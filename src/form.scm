@@ -4,7 +4,7 @@
 ; Code for recognizing, destructuring, and checking the syntax of forms.
 
 (define (literal? x)
-  (or (number? x) (string? x) (boolean? x) (char? x)))
+  (or (number? x) (string? x) (boolean? x) (char? x) (vector? x)))
 
 
 (define syntax-checkers

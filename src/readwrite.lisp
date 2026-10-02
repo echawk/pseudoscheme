@@ -27,9 +27,6 @@
 
 (defvar *non-scheme-readtable* (copy-readtable nil))
 
-#+Symbolics
-(pushnew scheme-readtable si:*valid-readtables*)
-
 (defun quote-read-macro (stream c)
   (if (eq *package* scheme-package)
       (list (intern "QUOTE" scheme-package) (read stream t nil t))

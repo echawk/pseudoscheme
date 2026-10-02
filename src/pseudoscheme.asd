@@ -14,15 +14,18 @@
   (declare (ignore component system))
   "pso")
 
-(defsystem :pseudoscheme-rts
+;;; Pseudoscheme is split into a core run-time (rts), the self-hosted
+;;; Scheme-to-Common-Lisp translator (translator), and an evaluator/REPL
+;;; layer built on both.  Language-standard surfaces (r5rs, r6rs, r7rs)
+;;; are secondary systems built on top of this shared core; see
+;;; :pseudoscheme/r5rs below.
+
+(defsystem :pseudoscheme/rts
   :author "Jonathan Rees"
   :components
     (
      (:file "pack")
      (:file "spack" :depends-on ("pack"))
-     ;; I don't remember what was in this file, but it doesn't seem to
-     ;; have been necessary anyway!
-     ;;   (:file "pathnames" :depends-on ("pack"))
      (:file "core" :depends-on ("pack"))
      (pso-file "closed" :depends-on ("spack" "core"))
      (:file "rts" :depends-on ("pack" "spack" "core"))
@@ -31,9 +34,9 @@
      #+(or) (pso-file "write" :depends-on ("spack" "core"))
      ))
 
-(defsystem :pseudoscheme-translator
+(defsystem :pseudoscheme/translator
   :author "Jonathan Rees"
-  :depends-on (:pseudoscheme-rts)
+  :depends-on (:pseudoscheme/rts)
   :serial t                        ;[No time to figure out the deps... --TRC]
   :components
   (
@@ -59,17 +62,33 @@
    (pso-file "builtin")                 ; CL info about scheme built-ins
    (pso-file "translate")               ; phase coordination and file transducer
    (pso-file "reify")                   ; miscellaneous
-
-   ;; ASDF Support (not yet implemented)
-   ;;   (:file "asdf")
    ))
 
-(defsystem :pseudoscheme-evaluator
+(defsystem :pseudoscheme/evaluator
   :author "Jonathan Rees"
-  :depends-on (:pseudoscheme-rts :pseudoscheme-translator)
+  :depends-on (:pseudoscheme/rts :pseudoscheme/translator)
   :components ((:file "eval")))
 
 (defsystem :pseudoscheme
   :author "Jonathan Rees"
   :depends-on
-    (:pseudoscheme-rts :pseudoscheme-translator :pseudoscheme-evaluator))
+    (:pseudoscheme/rts :pseudoscheme/translator :pseudoscheme/evaluator))
+
+;;; The R5RS-conformant surface. REVISED^4-SCHEME-INTERFACE (ssig.scm)
+;;; already includes R5RS's additions over R4RS (VALUES, DYNAMIC-WIND,
+;;; EVAL, string ports, ...) in the one shared runtime structure, so
+;;; this system is currently just the core stack under its R5RS name;
+;;; tests/run-r5rs-tests.lisp (chibi's R5RS suite) is what actually
+;;; gates this system's R5RS claim -- see its header comment and the
+;;; project README for known gaps (the CL-reader-based `...`/string-escape
+;;; limitation, symbol/number print case).
+(defsystem :pseudoscheme/r5rs
+  :author "Jonathan Rees"
+  :depends-on (:pseudoscheme/rts :pseudoscheme/translator :pseudoscheme/evaluator))
+
+;;; Regenerates translator.files' .pso bootstrap artifacts from their
+;;; .scm sources using the already-loaded translator. See bootstrap.lisp.
+(defsystem :pseudoscheme/bootstrap
+  :author "Jonathan Rees"
+  :depends-on (:pseudoscheme)
+  :components ((:file "bootstrap")))

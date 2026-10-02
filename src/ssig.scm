@@ -93,6 +93,11 @@
      ;; Revised^5 stuff
      values call-with-values dynamic-wind
      eval interaction-environment scheme-report-environment
+
+     ;; String ports (not required by R5RS, but a very common extension,
+     ;; and used by the R5RS/R7RS test suites under tests/chibi)
+     open-output-string open-input-string get-output-string
+     call-with-output-string with-output-to-string flush-output
      )
    ;; Private variables
    '(and-aux case-aux make-promise or-aux

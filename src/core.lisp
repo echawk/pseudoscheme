@@ -45,10 +45,6 @@
 
 (defparameter scheme-package (find-package "SCHEME"))
 
-#+Symbolics
-(pushnew scheme-package si:*reasonable-packages*)
-
-
 ; ----- Photons
 
 ; "A `photon' is an object that PRIN1's as if it had been PRINC'ed."
@@ -75,13 +71,11 @@
 ; PROCEDURE?
 
 (defparameter closures-might-be-conses-p
-  #+Lucid nil  ;suppress message about compiler optimizations
-  #-Lucid
-  (or (consp (eval '#'(lambda (x) x)))	;VAX LISP 2.1
+  (or (consp (eval '#'(lambda (x) x)))
       (consp (let ((g (gensym)))
-	       (eval `(progn (defun ,g () 0) #',g)))) ;Symbolics
+	       (eval `(progn (defun ,g () 0) #',g))))
       (consp (compile nil '(lambda (x) x))) ;just for kicks
-      (consp (funcall (compile nil '(lambda (x) ;VAX LISP 2.2
+      (consp (funcall (compile nil '(lambda (x)
 				      #'(lambda () (prog1 x (incf x)))))
 		      0))))
 
@@ -113,7 +107,8 @@
        (output-stream-p obj)
        t))
 
-;This function is new in CLtL II / ANSI.
+;; REALP is part of ANSI Common Lisp (CLtL II); only define it ourselves
+;; on implementations that predate the standard.
 #-ansi-cl
 (defun realp (obj)
   (and (numberp obj)
@@ -137,23 +132,10 @@
       (fmakunbound CL-sym))
   unspecific)
 
-; Auxiliary for lambda-expression-containing top-level forms on Symbolics
-
 (defmacro at-top-level (&rest forms)
-  #+LISPM
-  (let ((g (gentemp "[TOP]")));;!?!?
-    `(progn (defun ,g () ,@forms)
-	    (prog1 (,g)
-	      (fmakunbound ',g))))
-  #-LISPM
   `(progn ,@forms))
 
-; Auxiliary for copying &rest variables on Symbolics
-
 (defmacro maybe-fix-&rest-parameter (rest-var)
-  #+LISPM
-  `(setq ,rest-var (copy-list ,rest-var))
-  #-LISPM
   (progn rest-var ;ignored
 	 `nil))
 
@@ -203,9 +185,6 @@
 
 (defun really-set-function (CL-sym value)
   (cond ((procedurep value)
-	 #+Lucid
-	 (lcl:define-function CL-sym value)
-	 #-Lucid
 	 (setf (symbol-function CL-sym) value))
 	(t
 	 (fmakunbound CL-sym))))
@@ -213,8 +192,6 @@
 (defun set-function-from-value (CL-sym &optional name) ;Follows a SETQ
   (let ((value (symbol-value CL-sym)))
     (really-set-function CL-sym value)
-    #+Symbolics
-    (scl:record-source-file-name CL-sym (if (procedurep value) 'defun 'defvar))
     (after-define CL-sym name)))
 
 ; Follows (SETQ *FOO* ...)
@@ -288,9 +265,6 @@
 			    irritants))
 	     message
 	     irritants)))
-
-#+LispM
-(setf (get 'scheme-error :error-reporter) t)  ;Thanks to KMP
 
 ; PP (nonstandard)
 

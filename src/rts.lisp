@@ -16,14 +16,10 @@
 		       (concatenate 'string "." string)
 		       string))
 		 *package*)))
-    `(progn #+LispM 'compile
+    `(progn
 	    (defun ,new-name ,bvl ,@body)
 	    (ps:set-value-from-function ',new-name)
 	    ',name)))
-
-(when (symbolp (symbol-function 'null))	;Symbolics loses
-  (setf (symbol-function 'null)
-	(symbol-function (symbol-function 'null))))
 
 ; Definitions for CAR and CDR for when they are *not* open-coded.
 ; There really ought to be definitions for CDADDR and friends, but the
@@ -86,8 +82,6 @@
       (return ps:false))))
 
 ; LOAD -- forward reference to not-yet-existing EVAL module
-
-#+DEC (proclaim '(function ps:scheme-load ps:scheme-eval))
 
 (defune load (filespec &rest optional-args)
   (apply #'ps:scheme-load filespec optional-args))
@@ -189,13 +183,7 @@
 
 (proclaim '(inline vector?))
 (defune vector? (obj)
-  (ps:true? (and (simple-vector-p obj)
-		   ;; Structures are vectors in Symbolics, Exploder, and CLISP.
-		   #+(or tops-20 Lispm)
-		   (not (typep obj 'lisp::structure))
-		   ;; Strings are simple vectors in CLISP (this is a bug)
-		   #+tops-20
-		   (not (stringp obj)))))
+  (ps:true? (simple-vector-p obj)))
 
 ; WRITE
 ; Do a real printer some time.
@@ -206,6 +194,37 @@
 
 (defune display (obj &optional (port *standard-output*))
   (funcall ps:*scheme-display* obj port))
+
+; String ports (not required by R5RS itself, but widely provided as an
+; extension, and relied on by chibi's R5RS/R7RS test suites).
+;
+; MAKE-STRING-OUTPUT-STREAM &co. aren't in PS's curated re-export of
+; Common Lisp (see pack.lisp), so they're named with explicit package
+; prefixes here rather than widening that shared allow-list.
+
+(defune open-output-string ()
+  (cl:make-string-output-stream))
+
+(defune get-output-string (port)
+  (cl:get-output-stream-string port))
+
+(defune open-input-string (string)
+  (cl:make-string-input-stream string))
+
+(defune call-with-output-string (proc)
+  (let ((port (cl:make-string-output-stream)))
+    (funcall proc port)
+    (cl:get-output-stream-string port)))
+
+(defune with-output-to-string (thunk)
+  (let ((port (cl:make-string-output-stream)))
+    (let ((*standard-output* port))
+      (funcall thunk))
+    (cl:get-output-stream-string port)))
+
+(defune flush-output (&optional (port *standard-output*))
+  (cl:force-output port)
+  ps:unspecific)
 
 ; CASE-AUX
 ;  Usually this should be open-coded, but sometimes it may not be.
@@ -263,56 +282,3 @@
 
 (defune syntax-error (message &rest irritants)
   (apply #'ps:scheme-warn message irritants))
-
-
-
-; Printer hooks
-
-#+DEC
-(progn
-(system::define-list-print-function scheme::quote (list stream)
-  (declare (list list))
-  (if (two-element-list-p list)
-      (format stream "'~W" (second list))
-      (format stream "~1!~@{~W~^ ~:_~}~." list)))
-
-(system::define-list-print-function scheme::quasiquote (list stream)
-  (declare (list list))
-  (if (two-element-list-p list)
-      (format stream "`~W" (second list))
-      (format stream "~1!~@{~W~^ ~:_~}~." list)))
-
-(system::define-list-print-function scheme::unquote (list stream)
-  (declare (list list))
-  (if (two-element-list-p list)
-      ;;+++ Should insert a space for , @FOO
-      (format stream ",~W" (second list))
-      (format stream "~1!~@{~W~^ ~:_~}~." list)))
-
-(system::define-list-print-function scheme::unquote-splicing (list stream)
-  (declare (list list))
-  (if (two-element-list-p list)
-      (format stream ",@~W" (second list))
-      (format stream "~1!~@{~W~^ ~:_~}~." list)))
-
-(defun two-element-list-p (obj)
-  (and (consp obj) (consp (cdr obj)) (null (cddr obj))))
-);ngorp
-
-#+Symbolics
-(progn 'compile
-; This stuff seems to not work!
-(zl:defprop scheme::quasiquote grind-quasiquote si:grind-macro)
-(defun grind-quasiquote (e loc) loc
-  (si:gtyo #.(zl:character (char-code #\`)))
-  (si:grind-form (cadr e) (zl:locf (cadr e))))
-(zl:defprop scheme::unquote grind-unquote si:grind-macro)
-(defun grind-unquote (e loc) loc
-  (si:gtyo #.(zl:character (char-code #\,)))
-  (si:grind-form (cadr e) (zl:locf (cadr e))))
-(zl:defprop scheme::unquote-splicing grind-unquote-splicing si:grind-macro)
-(defun grind-unquote-splicing (e loc) loc
-  (si:gtyo #.(zl:character (char-code #\,)))
-  (si:gtyo #.(zl:character (char-code #\@)))
-  (si:grind-form (cadr e) (zl:locf (cadr e))))
-);ngorp

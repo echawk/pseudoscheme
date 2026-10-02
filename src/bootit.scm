@@ -30,8 +30,6 @@
   (translate-run-time)
   (translate-translator))
 
-(define clever-load #f)
-
 (define (boot-initialize)
   ;; For CL:LOAD to work, we need for *PACKAGE* to be bound to
   ;; something other than the SCHEME package.  Since all these files start
@@ -41,22 +39,7 @@
 			     (cl:make-package "CL-USER"))))
 
     ;; Create the PS package
-    (cl:load (pseudo-pathname "pack"))
-
-    ;; Get clever file loader
-    ;; (cl:load (pseudo-pathname "clever") :verbose 'cl:nil)
-    ;; (set! clever-load
-    ;;       (cl:symbol-function
-    ;;        (cl:intern "CLEVER-LOAD"
-    ;;                   (cl:find-package "CLEVER-LOAD"))))
-
-    ;; Fix SCHEME package if necessary
-;    (clever-load (pseudo-pathname "purify") :compile-if-necessary #t)
-;    (cl:funcall (cl:symbol-function
-;                 (cl:intern "FIX-SCHEME-PACKAGE-IF-NECESSARY"
-;                            (cl:find-package "SCHEME-PURIFY")))
-;                (cl:symbol-package 'askdjfh))
-          ))
+    (cl:load (pseudo-pathname "pack"))))
 
 
 (define (pseudo-pathname name)
@@ -70,30 +53,6 @@
 
 (define *scheme-file-type*     (filename-preferred-case "scm"))
 (define *translated-file-type* (filename-preferred-case "pso"))
-(define *boot-file-type*       (filename-preferred-case "boot"))
-
-; Make sure the host system understands that files foo.boot are
-; compiled.
-
-#+Lucid
-(if (not (member *boot-file-type*
-		 lucid::*load-binary-pathname-types*))
-    (lisp:setq lucid::*load-binary-pathname-types*
-	       (append lucid::*load-binary-pathname-types*
-		       (list *boot-file-type*))))
-
-#+Symbolics
-(begin
-  (fs:define-canonical-type :boot-bin #,*boot-file-type*)
-
-  (lisp:setq fs:*auxiliary-loadable-file-types*
-	(cons '(:boot-bin :load-stream-function
-			  si:load-binary-file-internal)
-	      (lisp:remove :boot-bin fs:*auxiliary-loadable-file-types*
-			   :key #'car)))
-
-  (lisp:setf (lisp:get :boot-bin :binary-file-byte-size)
-	     (lisp:get :bin :binary-file-byte-size)))
 
 (define translator-files #f)
 

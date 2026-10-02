@@ -80,7 +80,7 @@
 	  (lambda (string proc)
 	    (ps-lisp:with-open-file (port (ps-lisp:merge-pathnames string)
 					  :direction :output
-					  :if-exists :new-version)
+					  :if-exists :supersede)
 	      (ps-lisp:funcall proc port))))
       (call-with-values
 	  (subst (thunk proc)
@@ -229,11 +229,24 @@
       (string->symbol
        (subst (string)
 	 (ps-lisp:values (ps-lisp:intern string ps:scheme-package))))
-      (string-ci<=?                   (pred ps-lisp:string-not-greaterp 2))
-      (string-ci<?                    (pred ps-lisp:string-lessp 2))
+      ;; NB: unlike STRING= / STRING-EQUAL, these CL comparison functions
+      ;; return the mismatch index (or NIL) rather than a canonical T/NIL
+      ;; boolean, so a truthy result can't just be passed through PS:TRUE?
+      ;; (which only maps CL NIL to PS:FALSE, leaving any other truthy
+      ;; value as-is) -- normalize explicitly to PS:TRUE / PS:FALSE.
+      (string-ci<=?
+       (subst (a b)
+	 (ps-lisp:if (ps-lisp:string-not-greaterp a b) ps:true ps:false)))
+      (string-ci<?
+       (subst (a b)
+	 (ps-lisp:if (ps-lisp:string-lessp a b) ps:true ps:false)))
       (string-ci=?                    (pred ps-lisp:string-equal 2))
-      (string-ci>=?                   (pred ps-lisp:string-not-lessp 2))
-      (string-ci>?                    (pred ps-lisp:string-greaterp 2))
+      (string-ci>=?
+       (subst (a b)
+	 (ps-lisp:if (ps-lisp:string-not-lessp a b) ps:true ps:false)))
+      (string-ci>?
+       (subst (a b)
+	 (ps-lisp:if (ps-lisp:string-greaterp a b) ps:true ps:false)))
       (string-copy                    (fun ps-lisp:copy-seq))
       (string-fill!
        (subst (s val)
@@ -248,11 +261,15 @@
        (subst (s k obj)
 	 (ps-lisp:setf (ps-lisp:char (ps-lisp:the ps-lisp:simple-string s) k) obj)
 	 ps:unspecific))
-      (string<=?                      (pred ps-lisp:string<= 2))
-      (string<?                       (pred ps-lisp:string< 2))
+      (string<=?
+       (subst (a b) (ps-lisp:if (ps-lisp:string<= a b) ps:true ps:false)))
+      (string<?
+       (subst (a b) (ps-lisp:if (ps-lisp:string< a b) ps:true ps:false)))
       (string=?                       (pred ps-lisp:string= 2))
-      (string>=?                      (pred ps-lisp:string>= 2))
-      (string>?                       (pred ps-lisp:string> 2))
+      (string>=?
+       (subst (a b) (ps-lisp:if (ps-lisp:string>= a b) ps:true ps:false)))
+      (string>?
+       (subst (a b) (ps-lisp:if (ps-lisp:string> a b) ps:true ps:false)))
       (string?                        (pred ps-lisp:simple-string-p 1))
       (substring                      (fun ps-lisp:subseq))
       (symbol?			      (pred ps:scheme-symbol-p 1))
@@ -294,7 +311,7 @@
 	 (ps-lisp:with-open-file (ps-lisp:*standard-output*
 			         (ps-lisp:merge-pathnames string)
 				 :direction :output
-				 :if-exists :new-version)
+				 :if-exists :supersede)
 	    (ps-lisp:funcall thunk))))
       (write-char                     (fun ps-lisp:write-char))
       (zero?                          (pred ps-lisp:zerop 1))

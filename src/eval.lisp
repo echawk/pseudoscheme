@@ -64,9 +64,6 @@
 
 (defparameter roadblock-readtable (copy-readtable nil))
 
-#+Symbolics
-(pushnew roadblock-readtable si:*valid-readtables*)
-
 (defun roadblock-read-macro (stream ch)
   (unread-char ch stream)
   (if (or (eq *package* scheme-package)
@@ -135,15 +132,7 @@
 (defvar *scheme-file-type* (filename-preferred-case "scm"))
 
 (defmacro without-requiring-in-package (&body body)
-  #-Lucid
-  `(progn ,@body)
-  #+Lucid
-  `(lcl:handler-bind ((lcl:simple-warning
-		       #'(lambda (c)
-			   (when (search "does not begin with IN-PACKAGE"
-					(lcl:simple-condition-format-string c))
-			     (lcl:invoke-restart 'lcl:muffle-warning)))))
-		     ,@body))
+  `(progn ,@body))
 
 ; LOAD
 
@@ -174,7 +163,6 @@
 	  (without-requiring-in-package
 	   (apply #'compile-file
 		  path
-		  #+LispM :package #+LispM (scheme-translator:program-env-package env)
 		  keys))))))
 
 ; using-environment: auxiliary for LOAD and COMPILE-FILE.
@@ -319,13 +307,7 @@
     (set-standard-value var value)))
 
 (defun set-standard-value (var value)
-  #-Symbolics
-  (setf (symbol-value var) value)
-  #+Symbolics
-  (if (member var '(*package* *readtable* *print-array* *print-case*))
-      (setf (sys:standard-value var :setq-p t)
-	    value)
-      (setf (symbol-value var) value)))
+  (setf (symbol-value var) value))
 
 ;;; EVAL and PRINT functions to be used by the REP loop:
 
@@ -354,89 +336,10 @@
 (defun quit   () (funcall *quitter*))
 (defun scheme () (funcall *schemer*))
 
-#+LispWorks (progn
-
-(defun scheme-repl-for-lw ()
-  (when (find-restart 'quit-scheme-repl)
-    (error "The LW Scheme REPL is not re-entrant."))
-  (unless *rep-state-vars*
-    (let ((*standard-output* (make-broadcast-stream)))
-      ;; This is done without typeout since it's a mind's eye experiment.
-      ;; It is for effect, so we can find out what variables to bind.
-      ;; Kind of a kludge, I suppose...
-      (enter-scheme :verbose nil)
-      (exit-scheme :verbose nil)))
-  (cl:progv *rep-state-vars* (mapcar #'symbol-value *rep-state-vars*)
-    (enter-scheme)
-    (unwind-protect (with-simple-restart (quit-scheme-repl "Quit Scheme")
-                      (let ((*quitter* #'(lambda ()
-                                           (invoke-restart 'quit-scheme-repl))))
-                        (system::listener-top-loop ; Seems to work better than system::%top-level
-                         ;; You could specify :PROMPT here (see LW:*PROMPT*) but the default is good.
-                         :eval-print-hook
-                         #'(lambda (values) 
-                             (let ((*print-case* :downcase))
-                               (loop for (result . more) on values
-                                     do (write-result result)
-                                     when more
-                                     do (format t " ;~%"))
-                               ;; Already printed, so have system print no values.
-                               (values))))))
-      (exit-scheme))))
-
-(setq *schemer* 'scheme-repl-for-lw)
-
-)
-
-#-(or :DEC Symbolics) (progn
-
-;; Nothing to do.
-;; Generic definitions of QUIT and SCHEME suffice
-
-) ;end (progn ...)
-
-#+:DEC (progn
-
-(defun scheme-repl-for-dec ()
-  (unwind-protect
-      (progn
-	(enter-scheme)
-        (let ((*quitter* 'vax-lisp:continue))
-	  (system::read-eval-print-loop
-	   "Scheme> "
-	   :eval 'scheme-rep-eval
-	   :print #'(lambda (vals stream)
-		      (format stream "~&")
-		      (do ((v vals (cdr v)))
-			  ((null v) (values))
-			(write-result (car v) stream)
-			(if (not (null (cdr v)))
-			    (format stream " ;~%"))))))
-	(values))
-    (exit-scheme)))
-
-(setq *schemer* 'scheme-repl-for-dec)
-
-) ;end #+:DEC (progn ...)
-
-#+Symbolics (progn 'compile
-
-(defun enter-scheme-for-symbolics ()
-  "Initialize for execution of Scheme programs."
-  (enter-scheme)
-  (set-scheme-value 'si:*command-loop-eval-function*
-		    'scheme-rep-eval)
-  (set-scheme-value 'si:*command-loop-print-function*
-		    #'(lambda (values)
-			(mapc #'(lambda (value)
-				  (zl:send zl:standard-output :fresh-line)
-				  (write-result value))	;?
-			      values)))
-  (values))
-
-(setq *schemer* 'enter-scheme-for-symbolics)
-
-) ;end #+Symbolics (progn ...)
+;; (SCHEME) and (QUIT) default to ENTER-SCHEME/EXIT-SCHEME, which rebind
+;; the reader/printer/package so the host Lisp's own top-level reads and
+;; writes Scheme. A dedicated standalone REPL driver is a separate,
+;; not-yet-built system; see the project roadmap.
 
 ; Integrate built-ins in user environment
 
