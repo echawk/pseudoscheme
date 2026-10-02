@@ -19,7 +19,8 @@
 
 (defpackage :pseudoscheme-bootstrap
   (:use :common-lisp)
-  (:export #:regenerate-pso-files #:regenerate-closed-pso))
+  (:export #:regenerate-pso-files #:regenerate-closed-pso
+	   #:regenerate-reader-writer))
 
 (in-package :pseudoscheme-bootstrap)
 
@@ -30,14 +31,26 @@
 (defun translator-env ()
   (symbol-value (intern "SCHEME-TRANSLATOR-ENV" "SCHEME-TRANSLATOR")))
 
+(defmacro with-bootstrap-reader (&body body)
+  ;; Bootstrap regeneration must always use the CL-reader bridge
+  ;; (ps:scheme-read-using-commonlisp-reader), regardless of what
+  ;; ps:*scheme-read* currently is -- if :pseudoscheme/reader has also
+  ;; been loaded in this image (e.g. for R5RS work), the dedicated
+  ;; Scheme48-derived reader it installs can't resolve the CL
+  ;; package-qualified symbols (PS-LISP:SETF and friends) the
+  ;; translator's own sources rely on. See README.md.
+  `(let ((ps:*scheme-read* #'ps:scheme-read-using-commonlisp-reader))
+     ,@body))
+
 (defun regenerate-pso-files (&optional (files (translator-files)))
   "Retranslate each named .scm file (default: all of translator.files)
 to its .pso file, using the currently-loaded translator. Returns the
 list of files regenerated."
-  (let ((env (translator-env)))
-    (dolist (file files)
-      (format t "~&Regenerating ~A.pso from ~A.scm~%" file file)
-      (ps:translate-file file env)))
+  (with-bootstrap-reader
+    (let ((env (translator-env)))
+      (dolist (file files)
+	(format t "~&Regenerating ~A.pso from ~A.scm~%" file file)
+	(ps:translate-file file env))))
   files)
 
 (defun regenerate-closed-pso ()
@@ -51,6 +64,20 @@ coerced to a Scheme boolean), even though no line of CLOSED.PSO
 itself changed. Call this after such a change, then always do a full
 REGENERATE-PSO-FILES + fresh-image reload + test run before trusting
 the result, same as for the other bootstrap files."
-  (funcall (intern "WRITE-CLOSED-DEFINITIONS" "SCHEME-TRANSLATOR")
-	   (symbol-value (intern "REVISED^4-SCHEME-STRUCTURE" "SCHEME-TRANSLATOR"))
-	   (asdf:system-relative-pathname :pseudoscheme "closed.pso")))
+  (with-bootstrap-reader
+    (funcall (intern "WRITE-CLOSED-DEFINITIONS" "SCHEME-TRANSLATOR")
+	     (symbol-value (intern "REVISED^4-SCHEME-STRUCTURE" "SCHEME-TRANSLATOR"))
+	     (asdf:system-relative-pathname :pseudoscheme "closed.pso"))))
+
+(defun regenerate-reader-writer ()
+  "Retranslate read.scm/write.scm (the dedicated Scheme48-derived
+reader/writer, :pseudoscheme/reader) using the translator, same as
+REGENERATE-PSO-FILES does for the translator's own sources. These
+target REVISED^4-SCHEME-ENV, not SCHEME-TRANSLATOR-ENV, since they're
+ordinary runtime code, not part of the translator itself."
+  (with-bootstrap-reader
+    (let ((env (symbol-value (intern "REVISED^4-SCHEME-ENV" "SCHEME-TRANSLATOR"))))
+      (dolist (file '("read" "write"))
+	(format t "~&Regenerating ~A.pso from ~A.scm~%" file file)
+	(ps:translate-file file env))))
+  '("read" "write"))

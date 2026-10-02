@@ -102,7 +102,7 @@
 (define (mutable-program-variable? var)
   (let ((name (program-variable-name var)))
     (and (not (qualified-symbol? name))
-	 (let* ((s (symbol->string name))
+	 (let* ((s (ps-lisp:symbol-name name))
 		(n (string-length s)))
 	   (and (>= n 3)
 		(char=? (string-ref s 0) #\*)
@@ -118,7 +118,7 @@
 
 (define (change-package sym package)
   (if (and package (not (qualified-symbol? sym)))
-      (intern-renaming-perhaps (symbol->string sym) package)
+      (intern-renaming-perhaps (ps-lisp:symbol-name sym) package)
       sym))
 
 ; Code emission utilities; peephole optimizers

@@ -90,6 +90,11 @@
   (apply #'ps:scheme-error rest))
 
 
+;; NB: PS-LISP:SYMBOL-NAME throughout this file, not SYMBOL->STRING --
+;; this generates real CL DEFPACKAGE forms, which must stay canonical
+;; (fold-cased) regardless of SYMBOL->STRING's own case-preserving
+;; behavior for Scheme-visible use (see rts.lisp).
+
 (define (generate-structure-defpackage struct)
   (let ((env (structure-program-env struct)))
     (if (eq? (structure-id struct)
@@ -97,26 +102,26 @@
 	(generate-program-env-defpackage env (list struct))
 	(begin
 	  (warn "multiple structures over a package NYI")
-	  `(ps-lisp:defpackage ,(symbol->string (structure-id struct))
-	     (:use ,(symbol->string (program-env-id env)))
+	  `(ps-lisp:defpackage ,(ps-lisp:symbol-name (structure-id struct))
+	     (:use ,(ps-lisp:symbol-name (program-env-id env)))
 	     (:export ,@(map (lambda (name)
 			       (perhaps-rename
-				(symbol->string name)))
+				(ps-lisp:symbol-name name)))
 			     (interface-names
 			      (structure-interface struct)))))))))
 
 (define (generate-program-env-defpackage env structs)
-  `(ps-lisp:defpackage ,(symbol->string (program-env-id env))
+  `(ps-lisp:defpackage ,(ps-lisp:symbol-name (program-env-id env))
      (:use ,(package-name lisp-package)
 	   ,@(map (lambda (struct)
-		    (symbol->string (structure-id struct)))
+		    (ps-lisp:symbol-name (structure-id struct)))
 		  (program-env-use-list env)))
      (:export
       ,@(apply append
 	       (map (lambda (struct)
 		      (map (lambda (name)
 			     (perhaps-rename
-			      (symbol->string name)))
+			      (ps-lisp:symbol-name name)))
 			   (interface-names
 			    (structure-interface struct))))
 		    structs)))))

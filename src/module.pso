@@ -174,7 +174,7 @@
                                  (VALUES
                                   (INTERN
                                    (STRING-APPEND
-                                    (SYMBOL->STRING (PROGRAM-ENV-ID ENV))
+                                    (SYMBOL-NAME (PROGRAM-ENV-ID ENV))
                                     "[FOR-SYNTAX]")
                                    SCHEME-PACKAGE))
                                  (LIST REVISED^4-SCHEME-STRUCTURE))))))
@@ -204,7 +204,7 @@
                                                    (MAPCAR
                                                     #'(LAMBDA (NAME)
                                                         (INTERN-RENAMING-PERHAPS
-                                                         (SYMBOL->STRING NAME)
+                                                         (SYMBOL-NAME NAME)
                                                          PPACKAGE))
                                                     (INTERFACE-NAMES
                                                      SIG))))))))))

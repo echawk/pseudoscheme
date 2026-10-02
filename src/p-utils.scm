@@ -94,8 +94,13 @@
 
 (define scheme-package (ps-lisp:symbol-package 'askdjfh))
 
+;; NB: PS-LISP:SYMBOL-NAME, not SYMBOL->STRING -- these name real CL
+;; packages, which must stay canonical (fold-cased) regardless of
+;; SYMBOL->STRING's own case-preserving behavior for Scheme-visible
+;; use (see rts.lisp).
+
 (define (make-package-using id use-list)
-  (let* ((name (symbol->string id))
+  (let* ((name (ps-lisp:symbol-name id))
 	 (probe (ps-lisp:find-package name))
 	 (package
 	  (cond ((not (eq? probe 'ps-lisp:nil))
@@ -113,7 +118,7 @@
     package))
 
 (define (make-package-exporting id syms)
-  (let* ((name (symbol->string id))
+  (let* ((name (ps-lisp:symbol-name id))
 	 (new (ps-lisp:or (ps-lisp:find-package name)
 		       (ps-lisp:make-package name :use '()))))
     (ps-lisp:import syms new)

@@ -74,17 +74,45 @@
   :depends-on
     (:pseudoscheme/rts :pseudoscheme/translator :pseudoscheme/evaluator))
 
+;;; A proper, self-hosted Scheme reader/writer (adapted from
+;;; Scheme48's), as an explicit alternative to the default CL-reader
+;;; bridge (ps:scheme-read-using-commonlisp-reader, installed by
+;;; readwrite.lisp as part of :pseudoscheme/rts). Loading this system
+;;; switches ps:*scheme-read*/*scheme-write*/*scheme-display* to it --
+;;; the right choice for evaluating or loading ordinary R5RS/R6RS/R7RS
+;;; Scheme source: unlike the CL-reader bridge, it correctly handles
+;;; the `...' ellipsis identifier, standard string escapes (\n \t...),
+;;; #| |# block comments and #; datum comments, more named characters,
+;;; and case-preserving SYMBOL->STRING/WRITE (read.scm/write.scm have
+;;; the details and rationale).
+;;;
+;;; It is NOT used for retranslating the translator's own .scm sources
+;;; (see :pseudoscheme/bootstrap) -- those rely throughout on bare CL
+;;; package-qualified symbols like PS-LISP:SETF, and on the CL-reader
+;;; bridge's exact case-folding being in effect, matching how the
+;;; classifier's own keyword tables were originally built. Re-pointing
+;;; the translator itself at this reader would be a much bigger step
+;;; than loading ordinary Scheme source with it; PSEUDOSCHEME-BOOTSTRAP
+;;; always forces the CL-reader bridge back on for that regardless of
+;;; what this system has set globally (see bootstrap.lisp).
+(defsystem :pseudoscheme/reader
+  :author "Jonathan Rees"
+  :depends-on (:pseudoscheme/rts)
+  :components
+  ((pso-file "read")
+   (pso-file "write")))
+
 ;;; The R5RS-conformant surface. REVISED^4-SCHEME-INTERFACE (ssig.scm)
 ;;; already includes R5RS's additions over R4RS (VALUES, DYNAMIC-WIND,
 ;;; EVAL, string ports, ...) in the one shared runtime structure, so
-;;; this system is currently just the core stack under its R5RS name;
+;;; this system is otherwise just the core stack under its R5RS name;
 ;;; tests/run-r5rs-tests.lisp (chibi's R5RS suite) is what actually
 ;;; gates this system's R5RS claim -- see its header comment and the
-;;; project README for known gaps (the CL-reader-based `...`/string-escape
-;;; limitation, symbol/number print case).
+;;; project README for remaining known gaps.
 (defsystem :pseudoscheme/r5rs
   :author "Jonathan Rees"
-  :depends-on (:pseudoscheme/rts :pseudoscheme/translator :pseudoscheme/evaluator))
+  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
+	       :pseudoscheme/evaluator :pseudoscheme/reader))
 
 ;;; Regenerates translator.files' .pso bootstrap artifacts from their
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.

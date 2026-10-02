@@ -93,6 +93,7 @@
      ;; Revised^5 stuff
      values call-with-values dynamic-wind
      eval interaction-environment scheme-report-environment
+     null-environment
 
      ;; String ports (not required by R5RS, but a very common extension,
      ;; and used by the R5RS/R7RS test suites under tests/chibi)

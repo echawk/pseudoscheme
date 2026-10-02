@@ -164,6 +164,22 @@
       (list keyword
             (sub-read-carefully port)))))
 
+; String escapes: \\ and \" are the only ones R5RS requires, but \n \t
+; \r \a \b \0 are standard as of R6RS/R7RS and are such common Scheme
+; (and C) idiom that most R5RS implementations already accept them too
+; -- and chibi's own R5RS test suite relies on \n. A backslash before
+; any other character is read as that character literally, same as
+; before.
+
+(define (string-escape-char c)
+  (cond ((char=? c #\n) #\newline)
+	((char=? c #\t) #\tab)
+	((char=? c #\r) #\return)
+	((char=? c #\a) (ascii->char 7))
+	((char=? c #\b) (ascii->char 8))
+	((char=? c #\0) (ascii->char 0))
+	(else c)))
+
 (set-standard-read-macro! #\" #t
   (lambda (c port)
     c ;ignored
@@ -175,12 +191,8 @@
                (let ((c (read-char port)))
 		 (cond ((eof-object? c)
 			(reading-error port "end of file within a string"))
-		       ((or (char=? c #\\) (char=? c #\"))
-			(loop (cons c l) (+ i 1)))
 		       (else
-			(reading-error port
-				       "invalid escaped character in string"
-				       c)))))
+			(loop (cons (string-escape-char c) l) (+ i 1))))))
               ((char=? c #\")
 	       (reverse-list->string l i))
               (else
@@ -222,6 +234,22 @@
 (define-sharp-macro #\t
   (lambda (c port) c (read-char port) #t))
 
+(define named-characters
+  `((space     . ,(ascii->char 32))
+    (newline   . ,(ascii->char 10))
+    (tab       . ,(ascii->char 9))
+    (nul       . ,(ascii->char 0))
+    (null      . ,(ascii->char 0))
+    (backspace . ,(ascii->char 8))
+    (delete    . ,(ascii->char 127))
+    (rubout    . ,(ascii->char 127))
+    (escape    . ,(ascii->char 27))
+    (altmode   . ,(ascii->char 27))
+    (return    . ,(ascii->char 13))
+    (linefeed  . ,(ascii->char 10))
+    (page      . ,(ascii->char 12))
+    (alarm     . ,(ascii->char 7))))
+
 (define-sharp-macro #\\
   (lambda (c port)
     c
@@ -233,9 +261,16 @@
 	     (let ((name (sub-read-carefully port)))
 	       (cond ((= (string-length (symbol->string name)) 1)
 		      c)
-		     ((assq name '((space   #\space)
-				   (newline #\newline)))
-		      => cadr)
+		     ;; Character names match case-insensitively (#\Space,
+		     ;; #\newline, ...): fold to whichever case
+		     ;; NAMED-CHARACTERS' own keys were folded to by
+		     ;; PREFERRED-CASE when this file was translated.
+		     ((assq (string->symbol
+			     (list->string
+			      (map preferred-case
+				   (string->list (symbol->string name)))))
+			    named-characters)
+		      => cdr)
 		     (else
 		      (reading-error port "unknown #\\ name" name)))))
 	    (else
@@ -246,10 +281,39 @@
     (read-char port)
     (list->vector (sub-read-list c port))))
 
+; #| ... |# block comments (nestable) and #;datum datum comments.
+
+(define (skip-block-comment port depth)
+  (if (= depth 0)
+      #f
+      (let ((c (read-char port)))
+	(cond ((eof-object? c)
+	       (reading-error port "end of file within a block comment"))
+	      ((and (char=? c #\#) (eqv? (peek-char port) #\|))
+	       (read-char port)
+	       (skip-block-comment port (+ depth 1)))
+	      ((and (char=? c #\|) (eqv? (peek-char port) #\#))
+	       (read-char port)
+	       (skip-block-comment port (- depth 1)))
+	      (else
+	       (skip-block-comment port depth))))))
+
+(define-sharp-macro #\|
+  (lambda (c port)
+    (read-char port)                   ;consume the |
+    (skip-block-comment port 1)
+    (sub-read port)))
+
+(define-sharp-macro #\;
+  (lambda (c port)
+    (read-char port)                   ;consume the ;
+    (sub-read-carefully port)          ;discard the next datum
+    (sub-read port)))
+
 (let ((number-sharp-macro
        (lambda (c port)
 	 c
-	 (let ((string (sub-read-token #\# port)))
+	 (let ((string (car (sub-read-token #\# port))))
 	   (or (string->number string)
 	       (reading-error port "unsupported number syntax" string))))))
   (for-each (lambda (c)
@@ -258,31 +322,79 @@
 
 
 ; Tokens
+;
+; SUB-READ-TOKEN collects both the case-folded spelling (used for
+; symbol identity, same as always -- see PREFERRED-CASE above) and the
+; raw, as-typed spelling (used only to remember how to display the
+; resulting symbol -- see RECORD-ORIGINAL-SPELLING! below).
 
 (define (sub-read-token c port)
-  (let loop ((l (list (preferred-case c))) (n 1))
-    (let ((c (peek-char port)))
-      (cond ((or (eof-object? c)
-                 (vector-ref read-terminating?-vector (char->ascii c)))
-             (reverse-list->string l n))
+  (let loop ((l (list (preferred-case c))) (raw (list c)) (n 1))
+    (let ((p (peek-char port)))
+      (cond ((or (eof-object? p)
+                 (vector-ref read-terminating?-vector (char->ascii p)))
+             (cons (reverse-list->string l n) (reverse-list->string raw n)))
             (else
-             (loop (cons (preferred-case (read-char port)) l)
-                   (+ n 1)))))))
+             (let ((c (read-char port)))
+               (loop (cons (preferred-case c) l) (cons c raw) (+ n 1))))))))
 
-(define (parse-token string port)
-  (if (let ((c (string-ref string 0)))
-	(or (char-numeric? c) (char=? c #\+) (char=? c #\-) (char=? c #\.)))
-      (cond ((string->number string))
-	    ((member string strange-symbol-names)
-	     (really-string->symbol string))
-	    ((string=? string ".")
-	     dot)
-	    (else
-	     (reading-error port "unsupported number syntax" string)))
-      (really-string->symbol string)))
+(define (parse-token token port)
+  (let ((string (car token)))
+    (if (let ((c (string-ref string 0)))
+	  (or (char-numeric? c) (char=? c #\+) (char=? c #\-) (char=? c #\.)))
+	(cond ((string->number string))
+	      ((member string strange-symbol-names)
+	       (intern-token string))
+	      ((string=? string ".")
+	       dot)
+	      (else
+	       (reading-error port "unsupported number syntax" string)))
+	(record-original-spelling! (intern-token string) (cdr token)))))
 
 (define strange-symbol-names
   '("+" "-" "..." "1+" "-1+"))  ;The latter two only for S&ICP support
+
+; NB: no special handling of ":" here. It's tempting to read FOO:BAR
+; as a Common-Lisp-style package-qualified symbol (the way the CL
+; reader bridge, and the #'-escape below, do) -- but unlike in CL, ":"
+; is just an ordinary constituent character in R5RS/R7RS symbol syntax
+; with no special meaning, and real Scheme code uses it that way (e.g.
+; ":::" as a custom syntax-rules ellipsis identifier, in R7RS). Giving
+; it CL semantics here breaks those. This reader is for Scheme source;
+; code that specifically wants to name a CL symbol from Scheme should
+; keep using the #'-escape (below), same as read.scm's own definitions
+; at the top of this file do.
+
+(define (intern-token string)
+  (really-string->symbol string))
+
+; Reading folds case to match the rest of the system (see
+; PREFERRED-CASE), so the only way to show a symbol in the case the
+; program actually wrote it in -- what SYMBOL->STRING and WRITE users
+; expect -- is to remember that original spelling out of band. First
+; spelling seen for a given symbol wins, same as R5RS's case-folding
+; model implies: once folded, two different original spellings denote
+; the same symbol, so there's only one case to remember.
+
+(define (record-original-spelling! sym raw)
+  (ps-lisp:if (ps-lisp:get sym 'scheme::%original-spelling)
+	      sym
+	      (ps-lisp:progn
+	       (ps-lisp:setf (ps-lisp:get sym 'scheme::%original-spelling) raw)
+	       sym)))
+
+; Tokens are case-folded to match the host Common Lisp's own default
+; readtable case, same as the rest of Pseudoscheme's bootstrap (every
+; already-translated .pso file, and every .scm file in this system,
+; was read -- and its internal `(eq? ... 'foo)' comparisons baked in --
+; under this same folding; switching it would require re-bootstrapping
+; everything in lockstep, not just this file). What IS fixed here is
+; that the *original*, as-typed spelling of each symbol is preserved
+; separately (see RECORD-ORIGINAL-SPELLING!/SYMBOL->DISPLAY-STRING
+; below) so WRITE and SYMBOL->STRING can still show a symbol in the
+; case the program actually wrote it in, the way R5RS/R7RS users
+; expect, without disturbing EQ?-identity or any internal keyword
+; matching.
 
 (define preferred-case
   (if (char=? (string-ref (symbol->string 't) 0) #\T)

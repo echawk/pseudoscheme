@@ -101,14 +101,14 @@
         (PROGN
          (.WARN "multiple structures over a package NYI")
          (CONS 'DEFPACKAGE
-               (CONS (SYMBOL->STRING (STRUCTURE-ID STRUCT))
+               (CONS (SYMBOL-NAME (STRUCTURE-ID STRUCT))
                      (CONS
-                      (CONS ':USE (LIST (SYMBOL->STRING (PROGRAM-ENV-ID ENV))))
+                      (CONS ':USE (LIST (SYMBOL-NAME (PROGRAM-ENV-ID ENV))))
                       (LIST
                        (CONS ':EXPORT
                              (MAPCAR
                               #'(LAMBDA (NAME)
-                                  (PERHAPS-RENAME (SYMBOL->STRING NAME)))
+                                  (PERHAPS-RENAME (SYMBOL-NAME NAME)))
                               (INTERFACE-NAMES
                                (STRUCTURE-INTERFACE STRUCT))))))))))))
 (SET-VALUE-FROM-FUNCTION 'GENERATE-STRUCTURE-DEFPACKAGE
@@ -116,13 +116,13 @@
 (DEFUN GENERATE-PROGRAM-ENV-DEFPACKAGE (ENV STRUCTS)
   (DECLARE (SPECIAL LISP-PACKAGE))
   (CONS 'DEFPACKAGE
-        (CONS (SYMBOL->STRING (PROGRAM-ENV-ID ENV))
+        (CONS (SYMBOL-NAME (PROGRAM-ENV-ID ENV))
               (CONS
                (CONS ':USE
                      (CONS (.PACKAGE-NAME LISP-PACKAGE)
                            (MAPCAR
                             #'(LAMBDA (STRUCT)
-                                (SYMBOL->STRING (STRUCTURE-ID STRUCT)))
+                                (SYMBOL-NAME (STRUCTURE-ID STRUCT)))
                             (PROGRAM-ENV-USE-LIST ENV))))
                (LIST
                 (CONS ':EXPORT
@@ -131,7 +131,7 @@
                               #'(LAMBDA (STRUCT)
                                   (MAPCAR
                                    #'(LAMBDA (NAME)
-                                       (PERHAPS-RENAME (SYMBOL->STRING NAME)))
+                                       (PERHAPS-RENAME (SYMBOL-NAME NAME)))
                                    (INTERFACE-NAMES
                                     (STRUCTURE-INTERFACE STRUCT))))
                               STRUCTS))))))))

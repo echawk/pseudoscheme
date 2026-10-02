@@ -274,8 +274,12 @@
       (string->symbol (name->string name))))
        
 (define (name->string name)
+  ;; PS-LISP:SYMBOL-NAME, not SYMBOL->STRING: this builds real CL
+  ;; symbol/package names (see callers in module.scm, alpha.scm), which
+  ;; must stay canonical regardless of SYMBOL->STRING's own
+  ;; case-preserving behavior for Scheme-visible use (see rts.lisp).
   (if (symbol? name)
-      (symbol->string name)
+      (ps-lisp:symbol-name name)
       (string-append "."
 		     (name->string (generated-name name))
 		     "."

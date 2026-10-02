@@ -18,7 +18,12 @@
 
 (asdf:load-system :pseudoscheme/r5rs)
 
-(setq ps:*scheme-read* #'ps:scheme-read-using-commonlisp-reader)
+;;; Loading :pseudoscheme/reader (a dependency of :pseudoscheme/r5rs)
+;;; already switched ps:*scheme-read* to the dedicated Scheme48-derived
+;;; reader (read.scm's SCHEME-READ) -- the CL-reader bridge this used
+;;; to rely on can't parse the `...' ellipsis identifier syntax-rules
+;;; uses throughout, or Scheme string escapes like \n, both of which
+;;; this test file needs.
 
 (defparameter *r5rs-tests-file*
   (merge-pathnames "chibi/r5rs-tests.scm"
@@ -27,20 +32,9 @@
 ;;; Load and evaluate the test file one top-level form at a time, so a
 ;;; single erroring test (an unimplemented corner case, say) doesn't
 ;;; abort the whole suite -- it's just counted as a failure and we
-;;; move on, like any other test runner would.
-;;;
-;;; A READ error is different: it means the CL reader (used here via
-;;; PS:SCHEME-READ-USING-COMMONLISP-READER -- see readwrite.lisp) hit
-;;; Scheme syntax it fundamentally can't parse, e.g. the `...' ellipsis
-;;; identifier used throughout syntax-rules (an unbroken run of dots
-;;; isn't a valid CL token) or a `\n'/`\t' string escape (CL's reader
-;;; treats a backslash as "read the next character literally", not as
-;;; introducing a control character the way Scheme's reader does). That
-;;; corrupts the stream position for resuming, so we stop the run
-;;; there rather than guess at resynchronizing -- see the project's R5RS
-;;; follow-up notes about enabling the dedicated Scheme reader
-;;; (read.scm/write.scm, currently excluded from pseudoscheme.asd) for
-;;; full conformance instead of borrowing the CL reader.
+;;; move on, like any other test runner would. A READ error is treated
+;;; the same way, but stops the run (its stream position can't be
+;;; trusted enough to resynchronize and keep going).
 
 (defvar *harness-failures* 0)
 (defvar *reader-stopped-early* nil)
@@ -48,8 +42,8 @@
 (with-open-file (in *r5rs-tests-file*)
   (loop
     (let ((form (handler-case (funcall ps:*scheme-read* in)
-		  (reader-error (e)
-		    (format t "~&[READER LIMITATION] ~A~%" e)
+		  (error (e)
+		    (format t "~&[READ ERROR] ~A~%" e)
 		    (setq *reader-stopped-early* t)
 		    ps:eof-object))))
       (when (eq form ps:eof-object)

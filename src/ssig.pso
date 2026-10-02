@@ -127,6 +127,7 @@
                                        SCHEME::DYNAMIC-WIND SCHEME::EVAL
                                        SCHEME::INTERACTION-ENVIRONMENT
                                        SCHEME::SCHEME-REPORT-ENVIRONMENT
+                                       SCHEME::NULL-ENVIRONMENT
                                        SCHEME::OPEN-OUTPUT-STRING
                                        SCHEME::OPEN-INPUT-STRING
                                        SCHEME::GET-OUTPUT-STRING

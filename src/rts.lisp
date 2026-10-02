@@ -108,10 +108,13 @@
 ; NUMBER->STRING
 
 (defune number->string (num &optional (radix 10))
-  (let ((*print-base* (if (equal radix '(scheme::heur))
-			  10
-			  radix)))
-    (write-to-string num)))
+  (let* ((radix (if (equal radix '(scheme::heur)) 10 radix))
+	 (*print-base* radix)
+	 (string (write-to-string num)))
+    ;; CL always prints non-decimal radixes with upper-case letter
+    ;; digits (#xFF); R5RS number syntax (and chibi's test suite) wants
+    ;; lower-case (#xff).
+    (if (= radix 10) string (string-downcase string))))
 
 ; READ
 
@@ -156,7 +159,22 @@
 ;  the same as symbol-name.
 
 (defune symbol->string (symbol)
-  (let ((name (symbol-name symbol))
+  ;; Prefer the as-typed spelling the Scheme48-derived reader stashes
+  ;; on first read (read.scm's RECORD-ORIGINAL-SPELLING!), so e.g.
+  ;; (symbol->string 'Martin) is "Martin", not "MARTIN" -- reading
+  ;; folds case to match the rest of the system, so that's the only
+  ;; place this information still exists. Symbols read by the CL-reader
+  ;; bridge instead (readwrite.lisp) never have this property, so this
+  ;; falls through to SYMBOL-NAME for them, same as before.
+  ;;
+  ;; The translator's own internals must NOT go through this for their
+  ;; own CL-symbol-naming bookkeeping (verified: doing so broke
+  ;; top-level DEFINE) -- they use PS-LISP:SYMBOL-NAME directly instead
+  ;; (classify.scm's NAME->STRING, module.scm, emit.scm, reify.scm,
+  ;; p-utils.scm all do). This primitive is purely the user-visible
+  ;; Scheme SYMBOL->STRING now.
+  (let ((name (or (get symbol 'scheme::%original-spelling)
+		   (symbol-name symbol)))
 	(package (symbol-package symbol)))
     (cond ((eq package ps:scheme-package) name)
 	  ((not (ps:scheme-symbol-p symbol))
@@ -275,6 +293,19 @@
   ps:*current-rep-environment*)
 
 (defune scheme-report-environment (n)
+  (declare (special ps:scheme-report-environment))
+  (case n
+    ((4 5) ps:scheme-report-environment)
+    (otherwise (error "invalid scheme report" n))))
+
+; NULL-ENVIRONMENT is specified to contain only the R5RS syntactic
+; keywords, with none of the procedure bindings SCHEME-REPORT-ENVIRONMENT
+; provides. This implementation doesn't distinguish the two: there's
+; only one environment object here, and EVAL doesn't enforce what may
+; be called in it either way, so returning the fuller environment is a
+; superset, not a divergent one, of what the standard specifies.
+
+(defune null-environment (n)
   (declare (special ps:scheme-report-environment))
   (case n
     ((4 5) ps:scheme-report-environment)
