@@ -12,9 +12,9 @@
 
 (let* ((here (make-pathname :name nil :type nil
 			    :defaults (or *load-truename* *load-pathname*)))
-       (src (merge-pathnames (make-pathname :directory '(:relative :up "src"))
-			      here)))
-  (pushnew (truename src) asdf:*central-registry* :test #'equal))
+       (root (merge-pathnames (make-pathname :directory '(:relative :up))
+			       here)))
+  (pushnew (truename root) asdf:*central-registry* :test #'equal))
 
 (asdf:load-system :pseudoscheme/r5rs)
 

@@ -22,6 +22,7 @@
 
 (defsystem :pseudoscheme/rts
   :author "Jonathan Rees"
+  :pathname #p"src/"
   :components
     (
      (:file "pack")
@@ -36,6 +37,7 @@
 
 (defsystem :pseudoscheme/translator
   :author "Jonathan Rees"
+  :pathname #p"src/"
   :depends-on (:pseudoscheme/rts)
   :serial t                        ;[No time to figure out the deps... --TRC]
   :components
@@ -66,11 +68,13 @@
 
 (defsystem :pseudoscheme/evaluator
   :author "Jonathan Rees"
+  :pathname #p"src/"
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator)
   :components ((:file "eval")))
 
 (defsystem :pseudoscheme
   :author "Jonathan Rees"
+  :pathname #p"src/"
   :depends-on
     (:pseudoscheme/rts :pseudoscheme/translator :pseudoscheme/evaluator))
 
@@ -97,6 +101,7 @@
 ;;; what this system has set globally (see bootstrap.lisp).
 (defsystem :pseudoscheme/reader
   :author "Jonathan Rees"
+  :pathname #p"src/"
   :depends-on (:pseudoscheme/rts)
   :components
   ((pso-file "read")
@@ -111,6 +116,7 @@
 ;;; project README for remaining known gaps.
 (defsystem :pseudoscheme/r5rs
   :author "Jonathan Rees"
+  :pathname #p"src/"
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator
 	       :pseudoscheme/evaluator :pseudoscheme/reader))
 
@@ -118,5 +124,6 @@
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.
 (defsystem :pseudoscheme/bootstrap
   :author "Jonathan Rees"
+  :pathname #p"src/"
   :depends-on (:pseudoscheme)
   :components ((:file "bootstrap")))

@@ -9,13 +9,31 @@ host Lisp. It loads and runs cleanly under modern SBCL via ASDF.
 ## Loading
 
 ```lisp
-(push #P"/path/to/pseudoscheme-asdf/src/" asdf:*central-registry*)
+(push #P"/path/to/pseudoscheme-asdf/" asdf:*central-registry*)
 (asdf:load-system :pseudoscheme)
 ```
+
+(or symlink/clone the repo under `~/common-lisp/` or `~/.local/share/common-lisp/source/`, or a `quicklisp/local-projects/`, if your ASDF source-registry already searches one of those.)
 
 `ps:scheme-eval`, `ps:scheme-load`, and `ps:scheme-compile-file` are
 the main entry points; `ps:scheme-user-environment` is the default
 environment to evaluate or load Scheme code into.
+
+## Repository layout
+
+```
+pseudoscheme.asd    -- all ASDF system definitions (repo root, like any
+                        normal CL project -- see below for why the
+                        components still live under src/)
+src/                 -- all implementation: .lisp (hand-written Common
+                        Lisp), .scm (the self-hosted translator and
+                        other Scheme source), .pso (that Scheme source,
+                        pre-translated to Common Lisp -- see
+                        "Bootstrap artifacts" below)
+tests/               -- tests/run-r5rs-tests.lisp and the chibi test
+                        suites it runs
+README.md, LICENSE
+```
 
 ## System layout
 

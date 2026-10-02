@@ -24,8 +24,15 @@
 
 (in-package :pseudoscheme-bootstrap)
 
+(defun src-directory ()
+  ;; NB: not ASDF:SYSTEM-RELATIVE-PATHNAME / ASDF:SYSTEM-SOURCE-DIRECTORY
+  ;; -- those give the directory of the .asd file itself (the repo
+  ;; root), not a system's :PATHNAME. The .scm/.pso files live under
+  ;; src/, where :pseudoscheme's components actually are.
+  (asdf:component-pathname (asdf:find-system :pseudoscheme)))
+
 (defun translator-files ()
-  (with-open-file (s (asdf:system-relative-pathname :pseudoscheme "translator.files"))
+  (with-open-file (s (merge-pathnames "translator.files" (src-directory)))
     (read s)))
 
 (defun translator-env ()
@@ -39,7 +46,13 @@
   ;; Scheme48-derived reader it installs can't resolve the CL
   ;; package-qualified symbols (PS-LISP:SETF and friends) the
   ;; translator's own sources rely on. See README.md.
-  `(let ((ps:*scheme-read* #'ps:scheme-read-using-commonlisp-reader))
+  ;;
+  ;; Also binds *DEFAULT-PATHNAME-DEFAULTS* to src/ (where the .scm/.pso
+  ;; files actually live, since pseudoscheme.asd itself is at the repo
+  ;; root) -- PS:TRANSLATE-FILE resolves bare filenames like "ssig"
+  ;; against *DEFAULT-PATHNAME-DEFAULTS*, not against the .asd.
+  `(let ((ps:*scheme-read* #'ps:scheme-read-using-commonlisp-reader)
+	 (*default-pathname-defaults* (src-directory)))
      ,@body))
 
 (defun regenerate-pso-files (&optional (files (translator-files)))
@@ -67,7 +80,7 @@ the result, same as for the other bootstrap files."
   (with-bootstrap-reader
     (funcall (intern "WRITE-CLOSED-DEFINITIONS" "SCHEME-TRANSLATOR")
 	     (symbol-value (intern "REVISED^4-SCHEME-STRUCTURE" "SCHEME-TRANSLATOR"))
-	     (asdf:system-relative-pathname :pseudoscheme "closed.pso"))))
+	     (merge-pathnames "closed.pso" (src-directory)))))
 
 (defun regenerate-reader-writer ()
   "Retranslate read.scm/write.scm (the dedicated Scheme48-derived

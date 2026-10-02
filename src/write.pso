@@ -72,8 +72,8 @@
   (LET ((LEN (LENGTH (THE SIMPLE-STRING OBJ))))
     (PROG (|.I.0|)
       (SETQ |.I.0| 0)
-      (GO .LOOP.114)
-     .LOOP.114
+      (GO .LOOP.1015)
+     .LOOP.1015
       (LET ((I |.I.0|))
         (IF (= I LEN)
             (RETURN (WRITE-CHAR #\" PORT))
@@ -83,7 +83,7 @@
                    (WRITE-CHAR #\\ PORT))
                (WRITE-CHAR C PORT))
              (SETQ |.I.0| (+ I 1))
-             (GO .LOOP.114)))))))
+             (GO .LOOP.1015)))))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-STRING-LITERAL 'SCHEME::WRITE-STRING-LITERAL)
 (DEFUN WRITE-LIST (OBJ PORT RECUR)
   (IF (TRUEP (QUOTATION? OBJ))
@@ -170,15 +170,15 @@
                  (WRITE-CHAR (CHAR-UPCASE (CHAR (THE SIMPLE-STRING S) 0)) PORT)
                  (PROG (|.I.0|)
                    (SETQ |.I.0| 1)
-                   (GO .LOOP.140)
-                  .LOOP.140
+                   (GO .LOOP.1041)
+                  .LOOP.1041
                    (LET ((I |.I.0|))
                      (OR (>= I LEN)
                          (PROGN
                           (WRITE-CHAR
                            (CHAR-DOWNCASE (CHAR (THE SIMPLE-STRING S) I)) PORT)
                           (SETQ |.I.0| (+ I 1))
-                          (GO .LOOP.140))))))
+                          (GO .LOOP.1041))))))
                 (DISPLAY NAME PORT)))))
       (DISPLAY NAME PORT)))
 (SET-VALUE-FROM-FUNCTION 'DISPLAY-TYPE-NAME 'SCHEME::DISPLAY-TYPE-NAME)
