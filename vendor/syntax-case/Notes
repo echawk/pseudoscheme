@@ -1,0 +1,26 @@
+Release  notes for Version 2.1
+
+
+syntax-case now recognizes when the last clause has a pattern
+consisting of a single pattern variable, and when recognized, avoids
+generating the call to syntax-dispatch and the corresponding error call
+
+converted syntax-dispatch, valid-syntax-pattern to return symbol `no'
+instead of #f for no match or invalid for compatibility with systems
+that represent #f and () as the same object
+
+added hooks-CS3.ss for Chez Scheme Version 3
+
+fixed bug in "do" that prevented multiple expressions from appearing
+after the test expression
+
+fixed bug in chi-definition that prevented "defun" syntax from being
+recognized properly (would result in "invalid identifier" for internal
+"defuns" and "not a vector" for top-level "defuns")
+
+the expander now complains about raw symbols inserted into the output
+of a macro.
+
+the expander now complains about misplaced ellipses in syntax
+expressions, and uses free-identifier to check for ellipses (was just
+checking symbolic name).
