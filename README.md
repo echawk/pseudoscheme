@@ -30,9 +30,14 @@ src/                 -- all implementation: .lisp (hand-written Common
                         other Scheme source), .pso (that Scheme source,
                         pre-translated to Common Lisp -- see
                         "Bootstrap artifacts" below)
-tests/               -- tests/run-r5rs-tests.lisp and the chibi test
-                        suites it runs
-README.md, LICENSE
+src/library.lisp     -- libraries and top-level programs (R6RS ch. 7-8,
+                        R7RS 5.1-5.6), shared by both
+src/syntax-case.lisp -- glue loading the vendored syntax-case
+src/r7rs/, src/r6rs/ -- the R7RS-small and R6RS front ends
+vendor/syntax-case/  -- Dybvig & Hieb's syntax-case, plus a Pseudoscheme
+                        port of its hooks (see "syntax-case" below)
+tests/               -- test runners and the chibi test suites they run
+README.md, ROADMAP.md, LICENSE
 ```
 
 ## System layout
@@ -57,9 +62,18 @@ README.md, LICENSE
   `dynamic-wind`, `eval`, string ports, ...), so this system is the
   core stack plus `pseudoscheme/reader`, under its R5RS name;
   `tests/run-r5rs-tests.lisp` is what actually gates the R5RS claim.
-  R6RS and R7RS-small surfaces are planned as further
-  `pseudoscheme/r6rs` / `pseudoscheme/r7rs` systems but aren't
-  implemented yet.
+- `pseudoscheme/syntax-case` -- Dybvig & Hieb's `syntax-case`, loaded
+  into the Scheme user environment (see **syntax-case**).
+- `pseudoscheme/library` -- `define-library` / `library` / `import`
+  and top-level programs, built on `module.scm`'s environments and
+  structures (see **Libraries**).
+- `pseudoscheme/r7rs` -- R7RS-small, built on the library layer.
+  Skeleton: ~98% of the exports of the standard libraries are
+  present (a handful are stubs that signal "not implemented"), and
+  chibi's R7RS suite runs. See **R7RS**.
+- `pseudoscheme/r6rs` -- R6RS `(rnrs base)`, `(rnrs syntax-case)` and
+  a slice of `(rnrs exceptions)`/`(rnrs conditions)`, the `library`
+  form and programs, expanded with `syntax-case`. A sketch. See **R6RS**.
 - `pseudoscheme/bootstrap` -- regenerates the translator's own `.pso`
   bootstrap files (and `pseudoscheme/reader`'s); see below.
 
@@ -203,12 +217,104 @@ issues -- the whole file now reads correctly.
   being shadowable as ordinary local variable names without disturbing
   their syntactic role in `quasiquote`/`syntax-rules` are not handled.
 
-## Vendored syntax-case
+## syntax-case
 
-`syntax-case.tar.gz` at the repo root is Dybvig & Hieb's reference
-`syntax-case` implementation (targeting Chez Scheme). The plan is to
-port its `hooks.ss` to Pseudoscheme's own expander/eval hooks and
-expose it as an optional `pseudoscheme/syntax-case` library -- for code
-that wants non-pattern hygienic macros -- without disturbing the
-`syntax-rules`-based expander (`rules.scm`) that `pseudoscheme/r5rs`
-and friends use by default. Not yet started.
+`vendor/syntax-case/` is Dybvig & Hieb's reference `syntax-case`
+(originally for Chez Scheme), with `hooks-pseudoscheme.ss` as the port
+of its one implementation-dependent file and a few small additions.
+`src/syntax-case.lisp` (system `pseudoscheme/syntax-case`) loads it
+into the Scheme user environment and provides:
+
+```lisp
+(asdf:load-system :pseudoscheme/syntax-case)
+(sc:sc-eval form)       ; expand FORM hygienically, then evaluate it
+(sc:sc-load "file.scm") ; the same for every form of a file
+(sc:sc-expand form)     ; expansion only: core forms out
+```
+
+It lives **alongside** Pseudoscheme's own `define-syntax`/`syntax-rules`
+(the classifier-based expander of `rules.scm`), not in place of them:
+macros defined through `sc-eval` are invisible to plain `scheme-eval`,
+and vice versa, because syntax-case keeps its macros in one global
+table (on symbol plists) while the native ones are nodes in
+per-environment tables. `tests/run-syntax-case-tests.lisp` covers
+hygiene both ways, `syntax-case` with fenders, `with-syntax`, and the
+derived forms of `macro-defs.ss`.
+
+What the 1992 expander does *not* do: no `x ... ...` (R7RS-style
+nested-ellipsis flattening), no identifier macros (a macro keyword used
+as a plain identifier is an error, so no `identifier-syntax`), no
+`syntax-rules` patterns after an ellipsis, no custom ellipsis.
+
+## Libraries
+
+`src/library.lisp` implements R7RS `define-library` and R6RS `library`
+with one mechanism. A library is a `program-env` (a CL package and a
+name->binding table) plus an `interface` (its exports): a `structure`,
+which is exactly what `module.scm` already provides. An import
+*aliases binding nodes* into the importing environment, so an imported
+variable is the same location (a `set!` in the exporter is seen by the
+importer) and an imported syntactic keyword is the same macro. Import
+sets (`only`, `except`, `prefix`, `rename`, and R6RS `for`/`library`/
+version references) are list transformations on `(name . node)` pairs,
+and a renamed export is an alias in a scratch export environment.
+Top-level programs are an `import` form followed by forms evaluated in
+order in a fresh environment.
+
+Not done: R6RS phases (`for` levels are accepted and ignored),
+per-library scoping of syntax-case macros, library versions beyond
+"newest wins".
+
+## R7RS
+
+```lisp
+(asdf:load-system :pseudoscheme/r7rs)
+(r7rs:print-coverage)       ; what each standard library has, stubs, gaps
+(psl:run-program forms)     ; forms = (import ...) followed by the program
+```
+
+`src/r7rs/exports.lisp` is Appendix A of the report, transcribed and
+mechanically cross-checked against the PDF
+(`python3 tests/check-r7rs-exports.py`). The implementation
+environment starts as a copy of the R5RS bindings, adds the Common
+Lisp primitives of `rts.lisp` (bytevectors, `floor/` and friends,
+UTF-8, records, the exception machinery, parameters, process context,
+time) and the Scheme of `base.scm` (derived syntax: `when`, `unless`,
+`let-values`, `define-values`, `parameterize`, `case-lambda`,
+`define-record-type`, `guard`, lazy evaluation with the report's
+iterative `force`; plus the R7RS generalizations of `member`,
+`string-copy`, `vector-fill!`, n-ary `string=?`, ...). `cond-expand`,
+`include` and `syntax-error` are procedural macros, so they behave as
+specified (they see the real feature list and libraries, can read a
+file, and fail at expansion time). Anything in a standard library that
+isn't implemented yet is a stub that signals a clear error when
+*called*, so programs that import it still load.
+
+`tests/run-r7rs-tests.lisp` runs chibi's R7RS suite
+(`tests/chibi/r7rs-tests.scm`, with a small `(chibi test)` stand-in
+beside it). It currently passes **775 of the 842 tests that get as far
+as running**; a further 114 top-level forms can't even be read yet
+(`#u8(...)`, `#!fold-case`, `3+4i`, `+inf.0`, datum labels, `\x41;`
+escapes -- all reader work), and some others hit the gaps in
+`ROADMAP.md`. `tests/run-library-tests.lisp` covers the library layer
+and the R7RS and R6RS front ends directly (44 tests, all passing).
+
+## R6RS
+
+```lisp
+(asdf:load-system :pseudoscheme/r6rs)
+(r6rs:evaluate-library-form '(library (my lib) (export f) (import (rnrs base)) ...))
+(r6rs:load-r6rs-program "prog.scm")  ; (library ...) forms then an (import ...) program
+```
+
+`(rnrs base)` is chapter 11 of the language report, transcribed and
+cross-checked (`python3 tests/check-r6rs-exports.py`); the other
+standard libraries are in a separate report that isn't in this
+repository, so only `(rnrs syntax-case)` and the slices of
+`(rnrs exceptions)`/`(rnrs conditions)` that `(rnrs base)` depends on
+are provided (`src/r6rs/exports.lisp` lists the planned ones). Library
+bodies are expanded with syntax-case, so the macros of `(rnrs base)`
+are syntax-case macros; `div`/`mod`/`div0`/`mod0` follow the report's
+table. Conditions are a minimal single-type stand-in, not R6RS's
+compound conditions.
+

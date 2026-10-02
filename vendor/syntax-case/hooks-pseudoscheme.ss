@@ -18,9 +18,17 @@
 ;;; syntax-case (compat.ss, output.ss, init.ss, expand.pp, macro-defs.ss)
 ;;; has no such requirement and loads fine under either reader.
 
+;; Macro transformers are evaluated by EVAL-HOOK.  Which environment
+;; they see is up to EXPANDER-ENVIRONMENT-HOOK: the user environment by
+;; default, but src/syntax-case.lisp replaces it so that code expanding
+;; inside an R6RS/R7RS library sees that library's own bindings.
+(define expander-environment-hook
+  (lambda ()
+    (interaction-environment)))
+
 (define eval-hook
   (lambda (x)
-    (eval x (interaction-environment))))
+    (eval x (expander-environment-hook))))
 
 (define expand-install-hook
   (lambda (expand)
@@ -61,3 +69,24 @@
 (define get-global-definition-hook
   (lambda (symbol)
     (ps-lisp:true? (ps-lisp:get symbol 'scheme::%macro-transformer))))
+
+;; Chez's TOP-LEVEL-BOUND? (used by expand.ss's debugging hook, DP):
+;; is SYMBOL bound as a global variable?  Pseudoscheme globals live in
+;; the symbol's value cell, so CL's BOUNDP answers it; TRUE? again maps
+;; CL's NIL to Scheme #f.
+(define top-level-bound?
+  (lambda (symbol)
+    (ps-lisp:true? (ps-lisp:boundp symbol))))
+
+;; Chez's LIST* (used by the preprocessed expander, expand.pp).
+(define list*
+  (lambda (first . rest)
+    (let loop ((x first) (rest rest))
+      (if (null? rest)
+          x
+          (cons x (loop (car rest) (cdr rest)))))))
+
+;; Chez's GENSYM (used by GENERATE-TEMPORARIES), likewise via CL.
+(define gensym
+  (lambda ()
+    (common-lisp:gensym)))

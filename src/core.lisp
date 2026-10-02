@@ -238,6 +238,10 @@
 				   (aref (the simple-vector obj1) i)
 				   (aref (the simple-vector obj2) i)))
 			 (return nil)))))))
+	;; R7RS bytevectors
+	((typep obj1 '(simple-array (unsigned-byte 8) (*)))
+	 (and (typep obj2 '(simple-array (unsigned-byte 8) (*)))
+	      (equalp obj1 obj2)))
         (t nil)))
 
 

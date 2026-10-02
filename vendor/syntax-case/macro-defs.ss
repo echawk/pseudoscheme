@@ -171,10 +171,10 @@
 
 (define make-promise
    (lambda (thunk)
-      (let ([value (void)] [set? #f])
+      (let ((value (void)) (set? #f))
          (lambda ()
             (unless set?
-               (let ([v (thunk)])
+               (let ((v (thunk)))
                   (unless set?
                      (set! value v)
                      (set! set? #t))))

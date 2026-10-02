@@ -120,29 +120,46 @@
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator
 	       :pseudoscheme/evaluator :pseudoscheme/reader))
 
-;;; SKETCH ONLY -- not yet implemented. See ROADMAP.md "R6RS" for what
-;;; this needs: a (scheme/rnrs-style) library system, condition types,
-;;; and an r6rs-sig.scm interface. Many individual R6RS procedures are
-;;; one-line CL wrappers (bytevectors, fixnum/flonum ops, hashtables);
-;;; the real work is the library/import form and conditions, which
-;;; this repo's module.scm/node.scm machinery may or may not be the
-;;; right foundation for -- undecided, see ROADMAP.md.
+;;; Dybvig & Hieb's syntax-case (vendored under vendor/syntax-case/),
+;;; loaded into the Scheme user environment.  Provides SC:SC-EVAL /
+;;; SC:SC-LOAD, which expand a form hygienically before translating it;
+;;; see src/syntax-case.lisp.  Needs the dedicated reader (the vendored
+;;; sources use #| |# comments and the `...' identifier).
+(defsystem :pseudoscheme/syntax-case
+  :author "Jonathan Rees"
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
+	       :pseudoscheme/evaluator :pseudoscheme/reader)
+  :components ((:file "syntax-case")))
+
+;;; Libraries and top-level programs (R6RS ch. 7-8, R7RS 5.1-5.6) over
+;;; module.scm's program-env/structure machinery; see src/library.lisp.
+(defsystem :pseudoscheme/library
+  :author "Jonathan Rees"
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
+	       :pseudoscheme/evaluator :pseudoscheme/reader)
+  :components ((:file "library")))
+
+;;; R6RS: (rnrs base) and (rnrs syntax-case), the library form and
+;;; top-level programs, over the R7RS layer and the vendored
+;;; syntax-case.  A sketch: see src/r6rs/* and ROADMAP.md.
 (defsystem :pseudoscheme/r6rs
   :author "Jonathan Rees"
-  :pathname #p"src/"
-  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
-	       :pseudoscheme/evaluator :pseudoscheme/reader))
+  :pathname #p"src/r6rs/"
+  :depends-on (:pseudoscheme/r7rs :pseudoscheme/syntax-case)
+  :components ((:file "exports")
+	       (:file "rts" :depends-on ("exports"))
+	       (:file "r6rs" :depends-on ("exports" "rts"))))
 
-;;; SKETCH ONLY -- not yet implemented. See ROADMAP.md "R7RS" for what
-;;; this needs: define-record-type, case-lambda, parameterize, a
-;;; library/import form, bytevectors, and an r7rs-sig.scm interface.
-;;; Most of (scheme char)/(scheme inexact)/(scheme cxr) are thin CL
-;;; wrappers, same pattern as builtin.scm's existing R5RS entries.
+;;; R7RS-small, on top of the library layer.  See src/r7rs/*.
 (defsystem :pseudoscheme/r7rs
   :author "Jonathan Rees"
-  :pathname #p"src/"
-  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
-	       :pseudoscheme/evaluator :pseudoscheme/reader))
+  :pathname #p"src/r7rs/"
+  :depends-on (:pseudoscheme/library)
+  :components ((:file "exports")
+	       (:file "rts" :depends-on ("exports"))
+	       (:file "r7rs" :depends-on ("exports" "rts"))))
 
 ;;; Regenerates translator.files' .pso bootstrap artifacts from their
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.

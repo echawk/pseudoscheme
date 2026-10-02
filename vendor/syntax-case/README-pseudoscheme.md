@@ -2,86 +2,66 @@
 
 This directory is Dybvig & Hieb's reference `syntax-case` implementation
 (see `ReadMe`/`Notes` for the original, targeting Chez Scheme), plus
-one added file, `hooks-pseudoscheme.ss`, a Pseudoscheme port of
-`hooks.ss` (the file the original `ReadMe` says is "the only file you
-have to change" to port this to a new Scheme).
+Pseudoscheme-specific files:
 
-## What's confirmed working
+- `hooks-pseudoscheme.ss` -- the port of `hooks.ss` (the file the
+  original `ReadMe` says is "the only file you have to change"), and
+  the handful of Chez built-ins the sources assume.
+- `extras-pseudoscheme.ss` -- `when` and `unless`, which `macro-defs.ss`
+  uses but defines nowhere (Chez has them built in).
 
-Loading `compat.ss`, `hooks-pseudoscheme.ss`, `output.ss`, `init.ss`,
-and `expand.pp` (in that order -- `expand.pp` is the pre-expanded form
-of `expand.ss`, needed because `expand.ss` uses `syntax-case` to define
-itself) brings up a working `expand-syntax`. Calling it directly
-(bypassing Pseudoscheme's own `define-syntax`/`syntax-rules` for now --
-see below) correctly expands and hygienically renames core forms:
+and one edit to a vendored file: `macro-defs.ss`'s `delay` support code
+used Chez's `[ ]` brackets, which the Scheme reader here (rightly, for
+R5RS) doesn't read; they are now parentheses.
 
-```
-(quote x)        => (quote x)
-(lambda (x) x)   => (lambda (#:|x|) #:|x|)        ; hygienic rename
-(if 1 2 3)       => (if (quote 1) (quote 2) (quote 3))
-(let ((x 1)) x)  => ((lambda (#:|x|) #:|x|) (quote 1))
-```
+Everything is loaded by `src/syntax-case.lisp` (system
+`pseudoscheme/syntax-case`); see the top-level README's "syntax-case"
+section for how to use it and `tests/run-syntax-case-tests.lisp` for
+what's covered.
 
-`install-global-transformer` and `syntax-dispatch` are both live
-(non-placeholder) after loading, so the macro engine itself is fully
-initialized.
+## Load order
 
-One real bug was found and fixed in `hooks-pseudoscheme.ss` along the
-way: `get-global-definition-hook` must return Pseudoscheme's actual
-`#f` when a macro isn't defined, not Common Lisp's bare `NIL` -- NIL is
-a legitimate Scheme value here (the empty list; see `core.lisp`'s
-`true?`), so `expand.ss`'s `(or (get-global-definition-hook sym)
-'(global-unbound))` silently did the wrong thing until this was wrapped
-in `true?`.
+As in the original `loadpp.ss`: `compat.ss`, `hooks-pseudoscheme.ss`
+(with the CL-reader bridge, because it uses bare `ps-lisp:foo`
+symbols), `output.ss`, `init.ss`, `expand.pp` (the pre-expanded form of
+`expand.ss`, which is written in terms of `syntax-case` itself), then --
+what an earlier attempt at this left out, and which is why top-level
+`define-syntax` appeared to fail with `invalid syntax NIL` --
+**`macro-defs.ss`**. `syntax-rules`, `with-syntax`, `or`, `cond`, `case`,
+`do`, `quasiquote`, ... are not built into the expander: `macro-defs.ss`
+defines them using `syntax-case`, and `(define-syntax m (syntax-rules
+...))` fails until `syntax-rules` itself exists.
 
-## What's not working yet
+## What had to be fixed to get there
 
-Top-level `(define-syntax my-or (syntax-rules () ...))`, expanded
-through `expand-syntax` the same way as above, currently fails with
-`invalid syntax NIL`. Core-form expansion (above) works, so this is
-specific to how `define-syntax`/`syntax-rules` processing interacts
-with the hooks here -- not yet root-caused. Next step for picking this
-back up: trace `global-extend` and the `syntax-rules` macro's own
-expansion (both in `expand.ss`/`expand.pp`) to see what's producing or
-receiving `NIL` where a form was expected.
+All in this directory or `src/`:
 
-Separately, `macro-defs.ss` (which redefines standard forms like `cond`,
-`let*`, `case`, `do`, `quasiquote` *using* `syntax-case` itself, mostly
-as a self-test per the original `loadpp.ss`'s comment) wasn't loaded in
-this round of testing -- it tries to globally redefine keywords that
-Pseudoscheme's own classifier already intercepts specially
-(`define-syntax` is a special operator there, not a redefinable
-procedure), which is a separate integration question from whether
-`syntax-case` itself works: does a vendored `syntax-case` become
-Pseudoscheme's `define-syntax`, or does it live alongside as an
-independent, explicitly-invoked library? That's a real design decision
-for whoever picks this up, not yet made.
+- `symbol->string` (in `src/rts.lisp`) crashed on *uninterned* symbols
+  -- exactly what hygienic renaming makes -- because it assumed every
+  symbol has a package to qualify with.
+- Chez built-ins the sources use but Scheme doesn't have: `list*`,
+  `gensym`, `top-level-bound?` (all in `hooks-pseudoscheme.ss`).
+- `get-global-definition-hook` must return Scheme `#f`, not Lisp `NIL`
+  (which is the empty list here), for "not defined".
+- The environment macro transformers are evaluated in is now a hook
+  (`expander-environment-hook`), so code expanding inside a library sees
+  that library's bindings.
 
-## Loading it yourself
+## Known limits of this expander (they are the 1992 design's)
 
-`ps:scheme-load` assumes a `.scm` extension and forwards any other
-keyword arguments straight to `cl:load` (which doesn't know
-`:source-type`), so the simplest way to load these `.ss` files is to
-read and evaluate them form-by-form directly, switching readers for
-`hooks-pseudoscheme.ss` only:
+- No identifier macros: a macro keyword used as a plain identifier is
+  "invalid context for identifier", so `identifier-syntax` /
+  `make-variable-transformer` can't be real.
+- `syntax-rules` (from `macro-defs.ss`) is R5RS-level: no patterns after
+  an ellipsis, no custom ellipsis, no `x ... ...`.
+- Macros are global (one table), not scoped to environments or
+  libraries.
 
-```lisp
-(asdf:load-system :pseudoscheme/r5rs)
+## The design question, answered for now
 
-(defun load-scheme-forms (path reader)
-  (let ((ps:*scheme-read* reader))
-    (with-open-file (in path)
-      (loop (let ((form (funcall ps:*scheme-read* in)))
-              (when (eq form ps:eof-object) (return))
-              (ps:scheme-eval form ps:scheme-user-environment))))))
-
-(let ((cl-bridge #'ps:scheme-read-using-commonlisp-reader)
-      (dir #P"vendor/syntax-case/"))
-  (load-scheme-forms (merge-pathnames "compat.ss" dir) ps:*scheme-read*)
-  (load-scheme-forms (merge-pathnames "hooks-pseudoscheme.ss" dir) cl-bridge)
-  (load-scheme-forms (merge-pathnames "output.ss" dir) ps:*scheme-read*)
-  (load-scheme-forms (merge-pathnames "init.ss" dir) ps:*scheme-read*)
-  (load-scheme-forms (merge-pathnames "expand.pp" dir) ps:*scheme-read*))
-
-(funcall (symbol-value (intern "EXPAND-SYNTAX" "SCHEME")) '(lambda (x) x))
-```
+Does a vendored `syntax-case` become Pseudoscheme's `define-syntax`, or
+live alongside? **Alongside**: forms must go through `sc:sc-eval` /
+`sc:sc-load`. The expander's output (core forms only) is fed to the
+ordinary translator, so nothing in the translator changed. What it
+costs, and ways to remove the cost, is in `ROADMAP.md`
+("syntax-case and the two macro worlds").

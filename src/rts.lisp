@@ -177,6 +177,9 @@
 		   (symbol-name symbol)))
 	(package (symbol-package symbol)))
     (cond ((eq package ps:scheme-package) name)
+	  ;; Uninterned (GENSYM/MAKE-SYMBOL) symbols, e.g. syntax-case's
+	  ;; hygienic renames, have no package to qualify with.
+	  ((null package) name)
 	  ((not (ps:scheme-symbol-p symbol))
 	   (error "symbol->string: invalid argument - ~S"
 		  symbol))
