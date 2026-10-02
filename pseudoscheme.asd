@@ -120,6 +120,30 @@
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator
 	       :pseudoscheme/evaluator :pseudoscheme/reader))
 
+;;; SKETCH ONLY -- not yet implemented. See ROADMAP.md "R6RS" for what
+;;; this needs: a (scheme/rnrs-style) library system, condition types,
+;;; and an r6rs-sig.scm interface. Many individual R6RS procedures are
+;;; one-line CL wrappers (bytevectors, fixnum/flonum ops, hashtables);
+;;; the real work is the library/import form and conditions, which
+;;; this repo's module.scm/node.scm machinery may or may not be the
+;;; right foundation for -- undecided, see ROADMAP.md.
+(defsystem :pseudoscheme/r6rs
+  :author "Jonathan Rees"
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
+	       :pseudoscheme/evaluator :pseudoscheme/reader))
+
+;;; SKETCH ONLY -- not yet implemented. See ROADMAP.md "R7RS" for what
+;;; this needs: define-record-type, case-lambda, parameterize, a
+;;; library/import form, bytevectors, and an r7rs-sig.scm interface.
+;;; Most of (scheme char)/(scheme inexact)/(scheme cxr) are thin CL
+;;; wrappers, same pattern as builtin.scm's existing R5RS entries.
+(defsystem :pseudoscheme/r7rs
+  :author "Jonathan Rees"
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
+	       :pseudoscheme/evaluator :pseudoscheme/reader))
+
 ;;; Regenerates translator.files' .pso bootstrap artifacts from their
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.
 (defsystem :pseudoscheme/bootstrap
