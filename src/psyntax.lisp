@@ -34,6 +34,9 @@
 (defvar *host* nil
   "The program environment psyntax and the code it expands run in.")
 
+(defvar *shared-primitives* '()
+  "Host primitives that are R5RS's own (integrated) bindings; see MAKE-HOST.")
+
 (defun location (name)
   "The CL symbol holding the host global NAME (a Scheme symbol)."
   (psl:tr "PROGRAM-VARIABLE-LOCATION" (psl:tr "PROGRAM-ENV-ENSURE-DEFINED" *host* name)))
@@ -42,7 +45,14 @@
   (symbol-value (location (if (stringp name) (sym name) name))))
 
 (defun host-set! (name value)
-  (let ((loc (location (if (stringp name) (sym name) name))))
+  (let* ((name (if (stringp name) (sym name) name))
+	 (loc (progn
+		;; A primitive shared with R5RS (see MAKE-HOST) gets its own
+		;; variable before being changed, so R5RS's isn't.
+		(when (member name *shared-primitives*)
+		  (setq *shared-primitives* (remove name *shared-primitives*))
+		  (psl:install-variable! *host* name value))
+		(location name))))
     (setf (symbol-value loc) value)
     (when (functionp value) (ps:set-function-from-value loc))
     value))
@@ -74,12 +84,34 @@
   (defhost "pretty-print" (x &optional (port *standard-output*))
     (funcall ps:*scheme-write* x port) (terpri port) ps:unspecific))
 
+(defparameter *closed-primitives* '("assv" "memv" "map" "for-each")
+  "Primitives whose host binding is one of the translator's integrated
+built-ins but whose value the R6RS/R7RS layers replaced: OPEN-PRIMITIVES
+must leave them as (primitive x), or the translator would open-code the
+old built-in.")
+
+(defun open-primitives (form)
+  "FORM with each (primitive x) -- psyntax's reference to host global
+x -- replaced by the plain variable reference x, so the translator
+integrates x as it does in R5RS code ((primitive +) becomes CL's +
+rather than a call through a function named PRIMITIVE).  Safe because
+psyntax renames every user variable: nothing in its output can shadow a
+host global."
+  (cond ((atom form) form)
+	((and (symbolp (car form)) (string= (symbol-name (car form)) "QUOTE")) form)
+	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
+	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
+	      (not (member (ps:scheme-symbol-name (cadr form)) *closed-primitives* :test #'string=)))
+	 (cadr form))
+	(t (let ((a (open-primitives (car form))) (d (open-primitives (cdr form))))
+	     (if (and (eq a (car form)) (eq d (cdr form))) form (cons a d))))))
+
 (defun host-eval (form)
   "Translate and evaluate core FORM in *HOST*.  The CL compiler's
 style warnings about the generated code (an unknown arity, say) are
 about psyntax's output, not the user's program, so they're muffled."
   (handler-bind ((warning #'muffle-warning))
-    (ps:scheme-eval form *host*)))
+    (ps:scheme-eval (open-primitives form) *host*)))
 
 ;;; ------------------------------------------------------------------
 ;;; Building the host environment
@@ -91,9 +123,37 @@ about psyntax's output, not the user's program, so they're muffled."
 	   (psl:tr "INTERFACE-NAMES"
 		   (psl:tr "STRUCTURE-INTERFACE" (psl:base-structure))))))
 
+(defun overridden-primitive-names ()
+  "Names the host's INSTALL-PRIMITIVES (re)defines."
+  (mapcar (lambda (p) (sym (car p))) ps-r6rs:*primitives*))
+
 (defun make-host ()
-  (let ((env (psl:new-library-env "psyntax host")))
-    (psl:copy-bindings! env ps-r7rs:*implementation-env* (all-primitive-names))
+  "The host environment: a copy of the R7RS implementation env's
+bindings -- except that where a binding is still R5RS's own built-in
+(same value, and not redefined by the R6RS layer), the host shares the
+R5RS binding itself, so the translator open-codes it ((+ a b) becomes
+CL's +, (vector-ref v i) SVREF) as it does in R5RS code.  A copy would
+be a fresh variable, called out of line."
+  (let ((env (psl:new-library-env "psyntax host"))
+	(base (psl:base-structure))
+	(overridden (overridden-primitive-names))
+	(shared '()))
+    (dolist (name (all-primitive-names))
+      (when (psl:binding-defined-p ps-r7rs:*implementation-env* name)
+	(let ((den (psl:tr "PROGRAM-ENV-LOOKUP" ps-r7rs:*implementation-env* name))
+	      (base-den (and (member name (psl:tr "INTERFACE-NAMES" (psl:tr "STRUCTURE-INTERFACE" base)))
+			     (psl:tr "STRUCTURE-REF" base name))))
+	  (if (and base-den
+		   (psl:variable-node-p den) (psl:variable-node-p base-den)
+		   (boundp (psl:tr "PROGRAM-VARIABLE-LOCATION" den))
+		   (boundp (psl:tr "PROGRAM-VARIABLE-LOCATION" base-den))
+		   (eq (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" den))
+		       (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" base-den)))
+		   (not (member name overridden))
+		   (not (member (ps:scheme-symbol-name name) *closed-primitives* :test #'string=)))
+	      (progn (psl:tr "PROGRAM-ENV-DEFINE!" env name base-den) (push name shared))
+	      (psl:copy-bindings! env ps-r7rs:*implementation-env* (list name))))))
+    (setq *shared-primitives* shared)
     env))
 
 (defun install-primitives (alist)

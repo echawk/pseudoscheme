@@ -56,7 +56,7 @@ cat > $tmp/prog6.sps <<'S'
 S
 check "r6rs program + library from -L" "(2 1)" $PS --r6rs -L $tmp/lib $tmp/prog6.sps
 
-check "error exit" "Error: car: not a pair" sh -c "$PS -e '(car 5)' 2>&1 | sed 's/ --.*//;s/Argument to CAR isn.t a pair/car: not a pair/'"
+check "error exit" "Error: not a pair 5" sh -c "$PS -e '(car 5)' 2>&1 | head -1"
 check "repl" "3" sh -c "printf '(+ 1 2)\n,q\n' | $PS | grep -v '^Pseudoscheme' | tr -d '> r7s' "
 
 check "(cl common-lisp) from Scheme" "(1 2 3)" $PS -p "(begin (import (prefix (cl common-lisp) cl:)) (cl:sort (list 3 1 2) cl:<))"

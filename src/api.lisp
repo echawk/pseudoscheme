@@ -52,7 +52,7 @@
   (:use "COMMON-LISP")
   (:shadow "WRITE-TO-STRING")
   (:import-from "PSEUDOSCHEME-INTEROP" "SCHEMIFY" "VERBATIM")
-  (:export "SCHEMIFY" "READ-SCHEME-FORMS" "TRUE-P" "REPL-LOOP" "VERBATIM"
+  (:export "SCHEMIFY" "READ-SCHEME-FORMS" "TRUE-P" "REPL-LOOP" "VERBATIM" "ERROR-MESSAGE"
 	   "WRITE-TO-STRING" "ADD-LIBRARY-DIRECTORY"))
 
 (macrolet ((dialect-package (name &rest extra)
@@ -190,11 +190,11 @@ environment."
 
 (defun r7rs:translate (source)
   "The Lisp code SOURCE translates to."
-  (scheme-translator:translate (r7rs:expand source) psx:*host*))
+  (scheme-translator:translate (psx::open-primitives (r7rs:expand source)) psx:*host*))
 
 (defun r6rs:translate (source)
   "The Lisp code SOURCE translates to."
-  (scheme-translator:translate (r6rs:expand source) psx:*host*))
+  (scheme-translator:translate (psx::open-primitives (r6rs:expand source)) psx:*host*))
 
 (defun r7rs:read-from-string (string)
   "The first datum in STRING, read by the Scheme reader."
@@ -327,8 +327,17 @@ environment, as a Lisp function (see R7RS:PROCEDURE)."
       (funcall ps:*scheme-write* v stream)
       (terpri stream))))
 
+(defun error-message (e)
+  "How to show condition E to a Scheme user: an uncaught Scheme raise as
+it prints itself (message, irritants, condition types), a Lisp error as
+the message a Scheme handler would see (e.g. \"not a pair 5\")."
+  (if (typep e 'ps-r7rs::uncaught-raise)
+      (string-trim '(#\Newline #\Space) (princ-to-string e))
+      (multiple-value-bind (message irritants) (ps-r6rs::foreign-condition-message e)
+	(format nil "~A~{ ~A~}" message (mapcar #'write-to-string irritants)))))
+
 (defun report-error (e stream)
-  (format stream "~&;; Error: ~A~%" (string-trim '(#\Newline #\Space) (princ-to-string e))))
+  (format stream "~&;; Error: ~A~%" (error-message e)))
 
 (defun quit-command-p (form)
   ;; ,q reads as (unquote q)

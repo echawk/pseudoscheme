@@ -67,6 +67,9 @@ be ASDF components (`:r7rs-library`, `:r7rs-file`, ...). See
 | R7RS-small | psyntax | chibi's R7RS suite: 948 of 975 |
 | R5RS | native translator | chibi's R5RS suite: 183 of 188 |
 
+Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 3.0× Chez's
+time as a geometric mean, close to Guile's 2.8×. See bench/RESULTS.md.
+
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
 libraries and 91 of 130 snow-fort libraries load. SRFIs 1, 2, 6, 8, 9,
 11, 13, 14, 16, 19, 23, 26, 27, 28, 31, 39, 41, 43, 45, 61, 64, 69, 87,
@@ -112,6 +115,8 @@ vendor/psyntax/      -- Ghuloum & Dybvig's psyntax, patched, and the
 contrib/cli/         -- the `pseudoscheme' command
 examples/            -- Scheme using Lisp, Lisp using Scheme, a mixed
                         ASDF system
+bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
+                        results
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
 docs/                -- interop (the bridge), continuations (design)

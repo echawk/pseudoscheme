@@ -202,9 +202,12 @@ function (#f is a symbol) or as a type error expecting a function."
 	   (values "attempt to apply non-procedure" (list ps:false))
 	   (plain)))
       (type-error
-       (if (subtypep 'function (type-error-expected-type c))
-	   (values "attempt to apply non-procedure" (list (type-error-datum c)))
-	   (plain)))
+       (cond ((subtypep 'function (type-error-expected-type c))
+	      (values "attempt to apply non-procedure" (list (type-error-datum c))))
+	     ;; car/cdr of a non-pair (builtin.scm checks with (the cons x))
+	     ((member (type-error-expected-type c) '(cons list))
+	      (values "not a pair" (list (type-error-datum c))))
+	     (t (plain))))
       ;; THROW to a dead tag: see PS:CALL-WITH-ESCAPE
       (control-error
        (values "continuation invoked after its extent ended (continuations are escape-only)" '()))

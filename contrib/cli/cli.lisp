@@ -135,7 +135,7 @@ system being loaded, may REQUIRE contribs such as SB-POSIX.")
     (load setup)))
 
 (defun report-and-exit (e)
-  (format *error-output* "~&Error: ~A~%" (string-trim '(#\Newline #\Space) (princ-to-string e)))
+  (format *error-output* "~&Error: ~A~%" (pseudoscheme-api:error-message e))
   (finish-output *error-output*)
   (uiop:quit 70))
 

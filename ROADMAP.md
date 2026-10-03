@@ -14,6 +14,7 @@ this file.
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
 | `make -C contrib/cli test` | 13/13 |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
+| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 3.0× Chez's time (Guile 2.8×, Gauche 9.2×) |
 
 ## Architecture now
 
@@ -83,11 +84,27 @@ Not triaged yet; `tests/run-r6rs-tests.lisp -v NAME` lists them.
 
 ## 2. Speed
 
-- **Open-code primitives in psyntax output.** psyntax refers to
-  primitives as `(primitive +)`, and the translator turns that into
-  `(funcall (primitive +) ...)` rather than the integrated `+` it uses
-  for R5RS code. `r7rs:translate` shows it. This is the biggest cheap win
-  for R6RS/R7RS code.
+`bench/` vendors ecraven's r7rs-benchmarks. In the last run
+(bench/RESULTS.md) Pseudoscheme was 3.0× Chez's time as a geometric
+mean, beside Guile (2.8×), with all 57 benchmarks completing.
+Open-coding psyntax's primitives made it 2.4–7.8× faster than the
+previous build. The worst ratios point at what to do next:
+
+- **`lattice` (13.5×), `conform` (7.9×), `peval` (5.8×).** These are
+  heavy on closures and on `apply`/`map`. Profile them; `map` and
+  `for-each` are still called out of line (`*closed-primitives*` in
+  src/psyntax.lisp), because the R6RS/R7RS versions replaced the
+  integrated ones.
+- **`gcbench` (10.2×).** Allocation of record instances and vectors.
+  Check how R6RS record constructors compile.
+- **`wc` (8.7×).** Character I/O, one `read-char` at a time through
+  generic port code.
+- **`ack` (8.6×), `takl` (6.9×), `cpstak` (5.9×).** Calls and
+  arithmetic: `+`/`-` are CL's generic versions. Fixnum fast paths like
+  the comparisons' (src/numbers.lisp) might help, and so might SBCL
+  declarations in the translator's output.
+- **`mbrotZ` (7.5×).** Complex arithmetic, which is also wrong (single
+  floats; section 1).
 - **Compiled libraries.** Every run re-expands the libraries it
   imports, and booting psyntax re-translates its image (about 1.7 s; the
   CLI avoids this by booting at build time).

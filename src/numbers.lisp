@@ -177,11 +177,27 @@ the same side of every finite OTHER."
 	(t (funcall op a b))))
 
 (defmacro def-compare (name op)
-  `(defun ,name (a b &rest more)
-     (and (compare2 ',op a b)
-	  (loop for (x y) on (cons b more)
-		while y
-		always (compare2 ',op x y)))))
+  `(progn
+     (defun ,name (a b &rest more)
+       (and (compare2 ',op a b)
+	    (loop for (x y) on (cons b more)
+		  while y
+		  always (compare2 ',op x y))))
+     ;; Two arguments, both fixnums or both double-floats: CL's own
+     ;; comparison, inline (IEEE comparisons are already false for NaN
+     ;; and order infinities).  The translator integrates (< a b) as a
+     ;; call to this, so this is what Scheme arithmetic tests compile to.
+     (define-compiler-macro ,name (&whole form a b &rest more)
+       (if more
+	   form
+	   (let ((x (gensym "A")) (y (gensym "B")))
+	     (list 'let (list (list x a) (list y b))
+		   (list 'cond
+			 (list (list 'and (list 'typep x ''fixnum) (list 'typep y ''fixnum))
+			       (list ',op x y))
+			 (list (list 'and (list 'typep x ''double-float) (list 'typep y ''double-float))
+			       (list ',op x y))
+			 (list t (list 'compare2 '',op x y)))))))))
 
 (def-compare scheme= =)
 (def-compare scheme< <)

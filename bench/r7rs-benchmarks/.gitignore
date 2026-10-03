@@ -1,0 +1,4 @@
+results.*
+all.csv
+outputs/*
+!outputs/.gitkeep
