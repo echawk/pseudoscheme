@@ -49,4 +49,18 @@
   (set-symbol-value! 'psyntax:library-locator library-locator)
   (set-symbol-value! 'psyntax:install-library install-library)
   (set-symbol-value! 'psyntax:interaction-library-name interaction-library-name)
-  (set-symbol-value! 'psyntax:interaction-source-name interaction-source-name))
+  (set-symbol-value! 'psyntax:interaction-source-name interaction-source-name)
+  ;; A library's exports, for the Lisp side (src/interop.lisp): a list of
+  ;; (name type value) -- TYPE is the binding type (global, core-prim,
+  ;; global-macro, ...), VALUE the location or primitive name.  The
+  ;; library is found (and loaded) if need be, and invoked.
+  (set-symbol-value! 'psyntax:library-export-bindings
+    (lambda (name)
+      (let ((lib (find-library-by-name name)))
+        (invoke-library lib)
+        (map (lambda (x)
+               (let ((b (imported-label->binding (cdr x))))
+                 (if (pair? b)
+                     (list (car x) (car b) (cdr b))
+                     (list (car x) 'unknown #f))))
+             (library-subst lib))))))

@@ -50,9 +50,10 @@ Each is marked `PSEUDOSCHEME:` in the source.
   command line and exiting, it hands the expander's entry points to the
   host as globals (`psyntax:eval-r6rs-top-level`,
   `psyntax:library-expander`, `psyntax:eval-top-level`, ...).
-* `psyntax/library-manager.ss` exports `library-path` and
-  `file-locator`, so the host can search a library path for `.sls`,
-  `.ss`, `.sld` and `.scm` files.
+* `psyntax/library-manager.ss` exports `library-path`, `file-locator`
+  and `library-locator`, so the host can search a library path for
+  `.sls`, `.ss`, `.sld` and `.scm` files, and translate R7RS
+  `define-library` forms (src/r7rs/front.lisp).
 * The REPL's "all public bindings" library is `(pseudoscheme)` rather
   than `(ikarus)` (expander and build script).
 * Build-script table: the `&foo-rtd` / `&foo-rcd` identifiers behind
@@ -96,6 +97,39 @@ Each is marked `PSEUDOSCHEME:` in the source.
 * `let-syntax` / `letrec-syntax` at the REPL top level work as
   expressions (it was "not supported yet").
 
+**R7RS and real-world libraries**
+
+* Library bodies may interleave definitions and expressions, and keep a
+  trailing expression's value (`chi-library-internal`).
+* REPL `import`, in the extensible interaction library (parameters
+  `interaction-library-name` / `interaction-source-name`).
+* Custom ellipsis, `(syntax-rules ::: (lit ...) rule ...)`, by
+  rewriting the rules; inside vector patterns too (`replace-ellipsis`).
+* `let*-values` as a macro.
+* `let-syntax` / `letrec-syntax` bindings are scoped by their own rib,
+  so imports in a macro's output can't shadow them.
+* A definition may shadow an *import* (as chibi and Gauche allow;
+  irregex and SSAX rely on it); defining a name twice is still an
+  error (`extend-rib!`).
+* Every imported library is invoked, not only those whose variables are
+  referenced: R7RS libraries may rely on their imports' side effects.
+* A library defined again replaces the old one (at the REPL, or when an
+  ASDF system is reloaded), as in Chez; libraries already expanded keep
+  the old one (`install-library`).
+* `set!` of an exported variable inside its library updates the
+  exported location too, so importers see the new value. psyntax copied
+  each variable to its location once, at the end of initialization
+  (`library-export-locs`, `chi-set!`).
+
+**The Lisp bridge** (docs/interop.md)
+
+* Lisp keywords (`#:name`) are self-evaluating constants, not
+  identifiers (`id?`, `self-evaluating?`, the host primitive
+  `lisp-keyword?`, added to the build-script table as `$boot`).
+* `psyntax:library-export-bindings`, an entry point listing a
+  library's exports with their binding types and locations, for
+  `use-library`.
+
 **Elsewhere**
 
 * `delay` expands into `($delay thunk)`, building an R7RS promise, so
@@ -106,9 +140,13 @@ Each is marked `PSEUDOSCHEME:` in the source.
 
 ## Known gaps
 
-* R7RS's custom ellipsis, `(syntax-rules ::: () ...)`, isn't supported.
+* `_` isn't a wildcard in `syntax-rules`/`syntax-case` patterns (it's
+  an ordinary pattern variable), and `...` can't be a literal. These
+  show up as R7RS test failures.
+* Ellipses inside *vector templates*, `#(x ...)`, aren't expanded
+  (`gen-syntax` only handles vectors that aren't syntax objects).
 * Phases are implicit (Ghuloum & Dybvig's "implicit phasing"), so
   `for` levels are accepted and ignored.
 * Libraries aren't serialized: each run re-expands library sources.
   Ikarus's later psyntax added serialization; that's the model for
-  compiled libraries (docs/interop.md, 2.3).
+  compiled libraries (ROADMAP.md, 2).

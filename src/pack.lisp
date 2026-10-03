@@ -33,6 +33,7 @@
 	   ;; Additional auxiliaries for Revised^4 builtins
 	   "SCHEME-PACKAGE"		;for STRING->SYMBOL
 	   "INVERT-CASE"		;symbol case: see core.lisp
+	   "INTERN-LISP-KEYWORD"	;#:keyword
 	   "SCHEME-SYMBOL-NAME"		;for SYMBOL->STRING
 	   "INTERN-SCHEME-SYMBOL"	;for STRING->SYMBOL
 	   "*FOLD-CASE*"		;reader case folding

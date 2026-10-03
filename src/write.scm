@@ -52,7 +52,10 @@
 	(else (write-other obj port recur))))
 
 (define (write-symbol obj port)
-  (write-string (symbol->string obj) port))
+  (cond ((ps:true? (ps-lisp:keywordp obj))     ;#:name, see read.scm
+         (write-string "#:" port)
+         (write-string (ps:scheme-symbol-name obj) port))
+        (else (write-string (symbol->string obj) port))))
 
 (define (write-boolean mumble port)
   (write-char #\# port)

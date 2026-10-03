@@ -43,7 +43,12 @@
                                   (WRITE-CHAR-LITERAL OBJ PORT)
                                   (WRITE-OTHER OBJ PORT RECUR))))))))))
 (SET-VALUE-FROM-FUNCTION 'RECURRING-WRITE 'SCHEME::RECURRING-WRITE)
-(DEFUN WRITE-SYMBOL (OBJ PORT) (WRITE-STRING (SYMBOL->STRING OBJ) PORT))
+(DEFUN WRITE-SYMBOL (OBJ PORT)
+  (IF (KEYWORDP OBJ)
+      (PROGN
+       (WRITE-STRING "#:" PORT)
+       (WRITE-STRING (SCHEME-SYMBOL-NAME OBJ) PORT))
+      (WRITE-STRING (SYMBOL->STRING OBJ) PORT)))
 (SET-VALUE-FROM-FUNCTION 'WRITE-SYMBOL 'SCHEME::WRITE-SYMBOL)
 (DEFUN WRITE-BOOLEAN (MUMBLE PORT)
   (WRITE-CHAR #\# PORT)
@@ -70,8 +75,8 @@
   (LET ((LEN (LENGTH (THE SIMPLE-STRING OBJ))))
     (PROG (|.I.0|)
       (SETQ |.I.0| 0)
-      (GO .LOOP.153)
-     .LOOP.153
+      (GO .LOOP.157)
+     .LOOP.157
       (LET ((I |.I.0|))
         (IF (SCHEME= I LEN)
             (RETURN (WRITE-CHAR #\" PORT))
@@ -81,7 +86,7 @@
                    (WRITE-CHAR #\\ PORT))
                (WRITE-CHAR C PORT))
              (SETQ |.I.0| (+ I 1))
-             (GO .LOOP.153)))))))
+             (GO .LOOP.157)))))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-STRING-LITERAL 'SCHEME::WRITE-STRING-LITERAL)
 (DEFUN WRITE-LIST (OBJ PORT RECUR)
   (IF (TRUEP (QUOTATION? OBJ))
@@ -169,15 +174,15 @@
                  (WRITE-CHAR (CHAR-UPCASE (CHAR (THE SIMPLE-STRING S) 0)) PORT)
                  (PROG (|.I.0|)
                    (SETQ |.I.0| 1)
-                   (GO .LOOP.179)
-                  .LOOP.179
+                   (GO .LOOP.183)
+                  .LOOP.183
                    (LET ((I |.I.0|))
                      (OR (SCHEME>= I LEN)
                          (PROGN
                           (WRITE-CHAR
                            (CHAR-DOWNCASE (CHAR (THE SIMPLE-STRING S) I)) PORT)
                           (SETQ |.I.0| (+ I 1))
-                          (GO .LOOP.179))))))
+                          (GO .LOOP.183))))))
                 (DISPLAY NAME PORT)))))
       (DISPLAY NAME PORT)))
 (SET-VALUE-FROM-FUNCTION 'DISPLAY-TYPE-NAME 'SCHEME::DISPLAY-TYPE-NAME)

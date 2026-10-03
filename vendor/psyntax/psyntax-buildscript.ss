@@ -948,6 +948,7 @@
     (gensym                   $boot)
     (symbol-value             $boot)
     (set-symbol-value!        $boot)
+    (lisp-keyword?            $boot)  ; PSEUDOSCHEME: self-evaluating Lisp keywords
     (eval-core                $boot)
     (pretty-print             $boot)
     (module                   cm)

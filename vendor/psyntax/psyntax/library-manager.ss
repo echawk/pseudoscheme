@@ -37,7 +37,9 @@
           (else (cons x ls))))
       (case-lambda
         (() set)
-        ((x) (set! set (set-cons x set))))))
+        ((x) (set! set (set-cons x set)))
+        ;; PSEUDOSCHEME: (collection x 'remove), for redefinition
+        ((x remove) (set! set (remq x set))))))
 
   (define current-library-collection
     ;;; this works now because make-collection is a lambda
@@ -215,8 +217,11 @@
           (inv-lib* (map find-library-by-spec/die inv*)))
       (unless (and (symbol? id) (list? name) (list? ver))
         (error 'install-library "invalid spec with id/name/ver" id name ver))
-      (when (library-exists? name)
-        (error 'install-library "library is already installed" name))
+      ;; PSEUDOSCHEME: a library defined again (at the REPL, or by
+      ;; reloading a file) replaces the old one, as in Chez Scheme;
+      ;; libraries already expanded against the old one keep it.
+      (let ((old (find-library-by (lambda (x) (equal? (library-name x) name)))))
+        (when old ((current-library-collection) old 'remove)))
       (let ((lib (make-library id name ver imp-lib* vis-lib* inv-lib* 
                     exp-subst exp-env visit-code invoke-code 
                     visible?)))

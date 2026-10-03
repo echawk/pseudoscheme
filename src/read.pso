@@ -484,6 +484,15 @@
       (SKIP-BLOCK-COMMENT PORT 1)
       (SUB-READ PORT))))
 (AT-TOP-LEVEL
+ (DEFINE-SHARP-MACRO #\:
+  #'(LAMBDA (C PORT)
+      (.READ-CHAR PORT)
+      (LET ((P (.PEEK-CHAR PORT)))
+        (IF (OR (EQ P EOF-OBJECT) (TRUEP (TERMINATING? P)))
+            (READING-ERROR PORT "missing keyword name after #:")
+            (INTERN-LISP-KEYWORD
+             (CAR (SUB-READ-TOKEN (.READ-CHAR PORT) PORT))))))))
+(AT-TOP-LEVEL
  (DEFINE-SHARP-MACRO #\;
   #'(LAMBDA (C PORT)
       (.READ-CHAR PORT)

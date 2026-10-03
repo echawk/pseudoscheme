@@ -29,17 +29,35 @@ From Lisp:
 
 ```lisp
 (push #P"/path/to/pseudoscheme-asdf/" asdf:*central-registry*)
-(asdf:load-system :pseudoscheme/api)
+(asdf:load-system :r7rs)                    ; or :r6rs, :r5rs: the same system
 
-(r6rs:eval "(import (rnrs)) (display (list-sort < '(3 1 2)))")
-(r6rs:eval '(let-values (((q r) (div-and-mod 17 5))) (list q r)))  ; => (3 2)
+(r7rs:eval "(import (scheme base)) (exact-integer-sqrt 17)")
+(r7rs:scheme (let-values (((q r) (floor/ 17 5))) (list q r)))   ; => (3 2)
+(r7rs:use-library '(srfi 1))                ; a Scheme library as a package
+(srfi-1:filter #'evenp '(1 2 3 4))          ; => (2 4)
 (r7rs:load "prog.scm")
-(r6rs:repl)
+(r7rs:repl)
 ```
 
-`R5RS`, `R6RS` and `R7RS` are packages with `EVAL`, `LOAD`, `REPL` and
-`TRUE-P` (see `src/api.lisp`). `docs/interop.md` describes where the
-Lisp/Scheme bridge is going.
+And Scheme using Lisp: a Lisp package is a library.
+
+```scheme
+(import (scheme base)
+        (prefix (cl common-lisp) cl:)
+        (prefix (cl cl-ppcre) re:)          ; loaded on demand (ASDF/Quicklisp)
+        (pseudoscheme lisp))
+
+(cl:sort (list '(b . 2) '(a . 1)) cl:< #:key cl:cdr)
+(re:split "\\s*,\\s*" "a , b,c")
+(lisp-let ((cl:*print-base* 16)) (cl:princ-to-string 255))   ; => "FF"
+```
+
+The packages `R5RS`, `R6RS` and `R7RS` each have `EVAL`, `SCHEME`,
+`LOAD`, `REPL`, `EXPAND`, `TRANSLATE`, `PROCEDURE`, `READ-FROM-STRING`,
+`WRITE-TO-STRING`, `TRUE-P` and `FALSE`; R6RS and R7RS also have
+`USE-LIBRARY`, `LIBRARY-EXPORTS` and `*LIBRARY-PATH*`. Scheme sources can
+be ASDF components (`:r7rs-library`, `:r7rs-file`, ...). See
+`docs/interop.md` and `examples/`.
 
 ## Status
 
@@ -85,12 +103,18 @@ src/compat/          -- (chezscheme), for the Chez variants of Akku
 src/environments.lisp
                      -- native environments the R5RS/R7RS layers build on
 src/api.lisp         -- the R5RS / R6RS / R7RS packages for Lisp
+src/interop.lisp, src/interop/
+                     -- the Scheme <-> Lisp bridge: (cl <package>)
+                        libraries, (pseudoscheme lisp), use-library
+src/asdf.lisp        -- Scheme sources as ASDF components
 vendor/psyntax/      -- Ghuloum & Dybvig's psyntax, patched, and the
                         image of it built on Pseudoscheme
 contrib/cli/         -- the `pseudoscheme' command
+examples/            -- Scheme using Lisp, Lisp using Scheme, a mixed
+                        ASDF system
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
-docs/                -- design notes: interop, continuations
+docs/                -- interop (the bridge), continuations (design)
 ```
 
 ## Systems
@@ -107,7 +131,10 @@ docs/                -- design notes: interop, continuations
 - `pseudoscheme/r7rs-runtime` -- the procedures behind R7RS-small.
 - `pseudoscheme/r6rs` -- psyntax, the R6RS libraries and `(chezscheme)`.
 - `pseudoscheme/r7rs` -- R7RS-small on psyntax.
-- `pseudoscheme/api` -- the `R5RS`/`R6RS`/`R7RS` packages.
+- `pseudoscheme/api` -- the `R5RS`/`R6RS`/`R7RS` packages and the
+  Scheme/Lisp bridge. The systems `r5rs`, `r6rs` and `r7rs` are
+  shorthands for it.
+- `pseudoscheme/asdf` -- ASDF component types for Scheme sources.
 - `pseudoscheme-cli` (`contrib/cli/`) -- the command.
 - `pseudoscheme/bootstrap` -- regenerates the `.pso` files.
 
@@ -196,10 +223,11 @@ by the command line program and the test runners, via
 - **The Scheme reader** (`pseudoscheme/reader`) is for Scheme: R6RS and
   R7RS syntax including `[ ]`, `#u8(...)`/`#vu8(...)`, `#'x` `` #`x ``
   `#,x` `#,@x`, `|symbols|`, `\x41;` escapes, `#\x41`, `#true`/`#false`,
-  `#!fold-case`, `#;` and `#| |#`, Unicode identifiers, and the number
-  syntax above. (`#'x` used to be a Pseudoscheme escape naming a CL
-  function; it's R6RS's `(syntax x)` now, and Lisp access from Scheme is
-  being redesigned, see docs/interop.md.)
+  `#!fold-case`, `#;` and `#| |#`, Unicode identifiers, the number
+  syntax above, and `#:name` for Lisp keywords. (`#'x` used to be a
+  Pseudoscheme escape naming a CL function; it's R6RS's `(syntax x)`
+  now, and Lisp is reached through `(cl <package>)` libraries, see
+  docs/interop.md.)
 
 ## Bootstrap artifacts
 
@@ -227,6 +255,7 @@ sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r6rs
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-syntax-case-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-corpus.lisp DIR
+sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-interop-tests.lisp
 make -C contrib/cli test
 python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 ```

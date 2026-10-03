@@ -379,7 +379,8 @@
               (cdr x)
               (error 'syntax-cdr "not a pair" x)))))
   (define id?
-    (lambda (x) (syntax-kind? x symbol?)))
+    ;;; PSEUDOSCHEME: a Lisp keyword is a constant, not an identifier.
+    (lambda (x) (syntax-kind? x (lambda (s) (and (symbol? s) (not (lisp-keyword? s)))))))
   
   (define id->sym
     (lambda (x)
@@ -438,7 +439,10 @@
   (define self-evaluating?
     (lambda (x) ;;; am I missing something here?
       (or (number? x) (string? x) (char? x) (boolean? x)
-          (bytevector? x) (vector? x))))
+          (bytevector? x) (vector? x)
+          ;; PSEUDOSCHEME: Lisp keywords (#:test), for Lisp keyword
+          ;; arguments; see docs/interop.md.
+          (lisp-keyword? x))))
 
   ;;; strip is used to remove the wrap of a syntax object.
   ;;; It takes an stx's expr and marks.  If the marks contain
@@ -2463,9 +2467,17 @@
          (let-values (((type value kwd) (syntax-type x r)))
            (case type
              ((lexical)
-              (build-lexical-assignment no-source
-                value
-                (chi-expr v r mr)))
+              ;; PSEUDOSCHEME: assigning an exported variable updates
+              ;; its location too (see library-body-expander).
+              (let ((exported (assq value (library-export-locs))))
+                (if exported
+                    (build-sequence no-source
+                      (list (build-lexical-assignment no-source value (chi-expr v r mr))
+                            (build-global-assignment no-source (cdr exported)
+                              (build-lexical-reference no-source value))))
+                    (build-lexical-assignment no-source
+                      value
+                      (chi-expr v r mr)))))
              ;; PSEUDOSCHEME: a global of the REPL's own interaction
              ;; library is assignable (as GEN-GLOBAL-VAR-BINDING already
              ;; allows for DEFINE); only imported ones aren't.
@@ -3135,6 +3147,10 @@
           (values (append (apply append (reverse mod**)) e*)
              r mr (reverse lex*) (reverse rhs*))))))
   
+  ;;; PSEUDOSCHEME: ((lexical . location) ...) for the exported
+  ;;; variables of the library being expanded.
+  (define library-export-locs (make-parameter '()))
+
   (define library-body-expander
     (lambda (exp* imp* b*)
       (let-values (((exp-int* exp-ext*) (parse-exports exp*))
@@ -3150,6 +3166,25 @@
               ;; bodies may; for R6RS bodies that's a harmless extension.
               (let-values (((init* r mr lex* rhs*)
                             (chi-library-internal b* rib #t)))
+               ;; PSEUDOSCHEME: exported variables get their global
+               ;; locations now, so that a set! in the library can update
+               ;; the location as well (see chi-set!), and importers see
+               ;; the new value; psyntax copied each variable to its
+               ;; location once, at the end of initialization.
+               (parameterize ((library-export-locs
+                               (let f ((ids exp-int*) (locs '()))
+                                 (if (null? ids)
+                                     locs
+                                     (let* ((label (id->label
+                                                     (mkstx (car ids) top-mark* (list rib))))
+                                            (b (and label (label->binding label r))))
+                                       (if (and b (eq? (binding-type b) 'lexical)
+                                                (not (assq (binding-value b) locs)))
+                                           (f (cdr ids)
+                                              (cons (cons (binding-value b)
+                                                          (gen-global (binding-value b)))
+                                                    locs))
+                                           (f (cdr ids) locs)))))))
                 (seal-rib! rib)
                 (let ((rhs* (chi-rhs* rhs* r mr))
                       (init* (chi-expr* init* r mr)))
@@ -3172,7 +3207,7 @@
                           (build-sequence no-source 
                             (append invoke-definitions
                               (list invoke-body)))
-                          macro* export-subst export-env))))))))))))
+                          macro* export-subst export-env)))))))))))))
 
   (define core-library-expander
     (lambda (e)
@@ -3337,7 +3372,9 @@
            (let ((label (car x)) (b (cdr x)))
              (case (binding-type b)
                ((lexical)
-                (let ((loc (gen-global (binding-value b))))
+                (let ((loc (cond
+                             ((assq (binding-value b) (library-export-locs)) => cdr)
+                             (else (gen-global (binding-value b))))))
                   (f (cdr r)
                      (cons (cons* label 'global loc) env)
                      (cons (cons (binding-value b) loc) global*)

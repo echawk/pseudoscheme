@@ -154,7 +154,9 @@
     (cond ((or (eq package ps:scheme-package)
 	       ;; Uninterned (GENSYM/MAKE-SYMBOL) symbols, e.g. hygienic
 	       ;; renames, have no package to qualify with.
-	       (null package))
+	       (null package)
+	       ;; #:name keywords (docs/interop.md): their name
+	       (keywordp symbol))
 	   (ps:scheme-symbol-name symbol))
 	  ((not (ps:scheme-symbol-p symbol))
 	   (error "symbol->string: invalid argument - ~S"
@@ -171,9 +173,8 @@
 				       ":"
 				       "::")
 				   (symbol-name symbol))))
-		 (warn "returning ~s for (symbol->string '~s)"
-		       fakename
-		       symbol)
+		 ;; A Lisp symbol (Scheme code can have them, see
+		 ;; docs/interop.md): its qualified name.
 		 fakename))))))
 
 ; VECTOR?

@@ -86,6 +86,13 @@
   "True when the Scheme reader folds symbols and character names to
 lower case (R5RS behavior, or after #!fold-case).")
 
+(defun intern-lisp-keyword (string)
+  "The Lisp keyword that Scheme's #:STRING reads as (see
+docs/interop.md): named by inverting case, like a Scheme symbol, so
+#:test is :TEST."
+  (values (intern (invert-case (if *fold-case* (string-downcase string) string))
+		  "KEYWORD")))
+
 ; ----- Photons
 
 ; "A `photon' is an object that PRIN1's as if it had been PRINC'ed."

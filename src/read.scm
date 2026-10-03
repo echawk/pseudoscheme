@@ -400,6 +400,16 @@
     (skip-block-comment port 1)
     (sub-read port)))
 
+; #:name -- a Lisp keyword, for calling Lisp functions with keyword
+; arguments (docs/interop.md).  Neither R6RS nor R7RS gives #: a meaning.
+(define-sharp-macro #\:
+  (lambda (c port)
+    (read-char port)                   ;consume the :
+    (let ((p (peek-char port)))
+      (if (or (eof-object? p) (terminating? p))
+          (reading-error port "missing keyword name after #:")
+          (ps:intern-lisp-keyword (car (sub-read-token (read-char port) port)))))))
+
 (define-sharp-macro #\;
   (lambda (c port)
     (read-char port)                   ;consume the ;

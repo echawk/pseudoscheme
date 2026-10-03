@@ -30,6 +30,11 @@
   -L, --library-path DIR
                    look for libraries in DIR too (foo/bar.sld etc.
                    for (foo bar)); may be repeated
+  -l, --lisp-system SYSTEM
+                   load the Common Lisp system SYSTEM (with ASDF, or
+                   Quicklisp if loaded) first; may be repeated
+  --quicklisp      load Quicklisp (~/quicklisp/setup.lisp), so that
+                   importing (cl <package>) can fetch missing systems
   -i, --interactive
                    start a REPL after running the file or expressions
   --version        print the version and exit
@@ -41,6 +46,11 @@ With a FILE, it is run as a program: for R6RS/R7RS, any (library ...) /
 after them is run; for R5RS the file is loaded.  (command-line) is
 (FILE ARGUMENT ...).  Without a file or -e/-p, the REPL starts.
 In the REPL, ,q quits.
+
+Scheme code can use Common Lisp packages as libraries:
+  (import (prefix (cl common-lisp) cl:) (pseudoscheme lisp))
+A (cl <package>) whose package isn't loaded loads the system of that
+name first (see -l and --quicklisp; docs/interop.md).
 ")
 
 (defvar *standard* :r7rs)
@@ -90,6 +100,9 @@ list of (:eval text) / (:print text)."
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
 		((member a '("-p" "--print") :test #'string=) (push (list :print (value)) actions))
 		((member a '("-L" "--library-path") :test #'string=) (add-library-path (value)))
+		((member a '("-l" "--lisp-system") :test #'string=)
+		 (push (list :lisp-system (value)) actions))
+		((string= a "--quicklisp") (push (list :quicklisp nil) actions))
 		((member a '("-i" "--interactive") :test #'string=) (setq interactive t))
 		((member a '("-h" "--help") :test #'string=)
 		 (write-string *usage*) (uiop:quit 0))
@@ -99,6 +112,27 @@ list of (:eval text) / (:print text)."
 		 (die "unknown option ~A (try --help)" a))
 		(t (push a args) (return))))))
     (values (nreverse actions) (car args) (cdr args) interactive)))
+
+#+sbcl
+(defparameter *build-sbcl-home* (sb-int:sbcl-homedir-pathname)
+  "Where SBCL's contrib modules were when the image was built.  A saved
+executable doesn't know (it isn't the sbcl runtime), and Quicklisp, or a
+system being loaded, may REQUIRE contribs such as SB-POSIX.")
+
+(defun find-sbcl-contribs ()
+  #+sbcl
+  (flet ((has-contribs-p (home)
+	   (and home (eq (car (pathname-directory home)) :absolute)
+		(directory (merge-pathnames "contrib/sb-posix.*" home)))))
+    (unless (has-contribs-p (sb-int:sbcl-homedir-pathname))
+      (when (has-contribs-p *build-sbcl-home*)
+	(setf sb-sys::*sbcl-homedir-pathname* *build-sbcl-home*)))))
+
+(defun load-quicklisp ()
+  (let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+    (unless (probe-file setup)
+      (die "--quicklisp: no ~A" (namestring setup)))
+    (load setup)))
 
 (defun report-and-exit (e)
   (format *error-output* "~&Error: ~A~%" (string-trim '(#\Newline #\Space) (princ-to-string e)))
@@ -113,6 +147,7 @@ list of (:eval text) / (:print text)."
 
 (defun main ()
   (ps:disable-float-traps)
+  (find-sbcl-contribs)
   (multiple-value-bind (actions file file-args interactive)
       (parse-arguments (uiop:command-line-arguments))
     (setf ps-r7rs:*command-line* (cons (or file "pseudoscheme") file-args))
@@ -124,11 +159,15 @@ list of (:eval text) / (:print text)."
 			   (report-and-exit e)))))
       (dolist (action actions)
 	(destructuring-bind (kind text) action
-	  (let ((values (multiple-value-list (evaluate-string text))))
-	    (when (eq kind :print)
-	      (dolist (v values)
-		(funcall ps:*scheme-write* v *standard-output*)
-		(terpri))))))
+	  (case kind
+	    (:lisp-system (pseudoscheme-interop:load-lisp-system text))
+	    (:quicklisp (load-quicklisp))
+	    (t
+	     (let ((values (multiple-value-list (evaluate-string text))))
+	       (when (eq kind :print)
+		 (dolist (v values)
+		   (funcall ps:*scheme-write* v *standard-output*)
+		   (terpri))))))))
       (when file
 	(unless (probe-file file) (die "no such file: ~A" file))
 	(run-file file)))
@@ -139,4 +178,4 @@ list of (:eval text) / (:print text)."
     (uiop:quit 0)))
 
 ;;; Initialize everything now, at build time, so it's in the saved image.
-(ps-r7rs::boot)
+(pseudoscheme-interop:boot)

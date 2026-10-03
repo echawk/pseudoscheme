@@ -1,219 +1,251 @@
-# Scheme and Common Lisp, both ways: a design
+# Scheme and Common Lisp, both ways
 
-Status: proposal. Pieces marked **(done)** exist; everything else is a
-plan to be argued with.
+Pseudoscheme compiles Scheme *to* Lisp, so most of the bridge is just
+"use the same objects". This document covers what is shared, what gets
+converted at the boundary and why, the API in each direction, and how
+libraries are found and distributed. The code is in `src/interop.lisp`,
+`src/interop/lisp.sls`, `src/api.lisp` and `src/asdf.lisp`. Tests are in
+`tests/run-interop-tests.lisp`; examples are in `examples/`.
 
-The goal is the one in the original Pseudoscheme paper, taken further:
-any Scheme program or library (R5RS, R6RS, R7RS) loads and runs inside a
-Common Lisp image, is callable from Lisp as ordinary Lisp, and can itself
-use Lisp libraries. Pseudoscheme is unusually well placed for this,
-because it doesn't *embed* Scheme in Lisp: it *compiles* Scheme to Lisp,
-so most of the bridge is just "use the same objects".
-
-## 1. What is already shared
+## 1. Shared objects
 
 | Scheme | Lisp | notes |
 |---|---|---|
 | pair, list | cons, list | `'()` **is** `NIL` |
-| procedure | function | callable with `funcall`, no wrapper |
-| number | number | full tower; inexact = `double-float` (done) |
-| string, char | simple-string, character | Unicode |
+| procedure | function | callable with `funcall` |
+| number | number | the full tower; inexact means `double-float` |
+| string, char | string, character | Unicode |
 | vector | simple-vector | |
-| bytevector | `(simple-array (unsigned-byte 8) (*))` | (done) |
-| symbol | symbol in `SCHEME` | name is case-inverted (done, see below) |
+| bytevector | `(simple-array (unsigned-byte 8) (*))` | |
+| symbol | symbol in `SCHEME` | name is case-inverted: `car` ↔ `SCHEME::CAR` |
+| `#:name` | keyword `:NAME` | reader syntax, see 3.3 |
 | port | stream | |
-| record | `struct` instance | R6RS record types (done) |
-| condition | condition ↔ R6RS condition | Lisp errors become `&assertion`/`&i/o` conditions inside Scheme handlers (done) |
+| record | struct instance | |
+| condition | condition | Lisp errors are conditions in Scheme handlers, and vice versa |
 | multiple values | multiple values | |
-| `dynamic-wind` | `unwind-protect` | Lisp non-local exits run Scheme `after` thunks |
+| `dynamic-wind` | `unwind-protect` | |
 
-**Symbols (done).** Scheme symbols are CL symbols in the `SCHEME`
-package whose names are the Scheme names with case *inverted*, as CL's
-`:invert` readtable case does: `car` ↔ `SCHEME::CAR`, `Hello` ↔
-`|Hello|`, `ABC` ↔ `|abc|`. Scheme is case-sensitive (as R6RS/R7RS
-require) and a Lisp programmer can still write `'scheme::car`. This is
-what lets `(r6rs:eval '(list-sort < (list 3 1 2)))` work when written in
-Lisp: `CL-USER::LIST-SORT` maps to Scheme's `list-sort`.
+**Booleans** are the one real mismatch: `#f` is the symbol `PS:FALSE`,
+`#t` is `T`, and `NIL` is the empty list. Making `#f` the same as `NIL`
+would break `(if '() 'yes 'no)`, which must be `yes`. Giving the empty
+list its own object would break the most valuable sharing, which is
+that Scheme lists *are* Lisp lists. So booleans are converted where
+values cross between the languages.
 
-The one real mismatch is **booleans**: `#f` is the symbol `PS:FALSE`,
-`#t` is `T`, and `NIL` is the empty list. Every other choice is worse:
+## 2. The boundary rules
 
-* `#f` = `NIL` with a distinct empty-list object breaks the most
-  valuable sharing, Scheme lists *being* Lisp lists.
-* `#f` = `'()` = `NIL` (Pseudoscheme's old optional mode) is not Scheme:
-  `(if '() 'yes 'no)` must be `yes` in R6RS and R7RS.
+| crossing | conversion |
+|---|---|
+| a Scheme value passed to Lisp (arguments of a `(cl ...)` function, results of a `use-library` function) | `#f` → `NIL` |
+| a result of a Lisp predicate returned to Scheme | `NIL` → `#f` |
+| a result of any other Lisp function returned to Scheme | none: `NIL` is `()` |
+| a Lisp function given to Scheme | wrapped, and treated as a predicate: its `NIL` → `#f` |
+| a Scheme procedure given to Lisp | wrapped: its `#f` → `NIL` |
+| a wrapper crossing back | unwrapped (so `cl:equal` reaches `make-hash-table` as `#'equal`) |
 
-So booleans are converted at the boundary, and the design below tries to
-put that conversion where it can't be forgotten.
+A Lisp function counts as a predicate when:
+- its name ends in `-P`;
+- or it is a one-word name ending in `P` (`EVENP`, `TYPEP`, `EMPTYP`);
+- or it is listed in `*lisp-predicates*`. That list holds ANSI functions
+  whose `NIL` means false although their names don't say so: `EQUAL`,
+  `STRING=`, `MEMBER`, `FIND`, `SOME`, and so on.
 
-## 2. Lisp calling Scheme
+`*not-lisp-predicates*` lists the names that only look like predicates
+(`MAP`).
 
-### 2.1 Evaluate and load (done)
+The rule for callbacks covers the common case, `(filter #'evenp ...)`.
+For a Lisp callback that returns *lists* to Scheme (where `NIL` means
+`()`), mark it with `verbatim`: `(srfi-1:append-map (r7rs:verbatim
+(lambda (x) ...)) ...)`.
 
-```lisp
-(r7rs:load "prog.scm")
-(r6rs:eval "(import (rnrs)) (display (fold-left + 0 '(1 2 3)))")
-(r6rs:eval '(let-values (((q r) (div-and-mod 17 5))) (list q r)))
-(r6rs:repl)
+Conversion happens only at the top level of argument and value lists.
+A `#f` *inside* a list stays `#f`.
+
+## 3. Scheme calling Lisp
+
+### 3.1 Lisp packages are libraries: `(cl <package>)`
+
+```scheme
+(import (scheme base)
+        (prefix (cl common-lisp) cl:)
+        (prefix (cl alexandria) alex:))
+
+(cl:sort (list 3 1 2) cl:<)            ; => (1 2 3)
+(alex:flatten '((1 2) (3 (4))))         ; => (1 2 3 4)
 ```
 
-Strings are read by the Scheme reader (so `#f`, `#(...)`, `#\a` are
-exact); Lisp data have their symbols moved into `SCHEME`. Results are the
-shared objects above; test truth with `r6rs:true-p`.
+`(cl <package>)` exports every external symbol of the package that
+names a function or a variable, under its Lisp name in Scheme spelling
+(`REMOVE-IF` becomes `remove-if`). Prefixing the import keeps these
+names apart from Scheme's own and reads like Lisp. `only`, `except`,
+`rename` and `prefix` all work. A name like `(cl foo bar)` refers to the
+package `FOO/BAR`, the naming that package-inferred systems use.
 
-### 2.2 Libraries as packages
+- **Functions** are wrapped per section 2. Generic functions and struct
+  accessors are functions too.
+- **Variables** (specials and constants) are identifier macros over
+  `symbol-value`. Reading `cl:*print-base*` gives its current value,
+  `(set! cl:*print-base* 16)` assigns it, and `lisp-let` binds it
+  dynamically (3.4).
+- **Macros and special operators** are not exported. A Lisp macro's
+  arguments are Lisp code, not Scheme. `lisp-set!` covers the most common
+  one, `setf`; for the rest, use `lisp-eval-string`.
 
-A Scheme library should be usable from Lisp as a Lisp package:
+A library is built when first imported: about 0.3 s for all of
+`COMMON-LISP` (748 functions and 112 variables). After that, a
+`(cl ...)` import costs nothing.
 
-```lisp
-(pseudoscheme:use-library '(srfi 1) :package "SRFI-1")
-(srfi-1:fold #'+ 0 '(1 2 3))
-(srfi-1:any (lambda (x) (r6rs:true-p (scheme-even? x))) ...)
+### 3.2 Finding the Lisp code: autoloading
+
+If the package doesn't exist, importing `(cl foo)` first loads the
+*system* `foo` by calling `pseudoscheme-interop:*lisp-system-loader*`.
+The default loader:
+
+- uses `ql:quickload` if Quicklisp is loaded, which also downloads
+  systems it doesn't have yet;
+- otherwise uses `asdf:load-system`. This finds whatever ASDF's source
+  registry knows about: `~/common-lisp/`, `CL_SOURCE_REGISTRY`, an ocicl
+  project (whose ASDF hook can also fetch systems), or a qlot project run
+  under `qlot exec`.
+
+ASDF is the common denominator of every Lisp distribution tool, so it is
+the default; Quicklisp is used only when the user has already chosen it
+by loading it. Set `*autoload-lisp-systems*` to NIL to turn autoloading
+off, or replace the loader. From the command line:
+- `pseudoscheme -l cl-ppcre prog.scm` preloads a system;
+- `pseudoscheme --quicklisp prog.scm` loads Quicklisp first.
+
+When a package name differs from its system name (package `BT`, system
+`bordeaux-threads`), load the system first: `(lisp-require
+"bordeaux-threads")` at the REPL, `-l` on the command line, or a
+dependency in an ASDF system (3.5).
+
+### 3.3 Keywords: `#:name`
+
+`#:test` reads as the Lisp keyword `:TEST`. The name is case-inverted
+like a symbol's, and the keyword is self-evaluating and prints back as
+`#:test`. Neither R6RS nor R7RS gives `#:` a meaning; Guile and Racket
+use it for their own keywords.
+
+```scheme
+(cl:sort pairs cl:< #:key cl:car)
+(cl:make-hash-table #:test cl:equal)
 ```
 
-Each exported procedure becomes a function binding of a symbol in the
-package (its name the export's name, case inverted back: `fold` →
-`SRFI-1:FOLD`); exported variables become symbol macros so reads see the
-current value. Since psyntax stores every library variable in a host
-global, the function binding can simply *be* that global's value, so
-there is no per-call cost.
+### 3.4 `(pseudoscheme lisp)`
 
-Booleans: exported procedures whose names end in `?` get a second
-binding with the conventional Lisp `-P` name that returns a Lisp boolean
-(`null?` → `NULL?` raw, `NULL-P` converted). That is the one place a
-naming convention can carry a type.
+| | |
+|---|---|
+| `(lisp-true? x)`, `(lisp-false? x)` | Lisp truth (`NIL` and `#f` are false) |
+| `(lisp-set! (accessor arg ...) value)` | Lisp's `setf`: `(lisp-set! (cl:gethash k h) v)`; any place `setf` knows |
+| `(lisp-let ((var value) ...) body ...)` | dynamically binds Lisp specials imported from `(cl ...)` libraries |
+| `(lisp-symbol name [package])` | a symbol, written the Scheme way: `(lisp-symbol "equal" "cl")` |
+| `(lisp-keyword name)` | what `#:name` reads as |
+| `(lisp-function name [package])` | the raw function, which Scheme calls without conversion |
+| `(lisp-funcall f arg ...)`, `(lisp-apply f arg ... list)` | call with `#f` passed as `NIL`; results unconverted |
+| `(lisp-value symbol)`, `(set-lisp-value! symbol v)` | `symbol-value` |
+| `(lisp-symbol-of id)` | the Lisp symbol behind a `(cl ...)` variable |
+| `(call-with-lisp-bindings symbols values thunk)` | `progv` |
+| `(lisp-require system)` | load a Lisp system now |
+| `(lisp-eval-string string)` | read and evaluate Lisp source |
+| `(verbatim proc)` | pass `proc` to Lisp without converting its results |
 
-### 2.3 Scheme source in ASDF systems
+### 3.5 Distributing Scheme code that uses Lisp
 
-The most useful form of "load arbitrary Scheme": Scheme files as
-components of ordinary ASDF systems, compiled ahead of time to fasls.
+Make it an ASDF system. Its `:depends-on` lists the Lisp libraries, so
+whatever installs systems for the user resolves them like any other
+dependency: Quicklisp, ocicl, qlot, CLPM, or a source registry. Scheme
+sources are components of the system (section 5).
+
+## 4. Lisp calling Scheme
+
+`(asdf:load-system :r7rs)` loads the API. `:r6rs` and `:r5rs` are the
+same system, `pseudoscheme/api`. The packages `R7RS`, `R6RS` and `R5RS`
+each have:
+
+| | |
+|---|---|
+| `eval source` | Scheme text, or a Lisp datum (CL's `FOO` is Scheme's `foo`). Values come back as they are (`#f` is `FALSE`). |
+| `scheme form ...` | macro: evaluate unevaluated forms at the REPL top level, with results converted Lisp-style (`#f` → NIL) |
+| `load file`, `repl` | |
+| `expand source` | the core Scheme an expression expands to |
+| `translate source` | the Lisp code it compiles to |
+| `procedure name &key library convert` | a Scheme procedure as a Lisp function |
+| `read-from-string`, `write-to-string` | the Scheme reader and writer |
+| `true-p`, `false`, `verbatim` | |
+
+`R7RS` and `R6RS` also have `use-library`, `library-exports`,
+`*library-path*` and `add-library-directory`. These names shadow CL's,
+so use them package-qualified (`r7rs:eval`).
+
+### 4.1 Scheme libraries are packages: `use-library`
+
+```lisp
+(r7rs:use-library '(srfi 1))                  ; => #<PACKAGE "SRFI-1">
+(srfi-1:filter #'evenp '(1 2 3 4))            ; => (2 4)
+(r7rs:use-library "(srfi 13)" :package "STR")
+(str:string-pad "42" 6 #\0)                   ; => "000042"
+```
+
+- Each exported procedure becomes a function, converting per section 2.
+  `:convert nil` binds the procedures themselves instead.
+- Exported variables become symbol macros that read the current value.
+- Syntax exports are skipped; `library-exports` lists them.
+
+To read `pkg:name` in the same file that creates the package, call
+`use-library` inside `eval-when (:compile-toplevel :load-toplevel
+:execute)`, as `examples/mixed-system/report.lisp` does.
+
+### 4.2 Errors
+
+An uncaught Scheme `raise` is a Lisp error of type
+`ps-r7rs::uncaught-raise`, printed with the condition's message and
+irritants. Lisp code can `handler-case` it.
+
+## 5. Scheme sources in ASDF systems
 
 ```lisp
 (defsystem :my-app
   :defsystem-depends-on (:pseudoscheme/asdf)
-  :components ((:r7rs-library "lib/json")      ; lib/json.sld
-               (:r6rs-program "tools/report")  ; tools/report.sps
+  :depends-on (:alexandria)
+  :components ((:r7rs-library "lib/stats")     ; lib/stats.sld
+               (:r7rs-file "setup")            ; setup.scm, run at load time
                (:file "main")))                ; Lisp using both
 ```
 
-Compiling a library runs psyntax over it, translates the core output to
-Lisp and `compile-file`s that. The hard part is that a compiled library
-must be re-installable without re-expanding: the fasl has to carry
-psyntax's library descriptor (export substitution, environment, visit
-and invoke code). The 2007 psyntax doesn't serialize libraries; Ikarus's
-later version does, and that code is the model. This is also what makes
-startup fast for large programs, so it's worth doing early.
+- `:r7rs-library` / `:r6rs-library`: a file of library definitions.
+  Loading the component puts the library's root directory on
+  `*library-path*` and installs the libraries.
+- `:r7rs-file`, `:r6rs-file`, `:r5rs-file`: a source file that is loaded
+  (run).
 
-## 3. Scheme calling Lisp
+Defining a library again replaces it, so reloading the system (or
+re-evaluating a `define-library` at the REPL) picks up changes. This is
+also how a Scheme library reaches Lisp users who never install a Scheme
+package manager: ship it as an ASDF system.
 
-### 3.1 Lisp packages as libraries
+Compiling the component does nothing yet: there are no compiled Scheme
+libraries (ROADMAP), so each load expands the sources again.
 
-The natural Scheme-side notation is the one Scheme already has for
-namespaces: libraries. A virtual library `(cl <package>)` exports every
-external symbol of a Lisp package:
+## 6. Scheme libraries from Scheme package managers
 
-```scheme
-(import (rnrs)
-        (prefix (cl alexandria) alex:)
-        (only (cl common-lisp) format *print-base*))
+Akku and snow-fort lay libraries out the way `*library-path*` expects,
+so `(r7rs:add-library-directory ".akku/lib/")` (or `-L .akku/lib` on the
+command line) is all it takes. `tests/run-library-corpus.lisp`
+measures how many load.
 
-(alex:flatten '((1 2) (3 (4))))
-(format #t "~a~%" 42)
-```
+## 7. Not done yet
 
-Why this shape:
-
-* It is **explicit and hygienic**. `:` stays an ordinary Scheme
-  identifier character (R6RS code writes `foo:bar` after
-  `(prefix (lib) foo:)`; the old dedicated-reader convention of reading
-  `pkg:sym` as a CL symbol broke that), and a macro that uses a Lisp
-  function carries its binding with it like any other import.
-* It **costs nothing at run time**. A `(cl ...)` binding is a psyntax
-  `core-prim` whose name is the Lisp symbol itself, and the translator
-  turns a reference to a package-qualified symbol into a direct call:
-  `(alex:flatten x)` compiles to `(alexandria:flatten x)`.
-* `only`, `except`, `rename` and `prefix` all work unchanged.
-
-Implementation: psyntax's library locator (`psx:locate-library-file`
-today) gets a second hook that recognizes `(cl <name>)` and installs a
-synthesized library (`install-library` with a substitution built from
-`do-external-symbols`). Lisp special variables are exported as
-variables; Lisp macros are not exported (see 3.4).
-
-The old `#'cl-function` escape in the dedicated reader is gone: R6RS
-needs `#'x` to mean `(syntax x)` (done).
-
-### 3.2 Keywords
-
-Lisp keyword arguments need Lisp keywords, and `:test` read by a Scheme
-reader is a Scheme symbol. Proposal: the reader reads `#:test` as the
-keyword `:TEST` (Guile and Racket use similar `#:` syntax for their own
-keywords; neither R6RS nor R7RS gives `#:` a meaning):
-
-```scheme
-(cl:sort (list 3 1 2) cl:< #:key cl:identity)
-```
-
-### 3.3 Booleans coming back
-
-`(if (cl:evenp 3) ...)` is the trap: `evenp` returns `NIL`, which Scheme
-reads as `'()`, which is *true*. Options, in order of preference:
-
-1. Exports of `(cl ...)` libraries whose names end in `p`/`-p`, plus the
-   ANSI standard's predicates that don't follow the convention (`eq`,
-   `equal`, `string=`, `typep`, ...), are wrapped to return `#t`/`#f`.
-   The rest come back raw.
-2. `(pseudoscheme cl)` exports `cl-true?` / `cl-false?` for explicit
-   conversion, and `cl-if` as syntax.
-3. A per-import override: `(cl alexandria (predicates emptyp))`.
-
-### 3.4 Lisp macros
-
-A Lisp macro can't be a Scheme macro: its subforms would be Lisp, not
-Scheme. Two partial answers, both later:
-
-* Macros whose arguments are all *expressions* (`incf`, `when`,
-  `with-open-file`'s body...) could be imported as "foreign syntax": the
-  translator already passes Lisp special forms through with Scheme
-  subexpressions translated (that's how `read.scm` uses
-  `ps-lisp:setq`), and the same could apply to macro calls by expanding
-  them with `macroexpand-1` after translating the subforms.
-* An escape, `(cl-form <lisp form>)`, for when you really mean Lisp.
-
-### 3.5 CLOS
-
-Generic functions are functions, so calling them needs nothing. Defining
-methods and classes from Scheme wants a small library, `(pseudoscheme
-clos)`: `define-generic`, `define-method` (with Scheme-procedure
-bodies), and `define-class` mapping to `defclass`. Record types already
-are structs, so specializing methods on a Scheme record type works.
-
-## 4. Things that cut across both directions
-
-* **Tail calls.** Pseudoscheme relies on the Lisp compiler eliminating
-  tail calls (SBCL does at its default optimization settings). Calls
-  through Lisp frames are never guaranteed tail calls; that's
-  unavoidable and acceptable at the boundary.
-* **Continuations.** See `docs/continuations.md`. Whatever we do, a
-  continuation captured in Scheme code called *from* Lisp can't
-  re-enter through the Lisp frames above it: those frames are on the
-  real stack. The usual answer (Racket's "continuation barriers") is to
-  make capture work up to the nearest Lisp frame and raise an error
-  beyond it.
-* **Errors.** Lisp conditions become R6RS conditions inside Scheme
-  handlers (done); uncaught Scheme raises become Lisp errors of type
-  `ps-r7rs::uncaught-raise` carrying the raised object, printed with
-  the R6RS message/irritants (done). Lisp handlers can `handler-case`
-  on that type.
-* **Threads.** The host's threads are Scheme's. psyntax's state
-  (installed libraries, gensym counter) is global and unlocked: fine for
-  one expanding thread, which should be documented and guarded.
-
-## 5. Order of work
-
-1. `(cl <package>)` libraries with predicate wrapping; `#:keyword`
-   reader syntax. Small, and makes Scheme useful immediately.
-2. `pseudoscheme:use-library`: Scheme libraries as Lisp packages.
-3. ASDF component types and compiled libraries (library serialization).
-4. `(pseudoscheme clos)`.
-5. Foreign syntax for expression-only Lisp macros.
+- **CLOS from Scheme.** Calling generic functions and making instances
+  works (they're functions). *Defining* classes and methods wants a
+  `(pseudoscheme clos)`: `define-class`, `define-generic`,
+  `define-method`.
+- **Lisp macros** with expression-only arguments (`incf`, `when`,
+  `with-open-file`'s body) could be imported as "foreign syntax", by
+  translating the subforms and then macroexpanding.
+- **Compiled libraries** (ROADMAP).
+- **Continuations** captured in Scheme called from Lisp can't re-enter
+  through the Lisp frames above them. Continuations are escape-only
+  everywhere today (docs/continuations.md).
+- **Threads.** psyntax's state is global and unlocked: one expanding
+  thread at a time.

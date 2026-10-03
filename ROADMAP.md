@@ -1,128 +1,171 @@
 # Roadmap
 
-Where things stand and what to do next, roughly in order. Numbers come
-from the runners in `tests/`; re-run them rather than trusting this file.
+Where things stand and what to do next, roughly in order. The numbers
+come from the runners in `tests/`; re-run them rather than trusting
+this file.
 
 | runner | result |
 |---|---|
-| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8689 pass, 213 fail; all 25 programs run to completion |
-| `tests/run-r7rs-tests.lisp` (chibi) | 868 of 924 |
-| `tests/run-r5rs-tests.lisp` (chibi) | 183 of 188 |
-| `tests/run-syntax-case-tests.lisp` | psyntax 17/17, old syntax-case 17/17 |
+| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 948 of 975 |
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8690 pass, 212 fail; all 25 programs run to completion |
+| `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 183 of 188 |
+| `tests/run-interop-tests.lisp` | 73/73 |
 | `tests/run-library-tests.lisp` | 44/44 |
-| `make -C contrib/cli test` | 10/10 |
+| `tests/run-syntax-case-tests.lisp` | 17/17 |
+| `make -C contrib/cli test` | 13/13 |
+| `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
 
 ## Architecture now
 
 ```
-            R6RS source                       R7RS source        R5RS source
-                 |                                 |                  |
-             psyntax  (vendor/psyntax)       src/library.lisp         |
-                 |                          + native syntax-rules     |
-                 v                                 v                  v
-          core Scheme ------------------> translator (src/*.scm) ---> Common Lisp
-                 |
-      host globals: src/r6rs/*.lisp, src/r7rs/*, src/numbers.lisp
+ R6RS source   R7RS source (define-library -> library)    R5RS source
+      \              /                                          |
+       psyntax  (vendor/psyntax; library system, syntax-case,   |
+       |         syntax-rules, (cl <package>) libraries)        |
+       v                                                        v
+   core Scheme -------> translator (src/*.scm, native syntax-rules) ---> Common Lisp
+       |
+   host globals: src/r6rs/, src/r7rs/, src/numbers.lisp, src/compat/,
+                 src/interop.lisp; SRFIs as Scheme in src/srfi/
 ```
 
-psyntax is the front end for R6RS; R7RS and R5RS still go through the
-native classifier and its `syntax-rules`. Making psyntax the front end
-for everything is the next step.
+psyntax is the front end for R6RS and R7RS. The native classifier and
+its `syntax-rules` remain as R5RS mode's expander and the translator's
+own bootstrap expander. The Lisp/Scheme bridge is described in
+docs/interop.md.
 
-## 1. R7RS on psyntax
+## 1. Conformance: the remaining failures
 
-R7RS libraries are the same thing as R6RS libraries with a different
-surface, and psyntax already has the library system. Plan:
+**R7RS (27).** Most of these are small and independent.
 
-1. **Synthesized libraries.** psyntax's `install-library` (exported by
-   `(psyntax library-manager)`) can register a library whose exports are
-   host globals (`core-prim` bindings). Use it to build, at boot,
-   libraries over host procedures that aren't in psyntax's R6RS tables:
-   `(pseudoscheme r7rs-primitives)` and so on. This is the same
-   mechanism docs/interop.md needs for `(cl <package>)`, so build it once.
-2. **`define-library` → `library`.** Translate R7RS declarations
-   (`export` with `(rename a b)`, `import`, `begin`, `include`,
-   `include-ci`, `include-library-declarations`, `cond-expand`) into an
-   R6RS `library` form before psyntax sees it. Integers in library names
-   need care: R6RS reads a trailing list of integers as a version.
-3. **`(scheme base)` etc. as library source** over `(rnrs)` and the
-   primitives library, defining the R7RS-specific syntax with
-   `syntax-case`: R7RS's `define-record-type` (different syntax from
-   R6RS's), `parameterize` with converters, `define-values`,
-   `cond-expand` (procedural: it needs the feature list),
-   `syntax-error`, `guard` (R7RS = R6RS), `delay-force`. Where R6RS and
-   R7RS procedures differ under one name (`bytevector-copy!`'s argument
-   order, `error`'s signature, character-by-character
-   `string-upcase`), export the R7RS version under the standard name via
-   `(rename ...)`.
-4. **Custom ellipsis** `(syntax-rules ::: ...)`: add to psyntax's
-   `syntax-rules` by rewriting the rules (custom ellipsis → `...`,
-   literal `...` → `(... ...)`).
-5. The REPL (`r7rs:repl`, the CLI default) on psyntax's interaction
-   environment, as `--r6rs` already is.
-6. R5RS: run through psyntax's `(rnrs r5rs)` plus a folding reader, then
-   retire `src/library.lisp` and the native R7RS layer. The native
-   classifier stays as the translator's own bootstrap expander.
+- `syntax-rules`:
+  - `_` should be a wildcard, not a pattern variable, so a pattern may
+    use it twice;
+  - `...` should be allowed as a literal, `(syntax-rules (...) ...)`.
 
-## 2. The remaining R6RS failures
+  Both belong in psyntax's `syntax-rules` and `syntax-case`, since R6RS
+  has the same rules.
+- Numbers:
+  - complex functions (`make-polar`, `magnitude`, `angle`, `sqrt` of a
+    complex) compute in single floats;
+  - `truncate/` rejects inexact integers;
+  - `rationalize` of an inexact should be inexact;
+  - the branch cut of `sqrt` of `-1.0-0.0i` is on the wrong side.
+- `char-numeric?` returns the digit weight instead of `#t`, and
+  `char-whitespace?` misses some Unicode spaces.
+- `file-error?` and `read-error?` don't recognize the R6RS conditions
+  that raise for those errors.
+- Reader and writer:
+  - datum labels: reading `#0=` / `#0#`, and `write-shared` (`write`
+    also doesn't detect cycles);
+  - `#!fold-case` inside a `read` stream;
+  - symbols that need `|...|` aren't written with bars;
+  - some invalid input isn't rejected.
+- One `dynamic-wind` test re-enters a continuation (see 3).
 
-Run `tests/run-r6rs-tests.lisp -v NAME` to see them. By program:
-bytevectors 70, io/ports 70, base 30, flonums 19, syntax-case 8,
-unicode 8, records/syntactic 4, exceptions 2, r5rs 2. Not yet triaged.
+**R6RS (212).** By program:
 
-## 3. Lisp interop
+| program | failures |
+|---|---|
+| bytevectors | 70 |
+| io/ports | 69 |
+| base | 30 |
+| flonums | 19 |
+| syntax-case | 8 |
+| unicode | 8 |
+| records/syntactic | 4 |
+| exceptions | 2 |
+| r5rs | 2 |
 
-See docs/interop.md. In order: `(cl <package>)` libraries with predicate
-wrapping and `#:keyword` syntax; Scheme libraries as Lisp packages
-(`use-library`); ASDF component types for Scheme sources; CLOS from
-Scheme.
+Not triaged yet; `tests/run-r6rs-tests.lisp -v NAME` lists them.
 
-## 4. Compiled libraries
+**R5RS (5).** These are continuations (3) and harness-level issues.
 
-Every run re-expands the library sources it imports, and booting
-psyntax re-translates its 600 KB image (about 1.7 s; the command-line
-program avoids this by booting at build time). Fixes:
+## 2. Speed
 
-- Translate `psyntax-pseudoscheme.pp` to a `.pso` and let ASDF compile
-  it, like the translator's own sources.
-- Serialize expanded libraries (export substitution, environment,
-  visit/invoke code) into compiled output, as Ikarus's later psyntax
-  does, so a compiled library re-installs without re-expansion. This is
-  also the ASDF story of docs/interop.md 2.3.
+- **Open-code primitives in psyntax output.** psyntax refers to
+  primitives as `(primitive +)`, and the translator turns that into
+  `(funcall (primitive +) ...)` rather than the integrated `+` it uses
+  for R5RS code. `r7rs:translate` shows it. This is the biggest cheap win
+  for R6RS/R7RS code.
+- **Compiled libraries.** Every run re-expands the libraries it
+  imports, and booting psyntax re-translates its image (about 1.7 s; the
+  CLI avoids this by booting at build time).
+  - Translate `psyntax-pseudoscheme.pp` to a `.pso` that ASDF compiles.
+  - Serialize expanded libraries (export substitution, environment,
+    visit and invoke code) into fasls, as Ikarus's later psyntax does.
+    Then the `:r7rs-library` ASDF components (src/asdf.lisp) can really
+    compile.
 
-## 5. Continuations
+## 3. Continuations
 
-See docs/continuations.md: a pass framework between psyntax output and
-the translator, an opt-in full-continuation mode (CPS + trampoline as
-the reference, generalized stack inspection as the candidate fast
-path), barrier errors at Lisp frames, and one-shot continuations from
-threads in the default mode.
+docs/continuations.md describes the plan:
+- a pass framework between psyntax's output and the translator;
+- an opt-in full-continuation mode, with CPS plus a trampoline as the
+  reference and generalized stack inspection as the candidate fast
+  path;
+- barrier errors at Lisp frames;
+- one-shot continuations from threads in the default mode.
+
+Today `call/cc` is escape-only (Lisp `catch`), and re-entering a
+continuation signals an error. SRFI 158's coroutine generators are
+buffered as a result (src/srfi/README.md).
+
+## 4. The Lisp bridge, next
+
+What exists is in docs/interop.md: `(cl <package>)` libraries with
+autoloading, `#:keywords`, `(pseudoscheme lisp)`, `use-library`, the
+`R5RS`/`R6RS`/`R7RS` API, and ASDF components. Next:
+
+- **`(pseudoscheme clos)`**: `define-class`, `define-generic`,
+  `define-method` (Scheme procedures as method bodies; record types are
+  structs, so methods can specialize on them).
+- **Foreign syntax**: Lisp macros with expression-only arguments
+  (`incf`, `when`, the body of `with-open-file`), imported from
+  `(cl ...)` and expanded after translating the subforms.
+- **A package/system map** for the cases where they differ (package
+  `BT`, system `bordeaux-threads`), so that `(cl bt)` autoloads.
+- **An Akku/snow helper**: point at a project's `.akku/lib`, or install
+  snow packages, from Lisp.
+- **Thread safety**: psyntax's state is global and unlocked, so only
+  one thread can expand at a time.
+
+## 5. Real-world libraries
+
+From the corpus runs (`tests/run-library-corpus.lisp` over Akku and
+snow-fort trees):
+
+- An `(ikarus)` compat library would let xitomatl load (55 of the Akku
+  failures). Chez's `meta-cond`/`meta` would let some chez-srfi variants
+  load (15).
+- More SRFIs in `src/srfi/`. Asked for so far: 60, 113, 115, 146, 225 and
+  227.
+- SRFI 14's char-sets are Latin-1 only; Unicode char-sets would
+  replace the reference implementation's representation.
+- Some libraries depend on chibi- or Gauche-specific leniency, such as
+  duplicate pattern variables in `syntax-rules`, and are not counted as
+  bugs here.
 
 ## 6. Portability
 
 Developed and tested on SBCL only. SBCL-specific today:
 
-- Gray streams (`sb-gray`) for binary, custom and transcoded ports:
-  trivial-gray-streams elsewhere.
+- Gray streams (`sb-gray`) for binary, custom and transcoded ports;
+  trivial-gray-streams would serve elsewhere.
 - `sb-unicode` for case mapping, normalization and general categories.
 - `sb-kernel` float bit access for `bytevector-ieee-*`.
 - `sb-sys:make-fd-stream` for the standard binary ports, `sb-ext` for
-  infinities/NaN and float traps, and `sb-ext:with-timeout` in the R6RS
+  infinities, NaN and float traps, and `sb-ext:with-timeout` in the R6RS
   test runner.
+- `sb-int:sbcl-homedir-pathname` in the CLI, to find contribs.
 - The CLI Makefile accepts `LISP=ccl|ecl|clisp`, but only SBCL has been
   tried.
 
 ## 7. Smaller items
 
-- `write` doesn't detect cycles (datum labels); writing a circular
-  structure doesn't terminate. `equal?` does handle cycles.
-- psyntax's state (installed libraries, gensym counter) is global and
-  unlocked: one expanding thread at a time.
-- `include`/`include-ci` resolve relative to the working directory,
-  not the including file.
-- Remove `vendor/syntax-case/` and `pseudoscheme/syntax-case`, now
-  superseded by psyntax.
 - Bootstrapping without an existing Pseudoscheme (the `todo` file's
-  first item): judged feasible but substantial earlier (a portable
-  record system, a mini CL-package system, a `.pso` printer). psyntax
-  itself would be portable for free.
+  first item). Earlier analysis judged it feasible but substantial: it
+  needs a portable record system, a mini CL-package system and a `.pso`
+  printer. psyntax itself would be portable for free.
+- ASDF's one-second timestamps can leave a stale fasl after `.pso`
+  regeneration. Clear the fasl cache (README, "Bootstrap artifacts").

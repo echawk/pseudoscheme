@@ -155,13 +155,27 @@
 			     (:static-file "chezscheme.scm")))
 	       (:file "psyntax" :depends-on ("r6rs"))))
 
-;;; The Common Lisp face: packages R5RS, R6RS and R7RS, each with EVAL,
-;;; LOAD and REPL.  See src/api.lisp.
+;;; The Common Lisp face: packages R5RS, R6RS and R7RS (EVAL, LOAD,
+;;; REPL, EXPAND, USE-LIBRARY, ...), and the bridge between the
+;;; languages: (cl <package>) libraries for Scheme, Scheme libraries as
+;;; Lisp packages.  See src/api.lisp, src/interop.lisp, docs/interop.md.
+;;; The systems r5rs, r6rs and r7rs (r7rs.asd etc.) are shorthands.
 (defsystem :pseudoscheme/api
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/r7rs)
-  :components ((:file "api")))
+  :components ((:file "interop")
+	       (:static-file "interop/lisp.sls")
+	       (:file "api" :depends-on ("interop"))))
+
+;;; Scheme source files as components of ASDF systems: :r7rs-file,
+;;; :r6rs-file, :r5rs-file, :r7rs-library, :r6rs-library.  See
+;;; src/asdf.lisp.
+(defsystem :pseudoscheme/asdf
+  :author "Jonathan Rees"
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/api)
+  :components ((:file "asdf")))
 
 ;;; The R7RS procedures (and the native R7RS environment they're built
 ;;; in, which the psyntax host copies).  See src/r7rs/*.

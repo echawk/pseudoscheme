@@ -196,10 +196,18 @@ we no longer know which file the library came from."
 	 (let ((n (cadr form)))		; drop an R6RS version
 	   (if (listp (car (last n))) (butlast n) n)))))
 
+(defvar *virtual-libraries* '()
+  "Functions from a library name to a library form (or NIL), tried
+before the file search: libraries made on demand rather than read from
+files, such as (cl <package>) (src/interop.lisp).")
+
 (defun locate-library-form (name)
   "Find library NAME (psyntax-style) on the library path; return its
 form, translated to an R6RS library, or NIL."
   (let ((name (if (listp (car (last name))) (butlast name) name)))
+    (dolist (hook *virtual-libraries*)
+      (let ((form (funcall hook name)))
+	(when form (return-from locate-library-form form))))
     (dolist (stem (stems name))
       (dolist (path (psx:candidate-files stem))
 	(when (probe-file path)
