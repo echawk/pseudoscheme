@@ -124,7 +124,7 @@ written form of its value."
        (p "(let ((h (cl:make-hash-table #:test cl:equal))) (lisp-set! (cl:gethash \"k\" h) 1) (list (cl:gethash \"k\" h) (eq? (cl:hash-table-test h) (lisp-symbol \"equal\" \"cl\"))))"))
 (stest "Lisp error is a Scheme condition" "\"failed on purpose\""
        (p "(guard (e ((error-object? e) (error-object-message e))) (t:fail))"))
-(test "macros are not exported, functions and variables are" (nil :procedure :syntax)
+(test "macros, functions and variables are all exported" (:syntax :procedure :syntax)
   (let ((exports (r7rs:library-exports '(cl interop-test-lib))))
     (flet ((kind (name) (cdr (assoc name exports :key #'ps:scheme-symbol-name :test #'string=))))
       (list (kind "a-macro") (kind "add") (kind "*counter*")))))
@@ -156,6 +156,28 @@ written form of its value."
   (test "autoload: no system -> a clear error" t
     (handler-case (progn (r7rs:eval "(import (cl no-such-system-zz))") nil)
       (error (e) (and (search "no-such-system-zz" (princ-to-string e)) t)))))
+
+;;; Lisp macros and special operators from Scheme
+(stest "loop over a Scheme list, Scheme procedures inside" "(102 104 106)"
+       (p "(define (f x) (+ x 100)) (define xs '(1 2 3 4 5 6)) (cl:loop for x in xs when (even? x) collect (f x))"))
+(stest "loop arithmetic" "5050" (p "(cl:loop for i from 1 to 100 sum i)"))
+(stest "loop destructuring" "(3 7)" (p "(cl:loop for (a b) in '((1 2) (3 4)) collect (+ a b))"))
+(stest "loop binder shadows a Scheme variable" "(a b)" (p "(let ((x 5)) (cl:loop for x in '(a b) collect x))"))
+(stest "nested Lisp macros: when, return" "2" (p "(cl:loop for x in '(1 2 3) do (cl:when (> x 1) (cl:return x)))"))
+(stest "destructuring-bind with &key" "(1 2 3 4)" (p "(cl:destructuring-bind (a (b c) &key d) '(1 (2 3) #:d 4) (list a b c d))"))
+(stest "multiple-value-bind" "(3 2)" (p "(cl:multiple-value-bind (q r) (cl:floor 17 5) (list q r))"))
+(stest "handler-case with a condition type" "bad" (p "(cl:handler-case (cl:parse-integer \"x\") (cl:parse-error () 'bad))"))
+(stest "with-output-to-string" "\"x=42\"" (p "(cl:with-output-to-string (s) (cl:format s \"x=~a\" 42))"))
+(stest "special operator let binding a special" "\"101\"" (p "(cl:let ((cl:*print-base* 2)) (cl:princ-to-string 5))"))
+(stest "incf on a Lisp variable" "12" (p "(cl:let ((y 2)) (cl:incf y 10) y)"))
+(stest "#f inside a Lisp form is NIL" "no" (p "(cl:if #f 'yes 'no)"))
+(stest "type names are symbols" "(#t #f)" (p "(list (cl:typep 3 cl:integer) (cl:typep \"x\" cl:integer))"))
+(stest "CLOS defined from Scheme" "(12 27)"
+       (p "(cl:defclass circle () ((radius #:initarg #:radius #:reader radius))) (cl:defgeneric area (shape)) (cl:defmethod area ((c circle)) (* 3 (* (radius c) (radius c)))) (list ((lisp-function 'area) (cl:make-instance 'circle #:radius 2)) (lisp (area (make-instance 'circle :radius 3))))"))
+(stest "a macro from another package: test lib" "3" (p "(lisp (t:add 1 2))"))
+(test "Scheme macro inside a Lisp form is an error" t
+  (handler-case (progn (r7rs:eval "(import (scheme base) (prefix (cl common-lisp) cl:)) (cl:progn (let-values (((a) 1)) a))") nil)
+    (error (e) (and (search "inside a Lisp macro call" (princ-to-string e)) t))))
 
 ;;; ------------------------------------------------------------------
 ;;; Lisp calling Scheme
@@ -205,6 +227,40 @@ written form of its value."
   (let ((dir (namestring (merge-pathnames "examples/mixed-system/lib/" *root*))))
     (r7rs:add-library-directory dir)
     (and (member dir r7rs:*library-path* :test #'string=) t)))
+
+;; Scheme macros from Lisp, import sets into the current package, define
+(defpackage "INTEROP-IMPORT-TEST" (:use "COMMON-LISP"))
+(let ((*package* (find-package "INTEROP-IMPORT-TEST")))
+  (eval (read-from-string "(r7rs:import (only (srfi 1) fold iota) (rename (only (srfi 1) delete-duplicates) (delete-duplicates dedup)) (prefix (srfi 13) str-) (srfi 26) (srfi 2) (srfi 8))")))
+(defmacro in-import-test (string)
+  `(let ((*package* (find-package "INTEROP-IMPORT-TEST")))
+     (eval (read-from-string ,string))))
+(test "import: only" 6 (in-import-test "(fold #'+ 0 '(1 2 3))"))
+(test "import: rename" (1 2 3) (in-import-test "(dedup '(1 2 1 3))"))
+(test "import: prefix" "007" (in-import-test "(str-string-pad \"7\" 3 #\\0)"))
+(test "import: a name CL has is an error" t
+  (handler-case (progn (in-import-test "(r7rs:import (only (srfi 1) delete-duplicates))") nil)
+    (error (e) (and (search "DELETE-DUPLICATES" (princ-to-string e)) t))))
+(test "Scheme macro from Lisp: cut" (2 4 6) (in-import-test "(mapcar (cut * 2 <>) '(1 2 3))"))
+(test "Scheme macro sees a Lisp lexical variable" (11 12) (in-import-test "(let ((n 10)) (mapcar (cut + n <>) '(1 2)))"))
+(test "Scheme macro uses a Lisp function" "hi!" (in-import-test "(funcall (cut format nil \"~a!\" <>) \"hi\")"))
+(test "Scheme macro, quoted Lisp data, and-let*" 500
+  (in-import-test "(let ((table '((pear . 5)))) (and-let* ((e (assoc 'pear table)) (n (cdr e))) (* n 100)))"))
+(test "Scheme macro, multiple values from a Lisp function: receive" (3 2)
+  (in-import-test "(receive (q r) (floor 17 5) (list q r))"))
+(test "Scheme macro hygiene: the macro's own temporaries don't capture" (1 2)
+  (in-import-test "(let ((x 1) (y 2)) (and-let* ((x x) (z y)) (list x z)))"))
+(test "r7rs:define binds a Lisp function" (1 2 6 24)
+  (progn (in-import-test "(r7rs:define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))")
+	 (in-import-test "(mapcar #'fact '(1 2 3 4))")))
+(test "r7rs:define of a variable" 100 (progn (in-import-test "(r7rs:define limit 100)") (in-import-test "limit")))
+(test "r7rs:define over a built-in name shadows it at the REPL" (t nil)
+  (progn (in-import-test "(r7rs:define (positive? x) (> x 0))") (in-import-test "(list (positive? 1) (positive? -1))")))
+(test "r7rs:define-library, then import" 5
+  (progn (in-import-test "(r7rs:define-library (itest geometry) (export distance) (import (scheme base) (scheme inexact)) (begin (define (distance x y) (sqrt (+ (* x x) (* y y))))))")
+	 (in-import-test "(r7rs:import (itest geometry))")
+	 (in-import-test "(distance 3 4)")))
+(test "r7rs:false in Scheme written as Lisp" nil (r7rs:scheme (if r7rs:false 'yes r7rs:false)))
 
 ;; R6RS and R5RS have the same API.
 (test "r6rs:scheme" (1 2 3) (r6rs:scheme (import (rnrs sorting)) (list-sort < '(3 1 2))))

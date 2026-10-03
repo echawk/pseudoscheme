@@ -62,17 +62,24 @@
 			      ,@(when extra '("ADD-LIBRARY-DIRECTORY")))
 		,@(when extra '((:import-from "PSEUDOSCHEME-PSYNTAX" "*LIBRARY-PATH*")))
 		(:export "EVAL" "LOAD" "REPL" "EXPAND" "TRANSLATE" "SCHEME" "PROCEDURE"
-			 "READ-FROM-STRING" "WRITE-TO-STRING" "TRUE-P" "FALSE" "VERBATIM"
+			 "READ-FROM-STRING" "WRITE-TO-STRING" "TRUE-P" "FALSE" "TRUE" "VERBATIM"
+			 "DEFINE"
 			 ,@extra))))
-  (dialect-package "R7RS" "USE-LIBRARY" "LIBRARY-EXPORTS" "*LIBRARY-PATH*" "ADD-LIBRARY-DIRECTORY")
-  (dialect-package "R6RS" "USE-LIBRARY" "LIBRARY-EXPORTS" "*LIBRARY-PATH*" "ADD-LIBRARY-DIRECTORY")
+  (dialect-package "R7RS" "USE-LIBRARY" "LIBRARY-EXPORTS" "*LIBRARY-PATH*" "ADD-LIBRARY-DIRECTORY"
+		   "IMPORT" "DEFINE-LIBRARY")
+  (dialect-package "R6RS" "USE-LIBRARY" "LIBRARY-EXPORTS" "*LIBRARY-PATH*" "ADD-LIBRARY-DIRECTORY"
+		   "IMPORT" "LIBRARY")
   (dialect-package "R5RS"))
 
 (in-package "PSEUDOSCHEME-API")
 
-(defconstant r7rs:false 'ps::false "Scheme's #f.")
+(defconstant r7rs:false 'ps::false "Scheme's #f.  In Scheme code written in Lisp (R7RS:SCHEME,
+R7RS:DEFINE, Scheme macros), the symbol R7RS:FALSE also means #f.")
 (defconstant r6rs:false 'ps::false "Scheme's #f.")
 (defconstant r5rs:false 'ps::false "Scheme's #f.")
+(defconstant r7rs:true t "Scheme's #t (which is T).")
+(defconstant r6rs:true t "Scheme's #t (which is T).")
+(defconstant r5rs:true t "Scheme's #t (which is T).")
 
 (defun true-p (x)
   "Scheme truth: everything but #f is true."
@@ -317,6 +324,87 @@ environment, as a Lisp function (see R7RS:PROCEDURE)."
 (defun r5rs:procedure (name &key (convert t))
   "The R5RS procedure NAME, as a Lisp function (see R7RS:PROCEDURE)."
   (procedure #'r5rs-eval-forms name nil convert))
+
+;;; ------------------------------------------------------------------
+;;; Writing Scheme in Lisp files: IMPORT, DEFINE, DEFINE-LIBRARY
+;;;
+;;;   (r7rs:import (only (srfi 1) fold filter) (prefix (srfi 13) str-))
+;;;   (fold #'+ 0 '(1 2 3))  (str-string-pad "7" 3)
+;;;
+;;;   (r7rs:define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+;;;   (fact 20)
+;;;
+;;;   (r7rs:define-library (demo geometry)
+;;;     (export distance) (import (scheme base) (scheme inexact))
+;;;     (begin (define (distance x y) (sqrt (+ (* x x) (* y y))))))
+
+(defun scheme-definition-name (spec)
+  "The name a DEFINE form defines: (define name ...) or (define (name . args) ...)."
+  (loop while (consp spec) do (setq spec (car spec)))
+  spec)
+
+(defun bind-scheme-name (symbol evaluator)
+  "Give Lisp SYMBOL the Scheme value of the same name: a function if
+it's a procedure (converting booleans), else a symbol macro."
+  (let ((value (funcall evaluator (list (schemify symbol)))))
+    (if (functionp value)
+	(setf (fdefinition symbol) (pseudoscheme-interop:lisp-facing value))
+	(eval `(define-symbol-macro ,symbol
+		   (pseudoscheme-interop:to-lisp (,evaluator (list ',(schemify symbol)))))))
+    symbol))
+
+(defmacro r7rs:import (&rest import-sets)
+  "Bring R7RS libraries into the current package, with R7RS import-set
+syntax: (r7rs:import (srfi 1)), (only (srfi 1) fold), (except ...),
+(prefix (srfi 13) str-), (rename (srfi 1) (fold srfi-fold)).
+Procedures become functions, variables symbol macros, and syntax Lisp
+macros.  Names that would redefine an inherited symbol (CL's FIND,
+REMOVE, ...) are an error: use except, prefix or rename."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (ensure-psyntax)
+     (pseudoscheme-interop:import-into-package ',import-sets ,(package-name *package*))))
+
+(defmacro r6rs:import (&rest import-sets)
+  "Bring R6RS libraries into the current package; see R7RS:IMPORT."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (ensure-psyntax)
+     (pseudoscheme-interop:import-into-package ',import-sets ,(package-name *package*))))
+
+(defmacro r7rs:define (spec &body body)
+  "A Scheme definition, written in Lisp: defines SPEC's name at the R7RS
+REPL top level, and as a Lisp function (or symbol macro) in the current
+package.  (r7rs:define (square x) (* x x)), (r7rs:define limit 100)."
+  (let ((name (scheme-definition-name spec)))
+    `(progn
+       (r7rs-repl-eval (list (schemify '(define ,spec ,@body))))
+       (bind-scheme-name ',name 'r7rs-repl-eval))))
+
+(defmacro r6rs:define (spec &body body)
+  "A Scheme definition at the R6RS REPL top level; see R7RS:DEFINE."
+  (let ((name (scheme-definition-name spec)))
+    `(progn
+       (r6rs-repl-eval (list (schemify '(define ,spec ,@body))))
+       (bind-scheme-name ',name 'r6rs-repl-eval))))
+
+(defmacro r5rs:define (spec &body body)
+  "A Scheme definition in the R5RS user environment; see R7RS:DEFINE."
+  (let ((name (scheme-definition-name spec)))
+    `(progn
+       (r5rs-eval-forms (list (schemify '(define ,spec ,@body))))
+       (bind-scheme-name ',name 'r5rs-eval-forms))))
+
+(defmacro r7rs:define-library (name &body declarations)
+  "An R7RS library, written in Lisp; installed when the file is compiled
+and when it's loaded, so R7RS:IMPORT can follow it in the same file."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (r7rs-eval-forms (list (schemify '(define-library ,name ,@declarations))))
+     ',name))
+
+(defmacro r6rs:library (name &body body)
+  "An R6RS library, written in Lisp; see R7RS:DEFINE-LIBRARY."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (r6rs-eval-forms (list (schemify '(library ,name ,@body))))
+     ',name))
 
 ;;; ------------------------------------------------------------------
 ;;; A REPL, shared by the three (and by the command-line program)

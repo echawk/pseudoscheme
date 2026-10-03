@@ -31,33 +31,37 @@ From Lisp:
 (push #P"/path/to/pseudoscheme-asdf/" asdf:*central-registry*)
 (asdf:load-system :r7rs)                    ; or :r6rs, :r5rs: the same system
 
+(r7rs:import (only (srfi 1) fold filter iota) (srfi 26))
+(filter #'evenp (iota 10))                  ; => (0 2 4 6 8)
+(mapcar (cut * 2 <>) '(1 2 3))              ; a Scheme macro, in Lisp
+
+(r7rs:define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+(mapcar #'fact '(1 2 3 4))                  ; => (1 2 6 24)
+
 (r7rs:eval "(import (scheme base)) (exact-integer-sqrt 17)")
-(r7rs:scheme (let-values (((q r) (floor/ 17 5))) (list q r)))   ; => (3 2)
-(r7rs:use-library '(srfi 1))                ; a Scheme library as a package
-(srfi-1:filter #'evenp '(1 2 3 4))          ; => (2 4)
 (r7rs:load "prog.scm")
 (r7rs:repl)
 ```
 
-And Scheme using Lisp: a Lisp package is a library.
+And Scheme using Lisp: a Lisp package is a library, macros included.
 
 ```scheme
 (import (scheme base)
         (prefix (cl common-lisp) cl:)
-        (prefix (cl cl-ppcre) re:)          ; loaded on demand (ASDF/Quicklisp)
+        (prefix (cl ironclad) ic:)          ; loaded on demand (ASDF/Quicklisp)
         (pseudoscheme lisp))
 
 (cl:sort (list '(b . 2) '(a . 1)) cl:< #:key cl:cdr)
-(re:split "\\s*,\\s*" "a , b,c")
+(cl:loop for x in '(1 2 3 4) when (even? x) collect (* x x))
+(ic:byte-array-to-hex-string (ic:digest-sequence #:sha256 (string->utf8 "abc")))
 (lisp-let ((cl:*print-base* 16)) (cl:princ-to-string 255))   ; => "FF"
 ```
 
-The packages `R5RS`, `R6RS` and `R7RS` each have `EVAL`, `SCHEME`,
-`LOAD`, `REPL`, `EXPAND`, `TRANSLATE`, `PROCEDURE`, `READ-FROM-STRING`,
-`WRITE-TO-STRING`, `TRUE-P` and `FALSE`; R6RS and R7RS also have
-`USE-LIBRARY`, `LIBRARY-EXPORTS` and `*LIBRARY-PATH*`. Scheme sources can
-be ASDF components (`:r7rs-library`, `:r7rs-file`, ...). See
-`docs/interop.md` and `examples/`.
+The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
+`DEFINE`, `EVAL`, `SCHEME`, `LOAD`, `REPL`, `EXPAND`, `TRANSLATE`,
+`PROCEDURE` and more. Scheme sources can be ASDF components
+(`:r7rs-library`, `:r7rs-file`, ...). See `docs/interop.md` and
+`examples/`.
 
 ## Status
 

@@ -66,6 +66,41 @@
       (guard (e ((error-object? e) (error-object-message e)))
         (cl:parse-integer "not a number")))
 
+;; Lisp macros and special operators are imported too.  Inside a Lisp
+;; macro call the code is Lisp, with Scheme's variables and procedures
+;; visible: here LOOP's FOR, IN, WHEN and COLLECT are Lisp, while
+;; numbers, even? and square are Scheme's.  The call is compiled once,
+;; as a Lisp function.
+(define numbers '(1 2 3 4 5 6 7 8))
+(define (square x) (* x x))
+(show "loop" (cl:loop for n in numbers when (even? n) collect (square n)))
+(show "loop sum" (cl:loop for i from 1 to 100 sum i))
+(show "destructuring-bind"
+      (cl:destructuring-bind (a (b c) &key (d 0)) '(1 (2 3) #:d 4) (list a b c d)))
+(show "handler-case"
+      (cl:handler-case (cl:parse-integer "12x")
+        (cl:parse-error () 'not-a-number)))
+(show "with-output-to-string"
+      (cl:with-output-to-string (out)
+        (cl:dolist (word '("lisp" "and" "scheme"))
+          (cl:format out "~@(~a~) " word))))
+
+;; CLOS from Scheme: define a class and a generic function with Lisp's
+;; macros.  The names they define (circle, radius, area) are the Scheme
+;; symbols of those names, so 'circle names the class, and
+;; (lisp-function 'area) is the generic function.  (lisp ...) is Lisp
+;; code in Scheme, like a Lisp macro call: here (radius c) is Lisp's
+;; RADIUS, square Scheme's procedure.
+(cl:defclass circle () ((radius #:initarg #:radius #:reader radius)))
+(cl:defgeneric area (shape))
+(cl:defmethod area ((c circle)) (* 3 (square (radius c))))
+(define area (lisp-function 'area))
+(show "CLOS" (area (cl:make-instance 'circle #:radius 2)))
+(show "lisp form" (lisp (area (make-instance 'circle :radius 3))))
+
+;; Type and class names are symbols: (cl:typep x cl:integer) needs no quote.
+(show "typep" (list (cl:typep 42 cl:integer) (cl:typep "42" cl:integer)))
+
 ;; Escape hatches: a Lisp function by name, unconverted; Lisp source.
 (show "lisp-function" ((lisp-function "string-capitalize") "hello world"))
 (show "lisp-eval-string" (lisp-eval-string "(loop for i below 5 collect (* i i))"))

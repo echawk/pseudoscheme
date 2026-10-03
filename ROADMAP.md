@@ -130,22 +130,32 @@ buffered as a result (src/srfi/README.md).
 
 ## 4. The Lisp bridge, next
 
-What exists is in docs/interop.md: `(cl <package>)` libraries with
-autoloading, `#:keywords`, `(pseudoscheme lisp)`, `use-library`, the
-`R5RS`/`R6RS`/`R7RS` API, and ASDF components. Next:
+What exists is in docs/interop.md:
+- from Scheme: `(cl <package>)` libraries (functions, variables, macros
+  and special operators compiled as Lisp, symbols), autoloading,
+  `#:keywords`, and `(pseudoscheme lisp)`;
+- from Lisp: `r7rs:import` with import sets, Scheme macros as Lisp
+  macros, `r7rs:define`, `r7rs:define-library` and `use-library`;
+- ASDF components.
 
-- **`(pseudoscheme clos)`**: `define-class`, `define-generic`,
-  `define-method` (Scheme procedures as method bodies; record types are
-  structs, so methods can specialize on them).
-- **Foreign syntax**: Lisp macros with expression-only arguments
-  (`incf`, `when`, the body of `with-open-file`), imported from
-  `(cl ...)` and expanded after translating the subforms.
+Next:
+
+- **Scheme-syntax CLOS** (`(pseudoscheme clos)`): `define-class`,
+  `define-generic`, `define-method` with Scheme bodies. Lisp's own
+  `cl:defclass`/`cl:defmethod` already work from Scheme.
+- **Assignment across the boundary**: inside a Lisp macro call a Scheme
+  variable is read-only (it's passed by value), and so is a Lisp
+  variable inside a Scheme macro's arguments.
+- **Fasl-safe expansions**: code that uses Scheme macros from Lisp
+  refers to the running image, which only matters once there are
+  compiled libraries (2).
 - **A package/system map** for the cases where they differ (package
   `BT`, system `bordeaux-threads`), so that `(cl bt)` autoloads.
+- **Predicate overrides** per import, for functions like Ironclad's
+  `verify-signature` whose names don't say they're predicates.
 - **An Akku/snow helper**: point at a project's `.akku/lib`, or install
   snow packages, from Lisp.
-- **Thread safety**: psyntax's state is global and unlocked, so only
-  one thread can expand at a time.
+- **Thread safety**: psyntax's state is global and unlocked.
 
 ## 5. Real-world libraries
 

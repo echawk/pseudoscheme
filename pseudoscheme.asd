@@ -163,7 +163,8 @@
 (defsystem :pseudoscheme/api
   :author "Jonathan Rees"
   :pathname #p"src/"
-  :depends-on (:pseudoscheme/r7rs)
+  :depends-on (:pseudoscheme/r7rs
+	       (:feature :sbcl (:require :sb-cltl2)))	; lexical environments, for Scheme macros in Lisp
   :components ((:file "interop")
 	       (:static-file "interop/lisp.sls")
 	       (:file "api" :depends-on ("interop"))))

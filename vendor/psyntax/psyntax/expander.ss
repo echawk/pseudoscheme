@@ -26,7 +26,8 @@
           eval-r6rs-top-level boot-library-expand eval-top-level
           null-environment
           ;; PSEUDOSCHEME
-          interaction-library-name interaction-source-name)
+          interaction-library-name interaction-source-name
+          identifier-binding)
   (import
     (except (rnrs) 
       environment environment? identifier?
@@ -474,6 +475,22 @@
   ;;; id->label takes an id (that's a sym x marks x substs) and
   ;;; searches the substs for a label associated with the same sym
   ;;; and marks.
+  ;;; PSEUDOSCHEME: what identifier ID refers to, for the Lisp bridge
+  ;;; (src/interop.lisp): unbound, variable (a lexical, or a library or
+  ;;; REPL variable), or else the binding itself (a primitive, a macro,
+  ;;; or core syntax).  Local macros (let-syntax) look like
+  ;;; lexicals here, since their bindings live in the expansion-time
+  ;;; environment, which isn't available.
+  (define (identifier-binding id)
+    (let ((label (id->label id)))
+      (if (not label)
+          'unbound
+          (let ((b (imported-label->binding label)))
+            (cond
+              ((not b) 'variable)
+              ((eq? (car b) 'global) 'variable)
+              (else b))))))
+
   (define id->label
     (lambda (id)
       (let ((sym (id->sym id)))
@@ -2773,9 +2790,21 @@
                  (cond
                    ((eq? lib (interaction-library))
                     loc)
-                   (else
-                    (stx-error ctxt "cannot modify imported binding"))))))
-            (else (stx-error ctxt "cannot modify binding in")))))))
+                   (else (shadow-at-top-level id ctxt))))))
+            (else (shadow-at-top-level id ctxt)))))))
+
+  ;;; PSEUDOSCHEME: at the REPL, defining an imported name makes a new
+  ;;; binding in the interaction library that shadows the import, as
+  ;;; R7RS REPLs do (it was "cannot modify imported binding").
+  (define (shadow-at-top-level id ctxt)
+    (let ((lib (interaction-library)))
+      (unless lib (stx-error ctxt "cannot modify imported binding"))
+      (let* ((sym (id->sym id))
+             (label (gen-label sym))
+             (loc (gen-global sym)))
+        (extend-library-subst! lib sym label)
+        (extend-library-env! lib label (cons 'global (cons lib loc)))
+        loc)))
   
   (define chi-top-set!
     (lambda (e)

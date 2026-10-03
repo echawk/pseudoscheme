@@ -74,12 +74,12 @@ A `#f` *inside* a list stays `#f`.
 (alex:flatten '((1 2) (3 (4))))         ; => (1 2 3 4)
 ```
 
-`(cl <package>)` exports every external symbol of the package that
-names a function or a variable, under its Lisp name in Scheme spelling
-(`REMOVE-IF` becomes `remove-if`). Prefixing the import keeps these
-names apart from Scheme's own and reads like Lisp. `only`, `except`,
-`rename` and `prefix` all work. A name like `(cl foo bar)` refers to the
-package `FOO/BAR`, the naming that package-inferred systems use.
+`(cl <package>)` exports every external symbol of the package, under
+its Lisp name in Scheme spelling (`REMOVE-IF` becomes `remove-if`).
+Prefixing the import keeps these names apart from Scheme's own and reads
+like Lisp. `only`, `except`, `rename` and `prefix` all work. A name like
+`(cl foo bar)` refers to the package `FOO/BAR`, the naming that
+package-inferred systems use.
 
 - **Functions** are wrapped per section 2. Generic functions and struct
   accessors are functions too.
@@ -87,13 +87,14 @@ package `FOO/BAR`, the naming that package-inferred systems use.
   `symbol-value`. Reading `cl:*print-base*` gives its current value,
   `(set! cl:*print-base* 16)` assigns it, and `lisp-let` binds it
   dynamically (3.4).
-- **Macros and special operators** are not exported. A Lisp macro's
-  arguments are Lisp code, not Scheme. `lisp-set!` covers the most common
-  one, `setf`; for the rest, use `lisp-eval-string`.
+- **Macros and special operators** are Scheme macros whose calls are
+  compiled as Lisp; see 3.5.
+- **Every other symbol** (types, classes, lambda-list keywords...) is
+  syntax for the symbol itself, so `(cl:typep x cl:integer)` needs no
+  quote.
 
-A library is built when first imported: about 0.3 s for all of
-`COMMON-LISP` (748 functions and 112 variables). After that, a
-`(cl ...)` import costs nothing.
+A library is built when first imported: a fraction of a second for all
+of `COMMON-LISP`. After that, a `(cl ...)` import costs nothing.
 
 ### 3.2 Finding the Lisp code: autoloading
 
@@ -118,7 +119,7 @@ off, or replace the loader. From the command line:
 When a package name differs from its system name (package `BT`, system
 `bordeaux-threads`), load the system first: `(lisp-require
 "bordeaux-threads")` at the REPL, `-l` on the command line, or a
-dependency in an ASDF system (3.5).
+dependency in an ASDF system (3.6).
 
 ### 3.3 Keywords: `#:name`
 
@@ -149,8 +150,48 @@ use it for their own keywords.
 | `(lisp-require system)` | load a Lisp system now |
 | `(lisp-eval-string string)` | read and evaluate Lisp source |
 | `(verbatim proc)` | pass `proc` to Lisp without converting its results |
+| `(lisp form ...)` | Lisp code in Scheme: a `progn`, compiled as Lisp (3.5) |
 
-### 3.5 Distributing Scheme code that uses Lisp
+### 3.5 Lisp macros in Scheme
+
+```scheme
+(define numbers '(1 2 3 4 5 6))
+(cl:loop for n in numbers when (even? n) collect (square n))   ; => (4 16 36)
+(cl:destructuring-bind (a (b c) &key d) '(1 (2 3) #:d 4) (list a b c d))
+(cl:handler-case (cl:parse-integer "12x") (cl:parse-error () 'bad))
+(it:iter (for x in '(1 2 3)) (collect (* x 10)))               ; ITERATE
+(cl:defclass circle () ((radius #:initarg #:radius #:reader radius)))
+(lisp (radius (make-instance 'circle :radius 2)))              ; => 2
+```
+
+Inside a Lisp macro call, **the code is Lisp, with Scheme's variables
+and procedures visible**. The transformer walks the form and decides what
+each identifier is:
+
+| identifier | becomes |
+|---|---|
+| a Scheme variable or procedure (`numbers`, `even?`, `square`) | a placeholder: the form is compiled, once, as a Lisp function of the placeholders, and the expansion calls it with the variables' values. A placeholder in operator position calls its value. |
+| an export of a `(cl ...)` library (`cl:car`, `cl:parse-error`, `cl:*print-base*`, a nested `cl:when`) | its Lisp symbol |
+| Scheme syntax with a Lisp counterpart: `lambda`, `if`, `let`, `let*`, `quote`, `set!` (`setq`), `begin` (`progn`), `and`, `or`, `when`, `unless`, `cond`, `case`, `do`, `else` (`t`) | that Lisp operator |
+| other Scheme syntax | an error |
+| unbound (`for`, `in`, `collect`, and `x`, which `loop` binds) | the symbol of that name in the macro's package, else in `COMMON-LISP`, else the Scheme symbol itself; `:name` is a keyword |
+
+Quoted data stays Scheme data, except that `(cl ...)` exports inside it
+become their Lisp symbols. Values cross by the section 2 rules, and so
+does the result. Because unbound names become the Scheme symbols, a
+class or function defined from Scheme is named by Scheme's symbol:
+`'circle` is the class above, and `(lisp-function 'radius)` is its
+reader.
+
+`(lisp form ...)`, from `(pseudoscheme lisp)`, is the same mechanism
+with `progn`: Lisp code anywhere in Scheme.
+
+Limits. A Scheme variable can be read and called, but not assigned, from
+inside a Lisp form, since its value is passed in. Local macros
+(`let-syntax`) aren't recognized as syntax there. Each macro use is
+compiled when it's expanded, which takes milliseconds per use.
+
+### 3.6 Distributing Scheme code that uses Lisp
 
 Make it an ASDF system. Its `:depends-on` lists the Lisp libraries, so
 whatever installs systems for the user resolves them like any other
@@ -160,43 +201,106 @@ sources are components of the system (section 5).
 ## 4. Lisp calling Scheme
 
 `(asdf:load-system :r7rs)` loads the API. `:r6rs` and `:r5rs` are the
-same system, `pseudoscheme/api`. The packages `R7RS`, `R6RS` and `R5RS`
-each have:
+same system, `pseudoscheme/api`.
+
+### 4.1 Importing, defining, and libraries written in Lisp
+
+```lisp
+(r7rs:import (only (srfi 1) fold filter iota)
+             (rename (only (srfi 1) delete-duplicates) (delete-duplicates dedup))
+             (prefix (srfi 13) str-)
+             (srfi 26))                         ; cut: a Scheme macro
+
+(fold #'+ 0 '(1 2 3))                           ; => 6
+(filter #'evenp (iota 10))                      ; => (0 2 4 6 8)
+(mapcar (cut * 2 <>) '(1 2 3))                  ; => (2 4 6)
+
+(r7rs:define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))
+(mapcar #'fact '(1 2 3 4))                      ; => (1 2 6 24)
+
+(r7rs:define-library (demo geometry)
+  (export distance)
+  (import (scheme base) (scheme inexact))
+  (begin (define (distance x y) (sqrt (+ (* x x) (* y y))))))
+(r7rs:import (demo geometry))
+(distance 3 4)                                  ; => 5
+```
+
+- **`r7rs:import`** takes R7RS import sets and brings their bindings
+  into the *current package*. Procedures become functions, converting by
+  section 2; variables become symbol macros; syntax becomes Lisp macros
+  (4.2). A name that would redefine a symbol the package inherits (most
+  often from `COMMON-LISP`: `find`, `remove`, `delete-duplicates`...) is
+  an error, so use `only`, `except`, `prefix` or `rename`. The import
+  happens at compile time too, so the names can be used in the same file.
+- **`r7rs:define`** defines at the Scheme REPL and binds the Lisp
+  function (or symbol macro) of the same name. Redefining a name that
+  Scheme imports, such as `(r7rs:define (positive? x) ...)`, shadows the
+  import at the REPL.
+- **`r7rs:define-library`** installs a library, at compile time too.
+- **Scheme written as Lisp data** (these macros, `r7rs:scheme`) reads
+  CL's `FOO` as Scheme's `foo`. `r7rs:false` and `r7rs:true` stand for
+  `#f` and `#t`.
+
+`r6rs:import`, `r6rs:define`, `r6rs:library` and `r5rs:define` are the
+same for the other standards.
+
+`r7rs:use-library` is the alternative to `import`: it puts a library's
+bindings into a package of their own, named after the library
+(`srfi-1:fold`), or the one given by `:package`. To read `pkg:name` in
+the same file that creates the package, call it inside `eval-when
+(:compile-toplevel :load-toplevel :execute)`, as
+`examples/mixed-system/report.lisp` does.
+
+### 4.2 Scheme macros in Lisp
+
+A Scheme macro brought in by `import` or `use-library` is a Lisp macro.
+Its arguments are **Scheme code written in Lisp syntax, with Lisp's
+meanings where they exist**:
+- a Lisp lexical variable is that variable;
+- a Lisp function name is that function, wrapped as a `(cl ...)` export
+  would be;
+- quoted data is Lisp data, and `NIL` is the empty list;
+- other symbols are Scheme's: syntax, Scheme-only procedures, and the
+  variables the macro binds.
+
+The expansion runs psyntax, hygienically, on a Scheme `lambda` over the
+Lisp variables, translates the result to Lisp, and calls it. The result
+is ordinary Lisp code, compiled with the file.
+
+```lisp
+(let ((n 10)) (mapcar (cut + n <>) '(1 2 3)))  ; => (11 12 13)
+(receive (q r) (floor 17 5) (list q r))        ; SRFI 8; => (3 2)
+(macroexpand-1 '(cut list 1 <>))               ; plain Lisp
+```
+
+Limits:
+- Lisp variables are passed by value, so the macro can't assign them.
+- The expansion refers to the running Pseudoscheme image, so code
+  compiled with these macros must be loaded into an image where
+  Pseudoscheme is booted, the same way the Scheme libraries themselves
+  must be.
+
+### 4.3 The rest of the API
+
+Each of `R7RS`, `R6RS` and `R5RS` has:
 
 | | |
 |---|---|
-| `eval source` | Scheme text, or a Lisp datum (CL's `FOO` is Scheme's `foo`). Values come back as they are (`#f` is `FALSE`). |
-| `scheme form ...` | macro: evaluate unevaluated forms at the REPL top level, with results converted Lisp-style (`#f` → NIL) |
+| `eval source` | Scheme text, or a Lisp datum. Values come back as they are (`#f` is `FALSE`). |
+| `scheme form ...` | macro: evaluate forms at the REPL top level; results converted (`#f` → NIL) |
 | `load file`, `repl` | |
 | `expand source` | the core Scheme an expression expands to |
 | `translate source` | the Lisp code it compiles to |
 | `procedure name &key library convert` | a Scheme procedure as a Lisp function |
 | `read-from-string`, `write-to-string` | the Scheme reader and writer |
-| `true-p`, `false`, `verbatim` | |
+| `true-p`, `false`, `true`, `verbatim` | |
 
 `R7RS` and `R6RS` also have `use-library`, `library-exports`,
 `*library-path*` and `add-library-directory`. These names shadow CL's,
 so use them package-qualified (`r7rs:eval`).
 
-### 4.1 Scheme libraries are packages: `use-library`
-
-```lisp
-(r7rs:use-library '(srfi 1))                  ; => #<PACKAGE "SRFI-1">
-(srfi-1:filter #'evenp '(1 2 3 4))            ; => (2 4)
-(r7rs:use-library "(srfi 13)" :package "STR")
-(str:string-pad "42" 6 #\0)                   ; => "000042"
-```
-
-- Each exported procedure becomes a function, converting per section 2.
-  `:convert nil` binds the procedures themselves instead.
-- Exported variables become symbol macros that read the current value.
-- Syntax exports are skipped; `library-exports` lists them.
-
-To read `pkg:name` in the same file that creates the package, call
-`use-library` inside `eval-when (:compile-toplevel :load-toplevel
-:execute)`, as `examples/mixed-system/report.lisp` does.
-
-### 4.2 Errors
+### 4.4 Errors
 
 An uncaught Scheme `raise` is a Lisp error of type
 `ps-r7rs::uncaught-raise`, printed with the condition's message and
@@ -236,14 +340,12 @@ measures how many load.
 
 ## 7. Not done yet
 
-- **CLOS from Scheme.** Calling generic functions and making instances
-  works (they're functions). *Defining* classes and methods wants a
-  `(pseudoscheme clos)`: `define-class`, `define-generic`,
-  `define-method`.
-- **Lisp macros** with expression-only arguments (`incf`, `when`,
-  `with-open-file`'s body) could be imported as "foreign syntax", by
-  translating the subforms and then macroexpanding.
-- **Compiled libraries** (ROADMAP).
+- **CLOS-style definitions in Scheme syntax.** `cl:defclass` and
+  `cl:defmethod` work through 3.5, with Lisp syntax. A `(pseudoscheme
+  clos)` with Scheme-style forms (`define-class`, `define-method`
+  bodies as Scheme) could follow.
+- **Compiled libraries** (ROADMAP). These would also make code that uses
+  Scheme macros from Lisp loadable from fasls into a fresh image.
 - **Continuations** captured in Scheme called from Lisp can't re-enter
   through the Lisp frames above them. Continuations are escape-only
   everywhere today (docs/continuations.md).

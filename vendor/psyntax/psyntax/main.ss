@@ -50,6 +50,9 @@
   (set-symbol-value! 'psyntax:install-library install-library)
   (set-symbol-value! 'psyntax:interaction-library-name interaction-library-name)
   (set-symbol-value! 'psyntax:interaction-source-name interaction-source-name)
+  (set-symbol-value! 'psyntax:identifier-binding identifier-binding)
+  (set-symbol-value! 'psyntax:syntax->datum syntax->datum)
+  (set-symbol-value! 'psyntax:free-identifier=? free-identifier=?)
   ;; A library's exports, for the Lisp side (src/interop.lisp): a list of
   ;; (name type value) -- TYPE is the binding type (global, core-prim,
   ;; global-macro, ...), VALUE the location or primitive name.  The
