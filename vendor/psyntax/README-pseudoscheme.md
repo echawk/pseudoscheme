@@ -1,0 +1,114 @@
+# psyntax under Pseudoscheme
+
+This directory is Abdulaziz Ghuloum and Kent Dybvig's portable R6RS
+library and `syntax-case` system ("psyntax", 2007, MIT license; see
+`README.txt`). It came from the backup repository
+<https://github.com/xingzheone/psyntax-r6rs-backup> (commit
+`37731b04c26b`), a copy of the original
+<https://scheme.com/syntax-case/r6rs-libraries/>.
+
+It is Pseudoscheme's front end for R6RS: every form is expanded by
+psyntax into core Scheme (`lambda`, `if`, `set!`, `define`, `quote`,
+`begin`, `letrec`, calls), which the translator compiles to Common Lisp.
+See `src/psyntax.lisp` for the host side.
+
+## Files
+
+| file | what |
+|---|---|
+| `psyntax/*.ss` | the expander, as R6RS libraries (patched, see below) |
+| `psyntax-buildscript.ss` | expands those sources into a single image (patched) |
+| `psyntax-pseudoscheme.pp` | **that image, built on Pseudoscheme**: what `(psx::boot)` loads |
+| `pre-built/psyntax-scheme48.pp` | the original Scheme48 image, kept as a bootstrap seed |
+| `scheme48.r6rs.ss` | the original Scheme48 adapter, for reference |
+
+Only the Scheme48 image was kept of the original eleven pre-built ones;
+it's plain R5RS, which is what the translator eats.
+
+## Rebuilding
+
+After changing anything under `psyntax/` or the build script:
+
+```lisp
+(asdf:load-system :pseudoscheme/r6rs)
+(psx:rebuild)              ; expands the sources with the current image
+(psx:rebuild :seed t)      ; ... or from the original Scheme48 image
+```
+
+Run SBCL with a large control stack (`--control-stack-size 500MB`):
+the expander recurses deeply. A rebuild takes a few seconds and writes
+`psyntax-pseudoscheme.pp`; check it in. A rebuild from a rebuilt image
+reproduces itself, apart from gensym names.
+
+## Patches
+
+Each is marked `PSEUDOSCHEME:` in the source.
+
+**Host integration**
+
+* `psyntax/main.ss` replaced: instead of running a script named on the
+  command line and exiting, it hands the expander's entry points to the
+  host as globals (`psyntax:eval-r6rs-top-level`,
+  `psyntax:library-expander`, `psyntax:eval-top-level`, ...).
+* `psyntax/library-manager.ss` exports `library-path` and
+  `file-locator`, so the host can search a library path for `.sls`,
+  `.ss`, `.sld` and `.scm` files.
+* The REPL's "all public bindings" library is `(pseudoscheme)` rather
+  than `(ikarus)` (expander and build script).
+* Build-script table: the `&foo-rtd` / `&foo-rcd` identifiers behind
+  the `$core-rtd` bindings go to `$all` (the original leaves this to each
+  port), and `$delay`, which `delay` now expands into.
+
+**Escape-only continuations**
+
+* `guard` re-entered continuations (it called the guard's continuation
+  from a thunk invoked after that continuation's `call/cc` returned, and
+  re-raised by jumping back into the handler). Rewritten to escape with
+  a thunk and re-raise with `raise-continuable` from the guard's own
+  context. See docs/continuations.md.
+
+**Conformance with the final R6RS** (the 2007 code predates it)
+
+* Default record mutator names are `<record>-<field>-set!`, not
+  `set-<record>-<field>!` (library report 6.2).
+* `let-values` accepts any formals, `((a b . c) e)`, `(a e)` (11.4.6).
+* `(for <import set> <level> ...)` imports (7.1); with implicit phasing
+  the levels are ignored.
+* `(unsyntax e ...)` / `(unsyntax-splicing e ...)` with several operands
+  (11.19).
+* `assert` raises `&assertion` and returns the expression's value
+  (11.14); it raised `&error` and returned unspecified.
+* Version references: a bug compared sub-version references against the
+  *spec* instead of the version being tested.
+* Bytevectors are literals (11.4.1), and so are vectors (R7RS 4.1.2;
+  most R6RS systems accept them).
+* Three identifiers missing from the build script's table:
+  `bytevector-ieee-single-set!`, `bytevector-ieee-double-set!`,
+  `i/o-error-position`. (Found by comparing the table against the entries of
+  the errata-corrected library report; nothing else is missing.)
+* Truncated condition-type names in the table, `&non` and
+  `&implementation`, and a typo, `&i/o-fie-is-read-only-rcd`.
+
+**REPL**
+
+* `set!` of a variable defined at the REPL is allowed (it was "cannot
+  modify imported identifier").
+* `let-syntax` / `letrec-syntax` at the REPL top level work as
+  expressions (it was "not supported yet").
+
+**Elsewhere**
+
+* `delay` expands into `($delay thunk)`, building an R7RS promise, so
+  there's one promise type for `delay`, `delay-force`, `make-promise`
+  and `force`.
+* `(file-options ...)` is the checked list of option symbols
+  (`compat.ss`'s `file-options-spec` was "not implemented").
+
+## Known gaps
+
+* R7RS's custom ellipsis, `(syntax-rules ::: () ...)`, isn't supported.
+* Phases are implicit (Ghuloum & Dybvig's "implicit phasing"), so
+  `for` levels are accepted and ignored.
+* Libraries aren't serialized: each run re-expands library sources.
+  Ikarus's later psyntax added serialization; that's the model for
+  compiled libraries (docs/interop.md, 2.3).

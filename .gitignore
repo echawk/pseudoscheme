@@ -3,3 +3,4 @@
 *.abcl
 *~
 .DS_Store
+bin/

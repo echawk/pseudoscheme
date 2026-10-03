@@ -17,7 +17,7 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (asdf:load-system :pseudoscheme/r6rs)))
+    (asdf:load-system :pseudoscheme/api)))
 
 (defvar *run* 0)
 (defvar *passed* 0)
@@ -50,16 +50,10 @@ return the value of the last form."
   (values (psl:run-program (read-all-from-string source))))
 
 (defun r6 (source)
-  "Define any (library ...) forms in SOURCE, then run the (import ...)
-program that follows them."
-  (let ((forms (read-all-from-string source))
-	(psl:*library-evaluator* #'r6rs::r6rs-eval)
-	(psl:*syntax-binding-p* #'r6rs::sc-macro-p)
-	(libs '()))
-    (loop while (psl:keyword-head-p (car forms) "library")
-	  do (push (r6rs:evaluate-library-form (pop forms)) libs))
-    (let ((psl:*library-evaluator* #'r6rs::r6rs-eval))
-      (values (psl:run-program forms :implicit-imports r6rs::*implicit-imports*)))))
+  "Install any (library ...) forms in SOURCE, then run the (import ...)
+program after them, through psyntax; return the program's last value."
+  (unless psx:*host* (psx::boot))
+  (psx:eval-forms (read-all-from-string source)))
 
 (defmacro deftest (name (kind) source expected)
   `(check ,name (lambda () (,kind ,source)) ,expected))
@@ -369,10 +363,10 @@ program that follows them."
    (list (try (lambda () (error 'f \"bad thing\" 1 2)))
          (try (lambda () (assertion-violation 'g \"nope\" 'x)))
          (try (lambda () (assert (= 1 2)))))"
-  "((f \"bad thing\" (1 2) #f) (g \"nope\" (x) #t) (#f \"assertion failed\" ((= 1 2)) #t))")
+  "((f \"bad thing\" (1 2) #f) (g \"nope\" (x) #t) (assert \"assertion failed\" ((= 1 2)) #t))")
 
 (deftest "R6RS let-values, letrec*, named let, case, do" (r6)
-  "(import (rnrs base))
+  "(import (rnrs base) (rnrs control))
    (list (let-values (((a b) (values 1 2))) (+ a b))
          (letrec* ((a 1) (b (+ a 1))) (list a b))
          (let loop ((i 0) (acc '())) (if (= i 3) acc (loop (+ i 1) (cons i acc))))

@@ -10,7 +10,7 @@ be a short list of English words; anything else is a transcription bug.
 """
 import re, subprocess, sys, os
 here = os.path.dirname(os.path.abspath(__file__))
-pdf = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, '..', 'r7rs.pdf')
+pdf = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, '..', 'rnrs-pdfs', 'r7rs.pdf')
 text = subprocess.run(['pdftotext', '-layout', '-f', '73', '-l', '76', pdf, '-'],
                       capture_output=True, text=True, check=True).stdout
 src = open(os.path.join(here, '..', 'src', 'r7rs', 'exports.lisp')).read()

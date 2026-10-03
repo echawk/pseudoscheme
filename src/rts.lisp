@@ -108,13 +108,8 @@
 ; NUMBER->STRING
 
 (defune number->string (num &optional (radix 10))
-  (let* ((radix (if (equal radix '(scheme::heur)) 10 radix))
-	 (*print-base* radix)
-	 (string (write-to-string num)))
-    ;; CL always prints non-decimal radixes with upper-case letter
-    ;; digits (#xFF); R5RS number syntax (and chibi's test suite) wants
-    ;; lower-case (#xff).
-    (if (= radix 10) string (string-downcase string))))
+  (let ((radix (if (equal radix '(scheme::heur)) 10 radix)))
+    (ps:format-scheme-number num radix)))
 
 ; READ
 
@@ -137,16 +132,7 @@
 ; STRING->NUMBER
 
 (defune string->number (string &optional (radix 10))
-  (if (find-if #'(lambda (c) (digit-char-p c radix)) string)
-      (with-input-from-string (s string)
-	(let ((n (let ((*read-base* radix))
-		   (read s nil ps:eof-object))))
-	  (if (or (not (numberp n))
-		  (not (eq (read s nil ps:eof-object)
-			   ps:eof-object)))
-	      ps:false
-	      n)))
-      ps:false))
+  (or (ps:parse-scheme-number string radix) ps:false))
 
 ; STRING-APPEND
 
@@ -159,32 +145,22 @@
 ;  the same as symbol-name.
 
 (defune symbol->string (symbol)
-  ;; Prefer the as-typed spelling the Scheme48-derived reader stashes
-  ;; on first read (read.scm's RECORD-ORIGINAL-SPELLING!), so e.g.
-  ;; (symbol->string 'Martin) is "Martin", not "MARTIN" -- reading
-  ;; folds case to match the rest of the system, so that's the only
-  ;; place this information still exists. Symbols read by the CL-reader
-  ;; bridge instead (readwrite.lisp) never have this property, so this
-  ;; falls through to SYMBOL-NAME for them, same as before.
-  ;;
-  ;; The translator's own internals must NOT go through this for their
-  ;; own CL-symbol-naming bookkeeping (verified: doing so broke
-  ;; top-level DEFINE) -- they use PS-LISP:SYMBOL-NAME directly instead
+  ;; Case is inverted between Scheme names and CL symbol names; see
+  ;; INVERT-CASE in core.lisp.  The translator's own internals name CL
+  ;; symbols and packages with PS-LISP:SYMBOL-NAME directly
   ;; (classify.scm's NAME->STRING, module.scm, emit.scm, reify.scm,
-  ;; p-utils.scm all do). This primitive is purely the user-visible
-  ;; Scheme SYMBOL->STRING now.
-  (let ((name (or (get symbol 'scheme::%original-spelling)
-		   (symbol-name symbol)))
-	(package (symbol-package symbol)))
-    (cond ((eq package ps:scheme-package) name)
-	  ;; Uninterned (GENSYM/MAKE-SYMBOL) symbols, e.g. syntax-case's
-	  ;; hygienic renames, have no package to qualify with.
-	  ((null package) name)
+  ;; p-utils.scm), never through this.
+  (let ((package (symbol-package symbol)))
+    (cond ((or (eq package ps:scheme-package)
+	       ;; Uninterned (GENSYM/MAKE-SYMBOL) symbols, e.g. hygienic
+	       ;; renames, have no package to qualify with.
+	       (null package))
+	   (ps:scheme-symbol-name symbol))
 	  ((not (ps:scheme-symbol-p symbol))
 	   (error "symbol->string: invalid argument - ~S"
 		  symbol))
 	  (t (multiple-value-bind (sym-again status)
-		 (find-symbol name package)
+		 (find-symbol (symbol-name symbol) package)
 	       (declare (ignore sym-again))
 	       (let ((fakename
 		      (concatenate 'string
@@ -194,7 +170,7 @@
 				   (if (eq status :external)
 				       ":"
 				       "::")
-				   name)))
+				   (symbol-name symbol))))
 		 (warn "returning ~s for (symbol->string '~s)"
 		       fakename
 		       symbol)

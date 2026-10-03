@@ -51,16 +51,8 @@
         ((char? obj) (write-char-literal obj port))
 	(else (write-other obj port recur))))
 
-; Reading folds symbol case to match the rest of the system (see
-; read.scm's PREFERRED-CASE), but the original, as-typed spelling is
-; stashed on first read (RECORD-ORIGINAL-SPELLING! in read.scm) -- use
-; it here if present, so e.g. (symbol->string 'Martin) still prints
-; "Martin", not "MARTIN".
-
 (define (write-symbol obj port)
-  (write-string (ps-lisp:or (ps-lisp:get obj 'scheme::%original-spelling)
-			    (symbol->string obj))
-		port))
+  (write-string (symbol->string obj) port))
 
 (define (write-boolean mumble port)
   (write-char #\# port)

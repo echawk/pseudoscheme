@@ -28,8 +28,9 @@
      (:file "pack")
      (:file "spack" :depends-on ("pack"))
      (:file "core" :depends-on ("pack"))
-     (pso-file "closed" :depends-on ("spack" "core"))
-     (:file "rts" :depends-on ("pack" "spack" "core"))
+     (:file "numbers" :depends-on ("core"))
+     (pso-file "closed" :depends-on ("spack" "core" "numbers"))
+     (:file "rts" :depends-on ("pack" "spack" "core" "numbers"))
      (:file "readwrite" :depends-on ("pack" "core"))
      #+(or) (pso-file "read" :depends-on ("spack" "core"))
      #+(or) (pso-file "write" :depends-on ("spack" "core"))
@@ -141,16 +142,33 @@
 	       :pseudoscheme/evaluator :pseudoscheme/reader)
   :components ((:file "library")))
 
-;;; R6RS: (rnrs base) and (rnrs syntax-case), the library form and
-;;; top-level programs, over the R7RS layer and the vendored
-;;; syntax-case.  A sketch: see src/r6rs/* and ROADMAP.md.
+;;; R6RS, with psyntax (vendor/psyntax/) as the front end: psyntax does
+;;; all expansion and provides every standard library's namespace; the
+;;; files of src/r6rs/ are the primitives those libraries refer to.  See
+;;; src/psyntax.lisp.
 (defsystem :pseudoscheme/r6rs
   :author "Jonathan Rees"
-  :pathname #p"src/r6rs/"
-  :depends-on (:pseudoscheme/r7rs :pseudoscheme/syntax-case)
-  :components ((:file "exports")
-	       (:file "rts" :depends-on ("exports"))
-	       (:file "r6rs" :depends-on ("exports" "rts"))))
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/r7rs)
+  :components ((:module "r6rs"
+		:components ((:file "rts")
+			     (:file "lists" :depends-on ("rts"))
+			     (:file "hashtables" :depends-on ("lists"))
+			     (:file "records" :depends-on ("lists"))
+			     (:file "conditions" :depends-on ("records"))
+			     (:file "arithmetic" :depends-on ("conditions"))
+			     (:file "bytevectors" :depends-on ("conditions"))
+			     (:file "enums" :depends-on ("conditions"))
+			     (:file "ports" :depends-on ("bytevectors"))))
+	       (:file "psyntax" :depends-on ("r6rs"))))
+
+;;; The Common Lisp face: packages R5RS, R6RS and R7RS, each with EVAL,
+;;; LOAD and REPL.  See src/api.lisp.
+(defsystem :pseudoscheme/api
+  :author "Jonathan Rees"
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/r6rs :pseudoscheme/r7rs)
+  :components ((:file "api")))
 
 ;;; R7RS-small, on top of the library layer.  See src/r7rs/*.
 (defsystem :pseudoscheme/r7rs

@@ -23,7 +23,7 @@
              |.L.0| L)
       (GO LOOP)
      LOOP
-      (IF (< I 0)
+      (IF (SCHEME< I 0)
           (RETURN S)
           (PROGN
            (SETF (CHAR (THE SIMPLE-STRING S) I) (CAR |.L.0|))
@@ -32,10 +32,6 @@
                   |.L.0| (CDR |.L.0|))
            (GO LOOP))))))
 (SET-VALUE-FROM-FUNCTION 'REVERSE-LIST->STRING 'SCHEME::REVERSE-LIST->STRING)
-(LOCALLY
- (DECLARE (SPECIAL REALLY-STRING->SYMBOL STRING->SYMBOL))
- (SETQ REALLY-STRING->SYMBOL STRING->SYMBOL))
-(SET-FUNCTION-FROM-VALUE 'REALLY-STRING->SYMBOL 'SCHEME::REALLY-STRING->SYMBOL)
 (DEFUN INPUT-PORT-OPTION (PORT-OPTION)
   (IF (NULL PORT-OPTION)
       *STANDARD-INPUT*
@@ -94,12 +90,20 @@
  (SETQ DOT (MAKE-READER-TOKEN "unexpected \" . \"")))
 (SET-FUNCTION-FROM-VALUE 'DOT 'SCHEME::DOT)
 (DEFUN SUB-READ (PORT)
-  (DECLARE (SPECIAL READ-DISPATCH-VECTOR))
+  (DECLARE (SPECIAL READ-DISPATCH-VECTOR ASCII-LIMIT))
   (LET ((C (.READ-CHAR PORT)))
     (IF (EQ C EOF-OBJECT)
         C
-        (FUNCALL (SVREF READ-DISPATCH-VECTOR (CHAR->ASCII C)) C PORT))))
+        (IF (SCHEME>= (CHAR->ASCII C) ASCII-LIMIT)
+            (PARSE-TOKEN (SUB-READ-TOKEN C PORT) PORT)
+            (FUNCALL (SVREF READ-DISPATCH-VECTOR (CHAR->ASCII C)) C PORT)))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ 'SCHEME::SUB-READ)
+(DEFUN TERMINATING? (C)
+  (DECLARE (SPECIAL READ-TERMINATING?-VECTOR ASCII-LIMIT))
+  (IF (SCHEME< (CHAR->ASCII C) ASCII-LIMIT)
+      (SVREF READ-TERMINATING?-VECTOR (CHAR->ASCII C))
+      FALSE))
+(SET-VALUE-FROM-FUNCTION 'TERMINATING? 'SCHEME::TERMINATING?)
 (AT-TOP-LEVEL
  (LOCALLY
   (DECLARE (SPECIAL READ-DISPATCH-VECTOR ASCII-LIMIT))
@@ -165,6 +169,36 @@
 (LOCALLY
  (DECLARE (SPECIAL SUB-READ-LIST))
  (SET-STANDARD-READ-MACRO! #\( TRUE SUB-READ-LIST))
+(LOCALLY
+ (DECLARE (SPECIAL SUB-READ-LIST))
+ (SET-STANDARD-READ-MACRO! #\[ TRUE SUB-READ-LIST))
+(AT-TOP-LEVEL
+ (LOCALLY
+  (DECLARE (SPECIAL CLOSE-PAREN))
+  (SET-STANDARD-READ-MACRO! #\] TRUE #'(LAMBDA (C PORT) C PORT CLOSE-PAREN))))
+(AT-TOP-LEVEL
+ (SET-STANDARD-READ-MACRO! #\| TRUE
+  #'(LAMBDA (C PORT)
+      C
+      (PROG (L I)
+        (PSETQ L 'NIL
+               I 0)
+        (GO LOOP)
+       LOOP
+        (LET ((|.C.0| (.READ-CHAR PORT)))
+          (IF (EQ |.C.0| EOF-OBJECT)
+              (RETURN (READING-ERROR PORT "end of file within |symbol|"))
+              (IF (CHAR= |.C.0| #\|)
+                  (RETURN (INTERN-SCHEME-SYMBOL (REVERSE-LIST->STRING L I)))
+                  (IF (CHAR= |.C.0| #\\)
+                      (PROGN
+                       (PSETQ L (CONS (READ-ESCAPE PORT) L)
+                              I (+ I 1))
+                       (GO LOOP))
+                      (PROGN
+                       (PSETQ L (CONS |.C.0| L)
+                              I (+ I 1))
+                       (GO LOOP))))))))))
 (AT-TOP-LEVEL
  (LOCALLY
   (DECLARE (SPECIAL CLOSE-PAREN))
@@ -188,6 +222,30 @@
                        'SCHEME::UNQUOTE))))
           (LET ()
             (LIST KEYWORD (SUB-READ-CAREFULLY PORT))))))))
+(DEFUN READ-ESCAPE (PORT)
+  (LET ((C (.READ-CHAR PORT)))
+    (IF (EQ C EOF-OBJECT)
+        (READING-ERROR PORT "end of file after \\")
+        (IF (CHAR= C #\x)
+            (PROG (DIGITS)
+              (SETQ DIGITS 'NIL)
+              (GO LOOP)
+             LOOP
+              (LET ((D (.READ-CHAR PORT)))
+                (IF (EQ D EOF-OBJECT)
+                    (RETURN (READING-ERROR PORT "end of file in \\x escape"))
+                    (IF (CHAR= D #\;)
+                        (LET ((N
+                               (STRING->NUMBER
+                                (COERCE (THE LIST (REVERSE DIGITS))
+                                        'SIMPLE-STRING)
+                                16)))
+                          (IF (TRUEP N)
+                              (RETURN (ASCII->CHAR N))
+                              (RETURN (READING-ERROR PORT "bad \\x escape"))))
+                        (PROGN (SETQ DIGITS (CONS D DIGITS)) (GO LOOP))))))
+            (STRING-ESCAPE-CHAR C)))))
+(SET-VALUE-FROM-FUNCTION 'READ-ESCAPE 'SCHEME::READ-ESCAPE)
 (DEFUN STRING-ESCAPE-CHAR (C)
   (IF (CHAR= C #\n)
       #\Newline
@@ -203,33 +261,60 @@
                           (ASCII->CHAR 0)
                           C)))))))
 (SET-VALUE-FROM-FUNCTION 'STRING-ESCAPE-CHAR 'SCHEME::STRING-ESCAPE-CHAR)
+(DEFUN SKIP-LINE-CONTINUATION (PORT)
+  (PROG ()
+    (GO SKIP-BEFORE)
+   SKIP-BEFORE
+    (LET ((C (.READ-CHAR PORT)))
+      (IF (EQ C EOF-OBJECT)
+          (RETURN C)
+          (IF (CHAR= C #\Newline)
+              (RETURN
+               (PROG ()
+                 (GO SKIP-AFTER)
+                SKIP-AFTER
+                 (LET ((D (.PEEK-CHAR PORT)))
+                   (IF (AND (CHARACTERP D) (OR (CHAR= D #\ ) (CHAR= D #\Tab)))
+                       (PROGN (.READ-CHAR PORT) (GO SKIP-AFTER))
+                       (RETURN UNSPECIFIC)))))
+              (GO SKIP-BEFORE))))))
+(SET-VALUE-FROM-FUNCTION 'SKIP-LINE-CONTINUATION
+                         'SCHEME::SKIP-LINE-CONTINUATION)
 (AT-TOP-LEVEL
  (SET-STANDARD-READ-MACRO! #\" TRUE
   #'(LAMBDA (C PORT)
       C
-      (PROG (L I)
-        (PSETQ L 'NIL
-               I 0)
+      (PROG (|.L.0| |.I.1|)
+        (PSETQ |.L.0| 'NIL
+               |.I.1| 0)
         (GO LOOP)
        LOOP
-        (LET ((|.C.0| (.READ-CHAR PORT)))
-          (IF (EQ |.C.0| EOF-OBJECT)
-              (RETURN (READING-ERROR PORT "end of file within a string"))
-              (IF (CHAR= |.C.0| #\\)
-                  (LET ((|.C.1| (.READ-CHAR PORT)))
-                    (IF (EQ |.C.1| EOF-OBJECT)
-                        (RETURN
-                         (READING-ERROR PORT "end of file within a string"))
+        (LET ((L |.L.0|) (I |.I.1|))
+          (LET ((|.C.2| (.READ-CHAR PORT)))
+            (IF (EQ |.C.2| EOF-OBJECT)
+                (RETURN (READING-ERROR PORT "end of file within a string"))
+                (IF (CHAR= |.C.2| #\\)
+                    (LET ((NEXT (.PEEK-CHAR PORT)))
+                      (IF (EQ NEXT EOF-OBJECT)
+                          (RETURN
+                           (READING-ERROR PORT "end of file within a string"))
+                          (IF (OR (CHAR= NEXT #\Newline) (CHAR= NEXT #\ )
+                                  (CHAR= NEXT #\Tab))
+                              (PROGN
+                               (SKIP-LINE-CONTINUATION PORT)
+                               (PSETQ |.L.0| L
+                                      |.I.1| I)
+                               (GO LOOP))
+                              (PROGN
+                               (PSETQ |.L.0| (CONS (READ-ESCAPE PORT) L)
+                                      |.I.1| (+ I 1))
+                               (GO LOOP)))))
+                    (IF (CHAR= |.C.2| #\")
+                        (RETURN (REVERSE-LIST->STRING L I))
                         (PROGN
-                         (PSETQ L (CONS (STRING-ESCAPE-CHAR |.C.1|) L)
-                                I (+ I 1))
-                         (GO LOOP))))
-                  (IF (CHAR= |.C.0| #\")
-                      (RETURN (REVERSE-LIST->STRING L I))
-                      (PROGN
-                       (PSETQ L (CONS |.C.0| L)
-                              I (+ I 1))
-                       (GO LOOP))))))))))
+                         (PSETQ |.L.0| (CONS |.C.2| L)
+                                |.I.1| (+ I 1))
+                         (GO LOOP)))))))))))
 (AT-TOP-LEVEL
  (SET-STANDARD-READ-MACRO! #\; TRUE
   #'(LAMBDA (C PORT) C (GOBBLE-LINE PORT) (SUB-READ PORT))))
@@ -266,10 +351,29 @@
                (IF (TRUEP PROBE)
                    (FUNCALL (CDR PROBE) |.C.1| PORT)
                    (READING-ERROR PORT "unknown # syntax" |.C.1|))))))))))
+(DEFUN SHARP-BOOLEAN (VALUE LONG-NAME)
+  #'(LAMBDA (C PORT)
+      C
+      (LET ((NAME (CAR (SUB-READ-TOKEN (.READ-CHAR PORT) PORT))))
+        (IF (OR (SCHEME= (LENGTH (THE SIMPLE-STRING NAME)) 1)
+                (STRING= (STRING-DOWNCASE NAME) LONG-NAME))
+            VALUE
+            (READING-ERROR PORT "unknown # syntax" NAME)))))
+(SET-VALUE-FROM-FUNCTION 'SHARP-BOOLEAN 'SCHEME::SHARP-BOOLEAN)
+(DEFINE-SHARP-MACRO #\f (SHARP-BOOLEAN FALSE "false"))
+(DEFINE-SHARP-MACRO #\t (SHARP-BOOLEAN TRUE "true"))
 (AT-TOP-LEVEL
- (DEFINE-SHARP-MACRO #\f #'(LAMBDA (C PORT) C (.READ-CHAR PORT) FALSE)))
-(AT-TOP-LEVEL
- (DEFINE-SHARP-MACRO #\t #'(LAMBDA (C PORT) C (.READ-CHAR PORT) TRUE)))
+ (DEFINE-SHARP-MACRO #\!
+  #'(LAMBDA (C PORT)
+      (.READ-CHAR PORT)
+      (LET ((NAME
+             (STRING-DOWNCASE (CAR (SUB-READ-TOKEN (.READ-CHAR PORT) PORT)))))
+        (IF (STRING= NAME "fold-case")
+            (SETQ *FOLD-CASE* TRUE)
+            (IF (STRING= NAME "no-fold-case")
+                (SETQ *FOLD-CASE*
+                        (SCHEME-ERROR '"unknown expression type" 'NIL))))
+        (SUB-READ PORT)))))
 (LOCALLY
  (DECLARE (SPECIAL NAMED-CHARACTERS))
  (SETQ NAMED-CHARACTERS
@@ -302,14 +406,20 @@
                                               (CONS
                                                (CONS 'SCHEME::PAGE
                                                      (ASCII->CHAR 12))
-                                               (LIST
+                                               (CONS
                                                 (CONS 'SCHEME::ALARM
-                                                      (ASCII->CHAR
-                                                       7))))))))))))))))))
+                                                      (ASCII->CHAR 7))
+                                                (CONS
+                                                 (CONS 'SCHEME::VTAB
+                                                       (ASCII->CHAR 11))
+                                                 (LIST
+                                                  (CONS 'SCHEME::ESC
+                                                        (ASCII->CHAR
+                                                         27))))))))))))))))))))
 (SET-FUNCTION-FROM-VALUE 'NAMED-CHARACTERS 'SCHEME::NAMED-CHARACTERS)
 (AT-TOP-LEVEL
  (LOCALLY
-  (DECLARE (SPECIAL NAMED-CHARACTERS PREFERRED-CASE))
+  (DECLARE (SPECIAL NAMED-CHARACTERS))
   (DEFINE-SHARP-MACRO #\\
    #'(LAMBDA (C PORT)
        C
@@ -319,26 +429,34 @@
              (READING-ERROR PORT "end of file after #\\")
              (IF (ALPHA-CHAR-P |.C.0|)
                  (LET ((NAME (SUB-READ-CAREFULLY PORT)))
-                   (IF (= (LENGTH (THE SIMPLE-STRING (SYMBOL->STRING NAME))) 1)
+                   (IF (SCHEME=
+                        (LENGTH (THE SIMPLE-STRING (SYMBOL->STRING NAME))) 1)
                        |.C.0|
                        (LET ((TEMP
-                              (TRUE?
-                               (ASSOC
-                                (VALUES
-                                 (INTERN
-                                  (COERCE
-                                   (THE LIST
-                                        (MAPCAR PREFERRED-CASE
-                                                (COERCE
-                                                 (THE SIMPLE-STRING
-                                                      (SYMBOL->STRING NAME))
-                                                 'LIST)))
-                                   'SIMPLE-STRING)
-                                  SCHEME-PACKAGE))
-                                NAMED-CHARACTERS :TEST #'EQ))))
+                              (IF (CHAR=
+                                   (CHAR
+                                    (THE SIMPLE-STRING (SYMBOL->STRING NAME))
+                                    0)
+                                   #\x)
+                                  (STRING->NUMBER
+                                   (SUBSEQ (SYMBOL->STRING NAME) 1
+                                           (LENGTH
+                                            (THE SIMPLE-STRING
+                                                 (SYMBOL->STRING NAME))))
+                                   16)
+                                  FALSE)))
                          (IF (TRUEP TEMP)
-                             (CDR TEMP)
-                             (READING-ERROR PORT "unknown #\\ name" NAME)))))
+                             (ASCII->CHAR TEMP)
+                             (LET ((.TEMP.1
+                                    (TRUE?
+                                     (ASSOC
+                                      (INTERN-SCHEME-SYMBOL
+                                       (STRING-DOWNCASE (SYMBOL->STRING NAME)))
+                                      NAMED-CHARACTERS :TEST #'EQ))))
+                               (IF (TRUEP .TEMP.1)
+                                   (CDR .TEMP.1)
+                                   (READING-ERROR PORT "unknown #\\ name"
+                                    NAME)))))))
                  (.READ-CHAR PORT))))))))
 (AT-TOP-LEVEL
  (DEFINE-SHARP-MACRO #\(
@@ -346,7 +464,7 @@
       (.READ-CHAR PORT)
       (COERCE (THE LIST (SUB-READ-LIST C PORT)) 'SIMPLE-VECTOR))))
 (DEFUN SKIP-BLOCK-COMMENT (PORT DEPTH)
-  (IF (= DEPTH 0)
+  (IF (SCHEME= DEPTH 0)
       FALSE
       (LET ((C (.READ-CHAR PORT)))
         (IF (EQ C EOF-OBJECT)
@@ -382,23 +500,18 @@
    (MAPC #'(LAMBDA (C) (DEFINE-SHARP-MACRO C #'NUMBER-SHARP-MACRO))
          '(#\b #\o #\d #\x #\i #\e))))
 (DEFUN SUB-READ-TOKEN (C PORT)
-  (DECLARE (SPECIAL READ-TERMINATING?-VECTOR))
-  (PROG (|.L.0| .RAW.1 |.N.2|)
-    (PSETQ |.L.0| (LIST (PREFERRED-CASE C))
-           .RAW.1 (LIST C)
-           |.N.2| 1)
+  (PROG (|.L.0| |.N.1|)
+    (PSETQ |.L.0| (LIST C)
+           |.N.1| 1)
     (GO LOOP)
    LOOP
-    (LET ((L |.L.0|) (RAW .RAW.1) (N |.N.2|))
+    (LET ((L |.L.0|) (N |.N.1|))
       (LET ((P (.PEEK-CHAR PORT)))
-        (IF (OR (EQ P EOF-OBJECT)
-                (TRUEP (SVREF READ-TERMINATING?-VECTOR (CHAR->ASCII P))))
-            (RETURN
-             (CONS (REVERSE-LIST->STRING L N) (REVERSE-LIST->STRING RAW N)))
-            (LET ((|.C.3| (.READ-CHAR PORT)))
-              (PSETQ |.L.0| (CONS (PREFERRED-CASE |.C.3|) L)
-                     .RAW.1 (CONS |.C.3| RAW)
-                     |.N.2| (+ N 1))
+        (IF (OR (EQ P EOF-OBJECT) (TRUEP (TERMINATING? P)))
+            (RETURN (LIST (REVERSE-LIST->STRING L N)))
+            (LET ((|.C.2| (.READ-CHAR PORT)))
+              (PSETQ |.L.0| (CONS |.C.2| L)
+                     |.N.1| (+ N 1))
               (GO LOOP)))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-TOKEN 'SCHEME::SUB-READ-TOKEN)
 (DEFUN PARSE-TOKEN (TOKEN PORT)
@@ -413,30 +526,22 @@
                   (INTERN-TOKEN .STRING)
                   (IF (STRING= .STRING ".")
                       DOT
-                      (READING-ERROR PORT "unsupported number syntax"
-                       .STRING)))))
-        (RECORD-ORIGINAL-SPELLING! (INTERN-TOKEN .STRING) (CDR TOKEN)))))
+                      (IF (DIGIT-CHAR-P (CHAR (THE SIMPLE-STRING .STRING) 0))
+                          (READING-ERROR PORT "unsupported number syntax"
+                           .STRING)
+                          (INTERN-TOKEN .STRING))))))
+        (INTERN-TOKEN .STRING))))
 (SET-VALUE-FROM-FUNCTION 'PARSE-TOKEN 'SCHEME::PARSE-TOKEN)
 (LOCALLY
  (DECLARE (SPECIAL STRANGE-SYMBOL-NAMES))
  (SETQ STRANGE-SYMBOL-NAMES '("+" "-" "..." "1+" "-1+")))
 (SET-FUNCTION-FROM-VALUE 'STRANGE-SYMBOL-NAMES 'SCHEME::STRANGE-SYMBOL-NAMES)
-(DEFUN INTERN-TOKEN (.STRING) (REALLY-STRING->SYMBOL .STRING))
+(DEFUN INTERN-TOKEN (.STRING)
+  (INTERN-SCHEME-SYMBOL
+   (IF *FOLD-CASE*
+       (STRING-DOWNCASE .STRING)
+       .STRING)))
 (SET-VALUE-FROM-FUNCTION 'INTERN-TOKEN 'SCHEME::INTERN-TOKEN)
-(DEFUN RECORD-ORIGINAL-SPELLING! (SYM RAW)
-  (IF (GET SYM 'SCHEME::%ORIGINAL-SPELLING)
-      SYM
-      (PROGN (SETF (GET SYM 'SCHEME::%ORIGINAL-SPELLING) RAW) SYM)))
-(SET-VALUE-FROM-FUNCTION 'RECORD-ORIGINAL-SPELLING!
-                         'SCHEME::RECORD-ORIGINAL-SPELLING!)
-(LOCALLY
- (DECLARE (SPECIAL PREFERRED-CASE))
- (SETQ PREFERRED-CASE
-         (IF (CHAR= (CHAR (THE SIMPLE-STRING (SYMBOL->STRING 'SCHEME::T)) 0)
-                    #\T)
-             #'CHAR-UPCASE
-             #'CHAR-DOWNCASE)))
-(SET-FUNCTION-FROM-VALUE 'PREFERRED-CASE 'SCHEME::PREFERRED-CASE)
 (DEFUN READING-ERROR (PORT MESSAGE &REST IRRITANTS)
   (DECLARE (SPECIAL .ERROR))
   (MAYBE-FIX-&REST-PARAMETER IRRITANTS)
@@ -445,8 +550,40 @@
 (SET-VALUE-FROM-FUNCTION 'READING-ERROR 'SCHEME::READING-ERROR)
 (LOCALLY (DECLARE (SPECIAL SCHEME-READ)) (SETQ *SCHEME-READ* SCHEME-READ))
 (AT-TOP-LEVEL
+ (DEFINE-SHARP-MACRO #\u
+  #'(LAMBDA (C PORT)
+      (.READ-CHAR PORT)
+      (IF (NOT (AND (EQL (.READ-CHAR PORT) #\8) (EQL (.READ-CHAR PORT) #\()))
+          (READING-ERROR PORT "bad #u8 syntax"))
+      (LIST->BYTEVECTOR (SUB-READ-LIST C PORT)))))
+(AT-TOP-LEVEL
+ (DEFINE-SHARP-MACRO #\v
+  #'(LAMBDA (C PORT)
+      (.READ-CHAR PORT)
+      (IF (NOT
+           (AND (EQL (.READ-CHAR PORT) #\u) (EQL (.READ-CHAR PORT) #\8)
+                (EQL (.READ-CHAR PORT) #\()))
+          (READING-ERROR PORT "bad #vu8 syntax"))
+      (LIST->BYTEVECTOR (SUB-READ-LIST C PORT)))))
+(AT-TOP-LEVEL
  (DEFINE-SHARP-MACRO #\'
   #'(LAMBDA (C PORT)
       C
       (.READ-CHAR PORT)
-      (CONS 'FUNCTION (LIST (READ-PRESERVING-WHITESPACE PORT))))))
+      (LIST 'SCHEME::SYNTAX (SUB-READ-CAREFULLY PORT)))))
+(AT-TOP-LEVEL
+ (DEFINE-SHARP-MACRO #\`
+  #'(LAMBDA (C PORT)
+      C
+      (.READ-CHAR PORT)
+      (LIST 'SCHEME::QUASISYNTAX (SUB-READ-CAREFULLY PORT)))))
+(AT-TOP-LEVEL
+ (DEFINE-SHARP-MACRO #\,
+  #'(LAMBDA (C PORT)
+      C
+      (.READ-CHAR PORT)
+      (IF (EQL (.PEEK-CHAR PORT) #\@)
+          (PROGN
+           (.READ-CHAR PORT)
+           (LIST 'SCHEME::UNSYNTAX-SPLICING (SUB-READ-CAREFULLY PORT)))
+          (LIST 'SCHEME::UNSYNTAX (SUB-READ-CAREFULLY PORT))))))

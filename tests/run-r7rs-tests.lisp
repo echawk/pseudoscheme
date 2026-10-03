@@ -19,6 +19,9 @@
   (handler-bind ((warning #'muffle-warning))
     (asdf:load-system :pseudoscheme/r7rs)))
 
+;; IEEE inexact arithmetic: (/ 1. 0.) => +inf.0, as R6RS/R7RS expect.
+(ps:disable-float-traps)
+
 (defparameter *verbose* (member "-v" sb-ext:*posix-argv* :test #'string=))
 (defparameter *trace* (member "-vv" sb-ext:*posix-argv* :test #'string=))
 (defvar *here* (or *load-truename* *load-pathname*))

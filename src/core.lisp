@@ -45,6 +45,47 @@
 
 (defparameter scheme-package (find-package "SCHEME"))
 
+; Symbol case.  Scheme symbols are CL symbols in the SCHEME package,
+; named by INVERTING case, as CL's :INVERT readtable case does: a name
+; written all in lower case is the upper-case CL symbol (so `car' is
+; SCHEME::CAR, which is what the translator's own sources -- read by the
+; host's upcasing reader -- and every .pso file already use), one
+; written all in upper case is the lower-case CL symbol, and a name of
+; mixed case is kept as is.  Inversion is its own inverse, so this is a
+; bijection: Scheme symbols are case-sensitive, as R6RS and R7RS
+; require, with no change to how standard names are spelled in CL.
+; R5RS-style case folding is a reader mode (*FOLD-CASE*, also set by
+; R7RS's #!fold-case).
+
+(defun invert-case (string)
+  (let ((upper nil) (lower nil))
+    (loop for c across string
+	  do (cond ((upper-case-p c) (setq upper t))
+		   ((lower-case-p c) (setq lower t))))
+    (cond ((and upper lower) string)
+	  (upper (string-downcase string))
+	  (lower (string-upcase string))
+	  (t string))))
+
+(defun scheme-symbol-name (symbol)
+  "The Scheme name of SYMBOL (SYMBOL->STRING)."
+  (invert-case (symbol-name symbol)))
+
+(defun intern-scheme-symbol (string)
+  "The Scheme symbol named STRING (STRING->SYMBOL)."
+  (values (intern (invert-case string) scheme-package)))
+
+(defun list->bytevector (list)
+  "For the reader's #u8(...) / #vu8(...)."
+  (dolist (b list)
+    (unless (typep b '(unsigned-byte 8))
+      (scheme-error "bytevector literal: not a byte: ~S" b)))
+  (make-array (length list) :element-type '(unsigned-byte 8) :initial-contents list))
+
+(defvar *fold-case* nil
+  "True when the Scheme reader folds symbols and character names to
+lower case (R5RS behavior, or after #!fold-case).")
+
 ; ----- Photons
 
 ; "A `photon' is an object that PRIN1's as if it had been PRINC'ed."
@@ -216,12 +257,37 @@
 ; open-coding MEMBER and ASSOC, and the rule is that all auxiliaries
 ; are in the PS package (not REVISED^4-SCHEME).
 
+;; EQUAL? must terminate even on circular structure (R6RS 11.5, R7RS
+;; 6.1).  Plain recursion handles the usual case; once it has looked at
+;; *EQUAL-BUDGET* nodes it starts again in a mode that remembers which
+;; pairs of objects it is already comparing and assumes those equal -- a
+;; bisimulation check, which is what EQUAL? means for graphs.
+
+(defvar *equal-budget* 100000)
+
 (defun scheme-equal-p (obj1 obj2)
+  (let ((budget *equal-budget*))
+    (block bounded
+      (labels ((walk (a b)
+		 (when (minusp (decf budget)) (return-from bounded nil))
+		 (equal-step a b #'walk)))
+	(return-from scheme-equal-p (walk obj1 obj2))))
+    (let ((seen (make-hash-table :test 'eq)))
+      (labels ((walk (a b)
+		 (if (and (or (consp a) (simple-vector-p a))
+			  (member b (gethash a seen) :test #'eq))
+		     t
+		     (progn
+		       (when (or (consp a) (simple-vector-p a)) (push b (gethash a seen)))
+		       (equal-step a b #'walk)))))
+	(walk obj1 obj2)))))
+
+(defun equal-step (obj1 obj2 recur)
   (cond ((eql obj1 obj2) t)
         ((consp obj1)			;pair?
          (and (consp obj2)
-	      (scheme-equal-p (car obj1) (car obj2))
-	      (scheme-equal-p (cdr obj1) (cdr obj2))))
+	      (funcall recur (car obj1) (car obj2))
+	      (funcall recur (cdr obj1) (cdr obj2))))
 	((simple-string-p obj1)		;string?
 	 (and (simple-string-p obj2)
 	      (string= (the simple-string obj1)
@@ -234,9 +300,9 @@
 		     (do ((i 0 (+ i 1)))
 			 ((= i z) t)
 		       (declare (fixnum i))
-		       (when (not (scheme-equal-p
-				   (aref (the simple-vector obj1) i)
-				   (aref (the simple-vector obj2) i)))
+		       (when (not (funcall recur
+					   (aref (the simple-vector obj1) i)
+					   (aref (the simple-vector obj2) i)))
 			 (return nil)))))))
 	;; R7RS bytevectors
 	((typep obj1 '(simple-array (unsigned-byte 8) (*)))

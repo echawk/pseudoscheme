@@ -18,7 +18,6 @@
 	  (begin (string-set! s i (car l))
 		 (loop (- i 1) (cdr l)))))))
 
-(define really-string->symbol string->symbol)
 
 (define (input-port-option port-option)
   (cond ((null? port-option) (current-input-port))
@@ -42,8 +41,7 @@
 ;    (define (reverse-list->string l n)
 ;      (list->string (reverse l)))
 ;  really-string->symbol -- ok to define as follows:
-;    (define really-string->symbol string->symbol)
-;  signal (only for use by reading-error; easily excised)
+;    ;  signal (only for use by reading-error; easily excised)
 
 
 (define (scheme-read . port-option)
@@ -76,12 +74,21 @@
 
 ; Main dispatch
 
+; Characters beyond the dispatch tables (anything non-ASCII) are
+; symbol constituents, as R6RS and R7RS allow for most of Unicode.
+
 (define (sub-read port)
   (let ((c (read-char port)))
-    (if (eof-object? c)
-        c
-        ((vector-ref read-dispatch-vector (char->ascii c))
-         c port))))
+    (cond ((eof-object? c) c)
+	  ((>= (char->ascii c) ascii-limit)
+	   (parse-token (sub-read-token c port) port))
+	  (else
+	   ((vector-ref read-dispatch-vector (char->ascii c))
+	    c port)))))
+
+(define (terminating? c)
+  (and (< (char->ascii c) ascii-limit)
+       (vector-ref read-terminating?-vector (char->ascii c))))
 
 (define read-dispatch-vector
   (make-vector ascii-limit
@@ -135,6 +142,31 @@
 
 (set-standard-read-macro! #\( #t sub-read-list)
 
+; R6RS 4.2.1: brackets are parentheses.  (Not checked for matching.)
+
+(set-standard-read-macro! #\[ #t sub-read-list)
+
+(set-standard-read-macro! #\] #t
+  (lambda (c port)
+    c port
+    close-paren))
+
+; |symbol| with any characters (R7RS 2.1): \| \\ and \x<hex>; escapes.
+; The name is taken exactly as written, with no case folding.
+
+(set-standard-read-macro! #\| #t
+  (lambda (c port)
+    c
+    (let loop ((l '()) (i 0))
+      (let ((c (read-char port)))
+	(cond ((eof-object? c)
+	       (reading-error port "end of file within |symbol|"))
+	      ((char=? c #\|)
+	       (ps:intern-scheme-symbol (reverse-list->string l i)))
+	      ((char=? c #\\)
+	       (loop (cons (read-escape port) l) (+ i 1)))
+	      (else (loop (cons c l) (+ i 1))))))))
+
 (set-standard-read-macro! #\) #t
   (lambda (c port)
     c port
@@ -171,6 +203,26 @@
 ; any other character is read as that character literally, same as
 ; before.
 
+; READ-ESCAPE reads what follows a backslash in a string or |symbol|:
+; the one-character escapes above, or \x<hex>; (R6RS/R7RS).
+
+(define (read-escape port)
+  (let ((c (read-char port)))
+    (cond ((eof-object? c)
+	   (reading-error port "end of file after \\"))
+	  ((char=? c #\x)
+	   (let loop ((digits '()))
+	     (let ((d (read-char port)))
+	       (cond ((eof-object? d)
+		      (reading-error port "end of file in \\x escape"))
+		     ((char=? d #\;)
+		      (let ((n (string->number (list->string (reverse digits)) 16)))
+			(if n
+			    (ascii->char n)
+			    (reading-error port "bad \\x escape"))))
+		     (else (loop (cons d digits)))))))
+	  (else (string-escape-char c)))))
+
 (define (string-escape-char c)
   (cond ((char=? c #\n) #\newline)
 	((char=? c #\t) #\tab)
@@ -180,6 +232,17 @@
 	((char=? c #\0) (ascii->char 0))
 	(else c)))
 
+(define (skip-line-continuation port)
+  (let skip-before ()
+    (let ((c (read-char port)))
+      (cond ((eof-object? c) c)
+	    ((char=? c #\newline)
+	     (let skip-after ()
+	       (let ((d (peek-char port)))
+		 (if (and (char? d) (or (char=? d #\space) (char=? d #\tab)))
+		     (begin (read-char port) (skip-after))))))
+	    (else (skip-before))))))
+
 (set-standard-read-macro! #\" #t
   (lambda (c port)
     c ;ignored
@@ -188,11 +251,17 @@
         (cond ((eof-object? c)
                (reading-error port "end of file within a string"))
               ((char=? c #\\)
-               (let ((c (read-char port)))
-		 (cond ((eof-object? c)
+	       (let ((next (peek-char port)))
+		 (cond ((eof-object? next)
 			(reading-error port "end of file within a string"))
+		       ;; \<intraline whitespace><newline><intraline
+		       ;; whitespace>: a line continuation, read as nothing.
+		       ((or (char=? next #\newline) (char=? next #\space)
+			    (char=? next #\tab))
+			(skip-line-continuation port)
+			(loop l i))
 		       (else
-			(loop (cons (string-escape-char c) l) (+ i 1))))))
+			(loop (cons (read-escape port) l) (+ i 1))))))
               ((char=? c #\")
 	       (reverse-list->string l i))
               (else
@@ -228,11 +297,33 @@
 	  ((cdr probe) c port)
 	  (reading-error port "unknown # syntax" c)))))
 
-(define-sharp-macro #\f
-  (lambda (c port) c (read-char port) #f))
+; #t #f and R7RS's #true #false.
 
-(define-sharp-macro #\t
-  (lambda (c port) c (read-char port) #t))
+(define (sharp-boolean value long-name)
+  (lambda (c port)
+    c
+    (let ((name (car (sub-read-token (read-char port) port))))
+      (if (or (= (string-length name) 1)
+	      (string=? (common-lisp:string-downcase name) long-name))
+	  value
+	  (reading-error port "unknown # syntax" name)))))
+
+(define-sharp-macro #\f (sharp-boolean #f "false"))
+(define-sharp-macro #\t (sharp-boolean #t "true"))
+
+; Directives: #!fold-case and #!no-fold-case (R7RS 2.1), #!r6rs (R6RS
+; 4.2.4, a flag with no effect here), and any other #!<identifier>,
+; which is ignored the same way.  Each is a comment, so read on.
+
+(define-sharp-macro #\!
+  (lambda (c port)
+    (read-char port)                   ;consume the !
+    (let ((name (common-lisp:string-downcase (car (sub-read-token (read-char port) port)))))
+      (cond ((string=? name "fold-case")
+	     (ps-lisp:setq ps:*fold-case* ps-lisp:t))
+	    ((string=? name "no-fold-case")
+	     (ps-lisp:setq ps:*fold-case* ps-lisp:nil)))
+      (sub-read port))))
 
 (define named-characters
   `((space     . ,(ascii->char 32))
@@ -248,7 +339,9 @@
     (return    . ,(ascii->char 13))
     (linefeed  . ,(ascii->char 10))
     (page      . ,(ascii->char 12))
-    (alarm     . ,(ascii->char 7))))
+    (alarm     . ,(ascii->char 7))
+    (vtab      . ,(ascii->char 11))    ;R6RS
+    (esc       . ,(ascii->char 27))))  ;R6RS
 
 (define-sharp-macro #\\
   (lambda (c port)
@@ -261,14 +354,17 @@
 	     (let ((name (sub-read-carefully port)))
 	       (cond ((= (string-length (symbol->string name)) 1)
 		      c)
+		     ;; #\x<hex> (R6RS/R7RS)
+		     ((and (char=? (string-ref (symbol->string name) 0) #\x)
+			   (string->number (substring (symbol->string name) 1
+						      (string-length (symbol->string name)))
+					   16))
+		      => ascii->char)
 		     ;; Character names match case-insensitively (#\Space,
-		     ;; #\newline, ...): fold to whichever case
-		     ;; NAMED-CHARACTERS' own keys were folded to by
-		     ;; PREFERRED-CASE when this file was translated.
+		     ;; #\newline, ...); the keys of NAMED-CHARACTERS are
+		     ;; lower-case names.
 		     ((assq (string->symbol
-			     (list->string
-			      (map preferred-case
-				   (string->list (symbol->string name)))))
+			     (common-lisp:string-downcase (symbol->string name)))
 			    named-characters)
 		      => cdr)
 		     (else
@@ -323,20 +419,19 @@
 
 ; Tokens
 ;
-; SUB-READ-TOKEN collects both the case-folded spelling (used for
-; symbol identity, same as always -- see PREFERRED-CASE above) and the
-; raw, as-typed spelling (used only to remember how to display the
-; resulting symbol -- see RECORD-ORIGINAL-SPELLING! below).
+; SUB-READ-TOKEN returns a list whose car is the token as written.
+; (It used to return a case-folded spelling and the raw one; symbols
+; are now case-sensitive -- see INVERT-CASE in core.lisp -- and folding,
+; when wanted, happens in INTERN-TOKEN.)
 
 (define (sub-read-token c port)
-  (let loop ((l (list (preferred-case c))) (raw (list c)) (n 1))
+  (let loop ((l (list c)) (n 1))
     (let ((p (peek-char port)))
-      (cond ((or (eof-object? p)
-                 (vector-ref read-terminating?-vector (char->ascii p)))
-             (cons (reverse-list->string l n) (reverse-list->string raw n)))
+      (cond ((or (eof-object? p) (terminating? p))
+             (list (reverse-list->string l n)))
             (else
              (let ((c (read-char port)))
-               (loop (cons (preferred-case c) l) (cons c raw) (+ n 1))))))))
+               (loop (cons c l) (+ n 1))))))))
 
 (define (parse-token token port)
   (let ((string (car token)))
@@ -347,9 +442,13 @@
 	       (intern-token string))
 	      ((string=? string ".")
 	       dot)
-	      (else
-	       (reading-error port "unsupported number syntax" string)))
-	(record-original-spelling! (intern-token string) (cdr token)))))
+	      ;; Anything else that doesn't parse as a number: a symbol
+	      ;; if it can be one (R6RS/R7RS "peculiar identifiers" such
+	      ;; as ->x and .foo), else an error.
+	      ((char-numeric? (string-ref string 0))
+	       (reading-error port "unsupported number syntax" string))
+	      (else (intern-token string)))
+	(intern-token string))))
 
 (define strange-symbol-names
   '("+" "-" "..." "1+" "-1+"))  ;The latter two only for S&ICP support
@@ -366,41 +465,8 @@
 ; at the top of this file do.
 
 (define (intern-token string)
-  (really-string->symbol string))
-
-; Reading folds case to match the rest of the system (see
-; PREFERRED-CASE), so the only way to show a symbol in the case the
-; program actually wrote it in -- what SYMBOL->STRING and WRITE users
-; expect -- is to remember that original spelling out of band. First
-; spelling seen for a given symbol wins, same as R5RS's case-folding
-; model implies: once folded, two different original spellings denote
-; the same symbol, so there's only one case to remember.
-
-(define (record-original-spelling! sym raw)
-  (ps-lisp:if (ps-lisp:get sym 'scheme::%original-spelling)
-	      sym
-	      (ps-lisp:progn
-	       (ps-lisp:setf (ps-lisp:get sym 'scheme::%original-spelling) raw)
-	       sym)))
-
-; Tokens are case-folded to match the host Common Lisp's own default
-; readtable case, same as the rest of Pseudoscheme's bootstrap (every
-; already-translated .pso file, and every .scm file in this system,
-; was read -- and its internal `(eq? ... 'foo)' comparisons baked in --
-; under this same folding; switching it would require re-bootstrapping
-; everything in lockstep, not just this file). What IS fixed here is
-; that the *original*, as-typed spelling of each symbol is preserved
-; separately (see RECORD-ORIGINAL-SPELLING!/SYMBOL->DISPLAY-STRING
-; below) so WRITE and SYMBOL->STRING can still show a symbol in the
-; case the program actually wrote it in, the way R5RS/R7RS users
-; expect, without disturbing EQ?-identity or any internal keyword
-; matching.
-
-(define preferred-case
-  (if (char=? (string-ref (symbol->string 't) 0) #\T)
-      char-upcase
-      char-downcase))
-
+  (ps:intern-scheme-symbol
+   (ps-lisp:if ps:*fold-case* (common-lisp:string-downcase string) string)))
 
 ; Reader errors
 
@@ -414,8 +480,44 @@
 (ps-lisp:setq ps:*scheme-read* scheme-read)
 
 
+;; Bytevectors: R7RS #u8(...) and R6RS #vu8(...).
+
+(define-sharp-macro #\u
+  (lambda (c port)
+    (read-char port)                   ;consume u
+    (if (not (and (eqv? (read-char port) #\8) (eqv? (read-char port) #\()))
+	(reading-error port "bad #u8 syntax"))
+    (ps:list->bytevector (sub-read-list c port))))
+
+(define-sharp-macro #\v
+  (lambda (c port)
+    (read-char port)                   ;consume v
+    (if (not (and (eqv? (read-char port) #\u)
+		  (eqv? (read-char port) #\8)
+		  (eqv? (read-char port) #\()))
+	(reading-error port "bad #vu8 syntax"))
+    (ps:list->bytevector (sub-read-list c port))))
+
+;; R6RS 4.3.5 abbreviations: #'x #`x #,x #,@x.  (These replace an older
+;; Pseudoscheme-specific #'cl-function escape; see README.)
+
 (define-sharp-macro #\'
   (lambda (c port)
-    c ;unused
+    c
     (read-char port)
-    `(ps-lisp:function ,(ps-lisp:read-preserving-whitespace port))))
+    (list 'syntax (sub-read-carefully port))))
+
+(define-sharp-macro #\`
+  (lambda (c port)
+    c
+    (read-char port)
+    (list 'quasisyntax (sub-read-carefully port))))
+
+(define-sharp-macro #\,
+  (lambda (c port)
+    c
+    (read-char port)
+    (if (eqv? (peek-char port) #\@)
+	(begin (read-char port)
+	       (list 'unsyntax-splicing (sub-read-carefully port)))
+	(list 'unsyntax (sub-read-carefully port)))))

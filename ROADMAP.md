@@ -1,197 +1,128 @@
 # Roadmap
 
-What exists, what the tests say about it, and what to do next, in rough
-order of payoff. Numbers are from the test runners in `tests/` as of
-this writing; re-run them rather than trusting this file.
+Where things stand and what to do next, roughly in order. Numbers come
+from the runners in `tests/`; re-run them rather than trusting this file.
 
-| runner | what it checks | result |
-|---|---|---|
-| `tests/run-r5rs-tests.lisp` | chibi's R5RS suite | 183 / 188 |
-| `tests/run-syntax-case-tests.lisp` | hygiene, syntax-case, derived forms | 17 / 17 |
-| `tests/run-library-tests.lisp` | library layer, R7RS and R6RS front ends | 44 / 44 |
-| `tests/run-r7rs-tests.lisp` | chibi's R7RS suite (`-v` lists failures) | 775 / 842 ran, 114 forms unreadable |
-| `tests/check-r7rs-exports.py`, `check-r6rs-exports.py` | export tables vs. the PDFs | pass |
+| runner | result |
+|---|---|
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8689 pass, 213 fail; all 25 programs run to completion |
+| `tests/run-r7rs-tests.lisp` (chibi) | 868 of 924 |
+| `tests/run-r5rs-tests.lisp` (chibi) | 183 of 188 |
+| `tests/run-syntax-case-tests.lisp` | psyntax 17/17, old syntax-case 17/17 |
+| `tests/run-library-tests.lisp` | 44/44 |
+| `make -C contrib/cli test` | 10/10 |
 
-`(r7rs:print-coverage)`: 551 exports across the 16 R7RS-small libraries
-(counting `(scheme r5rs)` and names that appear in several libraries
-each time), 539 real, 12 stubs, 0 missing syntax. The stubs are all
-binary I/O: bytevector ports, `read-u8`/`peek-u8`/`u8-ready?`/`write-u8`,
-`read-bytevector(!)`/`write-bytevector`, `open-binary-{input,output}-file`.
+## Architecture now
 
-## Architecture in one paragraph
+```
+            R6RS source                       R7RS source        R5RS source
+                 |                                 |                  |
+             psyntax  (vendor/psyntax)       src/library.lisp         |
+                 |                          + native syntax-rules     |
+                 v                                 v                  v
+          core Scheme ------------------> translator (src/*.scm) ---> Common Lisp
+                 |
+      host globals: src/r6rs/*.lisp, src/r7rs/*, src/numbers.lisp
+```
 
-A library is a `program-env` + `interface` = a `structure` (module.scm),
-imports alias binding nodes, so variables and macros are shared, not
-copied (`src/library.lisp`). R7RS and R6RS each have an export table
-transcribed from the report and checked against the PDF, a set of Lisp
-primitives (`rts.lisp`), Scheme source (`base.scm`), and an `r*.lisp`
-that assembles them into an implementation environment and registers
-the libraries, stubbing procedures that aren't there yet. R7RS bodies
-are translated natively; R6RS bodies go through the vendored
-syntax-case first (`sc-eval`). Everything else below is a gap in that
-picture.
+psyntax is the front end for R6RS; R7RS and R5RS still go through the
+native classifier and its `syntax-rules`. Making psyntax the front end
+for everything is the next step.
 
-## R7RS: what the failing chibi tests are about
+## 1. R7RS on psyntax
 
-Grouped by root cause (run `tests/run-r7rs-tests.lisp -v`):
+R7RS libraries are the same thing as R6RS libraries with a different
+surface, and psyntax already has the library system. Plan:
 
-1. **The reader** (the 114 unreadable forms, plus several failures).
-   `read.scm` is a Scheme48-derived R5RS reader. Needed, all in
-   `read.scm` (then `regenerate-reader-writer`, see README): `#u8(...)`
-   (and `write` for bytevectors); `#!fold-case` / `#!no-fold-case`;
-   `#true` / `#false`; complex literals (`3+4i`, `+i`), `+inf.0`,
-   `-inf.0`, `+nan.0` (and masking float traps so they can be
-   produced); `0.` must read as a flonum (CL reads `0.` as the integer
-   0); `\x41;` escapes in strings and `|...|` symbols; datum labels
-   `#0=` / `#0#`; `#\x41`. Also **case sensitivity**: the reader folds,
-   R7RS doesn't (`(symbol=? 'a 'A)` is #t here; `(eq? 'bitBlt
-   (string->symbol "bitBlt"))` is #f). The as-typed-spelling stash
-   papers over printing but not identity; the real fix is a
-   case-preserving reader mode, which also affects how the translator
-   names CL symbols (see README "Known gaps").
-2. **Numeric fidelity of the R5RS base** (~20 failures, not R7RS
-   specific). `floor`/`ceiling`/`round`/`truncate` return integers for
-   floats (`(floor 3.5)` is `3`, should be `3.0`); `max`/`min` don't
-   propagate inexactness; `(integer? 3.0)`, `(rational? 1e15)`,
-   `(inexact? 3)` are wrong; `exp`/`log` use single floats (set
-   `*read-default-float-format*` to `double-float` or coerce);
-   `(char-numeric? #\0)` returns the digit weight rather than `#t`
-   (the `pred` integration in `builtin.scm` should return a boolean,
-   not a generalized one). Fix by overriding in `base.scm` first;
-   `builtin.scm` later.
-3. **`syntax-rules`** (`rules.scm`): custom ellipsis `(syntax-rules :::
-   ...)`, `(... ...)`, `_`, patterns after an ellipsis, vector
-   patterns, and `define-syntax`/`let-syntax` in internal-definition
-   position. The vendored syntax-case has the same pre-R6RS limits
-   except `(... ...)`. Options: extend `rules.scm`, or move R7RS over
-   to syntax-case once it has per-library scoping (below).
-4. **Ports**: binary ports and bytevector ports (the 12 stubs);
-   `read-error?` never true (the reader signals plain errors: give it a
-   condition type); `write`/`write-shared`/`write-simple` with datum
-   labels, and *no cycle detection at all* today -- `write` of a
-   circular list exhausts the heap (the runner survives this only
-   because it catches `serious-condition`).
-5. **Unicode string operations**: `string-upcase` etc. map character by
-   character, so `ß`, final sigma, `İ`, `ǰ` are wrong; `string-foldcase`
-   is just downcase. SBCL has `sb-unicode:` functions; other
-   implementations need a table.
-6. **Continuations**: `call/cc` is escape-only (block/return-from), so
-   re-entry fails (one chibi test, plus the generators-and-coroutines
-   idioms generally). `guard` here re-raises from the guard rather than
-   from the raise point because of this (documented in `base.scm`);
-   observable only for `raise-continuable` through a non-matching
-   guard.
-7. `include` / `include-ci` read relative to the process's working
-   directory, not the including file; `include-ci` doesn't fold case.
-   `load` takes no environment argument. `(scheme repl)`'s
-   `interaction-environment` is the plain user env, not one that has
-   the R7RS libraries imported.
+1. **Synthesized libraries.** psyntax's `install-library` (exported by
+   `(psyntax library-manager)`) can register a library whose exports are
+   host globals (`core-prim` bindings). Use it to build, at boot,
+   libraries over host procedures that aren't in psyntax's R6RS tables:
+   `(pseudoscheme r7rs-primitives)` and so on. This is the same
+   mechanism docs/interop.md needs for `(cl <package>)`, so build it once.
+2. **`define-library` → `library`.** Translate R7RS declarations
+   (`export` with `(rename a b)`, `import`, `begin`, `include`,
+   `include-ci`, `include-library-declarations`, `cond-expand`) into an
+   R6RS `library` form before psyntax sees it. Integers in library names
+   need care: R6RS reads a trailing list of integers as a version.
+3. **`(scheme base)` etc. as library source** over `(rnrs)` and the
+   primitives library, defining the R7RS-specific syntax with
+   `syntax-case`: R7RS's `define-record-type` (different syntax from
+   R6RS's), `parameterize` with converters, `define-values`,
+   `cond-expand` (procedural: it needs the feature list),
+   `syntax-error`, `guard` (R7RS = R6RS), `delay-force`. Where R6RS and
+   R7RS procedures differ under one name (`bytevector-copy!`'s argument
+   order, `error`'s signature, character-by-character
+   `string-upcase`), export the R7RS version under the standard name via
+   `(rename ...)`.
+4. **Custom ellipsis** `(syntax-rules ::: ...)`: add to psyntax's
+   `syntax-rules` by rewriting the rules (custom ellipsis → `...`,
+   literal `...` → `(... ...)`).
+5. The REPL (`r7rs:repl`, the CLI default) on psyntax's interaction
+   environment, as `--r6rs` already is.
+6. R5RS: run through psyntax's `(rnrs r5rs)` plus a folding reader, then
+   retire `src/library.lisp` and the native R7RS layer. The native
+   classifier stays as the translator's own bootstrap expander.
 
-## R6RS
+## 2. The remaining R6RS failures
 
-Done: `library` form (names, versions, version references, export
-renames, import sets incl. `for`/`library`), top-level programs,
-`(rnrs base)` (cross-checked), `(rnrs syntax-case)`, slices of
-`(rnrs exceptions)` and `(rnrs conditions)`, `guard`, `div`/`mod`
-family, `assert`, `letrec*`, `let-values`.
+Run `tests/run-r6rs-tests.lisp -v NAME` to see them. By program:
+bytevectors 70, io/ports 70, base 30, flonums 19, syntax-case 8,
+unicode 8, records/syntactic 4, exceptions 2, r5rs 2. Not yet triaged.
 
-To do, roughly by dependency:
+## 3. Lisp interop
 
-- **The rest of the standard libraries** -- they are in the separate
-  "Standard Libraries" report, which isn't in the repo; add it, then
-  transcribe its export lists the same way (a `tests/check-r6rs-*.py`
-  per library). `*planned-libraries*` in `src/r6rs/exports.lisp` names
-  them. Much is reuse: `(rnrs bytevectors)` over the R7RS bytevector
-  primitives (plus the `bytevector-*-ref/set!` integer and float
-  families), `(rnrs lists)` over the R5RS list procedures,
-  `(rnrs hashtables)` over CL hash tables (`make-hash-table` is already
-  used by `p-utils.scm`), `(rnrs unicode)` over item 5 above,
-  `(rnrs arithmetic fixnums/flonums/bitwise)` are CL one-liners,
-  `(rnrs sorting)` over `sort`/`stable-sort`, `(rnrs records *)` over
-  the record primitives in `src/r7rs/rts.lisp` (need parent types,
-  sealed/opaque, inspection), `(rnrs eval)`, `(rnrs programs)`,
-  `(rnrs control)` (`when unless do case-lambda`), `(rnrs r5rs)`, and
-  the composite `(rnrs)`.
-- **Compound conditions**. Today a condition is the R7RS error object
-  plus `who`/`kind`. R6RS conditions are bags of simple conditions with
-  a type hierarchy (`&condition &message &warning &serious &error
-  &violation &assertion &irritants &who &non-continuable &implementation-
-  restriction &lexical &syntax &undefined`), `condition`,
-  `simple-conditions`, `condition-predicate`, `condition-accessor`,
-  `define-condition-type`; and `raise` of a non-condition, `raise`
-  vs `raise-continuable` handler-return rules, `&non-continuable`.
-- **Reader syntax**: `[ ]` as parentheses, `#vu8(...)`, `#'x` `` #`x ``
-  `#,x` `#,@x` for `syntax`/`quasisyntax`/`unsyntax`, `#!r6rs`,
-  `#!fold-case`. R6RS is case-sensitive (item 1 above).
-- **Phases and `for`**: accepted and ignored. Real phase separation
-  needs the expander to be per-library (next section).
-- **identifier-syntax / `make-variable-transformer`**: the 1992
-  expander raises "invalid context for identifier" when a macro keyword
-  is used as a plain identifier; supporting identifier macros means a
-  change to `chi` in `expand.ss` and regenerating `expand.pp` (run
-  `expand.ss` through our own `sc-expand`, as the original `loadpp.ss`
-  does for Chez, and write the result out). `set!` forms with a macro
-  as target need the same.
-- **`datum->syntax` is only symbol-deep** (`implicit-identifier` per
-  symbol leaf) and `syntax-violation` takes no `subform` blame.
-- No R6RS test suite is in the repo. Write one from the report's own
-  examples, as the chibi suites do for R5RS/R7RS.
+See docs/interop.md. In order: `(cl <package>)` libraries with predicate
+wrapping and `#:keyword` syntax; Scheme libraries as Lisp packages
+(`use-library`); ASDF component types for Scheme sources; CLOS from
+Scheme.
 
-## syntax-case and the two macro worlds
+## 4. Compiled libraries
 
-The vendored expander keeps macros in one global table on symbol
-plists; the native classifier keeps them as nodes in per-environment
-tables. Consequences today: syntax-case macros ignore library
-boundaries (an exported macro is "exported" to everyone, can't be
-renamed/prefixed/`only`-restricted on import), and the native macros of
-`base.scm` (`parameterize`, `case-lambda`, ...) are invisible to
-syntax-case-expanded code. That's why R6RS re-defines the few it needs
-(`guard`, `let-values`, `letrec*`, `assert`) in `src/r6rs/macros.ss`.
+Every run re-expands the library sources it imports, and booting
+psyntax re-translates its 600 KB image (about 1.7 s; the command-line
+program avoids this by booting at build time). Fixes:
 
-Ways to unify, cheapest first:
-1. Key the plist table by (library, symbol): `put/get-global-definition-
-   hook` in `hooks-pseudoscheme.ss` already see every definition and
-   lookup; bind a "current library" special in `sc-eval` and look macros
-   up through the library's import graph. Gives per-library scoping and
-   import renaming without touching the translator.
-2. Teach the expander about native macro nodes: in `chi`, when the head
-   identifier has no syntax-case binding but the *library env* binds it
-   to a native macro, hand the form to the classifier's
-   `classify-macro-application` (explicit-renaming transformers: it
-   already takes `(proc form rename compare)`) and continue expanding
-   its output.
-3. Make syntax-case the front end of the translator: replace `alpha`'s
-   macro-expansion step with `expand-syntax`. This is the "right"
-   answer and the large one.
+- Translate `psyntax-pseudoscheme.pp` to a `.pso` and let ASDF compile
+  it, like the translator's own sources.
+- Serialize expanded libraries (export substitution, environment,
+  visit/invoke code) into compiled output, as Ikarus's later psyntax
+  does, so a compiled library re-installs without re-expansion. This is
+  also the ASDF story of docs/interop.md 2.3.
 
-## Libraries (`src/library.lisp`)
+## 5. Continuations
 
-- A library's body is evaluated one form at a time, in order, with no
-  separate pass over definitions first, so R6RS's two-phase body
-  treatment (collect definitions, then expand expressions) isn't
-  modeled; ordinary forward references between procedures work.
-- `import` at the REPL (R7RS 5.2) isn't wired up; use `psl:import-into`
-  on `ps:scheme-user-environment`. Likewise there's no `load`-a-file
-  entry point for R7RS programs beyond `psl:load-program`.
-- Library versions: parsed and matched, but registering a second
-  version of the same name replaces the first.
-- Re-defining a library creates a fresh environment and replaces the
-  registry entry; programs that imported the old one keep the old one.
+See docs/continuations.md: a pass framework between psyntax output and
+the translator, an opt-in full-continuation mode (CPS + trampoline as
+the reference, generalized stack inspection as the candidate fast
+path), barrier errors at Lisp frames, and one-shot continuations from
+threads in the default mode.
 
-## Bootstrapping without an existing Pseudoscheme
+## 6. Portability
 
-(the `todo` file's question: can `.pso` files be regenerated from
-Racket or Guile instead of requiring a working Pseudoscheme first?)
+Developed and tested on SBCL only. SBCL-specific today:
 
-Investigated and judged feasible but substantial -- not started.
-Findings: most of the translator's apparent CL-specificity
-(`generate.scm`, `builtin.scm`, `emit.scm`) is quoted data describing
-CL output, portable regardless of host (confirmed by inspection and a
-working Racket proof-of-concept of `p-record.scm`'s API using native
-Racket `struct`s). The real cost centers, none fatal but all real work:
-a portable record system (POC'd), a portable fluid/hash-table shim
-(easy), a from-scratch mini CL-"package" system (Pseudoscheme uses real
-CL packages pervasively for its naming strategy; neither Racket nor
-Guile has an equivalent), and a from-scratch CL-syntax-faithful printer
-for `.pso` output text. Multi-session scope; revisit if it becomes a
-priority.
+- Gray streams (`sb-gray`) for binary, custom and transcoded ports:
+  trivial-gray-streams elsewhere.
+- `sb-unicode` for case mapping, normalization and general categories.
+- `sb-kernel` float bit access for `bytevector-ieee-*`.
+- `sb-sys:make-fd-stream` for the standard binary ports, `sb-ext` for
+  infinities/NaN and float traps, and `sb-ext:with-timeout` in the R6RS
+  test runner.
+- The CLI Makefile accepts `LISP=ccl|ecl|clisp`, but only SBCL has been
+  tried.
+
+## 7. Smaller items
+
+- `write` doesn't detect cycles (datum labels); writing a circular
+  structure doesn't terminate. `equal?` does handle cycles.
+- psyntax's state (installed libraries, gensym counter) is global and
+  unlocked: one expanding thread at a time.
+- `include`/`include-ci` resolve relative to the working directory,
+  not the including file.
+- Remove `vendor/syntax-case/` and `pseudoscheme/syntax-case`, now
+  superseded by psyntax.
+- Bootstrapping without an existing Pseudoscheme (the `todo` file's
+  first item): judged feasible but substantial earlier (a portable
+  record system, a mini CL-package system, a `.pso` printer). psyntax
+  itself would be portable for free.

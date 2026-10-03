@@ -29,6 +29,10 @@
 (defmacro defprim (name lambda-list &body body)
   `(register-primitive ,name (lambda ,lambda-list ,@body)))
 
+(defun primitive (name)
+  (or (cdr (assoc name *primitives* :test #'string=))
+      (error "no R7RS primitive ~A" name)))
+
 (defun bool (x) (ps:true? x))
 
 (defun scheme-error (control &rest args)
@@ -314,13 +318,29 @@
   (print-unreadable-object (e stream)
     (format stream "Error ~A~{ ~S~}" (error-object-message e) (error-object-irritants e))))
 
+(defvar *condition-describer* nil
+  "If set, a function (object stream) that prints a raised object
+readably for humans and returns true, or returns NIL to decline.  (The
+R6RS layer describes its conditions.)")
+
 (define-condition uncaught-raise (error)
   ((payload :initarg :payload :reader uncaught-payload))
   (:report (lambda (c stream)
 	     (let ((p (uncaught-payload c)))
-	       (if (error-object-p p)
-		   (format stream "~A~{ ~S~}" (error-object-message p) (error-object-irritants p))
-		   (format stream "Uncaught exception: ~S" p))))))
+	       (cond ((and *condition-describer* (funcall *condition-describer* p stream)))
+		     ((error-object-p p)
+		      (format stream "~A~{ ~S~}" (error-object-message p) (error-object-irritants p)))
+		     (t (format stream "Uncaught exception: ~S" p)))))))
+
+(defvar *non-continuable-condition*
+  (lambda (obj)
+    (make-error-object "handler returned from non-continuable raise" (list obj)))
+  "What to raise when a handler returns from a non-continuable RAISE of
+OBJ.  (The R6RS layer replaces it with a &non-continuable condition.)")
+
+(defvar *foreign-condition-converter* #'identity
+  "Maps a Lisp error caught by WITH-EXCEPTION-HANDLER to the object the
+Scheme handler sees.  (The R6RS layer makes R6RS conditions of them.)")
 
 (defun raise-object (obj continuable)
   (if (null *handlers*)
@@ -331,9 +351,7 @@
 	(if continuable
 	    value
 	    (let ((*handlers* outer))
-	      (raise-object (make-error-object "handler returned from non-continuable raise"
-					       (list obj))
-			    nil))))))
+	      (raise-object (funcall *non-continuable-condition* obj) nil))))))
 
 (defprim "raise" (obj) (raise-object obj nil))
 (defprim "raise-continuable" (obj) (raise-object obj t))
@@ -352,12 +370,10 @@
 			      ;; installed, as for a RAISE; falling out of the
 			      ;; handler is the same secondary error.
 			      (unless (typep c 'uncaught-raise)
-				(let ((*handlers* outer))
-				  (funcall handler c)
-				  (raise-object
-				   (make-error-object
-				    "handler returned from non-continuable raise" (list c))
-				   nil))))))
+				(let ((*handlers* outer)
+				      (obj (funcall *foreign-condition-converter* c)))
+				  (funcall handler obj)
+				  (raise-object (funcall *non-continuable-condition* obj) nil))))))
 	(funcall thunk)))))
 
 (defprim "error-object?" (x)
@@ -452,7 +468,13 @@
   (uiop:quit (cond ((eq code t) 0) ((eq code ps:false) 1) ((integerp code) code) (t 0))))
 (defprim "emergency-exit" (&optional (code 0))
   (uiop:quit (cond ((eq code t) 0) ((eq code ps:false) 1) ((integerp code) code) (t 0))))
-(defprim "command-line" () (cons "pseudoscheme" (mapcar #'identity (uiop:command-line-arguments))))
+(defvar *command-line* nil
+  "What COMMAND-LINE returns, when set (the command-line program sets it
+to the script name and its arguments); else the process's arguments.")
+
+(defprim "command-line" ()
+  (or *command-line*
+      (cons "pseudoscheme" (copy-list (uiop:command-line-arguments)))))
 (defprim "get-environment-variable" (name)
   (or (uiop:getenv name) ps:false))
 (defprim "get-environment-variables" ()

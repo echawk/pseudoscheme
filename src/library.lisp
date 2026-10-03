@@ -33,7 +33,7 @@
   (:export "LIBRARY" "LIBRARY-NAME" "FIND-LIBRARY" "REGISTER-LIBRARY"
 	   "DEFINE-LIBRARY-FORM" "R6RS-LIBRARY-FORM" "READ-FORMS-FROM-FILE"
 	   "KEYWORD-HEAD-P" "BASE-STRUCTURE" "TR" "SNAME" "LIBRARY-KEY-OF" "IMPORT-INTO" "RESOLVE-IMPORT-SET"
-	   "SELECT-COND-EXPAND-CLAUSE" "RUN-PROGRAM" "LOAD-PROGRAM" "PROGRAM-ENVIRONMENT" "*LIBRARY-EVALUATOR*"
+	   "SELECT-COND-EXPAND-CLAUSE" "*LIBRARY-PATH*" "RUN-PROGRAM" "LOAD-PROGRAM" "PROGRAM-ENVIRONMENT" "*LIBRARY-EVALUATOR*"
 	   "*SCHEME-FEATURES*" "FEATURE-SATISFIED-P" "SCHEME-SYMBOL"
 	   "MAKE-LIBRARY-FROM-ENV" "LIBRARY-EXPORT-NAMES"
 	   "NEW-LIBRARY-ENV" "BINDING-DEFINED-P" "LIBRARY-ERROR"
@@ -149,11 +149,44 @@
 	 (has-vref (listp last))
 	 (base (if has-vref (butlast name) name))
 	 (vref (if has-vref last nil))
-	 (lib (gethash (library-key-of base) *libraries*)))
+	 (lib (or (gethash (library-key-of base) *libraries*)
+		  (and (load-library-from-path base)
+		       (gethash (library-key-of base) *libraries*)))))
     (cond ((and lib (version-matches-p vref (or (library-version lib) '())))
 	   lib)
 	  (errorp (lib-error "No such library: ~S" name))
 	  (t nil))))
+
+;;; Libraries in files: (foo bar) is looked for as foo/bar.sld, .sls,
+;;; .scm in each directory of *LIBRARY-PATH*, and the file's
+;;; define-library forms are evaluated.
+
+(defvar *library-path* (list "./")
+  "Directories searched, in order, for library source files.")
+
+(defparameter *library-extensions* '("sld" "sls" "scm"))
+
+(defvar *loading-libraries* '()
+  "Keys of libraries being loaded, to catch circular imports.")
+
+(defun library-file (name)
+  (let ((stem (format nil "~{~A~^/~}" (mapcar #'sname name))))
+    (loop for dir in *library-path*
+	  thereis (loop for ext in *library-extensions*
+			for path = (merge-pathnames (format nil "~A.~A" stem ext) (pathname dir))
+			when (probe-file path) return path))))
+
+(defun load-library-from-path (name)
+  (let ((key (library-key-of name))
+	(file (library-file name)))
+    (when file
+      (when (member key *loading-libraries* :test #'equal)
+	(lib-error "circular import of library ~S" name))
+      (let ((*loading-libraries* (cons key *loading-libraries*)))
+	(dolist (form (read-forms-from-file file))
+	  (when (keyword-head-p form "define-library")
+	    (define-library-form form))))
+      t)))
 
 ;;; ------------------------------------------------------------------
 ;;; Bindings: nodes, definedness, installing variables
