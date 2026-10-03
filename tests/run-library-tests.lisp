@@ -45,9 +45,9 @@
 		 (format t "~&FAIL ~A~%  got:  ~S~%  want: ~S~%" name got want)))))))
 
 (defun r7 (source)
-  "Run SOURCE (a whole R7RS program: an import form, then body) and
-return the value of the last form."
-  (values (psl:run-program (read-all-from-string source))))
+  "Run SOURCE (any define-library forms, then an R7RS program) on psyntax
+and return the program's last value."
+  (r7rs:eval source))
 
 (defun r6 (source)
   "Install any (library ...) forms in SOURCE, then run the (import ...)

@@ -369,6 +369,9 @@
 (defprim "standard-error-port" ()
   (make-instance 'standard-binary-output-port :stream (fd-stream 2 :output)))
 
+(defprim "buffer-mode?" (x)
+  (ps:true? (and (symbolp x) (member (ps:scheme-symbol-name x) '("none" "line" "block") :test #'string=))))
+
 (defprim "output-port-buffer-mode" (port) (declare (ignore port)) (ps:intern-scheme-symbol "block"))
 
 ;;; ------------------------------------------------------------------

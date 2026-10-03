@@ -15,7 +15,7 @@
 ;;;; Scheme uses: () is NIL, #t is T, #f is PS:FALSE (test with
 ;;;; R6RS:TRUE-P), procedures are functions, strings are strings.
 ;;;;
-;;;; R6RS evaluation goes through psyntax.  A program (text beginning with
+;;;; R6RS and R7RS evaluation go through psyntax.  A program (text beginning with
 ;;;; an `import' form) runs as an R6RS top-level program; anything else is
 ;;;; evaluated form by form at the REPL top level, where every binding of
 ;;;; (pseudoscheme) -- all of R6RS plus extensions -- is visible and
@@ -81,7 +81,9 @@ copied recursively."
 ;;; R6RS: psyntax
 
 (defun ensure-psyntax ()
-  (unless psx:*host* (psx::boot)))
+  ;; One host serves R6RS and R7RS: this boots psyntax and installs the
+  ;; R7RS and compatibility libraries too.
+  (ps-r7rs::boot))
 
 (defun r6rs-eval-forms (forms)
   (ensure-psyntax)
@@ -101,35 +103,25 @@ copied recursively."
   (psx:load-file path))
 
 ;;; ------------------------------------------------------------------
-;;; R7RS: the library layer of src/library.lisp for now (moving onto
-;;; psyntax is on the roadmap)
-
-(defvar *r7rs-env* nil)
-
-(defun r7rs-env ()
-  (or *r7rs-env*
-      (setq *r7rs-env*
-	    (psl:program-environment
-	     (cons (ps:intern-scheme-symbol "import")
-		   (loop for (name) in ps-r7rs:*standard-libraries*
-			 unless (equal (psl:library-key-of name) '("scheme" "r5rs"))
-			   collect (mapcar (lambda (w) (ps:intern-scheme-symbol (psl:sname w)))
-					   name)))))))
+;;; R7RS: psyntax too (src/r7rs/front.lisp)
 
 (defun r7rs-eval-forms (forms)
+  (ps-r7rs::boot)
   (cond ((null forms) ps:unspecific)
 	((or (psl:keyword-head-p (car forms) "import")
-	     (psl:keyword-head-p (car forms) "define-library"))
-	 (values (psl:run-program forms)))
+	     (psl:keyword-head-p (car forms) "define-library")
+	     (psl:keyword-head-p (car forms) "library"))
+	 (ps-r7rs::eval-forms forms))
 	(t (let ((v ps:unspecific))
 	     (dolist (form forms v)
-	       (setq v (ps:scheme-eval form (r7rs-env))))))))
+	       (setq v (ps-r7rs::eval-at-repl form)))))))
 
 (defun r7rs:eval (source)
   (r7rs-eval-forms (as-forms source)))
 
 (defun r7rs:load (path)
-  (r7rs-eval-forms (psl:read-forms-from-file path)))
+  (ps-r7rs::boot)
+  (ps-r7rs::load-file path))
 
 ;;; ------------------------------------------------------------------
 ;;; R5RS: the classic translator, in the R5RS user environment, with
@@ -186,7 +178,8 @@ function of one form), print the results.  ,q or end of file exits."
   (repl-loop (lambda (form) (r6rs-eval-forms (list form))) :prompt "r6rs> "))
 
 (defun r7rs:repl ()
-  (repl-loop (lambda (form) (r7rs-eval-forms (list form))) :prompt "r7rs> "))
+  (ps-r7rs::boot)
+  (repl-loop (lambda (form) (ps-r7rs::eval-at-repl form)) :prompt "r7rs> "))
 
 (defun r5rs:repl ()
   (let ((ps:*fold-case* t))

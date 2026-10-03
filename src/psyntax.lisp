@@ -23,8 +23,9 @@
   (:nicknames "PSX")
   (:use "COMMON-LISP")
   (:export "*HOST*" "EVAL-PROGRAM" "EVAL-LIBRARY" "EVAL-TOP-LEVEL"
-	   "EVAL-FORMS" "LOAD-FILE" "EXPAND" "REBUILD" "*LIBRARY-PATH*"
-	   "DEFHOST" "HOST-REF" "HOST-SET!" "MISSING-PRIMITIVES"))
+	   "EVAL-FORMS" "LOAD-FILE" "EXPAND" "REBUILD" "*LIBRARY-PATH*" "*SYSTEM-LIBRARY-PATH*"
+	   "DEFHOST" "HOST-REF" "HOST-SET!" "MISSING-PRIMITIVES"
+	   "TABLE-EXPORTS" "*LIBRARY-FORM-HOOK*" "*LIBRARY-EXTENSIONS*" "CANDIDATE-FILES" "*IMPLEMENTATION-VARIANTS*" "LOCATION" "HOST-EVAL"))
 
 (in-package "PSEUDOSCHEME-PSYNTAX")
 
@@ -149,6 +150,8 @@ see REBUILD)."
 		   "(define ($delay thunk) (delay-force (make-promise (thunk))))")))
   (when (boundp (location (sym "psyntax:file-locator")))
     (funcall (host-ref "psyntax:file-locator") #'locate-library-file))
+  (when (boundp (location (sym "psyntax:library-locator")))
+    (funcall (host-ref "psyntax:library-locator") #'locate-library))
   *host*)
 
 ;;; ------------------------------------------------------------------
@@ -158,7 +161,45 @@ see REBUILD)."
   "Directories searched, in order, for library source files: (foo bar)
 is looked for as foo/bar.sls, then .ss, .sld and .scm, in each.")
 
+(defvar *system-library-path*
+  (list (cons "srfi" (namestring (asdf:system-relative-pathname :pseudoscheme "src/srfi/"))))
+  "Libraries that ship with Pseudoscheme, searched after *LIBRARY-PATH*.
+An entry (PREFIX . DIR) roots names beginning with PREFIX at DIR: (srfi
+1) is src/srfi/1.sld.")
+
 (defparameter *library-extensions* '("sls" "ss" "sld" "scm"))
+
+(defparameter *implementation-variants* '("pseudoscheme" nil "chezscheme" "ikarus")
+  "Implementation-specific variants of a library file to try, in order:
+foo.pseudoscheme.sls first, then the generic foo.sls (NIL), then other
+systems' variants, as Akku lays them out.  Chez's is next because
+nearly every Akku package has one, and src/compat/ supplies the
+(chezscheme) library such variants import; Ikarus is psyntax-based.")
+
+(defun native-path (string)
+  "STRING as a pathname, with no CL wildcard syntax (* ? [ in Scheme
+file names, like and-let*.sls, are just characters)."
+  (uiop:parse-native-namestring string))
+
+(defun candidate-files (stem &optional (dirs (append *library-path* *system-library-path*)))
+  "Files that might hold the library whose name gives STEM (foo/bar), in
+search order: each variant (see *IMPLEMENTATION-VARIANTS*) in every
+directory before the next variant, so a generic file anywhere on the
+path beats another system's variant.  A (PREFIX . DIR) entry of DIRS
+applies only to stems under PREFIX (see *SYSTEM-LIBRARY-PATH*)."
+  (let ((roots (loop for d in (if (listp dirs) dirs (list dirs))
+		     for (prefix . dir) = (if (consp d) d (cons nil d))
+		     for p = (and prefix (concatenate 'string prefix "/"))
+		     when (or (null p) (and (> (length stem) (length p))
+					    (string= p stem :end2 (length p))))
+		       collect (cons (namestring (uiop:ensure-directory-pathname dir))
+				     (if p (subseq stem (length p)) stem)))))
+    (loop for variant in *implementation-variants*
+	  append (loop for (dir . stem) in roots
+		       append (if variant
+				  (list (native-path (format nil "~A~A.~A.sls" dir stem variant)))
+				  (loop for ext in *library-extensions*
+					collect (native-path (format nil "~A~A.~A" dir stem ext))))))))
 
 (defun library-name-file-stem (name)
   "(foo bar (1)) -> \"foo/bar\": the identifiers of a library name,
@@ -168,15 +209,28 @@ version dropped."
 		while (symbolp part)
 		collect (ps:scheme-symbol-name part))))
 
+(defvar *library-form-hook* nil
+  "If set, a function from a library name to its (R6RS library) form or
+NIL; used before the plain file search, e.g. to translate R7RS
+define-library forms (src/r7rs/front.lisp).")
+
+(defun locate-library (name)
+  "psyntax's LIBRARY-LOCATOR: the form defining library NAME, or #f."
+  (or (and *library-form-hook* (funcall *library-form-hook* name))
+      (let ((file (locate-library-file name)))
+	(and (stringp file)
+	     (with-open-file (in file) (funcall ps:*scheme-read* in))))
+      ps:false))
+
 (defun locate-library-file (name)
   "psyntax's FILE-LOCATOR: a file name for library NAME, or #f."
   (let ((stem (library-name-file-stem name)))
-    (or (loop for dir in *library-path*
-	      thereis (loop for ext in *library-extensions*
-			    for path = (merge-pathnames (format nil "~A.~A" stem ext)
-							(pathname dir))
-			    when (probe-file path) return (namestring path)))
+    (or (loop for path in (candidate-files stem)
+	      when (probe-file path) return (namestring path))
 	ps:false)))
+
+;;; ------------------------------------------------------------------
+;;; Entry points
 
 (defun entry (name)
   (let ((loc (location (sym name))))
@@ -185,8 +239,6 @@ version dropped."
               vendor/psyntax/psyntax/main.ss -- run (psx:rebuild)" name))
     (symbol-value loc)))
 
-;;; ------------------------------------------------------------------
-;;; Entry points
 
 (defun eval-program (forms)
   "Run an R6RS top-level program: FORMS begin with (import ...)."
@@ -233,6 +285,21 @@ SEED: bootstrap from the original Scheme48 image instead of our own."
     (format t "~&Rebuilt psyntax in ~,1Fs~%"
 	    (/ (- (get-internal-real-time) start) internal-time-units-per-second)))
   (boot))
+
+;;; ------------------------------------------------------------------
+;;; psyntax's identifier table
+
+(defun table-exports (keys)
+  "Names (strings) the build script's identifier->library-map sends to
+any of the library KEYS (strings: \"r\" for (rnrs), \"r5\", ...)."
+  (let* ((forms (read-file-forms (vendor-file "psyntax-buildscript.ss")))
+	 (def (find-if (lambda (f)
+			 (and (consp f) (consp (cdr f)) (symbolp (cadr f))
+			      (string= (ps:scheme-symbol-name (cadr f)) "identifier->library-map")))
+		       forms)))
+    (loop for (name . libs) in (cadr (caddr def))
+	  when (some (lambda (k) (member (ps:scheme-symbol-name k) keys :test #'string=)) libs)
+	    collect (ps:scheme-symbol-name name))))
 
 ;;; ------------------------------------------------------------------
 ;;; Diagnostics

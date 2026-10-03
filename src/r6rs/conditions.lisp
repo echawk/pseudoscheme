@@ -179,7 +179,7 @@
 (defun foreign-condition (c)
   "An R6RS condition standing for the Lisp condition C, so handlers in
 Scheme see something CONDITION? and MESSAGE-CONDITION? are true of."
-  (let ((message (remove #\Newline (princ-to-string c))))
+  (multiple-value-bind (message irritants) (foreign-condition-message c)
     (apply (prim "condition")
 	   (append
 	    (typecase c
@@ -189,7 +189,26 @@ Scheme see something CONDITION? and MESSAGE-CONDITION? are true of."
 	      (reader-error (list (funcall (prim "make-lexical-violation"))))
 	      (t (list (funcall (prim "make-assertion-violation")))))
 	    (list (funcall (prim "make-message-condition") message)
-		  (funcall (prim "make-irritants-condition") '()))))))
+		  (funcall (prim "make-irritants-condition") irritants))))))
+
+(defun foreign-condition-message (c)
+  "The message and irritants a Scheme handler sees for Lisp condition C.
+Applying a non-procedure shows up in Lisp as calling an undefined
+function (#f is a symbol) or as a type error expecting a function."
+  (flet ((plain () (values (remove #\Newline (princ-to-string c)) '())))
+    (typecase c
+      (undefined-function
+       (if (eq (cell-error-name c) ps:false)
+	   (values "attempt to apply non-procedure" (list ps:false))
+	   (plain)))
+      (type-error
+       (if (subtypep 'function (type-error-expected-type c))
+	   (values "attempt to apply non-procedure" (list (type-error-datum c)))
+	   (plain)))
+      ;; THROW to a dead tag: see PS:CALL-WITH-ESCAPE
+      (control-error
+       (values "continuation invoked after its extent ended (continuations are escape-only)" '()))
+      (t (plain)))))
 
 (defun describe-condition (c stream)
   "Print condition C the way a REPL reports an uncaught one:

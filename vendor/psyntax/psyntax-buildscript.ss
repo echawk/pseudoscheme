@@ -77,6 +77,7 @@
     (identifier-syntax   (macro . identifier-syntax))
     (let                 (macro . let))
     (let*                (macro . let*))
+    (let*-values         (macro . let*-values))   ; PSEUDOSCHEME
     (cond                (macro . cond))
     (do                  (macro . do))
     (and                 (macro . and))
@@ -950,6 +951,9 @@
     (eval-core                $boot)
     (pretty-print             $boot)
     (module                   cm)
+    ;; PSEUDOSCHEME: so (import ...) is available at the REPL (it was in
+    ;; no library), via (psyntax modules) and so (pseudoscheme)
+    (import                   cm)
     (syntax-dispatch ) ; only goes to $all
     ;; PSEUDOSCHEME: the run-time values behind the $core-rtd bindings
     ;; above (the comment there: "the implementation must export the

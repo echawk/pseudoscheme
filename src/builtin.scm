@@ -63,14 +63,8 @@
       (cadddr                         (fun ps-lisp:cadddr))
       (caddr                          (fun ps-lisp:caddr))
       (cadr                           (fun ps-lisp:cadr))
-      (call-with-current-continuation
-	  (subst (proc)
-	    (ps-lisp:block continuation
-	      (ps-lisp:funcall proc
-		  (ps-lisp:function
-		    (ps-lisp:lambda (ps-lisp:&rest vals)
-		      (ps-lisp:return-from continuation
-					   (ps-lisp:values-list vals))))))))
+      ;; Escaping only; see rts.lisp for why not BLOCK/RETURN-FROM.
+      (call-with-current-continuation (fun ps:call-with-escape))
       (call-with-input-file
 	  (lambda (string proc)
 	    (ps-lisp:with-open-file (port (ps-lisp:merge-pathnames string)

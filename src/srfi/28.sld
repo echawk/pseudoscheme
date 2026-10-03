@@ -1,0 +1,17 @@
+;;; SRFI 28: basic format strings.  Written for Pseudoscheme.
+(define-library (srfi 28)
+  (export format)
+  (import (scheme base) (scheme write))
+  (begin
+    (define (format fmt . args)
+      (let ((out (open-output-string)) (n (string-length fmt)))
+        (let loop ((i 0) (args args))
+          (cond ((>= i n) (get-output-string out))
+                ((and (char=? (string-ref fmt i) #\~) (< (+ i 1) n))
+                 (case (string-ref fmt (+ i 1))
+                   ((#\a) (display (car args) out) (loop (+ i 2) (cdr args)))
+                   ((#\s) (write (car args) out) (loop (+ i 2) (cdr args)))
+                   ((#\%) (newline out) (loop (+ i 2) args))
+                   ((#\~) (write-char #\~ out) (loop (+ i 2) args))
+                   (else (error "format: unknown directive" (string-ref fmt (+ i 1))))))
+                (else (write-char (string-ref fmt i) out) (loop (+ i 1) args))))))))

@@ -84,7 +84,12 @@
 	finally (return ps:false)))
 
 (defprim "memp" (proc list) (mem-tail (lambda (x) (truthy (funcall proc x))) list))
-(defprim "member" (obj list) (mem-tail (lambda (x) (ps:scheme-equal-p obj x)) list))
+(defprim "member" (obj list &optional compare)
+  ;; R7RS's optional third argument; R6RS has two.
+  (mem-tail (if compare
+		(lambda (x) (truthy (funcall compare obj x)))
+		(lambda (x) (ps:scheme-equal-p obj x)))
+	    list))
 (defprim "memv" (obj list) (mem-tail (lambda (x) (eql obj x)) list))
 (defprim "memq" (obj list) (mem-tail (lambda (x) (eq obj x)) list))
 
@@ -94,7 +99,11 @@
     (when (funcall pred (car pair)) (return pair))))
 
 (defprim "assp" (proc alist) (ass (lambda (x) (truthy (funcall proc x))) alist))
-(defprim "assoc" (obj alist) (ass (lambda (x) (ps:scheme-equal-p obj x)) alist))
+(defprim "assoc" (obj alist &optional compare)
+  (ass (if compare
+	   (lambda (x) (truthy (funcall compare obj x)))
+	   (lambda (x) (ps:scheme-equal-p obj x)))
+       alist))
 (defprim "assv" (obj alist) (ass (lambda (x) (eql obj x)) alist))
 (defprim "assq" (obj alist) (ass (lambda (x) (eq obj x)) alist))
 

@@ -1,0 +1,83 @@
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER -*-
+
+;;;; Can Pseudoscheme load real-world Scheme libraries?
+;;;;
+;;;; Point this at a directory of library sources laid out the R6RS/R7RS
+;;;; way -- (foo bar) in foo/bar.sls or .sld -- such as the .akku/lib of a
+;;;; project where `akku install` has run, or a snow-chibi install
+;;;; directory.  Every portable library file in it (implementation-specific
+;;;; variants like foo.chezscheme.sls are skipped) is imported in turn, in
+;;;; one psyntax host with the R7RS libraries installed; the result is a
+;;;; list of what loads and why the rest don't.
+;;;;
+;;;; Usage:
+;;;;   sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
+;;;;        --script tests/run-library-corpus.lisp DIR [-v]
+
+(require :asdf)
+
+(defvar *root*
+  (let ((here (make-pathname :name nil :type nil
+			     :defaults (or *load-truename* *load-pathname*))))
+    (truename (merge-pathnames (make-pathname :directory '(:relative :up)) here))))
+(pushnew *root* asdf:*central-registry* :test #'equal)
+
+(let ((*standard-output* (make-broadcast-stream))
+      (*error-output* (make-broadcast-stream)))
+  (handler-bind ((warning #'muffle-warning))
+    (asdf:load-system :pseudoscheme/api)))
+
+(ps:disable-float-traps)
+
+(defparameter *args* (cdr (member "--end-toplevel-options" sb-ext:*posix-argv* :test #'string=)))
+(defparameter *verbose* (member "-v" sb-ext:*posix-argv* :test #'string=))
+(defparameter *dir*
+  (or (find-if (lambda (a) (char/= (char a 0) #\-)) (cdr sb-ext:*posix-argv*))
+      (error "usage: run-library-corpus.lisp DIR")))
+
+(defparameter *implementations*
+  '("chezscheme" "guile" "ikarus" "mosh" "ypsilon" "larceny" "ironscheme" "vicare"
+    "sagittarius" "loko" "digamma" "racket" "mzscheme" "chibi" "gauche" "chicken"
+    "gambit" "cyclone" "kawa" "mit" "s7" "stklos" "capy" "foment" "skint" "nmosh"
+    "ypsilon" "unsyntax" "ufo")
+  "Second extensions marking implementation-specific variants.")
+
+(defun portable-file-p (path)
+  (let* ((name (pathname-name path))
+	 (dot (position #\. name :from-end t)))
+    (and (member (pathname-type path) '("sls" "sld") :test #'string=)
+	 (not (and dot (member (subseq name (1+ dot)) *implementations* :test #'string=))))))
+
+(defun library-names-in (path)
+  "Names of the libraries a file defines (R6RS library or R7RS define-library)."
+  (handler-case
+      (let ((forms (ps-r7rs::read-forms path)))
+	(loop for f in forms
+	      when (or (ps-r7rs::head-is f "library") (ps-r7rs::head-is f "define-library"))
+		collect (ps-r7rs::library-name-of f)))
+    (error () nil)))
+
+(defun try-import (name)
+  (handler-case
+      (progn
+	(ps-r7rs::eval-forms (list (list (ps:intern-scheme-symbol "import") name)))
+	:ok)
+    (serious-condition (e)
+      (string-trim '(#\Space #\Newline)
+		   (substitute #\Space #\Newline (princ-to-string e))))))
+
+(let* ((dir (uiop:ensure-directory-pathname *dir*))
+       (files (remove-if-not #'portable-file-p (directory (merge-pathnames "**/*.*" dir))))
+       (names (remove-duplicates (loop for f in files append (library-names-in f)) :test #'equal))
+       (ok 0) (failures '()))
+  (setf psx:*library-path* (list (namestring dir)))
+  (ps-r7rs::boot)
+  (dolist (name (sort names #'string< :key (lambda (n) (format nil "~S" n))))
+    (let ((result (try-import name)))
+      (cond ((eq result :ok) (incf ok)
+	     (when *verbose* (format t "~&ok   ~A~%" (ps-r7rs::write-scheme-to-string name))))
+	    (t (push (cons name result) failures)
+	       (format t "~&FAIL ~A~%     ~A~%" (ps-r7rs::write-scheme-to-string name)
+		       (subseq result 0 (min 200 (length result))))))
+      (finish-output)))
+  (format t "~&~%~D of ~D libraries load.~%" ok (length names)))

@@ -345,3 +345,13 @@ lower case (R5RS behavior, or after #!fold-case).")
     (format port "~&")
     (print obj port)
     (values)))
+
+; CALL-WITH-CURRENT-CONTINUATION: escaping only.  CATCH/THROW with a fresh
+; tag rather than BLOCK/RETURN-FROM: calling the escape procedure once its
+; extent has ended then signals a CONTROL-ERROR (CL requires THROW to),
+; where RETURN-FROM to a dead block is undefined and can corrupt the image.
+
+(defun call-with-escape (proc)
+  (let ((tag (list 'continuation)))
+    (catch tag
+      (funcall proc (lambda (&rest vals) (throw tag (values-list vals)))))))

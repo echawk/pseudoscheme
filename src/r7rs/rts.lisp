@@ -408,7 +408,21 @@ Scheme handler sees.  (The R6RS layer makes R6RS conditions of them.)")
     (setf (gethash param *parameter-states*) state)
     param))
 
-(defprim "%parameterize" (params values thunk)
+(defvar *port-parameters* '()
+  "(procedure . special variable) for the procedures that act as port
+parameters: current-input-port and friends, which are host procedures
+returning a CL stream variable.  Filled in at boot, when the procedure
+objects are known.")
+
+(defun parameterize* (params values thunk)
+  ;; current-input-port and friends: rebind their CL stream variables.
+  (let ((port (position-if (lambda (p) (assoc p *port-parameters*)) params)))
+    (when port
+      (return-from parameterize*
+	(progv (list (cdr (assoc (nth port params) *port-parameters*))) (list (nth port values))
+	  (parameterize* (append (subseq params 0 port) (nthcdr (1+ port) params))
+			 (append (subseq values 0 port) (nthcdr (1+ port) values))
+			 thunk)))))
   ;; Converters run before any parameter is rebound (R7RS 4.2.6).
   (let* ((states (mapcar (lambda (p)
 			   (or (gethash p *parameter-states*)
@@ -424,6 +438,9 @@ Scheme handler sees.  (The R6RS layer makes R6RS conditions of them.)")
 	 (progn (mapc (lambda (s v) (setf (parameter-state-value s) v)) states new)
 		(funcall thunk))
       (mapc (lambda (s v) (setf (parameter-state-value s) v)) states old))))
+
+(defprim "%parameterize" (params values thunk)
+  (parameterize* params values thunk))
 
 ;;; ------------------------------------------------------------------
 ;;; Ports and files (the parts that need CL streams)

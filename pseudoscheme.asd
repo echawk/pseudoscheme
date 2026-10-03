@@ -121,26 +121,14 @@
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator
 	       :pseudoscheme/evaluator :pseudoscheme/reader))
 
-;;; Dybvig & Hieb's syntax-case (vendored under vendor/syntax-case/),
-;;; loaded into the Scheme user environment.  Provides SC:SC-EVAL /
-;;; SC:SC-LOAD, which expand a form hygienically before translating it;
-;;; see src/syntax-case.lisp.  Needs the dedicated reader (the vendored
-;;; sources use #| |# comments and the `...' identifier).
-(defsystem :pseudoscheme/syntax-case
+;;; Building and filling program environments from Lisp; see
+;;; src/environments.lisp.
+(defsystem :pseudoscheme/environments
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator
 	       :pseudoscheme/evaluator :pseudoscheme/reader)
-  :components ((:file "syntax-case")))
-
-;;; Libraries and top-level programs (R6RS ch. 7-8, R7RS 5.1-5.6) over
-;;; module.scm's program-env/structure machinery; see src/library.lisp.
-(defsystem :pseudoscheme/library
-  :author "Jonathan Rees"
-  :pathname #p"src/"
-  :depends-on (:pseudoscheme/rts :pseudoscheme/translator
-	       :pseudoscheme/evaluator :pseudoscheme/reader)
-  :components ((:file "library")))
+  :components ((:file "environments")))
 
 ;;; R6RS, with psyntax (vendor/psyntax/) as the front end: psyntax does
 ;;; all expansion and provides every standard library's namespace; the
@@ -149,7 +137,7 @@
 (defsystem :pseudoscheme/r6rs
   :author "Jonathan Rees"
   :pathname #p"src/"
-  :depends-on (:pseudoscheme/r7rs)
+  :depends-on (:pseudoscheme/r7rs-runtime)
   :components ((:module "r6rs"
 		:components ((:file "rts")
 			     (:file "lists" :depends-on ("rts"))
@@ -159,7 +147,12 @@
 			     (:file "arithmetic" :depends-on ("conditions"))
 			     (:file "bytevectors" :depends-on ("conditions"))
 			     (:file "enums" :depends-on ("conditions"))
-			     (:file "ports" :depends-on ("bytevectors"))))
+			     (:file "ports" :depends-on ("bytevectors"))
+			     (:file "r7rs-compat" :depends-on ("ports"))))
+	       (:module "compat"
+		:depends-on ("r6rs" "psyntax")
+		:components ((:file "chezscheme-host")
+			     (:static-file "chezscheme.scm")))
 	       (:file "psyntax" :depends-on ("r6rs"))))
 
 ;;; The Common Lisp face: packages R5RS, R6RS and R7RS, each with EVAL,
@@ -167,17 +160,27 @@
 (defsystem :pseudoscheme/api
   :author "Jonathan Rees"
   :pathname #p"src/"
-  :depends-on (:pseudoscheme/r6rs :pseudoscheme/r7rs)
+  :depends-on (:pseudoscheme/r7rs)
   :components ((:file "api")))
 
-;;; R7RS-small, on top of the library layer.  See src/r7rs/*.
-(defsystem :pseudoscheme/r7rs
+;;; The R7RS procedures (and the native R7RS environment they're built
+;;; in, which the psyntax host copies).  See src/r7rs/*.
+(defsystem :pseudoscheme/r7rs-runtime
   :author "Jonathan Rees"
   :pathname #p"src/r7rs/"
-  :depends-on (:pseudoscheme/library)
+  :depends-on (:pseudoscheme/environments)
   :components ((:file "exports")
 	       (:file "rts" :depends-on ("exports"))
 	       (:file "r7rs" :depends-on ("exports" "rts"))))
+
+;;; R7RS-small on psyntax: define-library, the (scheme ...) libraries,
+;;; programs and the REPL.  See src/r7rs/front.lisp.
+(defsystem :pseudoscheme/r7rs
+  :author "Jonathan Rees"
+  :pathname #p"src/r7rs/"
+  :depends-on (:pseudoscheme/r6rs)
+  :components ((:static-file "syntax.sls")
+	       (:file "front")))
 
 ;;; Regenerates translator.files' .pso bootstrap artifacts from their
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.

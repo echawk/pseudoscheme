@@ -72,8 +72,7 @@ In the REPL, ,q quits.
 
 (defun add-library-path (dir)
   (let ((dir (namestring (uiop:ensure-directory-pathname (uiop:parse-native-namestring dir)))))
-    (setf psl:*library-path* (append psl:*library-path* (list dir))
-	  psx:*library-path* (append psx:*library-path* (list dir)))))
+    (setf psx:*library-path* (append psx:*library-path* (list dir)))))
 
 (defun parse-arguments (args)
   "Returns (values actions file file-args interactive), ACTIONS being a
@@ -140,5 +139,4 @@ list of (:eval text) / (:print text)."
     (uiop:quit 0)))
 
 ;;; Initialize everything now, at build time, so it's in the saved image.
-(psx::boot)
-(psl:find-library (list (ps:intern-scheme-symbol "scheme") (ps:intern-scheme-symbol "base")))
+(ps-r7rs::boot)

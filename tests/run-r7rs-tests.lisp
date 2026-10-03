@@ -1,9 +1,9 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER -*-
 
-;;;; Runs chibi's R7RS suite (tests/chibi/r7rs-tests.scm) against the
-;;;; R7RS skeleton and reports the pass count.  Expect a lot of failures
-;;;; for now: this is the acceptance test the skeleton is growing toward,
-;;;; not a gate.
+;;;; Runs chibi's R7RS suite (tests/chibi/r7rs-tests.scm) on R7RS-on-
+;;;; psyntax and reports the pass count.  The forms are evaluated one at
+;;;; a time at the R7RS REPL (so one bad form doesn't sink the rest), the
+;;;; file's first form, its (import ...), included.
 ;;;;
 ;;;; Usage:  sbcl --script tests/run-r7rs-tests.lisp [-v]
 
@@ -32,9 +32,11 @@
 	  until (eq form ps:eof-object)
 	  collect form)))
 
-;; (chibi test), the shim next to the tests.
+;; Boot psyntax and the R7RS libraries, then (chibi test), the shim next
+;; to the tests.
+(ps-r7rs::boot)
 (dolist (form (read-all (merge-pathnames "chibi/chibi-test.scm" *here*)))
-  (psl:define-library-form form))
+  (ps-r7rs::eval-at-repl form))
 
 ;;; Split the test file into top-level data textually (honoring strings,
 ;;; comments and #\x characters) so that one unreadable datum -- say a
@@ -106,15 +108,14 @@
 	(format t "~&[UNREADABLE] ~A~%  ~A~%" e (subseq chunk 0 (min 70 (length chunk)))))
       nil)))
 
-(let* ((chunks (split-toplevel (file-text (merge-pathnames "chibi/r7rs-tests.scm" *here*))))
-       (env (psl:program-environment (chunk-form (car chunks)))))
-  (dolist (chunk (cdr chunks))
+(let* ((chunks (split-toplevel (file-text (merge-pathnames "chibi/r7rs-tests.scm" *here*)))))
+  (dolist (chunk chunks)
     (let ((form (chunk-form chunk)))
       (when form
 	(when *trace*
 	  (format t "~&>> ~A~%" (subseq chunk 0 (min 100 (length chunk))))
 	  (finish-output))
-	(handler-case (ps:scheme-eval form env)
+	(handler-case (ps-r7rs::eval-at-repl form)
 	  ;; SERIOUS-CONDITION, not ERROR: a runaway WRITE of a circular
 	  ;; structure (no datum labels yet) ends in heap exhaustion.
 	  (serious-condition (e)
@@ -123,7 +124,7 @@
 	      (format t "~&[ERROR] ~A~%  in ~A~%"
 		      (remove #\Newline (princ-to-string e))
 		      (subseq chunk 0 (min 90 (length chunk))))))))))
-  (let* ((counts (ps:scheme-eval (read-from-string "(scheme::test-results)") env))
+  (let* ((counts (ps-r7rs::eval-at-repl (list (ps:intern-scheme-symbol "test-results"))))
 	 (run (car counts)) (passed (cdr counts)))
     (format t "~&~%R7RS: ~A of ~A tests passed (~A forms raised errors, ~A unreadable).~%"
 	    passed run *harness-errors* *unreadable*)))

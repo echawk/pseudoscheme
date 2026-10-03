@@ -24,7 +24,9 @@
           bound-identifier=? datum->syntax syntax-error
           syntax->datum make-variable-transformer
           eval-r6rs-top-level boot-library-expand eval-top-level
-          null-environment)
+          null-environment
+          ;; PSEUDOSCHEME
+          interaction-library-name interaction-source-name)
   (import
     (except (rnrs) 
       environment environment? identifier?
@@ -109,20 +111,25 @@
   ;;;  #<rib list-of-symbols list-of-list-of-marks list-of-labels #f>
   
   (define (extend-rib! rib id label)
-    (define (find sym mark* sym* mark**)
+    ;;; PSEUDOSCHEME: FIND returns the label of the existing entry.
+    (define (find sym mark* sym* mark** label*)
       (and (pair? sym*)
-           (or (and (eq? sym (car sym*))
+           (if (and (eq? sym (car sym*))
                     (same-marks? mark* (car mark**)))
-               (find sym mark* (cdr sym*) (cdr mark**)))))
+               (car label*)
+               (find sym mark* (cdr sym*) (cdr mark**) (cdr label*)))))
     (when (rib-sealed/freq rib)
       (error 'extend-rib! "rib is sealed" rib))
     (let ((sym (id->sym id)) (mark* (stx-mark* id)))
       (let ((sym* (rib-sym* rib)))
-        (when (and (memq sym (rib-sym* rib))
-                   (find sym mark* sym* (rib-mark** rib)))
+        (let ((old (and (memq sym (rib-sym* rib))
+                        (find sym mark* sym* (rib-mark** rib) (rib-label* rib)))))
           ;;; signal an error if the identifier was already
-          ;;; in the rib.
-          (stx-error id "cannot redefine"))
+          ;;; in the rib -- PSEUDOSCHEME: unless it was imported.  A
+          ;;; definition then shadows the import, as R7RS systems
+          ;;; (chibi, Gauche, ...) allow and libraries rely on.
+          (when (and old (not (imported-label->binding old)))
+            (stx-error id "cannot redefine")))
         (set-rib-sym*! rib (cons sym sym*))
         (set-rib-mark**! rib (cons mark* (rib-mark** rib)))
         (set-rib-label*! rib (cons label (rib-label* rib))))))
@@ -1217,6 +1224,16 @@
                      (loop ,@init*)))
                 (stx-error stx "invalid bindings"))))))))
   
+  ;;; PSEUDOSCHEME: let*-values (R6RS 11.4.6) was missing; the table
+  ;;; listed it as a procedure.
+  (define let*-values-macro
+    (lambda (stx)
+      (syntax-match stx ()
+        ((_ () b b* ...)
+         (bless `(let () ,b ,@b*)))
+        ((_ (binding binding* ...) b b* ...)
+         (bless `(let-values (,binding) (let*-values ,binding* ,b ,@b*)))))))
+
   (define let*-macro
     (lambda (stx)
       (syntax-match stx ()
@@ -1289,9 +1306,39 @@
                         (datum->stx id (reverse ls))))
                      (else (f (cons x ls)))))))))))))
   
+  ;;; PSEUDOSCHEME: R7RS 4.3.2's custom ellipsis, (syntax-rules <ellipsis>
+  ;;; (literal ...) rule ...).  Rewrite the rules into ordinary ones: the
+  ;;; custom ellipsis becomes ..., and ... (an ordinary identifier in such
+  ;;; rules) becomes a fresh one.
+  (define (replace-ellipsis x ell dots)
+    (let f ((x x))
+      (cond
+        ((id? x)
+         (cond
+           ((bound-id=? x ell) (scheme-stx '...))
+           ((free-id=? x (scheme-stx '...)) dots)
+           (else x)))
+        (else
+         (syntax-match x ()
+           ((a . d) (cons (f a) (f d)))
+           ;; vector patterns/templates: keep the elements' wraps
+           (_ (if (syntax-vector? x)
+                  (list->vector (map f (syntax-vector->list x)))
+                  x)))))))
+
   (define syntax-rules-macro
     (lambda (e)
       (syntax-match e ()
+        ((_ ell (lits ...) (pat* tmp*) ...)
+         (id? ell)
+         (let ((dots (datum->syntax ell (gensym))))
+           (syntax-rules-macro
+             (cons* 'syntax-rules
+                    (map (lambda (l) (replace-ellipsis l ell dots)) lits)
+                    (map (lambda (p t)
+                           (list (replace-ellipsis p ell dots)
+                                 (replace-ellipsis t ell dots)))
+                         pat* tmp*)))))
         ((_ (lits ...)
             (pat* tmp*) ...)
          (begin
@@ -2271,7 +2318,8 @@
            ((do)                    do-macro)
            ((or)                    or-macro)
            ((and)                   and-macro)
-           ((let*)                  let*-macro)
+           ((let*-values)                  let*-values-macro)
+        ((let*)                  let*-macro)
            ((syntax-rules)          syntax-rules-macro)
            ((quasiquote)            quasiquote-macro)
            ((quasisyntax)           quasisyntax-macro)
@@ -2617,11 +2665,34 @@
                                            (if (eq? type 'let-syntax) x (add-subst xrib x))
                                            mr)))
                                      xrhs*)))
-                       (chi-body*
-                         (append (map (lambda (x) (add-subst xrib x)) xbody*) (cdr e*))
-                         (append (map cons xlab* xb*) r)
-                         (append (map cons xlab* xb*) mr)
-                         lex* rhs* mod** kwd* rib top?)))))
+                       ;; PSEUDOSCHEME: was: splice the body forms, wrapped
+                       ;; in xrib, into this body and go on with RIB.  But
+                       ;; a macro's output gets RIB prepended (see the
+                       ;; macro cases below), so identifiers from the
+                       ;; macro's *input* then met RIB before XRIB, and an
+                       ;; imported binding in a library's top rib (define,
+                       ;; say) shadowed the let-syntax one.  So the body is
+                       ;; processed with its own rib, searched first, whose
+                       ;; definitions are then copied into RIB: spliced, as
+                       ;; R6RS 11.18 requires, but with the right scoping.
+                       (let ((irib (make-empty-rib)))
+                         (let-values (((e2* r mr lex* rhs* mod** kwd*)
+                                       (chi-body*
+                                         (map (lambda (x) (add-subst irib (add-subst xrib x)))
+                                              xbody*)
+                                         (append (map cons xlab* xb*) r)
+                                         (append (map cons xlab* xb*) mr)
+                                         lex* rhs* mod** kwd* irib top?)))
+                           (for-each
+                             (lambda (sym mark* label)
+                               (extend-rib! rib (make-stx sym mark* '()) label))
+                             (reverse (rib-sym* irib))
+                             (reverse (rib-mark** irib))
+                             (reverse (rib-label* irib)))
+                           (if (null? e2*)
+                               (chi-body* (cdr e*) r mr lex* rhs* mod** kwd* rib top?)
+                               (values (append e2* (cdr e*))
+                                       r mr lex* rhs* mod** kwd*))))))))
                  ((begin)
                   (syntax-match e ()
                     ((_ x* ...)
@@ -2736,6 +2807,20 @@
                 (syntax-match e ()
                   ((_ x* ...)
                    (chi-top* (append x* (cdr e*)) init*))))
+               ;; PSEUDOSCHEME: (import <import set> ...) at the REPL adds
+               ;; the bindings to the interaction library, shadowing
+               ;; earlier ones (R7RS 5.2).  (The original only had the
+               ;; module system's (import <module-id>) here.)
+               ((import)
+                (syntax-match e ()
+                  ((_ imp* ...)
+                   (let-values (((subst lib*) (parse-import-spec* (stx->datum imp*))))
+                     (for-each
+                       (lambda (x)
+                         (extend-library-subst! (interaction-library) (car x) (cdr x)))
+                       (reverse subst))
+                     (for-each (lambda (lib) ((inv-collector) lib) ((vis-collector) lib)) lib*)
+                     (chi-top* (cdr e*) init*)))))
                ((global-macro global-macro!)
                 (chi-top* (cons (chi-global-macro value e) (cdr e*)) init*))
                ((local-macro local-macro!)
@@ -3040,8 +3125,15 @@
     (lambda (e* rib top?)
       (let-values (((e* r mr lex* rhs* mod** _kwd*)
                     (chi-body* e* '() '() '() '() '() '() rib top?)))
-        (values (append (apply append (reverse mod**)) e*)
-           r mr (reverse lex*) (reverse rhs*)))))
+        ;; PSEUDOSCHEME: in top-level mode every expression became a
+        ;; dummy definition; keep a final one as the body's value.
+        (let-values (((e* lex* rhs*)
+                      (if (and top? (null? e*) (pair? rhs*)
+                               (pair? (car rhs*)) (eq? (caar rhs*) 'top-expr))
+                          (values (list (cdar rhs*)) (cdr lex*) (cdr rhs*))
+                          (values e* lex* rhs*))))
+          (values (append (apply append (reverse mod**)) e*)
+             r mr (reverse lex*) (reverse rhs*))))))
   
   (define library-body-expander
     (lambda (exp* imp* b*)
@@ -3053,8 +3145,11 @@
                 (vtc (make-collector)))
             (parameterize ((inv-collector rtc)
                            (vis-collector vtc))
+              ;; PSEUDOSCHEME: #t (top-level-program mode) lets
+              ;; definitions and expressions interleave, as R7RS library
+              ;; bodies may; for R6RS bodies that's a harmless extension.
               (let-values (((init* r mr lex* rhs*)
-                            (chi-library-internal b* rib #f)))
+                            (chi-library-internal b* rib #t)))
                 (seal-rib! rib)
                 (let ((rhs* (chi-rhs* rhs* r mr))
                       (init* (chi-expr* init* r mr)))
@@ -3067,6 +3162,11 @@
                                 (build-exports global* init*)))
                             (invoke-definitions 
                              (map build-global-define (map cdr global*))))
+                        ;; PSEUDOSCHEME: every imported library is
+                        ;; invoked, not only those whose variables are
+                        ;; referenced: R7RS libraries may rely on the
+                        ;; side effects of their imports' bodies.
+                        (for-each rtc imp*)
                         (values
                           imp* (rtc) (vtc)
                           (build-sequence no-source 
@@ -3317,6 +3417,11 @@
 
   (define interaction-library (make-parameter #f))
 
+  ;;; PSEUDOSCHEME: which library is the REPL's, and which one unknown
+  ;;; names are copied from on demand; R6RS and R7RS sessions differ.
+  (define interaction-library-name (make-parameter '(pseudoscheme interaction)))
+  (define interaction-source-name (make-parameter '(pseudoscheme)))
+
   (define (interaction-sym->label sym) 
     (cond
       ((interaction-library) =>
@@ -3325,8 +3430,8 @@
            ((assq sym (library-subst lib)) => cdr)
            (else
             (let ((subst 
-                   (if (library-exists? '(pseudoscheme))
-                       (library-subst (find-library-by-name '(pseudoscheme)))
+                   (if (library-exists? (interaction-source-name))
+                       (library-subst (find-library-by-name (interaction-source-name)))
                        '())))
               (cond
                 ((assq sym subst) =>
@@ -3355,7 +3460,7 @@
                (parameterize ((inv-collector rtc)
                               (vis-collector vtc)
                               (interaction-library
-                               (find-library-by-name '(pseudoscheme interaction))))
+                               (find-library-by-name (interaction-library-name))))
                  (chi-top* (list (mkstx x top-mark* '())) '()))))
           (for-each invoke-library (rtc))
           (unless (null? init*)

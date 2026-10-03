@@ -26,7 +26,7 @@
     current-library-collection
     ;; PSEUDOSCHEME: exported so the host can set the search path and
     ;; the file-name mapping (see psyntax/main.ss).
-    library-path file-locator)
+    library-path file-locator library-locator)
   (import (rnrs) (psyntax compat) (rnrs r5rs))
 
   (define (make-collection)

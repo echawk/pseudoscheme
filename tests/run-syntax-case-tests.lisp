@@ -1,11 +1,11 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER -*-
 
-;;;; Smoke tests for macro expansion (hygiene, syntax-case proper,
-;;;; derived forms), run through both expanders: the old vendored
-;;;; Dybvig/Hieb 1992 syntax-case (vendor/syntax-case, SC:SC-EVAL) and
-;;;; psyntax, the R6RS front end (R6RS:EVAL, at the REPL top level).
+;;;; Smoke tests for macro expansion through psyntax (hygiene,
+;;;; syntax-case proper, derived forms), at the R6RS REPL top level.
+;;;; (They were first written for the 1992 Dybvig/Hieb expander psyntax
+;;;; replaced, and passed there too.)
 ;;;;
-;;;; Usage:  sbcl --control-stack-size 500MB --script tests/run-syntax-case-tests.lisp
+;;;; Usage:  sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-syntax-case-tests.lisp
 
 (require :asdf)
 
@@ -18,7 +18,6 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (asdf:load-system :pseudoscheme/syntax-case)
     (asdf:load-system :pseudoscheme/api)))
 
 (defun rd (string)
@@ -47,8 +46,8 @@
 (defmacro deftest (name forms expected)
   `(check ,name ',forms ,expected))
 
-(defvar *datum->syntax* "implicit-identifier")
-(defvar *syntax->datum* "syntax-object->datum")
+(defvar *datum->syntax* "datum->syntax")
+(defvar *syntax->datum* "syntax->datum")
 
 (defmacro deftest* (name forms expected)
   `(check ,name (list ,@forms) ,expected))
@@ -119,9 +118,4 @@
   (format t "~&~A: ~A of ~A tests passed.~%" label *passed* *run*)
   (= *passed* *run*))
 
-;; psyntax first: the old expander leaves macro definitions on the
-;; plists of shared SCHEME symbols, which confuses a later psyntax run in
-;; the same image.  (The two are never meant to coexist.)
-(let* ((new (run-with "psyntax (R6RS front end)" #'r6rs:eval "datum->syntax"))
-       (old (run-with "syntax-case (1992, vendor/syntax-case)" #'sc:sc-eval "implicit-identifier")))
-  (uiop:quit (if (and old new) 0 1)))
+(uiop:quit (if (run-with "syntax-case (psyntax)" #'r6rs:eval "datum->syntax") 0 1))
