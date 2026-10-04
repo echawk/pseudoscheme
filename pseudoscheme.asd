@@ -23,6 +23,7 @@
 (defsystem :pseudoscheme/rts
   :author "Jonathan Rees"
   :pathname #p"src/"
+  :depends-on (:float-features)		; IEEE infinities, NaNs and traps
   :components
     (
      (:file "pack")
@@ -137,7 +138,9 @@
 (defsystem :pseudoscheme/r6rs
   :author "Jonathan Rees"
   :pathname #p"src/"
-  :depends-on (:pseudoscheme/r7rs-runtime)
+  :depends-on (:pseudoscheme/r7rs-runtime
+	       :cl-unicode			; (rnrs unicode)
+	       :trivial-gray-streams)		; (rnrs io ports)
   :components ((:module "r6rs"
 		:components ((:file "rts")
 			     (:file "lists" :depends-on ("rts"))
@@ -164,7 +167,7 @@
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/r7rs
-	       (:feature :sbcl (:require :sb-cltl2)))	; lexical environments, for Scheme macros in Lisp
+	       :trivial-cltl2)		; lexical environments, for Scheme macros in Lisp
   :components ((:file "interop")
 	       (:static-file "interop/lisp.sls")
 	       (:file "api" :depends-on ("interop"))))

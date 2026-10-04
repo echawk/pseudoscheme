@@ -175,18 +175,22 @@ snow-fort trees):
 
 ## 6. Portability
 
-Developed and tested on SBCL only. SBCL-specific today:
+Developed and tested on SBCL. Implementation-specific facilities go
+through portability libraries: float-features (infinities, NaN, float
+traps, IEEE bit access), cl-unicode (case mapping, normalization,
+general categories), trivial-gray-streams (binary, custom and
+transcoded ports), trivial-cltl2 (lexical environments for Scheme
+macros in Lisp) and, in the R6RS test runner, bordeaux-threads
+(timeouts). What is left per implementation, with fallbacks:
 
-- Gray streams (`sb-gray`) for binary, custom and transcoded ports;
-  trivial-gray-streams would serve elsewhere.
-- `sb-unicode` for case mapping, normalization and general categories.
-- `sb-kernel` float bit access for `bytevector-ieee-*`.
-- `sb-sys:make-fd-stream` for the standard binary ports, `sb-ext` for
-  infinities, NaN and float traps, and `sb-ext:with-timeout` in the R6RS
-  test runner.
-- `sb-int:sbcl-homedir-pathname` in the CLI, to find contribs.
-- The CLI Makefile accepts `LISP=ccl|ecl|clisp`, but only SBCL has been
-  tried.
+- `disable-float-traps` (float-features only masks traps around a body)
+  and listing the process environment (`get-environment-variables`).
+- The standard binary ports: `sb-sys:make-fd-stream` on SBCL,
+  `/dev/fd/N` elsewhere.
+- The CLI: finding SBCL's contribs, and recognizing an interactive
+  interrupt.
+- `string-titlecase` finds word boundaries with a simple rule rather
+  than full Unicode word breaking.
 
 ## 7. Smaller items
 

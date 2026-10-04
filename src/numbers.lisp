@@ -20,33 +20,28 @@
 
 (in-package "PS")
 
-(defconstant +inf+
-  #+sbcl sb-ext:double-float-positive-infinity
-  #-sbcl most-positive-double-float)
+(defconstant +inf+ float-features:double-float-positive-infinity)
+(defconstant -inf+ float-features:double-float-negative-infinity)
+(defparameter +nan+ float-features:double-float-nan)
 
-(defconstant -inf+
-  #+sbcl sb-ext:double-float-negative-infinity
-  #-sbcl most-negative-double-float)
-
-(defparameter +nan+
-  #+sbcl (sb-int:with-float-traps-masked (:invalid :overflow :divide-by-zero)
-	   (- sb-ext:double-float-positive-infinity sb-ext:double-float-positive-infinity))
-  #-sbcl 0d0)
-
-(defun nan-p (x) (and (floatp x) (/= x x)))
-(defun infinite-p (x) (and (floatp x) (not (nan-p x)) (or (= x +inf+) (= x -inf+))))
+(defun nan-p (x) (and (floatp x) (float-features:float-nan-p x)))
+(defun infinite-p (x) (and (floatp x) (float-features:float-infinity-p x)))
 
 (defun call-with-ieee-arithmetic (thunk)
   "Run THUNK with float traps off, so inexact arithmetic produces
 infinities and NaNs (R6RS 3.5, R7RS 6.2.4) instead of signalling."
-  #+sbcl (sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow)
-	   (funcall thunk))
-  #-sbcl (funcall thunk))
+  (float-features:with-float-traps-masked t
+    (funcall thunk)))
 
 (defun disable-float-traps ()
   "Turn float traps off for the rest of this thread (the command-line
-program does this once at startup)."
+program does this once at startup).  float-features only masks traps
+around a body, so this is per implementation."
   #+sbcl (sb-int:set-floating-point-modes :traps '())
+  #+ecl (ext:trap-fpe t nil)
+  #+abcl (ext:set-floating-point-modes :traps '())
+  #+ccl (ccl:set-fpu-mode :overflow nil :underflow nil :division-by-zero nil
+			  :invalid nil :inexact nil)
   t)
 
 ;;; ------------------------------------------------------------------

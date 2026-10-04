@@ -12,6 +12,16 @@
 
 (require :asdf)
 
+;; The dependencies (float-features, cl-unicode, ...) come from
+;; Quicklisp when it's installed; QUICKLOAD fetches any that are missing.
+(let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+  (when (probe-file setup) (load setup)))
+
+(defun load-system (system)
+  (if (find-package "QL")
+      (uiop:symbol-call "QL" "QUICKLOAD" system :silent t)
+      (asdf:load-system system)))
+
 (defvar *root*
   (let ((here (make-pathname :name nil :type nil
 			     :defaults (or *load-truename* *load-pathname*))))
@@ -21,15 +31,15 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (asdf:load-system :pseudoscheme/r6rs)))
+    (load-system :pseudoscheme/r6rs)
+    (load-system :bordeaux-threads)))
 
 ;; IEEE inexact arithmetic: (/ 1. 0.) => +inf.0, as R6RS/R7RS expect.
 (ps:disable-float-traps)
 
-(defparameter *args* (cdr (member "--end-toplevel-options" sb-ext:*posix-argv* :test #'string=)))
-(defparameter *verbose* (member "-v" sb-ext:*posix-argv* :test #'string=))
+(defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
 (defparameter *only* (remove-if (lambda (a) (char= (char a 0) #\-))
-				(cdr sb-ext:*posix-argv*)))
+				(uiop:command-line-arguments)))
 
 (defun programs ()
   ;; run/run.sps and run/test.sps aren't tests of a library: the first
@@ -57,7 +67,7 @@
 	   (handler-case
 	       ;; WITH-TIMEOUT interrupts even a CPU-bound loop (a
 	       ;; deadline only covers blocking operations).
-	       (sb-ext:with-timeout 60
+	       (bt:with-timeout (60)
 		 (let ((*standard-output* out)
 		       (psx:*library-path* (list (namestring *root*)))
 		       ;; The io tests create files: keep them out of the repo.
@@ -65,7 +75,7 @@
 		   (psx::boot)
 		   (psx:load-file path)
 		   :ok))
-	     (sb-ext:timeout () :timeout)
+	     (bt:timeout () :timeout)
 	     (serious-condition (e)
 	       (list :error (remove #\Newline (princ-to-string e))))))
 	 (text (get-output-stream-string out)))

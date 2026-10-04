@@ -146,21 +146,14 @@
 ;;; IEEE floats
 
 (defun float->bits (x size)
-  #+sbcl (if (= size 4)
-	     (ldb (byte 32 0) (sb-kernel:single-float-bits (coerce x 'single-float)))
-	     (let ((d (coerce x 'double-float)))
-	       (logior (ash (ldb (byte 32 0) (sb-kernel:double-float-high-bits d)) 32)
-		       (sb-kernel:double-float-low-bits d))))
-  #-sbcl (error "IEEE float bytevector access needs SBCL for now"))
+  (if (= size 4)
+      (ldb (byte 32 0) (float-features:single-float-bits (coerce x 'single-float)))
+      (ldb (byte 64 0) (float-features:double-float-bits (coerce x 'double-float)))))
 
 (defun bits->float (bits size)
-  #+sbcl (if (= size 4)
-	     (coerce (sb-kernel:make-single-float (if (logbitp 31 bits) (- bits (ash 1 32)) bits))
-		     'double-float)
-	     (let ((high (ldb (byte 32 32) bits)))
-	       (sb-kernel:make-double-float (if (logbitp 31 high) (- high (ash 1 32)) high)
-					    (ldb (byte 32 0) bits))))
-  #-sbcl (error "IEEE float bytevector access needs SBCL for now"))
+  (if (= size 4)
+      (coerce (float-features:bits-single-float bits) 'double-float)
+      (float-features:bits-double-float bits)))
 
 (macrolet ((def-ieee (kind size)
 	     (let ((name (format nil "bytevector-ieee-~A" kind)))

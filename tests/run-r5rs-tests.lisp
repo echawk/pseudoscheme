@@ -10,13 +10,23 @@
 
 (require :asdf)
 
+;; The dependencies (float-features, cl-unicode, ...) come from
+;; Quicklisp when it's installed; QUICKLOAD fetches any that are missing.
+(let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+  (when (probe-file setup) (load setup)))
+
+(defun load-system (system)
+  (if (find-package "QL")
+      (uiop:symbol-call "QL" "QUICKLOAD" system :silent t)
+      (asdf:load-system system)))
+
 (let* ((here (make-pathname :name nil :type nil
 			    :defaults (or *load-truename* *load-pathname*)))
        (root (merge-pathnames (make-pathname :directory '(:relative :up))
 			       here)))
   (pushnew (truename root) asdf:*central-registry* :test #'equal))
 
-(asdf:load-system :pseudoscheme/r5rs)
+(load-system :pseudoscheme/r5rs)
 
 ;;; Loading :pseudoscheme/reader (a dependency of :pseudoscheme/r5rs)
 ;;; already switched ps:*scheme-read* to the dedicated Scheme48-derived

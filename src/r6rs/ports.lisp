@@ -6,8 +6,7 @@
 ;;;; Textual file ports are CL character streams (UTF-8).  Everything
 ;;;; else -- binary ports (which need lookahead-u8), bytevector ports,
 ;;;; custom ports, and transcoded ports -- is a Gray stream class below.
-;;;; Gray streams are an SBCL contrib here (SB-GRAY); other Lisps would
-;;;; use trivial-gray-streams.
+;;;; Gray streams come from trivial-gray-streams.
 
 (in-package "PSEUDOSCHEME-R6RS")
 
@@ -70,7 +69,7 @@
 (defclass scheme-port ()
   ((transcoder :initform nil :initarg :transcoder :accessor port-transcoder*)))
 
-(defclass binary-input-port (scheme-port sb-gray:fundamental-binary-input-stream)
+(defclass binary-input-port (scheme-port trivial-gray-streams:fundamental-binary-input-stream)
   ((peeked :initform nil :accessor peeked)))
 
 (defclass bytevector-input-port (binary-input-port)
@@ -87,17 +86,18 @@
       (prog1 (aref (bytes s) (index s)) (incf (index s)))
       :eof))
 
-(defmethod sb-gray:stream-read-byte ((s binary-input-port))
+(defmethod trivial-gray-streams:stream-read-byte ((s binary-input-port))
   (let ((p (peeked s)))
     (if p (progn (setf (peeked s) nil) p) (next-byte s))))
 
 (defun peek-byte (s)
   (or (peeked s) (setf (peeked s) (next-byte s))))
 
-(defmethod sb-gray:stream-file-position ((s bytevector-input-port) &optional position)
-  (if position
-      (progn (setf (index s) position (peeked s) nil) t)
-      (- (index s) (if (peeked s) (if (eq (peeked s) :eof) 0 1) 0))))
+(defmethod trivial-gray-streams:stream-file-position ((s bytevector-input-port))
+  (- (index s) (if (peeked s) (if (eq (peeked s) :eof) 0 1) 0)))
+(defmethod (setf trivial-gray-streams:stream-file-position) (position (s bytevector-input-port))
+  (setf (index s) position (peeked s) nil)
+  t)
 
 ;; A binary port over a CL octet stream (files): adds the lookahead.
 (defclass octet-stream-input-port (binary-input-port)
@@ -106,22 +106,23 @@
 (defmethod next-byte ((s octet-stream-input-port))
   (read-byte (underlying s) nil :eof))
 
-(defmethod sb-gray:stream-file-position ((s octet-stream-input-port) &optional position)
-  (if position
-      (progn (setf (peeked s) nil) (file-position (underlying s) position))
-      (- (file-position (underlying s)) (if (and (peeked s) (not (eq (peeked s) :eof))) 1 0))))
+(defmethod trivial-gray-streams:stream-file-position ((s octet-stream-input-port))
+  (- (file-position (underlying s)) (if (and (peeked s) (not (eq (peeked s) :eof))) 1 0)))
+(defmethod (setf trivial-gray-streams:stream-file-position) (position (s octet-stream-input-port))
+  (setf (peeked s) nil)
+  (file-position (underlying s) position))
 
 (defmethod close ((s octet-stream-input-port) &key abort)
   (close (underlying s) :abort abort) (call-next-method))
 
-(defclass binary-output-port (scheme-port sb-gray:fundamental-binary-output-stream) ())
+(defclass binary-output-port (scheme-port trivial-gray-streams:fundamental-binary-output-stream) ())
 (defmethod stream-element-type ((s binary-output-port)) '(unsigned-byte 8))
 
 (defclass bytevector-output-port (binary-output-port)
   ((buffer :initform (make-array 0 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer t)
 	   :accessor buffer)))
 
-(defmethod sb-gray:stream-write-byte ((s bytevector-output-port) byte)
+(defmethod trivial-gray-streams:stream-write-byte ((s bytevector-output-port) byte)
   (vector-push-extend byte (buffer s)) byte)
 
 (defun take-bytes (s)
@@ -142,34 +143,34 @@
   ((id :initarg :id) (write! :initarg :write!) (get-position :initarg :get-position)
    (set-position! :initarg :set-position!) (closer :initarg :closer)))
 
-(defmethod sb-gray:stream-write-byte ((s custom-binary-output-port) byte)
+(defmethod trivial-gray-streams:stream-write-byte ((s custom-binary-output-port) byte)
   (let ((bv (make-array 1 :element-type '(unsigned-byte 8) :initial-element byte)))
     (funcall (slot-value s 'write!) bv 0 1)
     byte))
 
-(defclass custom-textual-input-port (scheme-port sb-gray:fundamental-character-input-stream)
+(defclass custom-textual-input-port (scheme-port trivial-gray-streams:fundamental-character-input-stream)
   ((id :initarg :id) (read! :initarg :read!) (get-position :initarg :get-position)
    (set-position! :initarg :set-position!) (closer :initarg :closer)
    (unread :initform nil :accessor unread)))
 
-(defmethod sb-gray:stream-read-char ((s custom-textual-input-port))
+(defmethod trivial-gray-streams:stream-read-char ((s custom-textual-input-port))
   (let ((u (unread s)))
     (if u
 	(progn (setf (unread s) nil) u)
 	(let* ((str (make-string 1)) (n (funcall (slot-value s 'read!) str 0 1)))
 	  (if (zerop n) :eof (char str 0))))))
-(defmethod sb-gray:stream-unread-char ((s custom-textual-input-port) c) (setf (unread s) c) nil)
+(defmethod trivial-gray-streams:stream-unread-char ((s custom-textual-input-port) c) (setf (unread s) c) nil)
 
-(defclass custom-textual-output-port (scheme-port sb-gray:fundamental-character-output-stream)
+(defclass custom-textual-output-port (scheme-port trivial-gray-streams:fundamental-character-output-stream)
   ((id :initarg :id) (write! :initarg :write!) (get-position :initarg :get-position)
    (set-position! :initarg :set-position!) (closer :initarg :closer)
    (column :initform 0 :accessor column)))
 
-(defmethod sb-gray:stream-write-char ((s custom-textual-output-port) c)
+(defmethod trivial-gray-streams:stream-write-char ((s custom-textual-output-port) c)
   (funcall (slot-value s 'write!) (string c) 0 1)
   (setf (column s) (if (char= c #\Newline) 0 (1+ (column s))))
   c)
-(defmethod sb-gray:stream-line-column ((s custom-textual-output-port)) (column s))
+(defmethod trivial-gray-streams:stream-line-column ((s custom-textual-output-port)) (column s))
 
 (defmethod close ((s scheme-port) &key abort)
   (declare (ignore abort))
@@ -196,23 +197,23 @@
 ;;; Custom input/output ports (8.2.13): both directions over the
 ;;; same procedures.
 
-(defclass custom-binary-io-port (custom-binary-input-port sb-gray:fundamental-binary-output-stream)
+(defclass custom-binary-io-port (custom-binary-input-port trivial-gray-streams:fundamental-binary-output-stream)
   ((write! :initarg :write!)))
 
-(defmethod sb-gray:stream-write-byte ((s custom-binary-io-port) byte)
+(defmethod trivial-gray-streams:stream-write-byte ((s custom-binary-io-port) byte)
   (let ((bv (make-array 1 :element-type '(unsigned-byte 8) :initial-element byte)))
     (funcall (slot-value s 'write!) bv 0 1)
     byte))
 
-(defclass custom-textual-io-port (custom-textual-input-port sb-gray:fundamental-character-output-stream)
+(defclass custom-textual-io-port (custom-textual-input-port trivial-gray-streams:fundamental-character-output-stream)
   ((write! :initarg :write!)
    (column :initform 0 :accessor column)))
 
-(defmethod sb-gray:stream-write-char ((s custom-textual-io-port) c)
+(defmethod trivial-gray-streams:stream-write-char ((s custom-textual-io-port) c)
   (funcall (slot-value s 'write!) (string c) 0 1)
   (setf (column s) (if (char= c #\Newline) 0 (1+ (column s))))
   c)
-(defmethod sb-gray:stream-line-column ((s custom-textual-io-port)) (column s))
+(defmethod trivial-gray-streams:stream-line-column ((s custom-textual-io-port)) (column s))
 
 (defprim "make-custom-binary-input/output-port" (id read! write! get-position set-position! close)
   (make-instance 'custom-binary-io-port :id id :read! read! :write! write!
@@ -225,7 +226,7 @@
 
 ;;; Transcoded ports (8.2.6): a textual view of a binary port.
 
-(defclass transcoded-input-port (scheme-port sb-gray:fundamental-character-input-stream)
+(defclass transcoded-input-port (scheme-port trivial-gray-streams:fundamental-character-input-stream)
   ((binary :initarg :binary :reader binary)
    (unread :initform nil :accessor unread)))
 
@@ -240,7 +241,7 @@
 		   (setq code (logior (ash code 6) (logand c #x3F)))))
 	       (code-char code))))))
 
-(defmethod sb-gray:stream-read-char ((s transcoded-input-port))
+(defmethod trivial-gray-streams:stream-read-char ((s transcoded-input-port))
   (let ((u (unread s)))
     (if u
 	(progn (setf (unread s) nil) u)
@@ -248,18 +249,18 @@
 	  (if (eq codec *latin-1-codec*)
 	      (let ((b (read-byte (binary s) nil :eof))) (if (eq b :eof) :eof (code-char b)))
 	      (read-utf8-char (binary s)))))))
-(defmethod sb-gray:stream-unread-char ((s transcoded-input-port) c) (setf (unread s) c) nil)
+(defmethod trivial-gray-streams:stream-unread-char ((s transcoded-input-port) c) (setf (unread s) c) nil)
 
-(defclass transcoded-output-port (scheme-port sb-gray:fundamental-character-output-stream)
+(defclass transcoded-output-port (scheme-port trivial-gray-streams:fundamental-character-output-stream)
   ((binary :initarg :binary :reader binary)
    (column :initform 0 :accessor column)))
 
-(defmethod sb-gray:stream-write-char ((s transcoded-output-port) c)
+(defmethod trivial-gray-streams:stream-write-char ((s transcoded-output-port) c)
   (loop for b across (encode (string c) (transcoder-codec (port-transcoder* s)))
 	do (write-byte b (binary s)))
   (setf (column s) (if (char= c #\Newline) 0 (1+ (column s))))
   c)
-(defmethod sb-gray:stream-line-column ((s transcoded-output-port)) (column s))
+(defmethod trivial-gray-streams:stream-line-column ((s transcoded-output-port)) (column s))
 
 (defprim "transcoded-port" (binary tc)
   (if (input-stream-p binary)
@@ -336,19 +337,22 @@
 (defun fd-stream (fd direction)
   (or (gethash fd *fd-streams*)
       (setf (gethash fd *fd-streams*)
-	    (sb-sys:make-fd-stream fd :element-type '(unsigned-byte 8)
-				      :input (eq direction :input) :output (eq direction :output)
-				      :buffering :full))))
+	    #+sbcl (sb-sys:make-fd-stream fd :element-type '(unsigned-byte 8)
+					     :input (eq direction :input) :output (eq direction :output)
+					     :buffering :full)
+	    ;; Elsewhere, reopen the descriptor (Unix).
+	    #-sbcl (open (format nil "/dev/fd/~D" fd) :element-type '(unsigned-byte 8)
+			 :direction direction :if-exists :append))))
 
 (defclass standard-binary-output-port (binary-output-port)
   ((stream :initarg :stream :reader underlying)
    (open :initform t :accessor port-open)))
 
-(defmethod sb-gray:stream-write-byte ((s standard-binary-output-port) byte)
+(defmethod trivial-gray-streams:stream-write-byte ((s standard-binary-output-port) byte)
   (write-byte byte (underlying s)))
-(defmethod sb-gray:stream-force-output ((s standard-binary-output-port))
+(defmethod trivial-gray-streams:stream-force-output ((s standard-binary-output-port))
   (finish-output (underlying s)))
-(defmethod sb-gray:stream-finish-output ((s standard-binary-output-port))
+(defmethod trivial-gray-streams:stream-finish-output ((s standard-binary-output-port))
   (finish-output (underlying s)))
 (defmethod close ((s standard-binary-output-port) &key abort)
   (declare (ignore abort))

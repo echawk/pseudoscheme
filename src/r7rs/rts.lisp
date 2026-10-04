@@ -95,12 +95,10 @@
   (nth-value 1 (truncate n d)))
 
 (defun float-nan-p (x)
-  #+sbcl (and (floatp x) (sb-ext:float-nan-p x))
-  #-sbcl (and (floatp x) (/= x x)))
+  (and (floatp x) (float-features:float-nan-p x)))
 
 (defun float-infinite-p (x)
-  #+sbcl (and (floatp x) (sb-ext:float-infinity-p x))
-  #-sbcl (and (floatp x) (not (float-nan-p x)) (> (abs x) most-positive-double-float)))
+  (and (floatp x) (float-features:float-infinity-p x)))
 
 (defprim "nan?" (x)
   (unless (numberp x) (scheme-error "nan?: not a number: ~S" x))
@@ -494,12 +492,20 @@ to the script name and its arguments); else the process's arguments.")
       (cons "pseudoscheme" (copy-list (uiop:command-line-arguments)))))
 (defprim "get-environment-variable" (name)
   (or (uiop:getenv name) ps:false))
+;; No portability library lists the whole environment.
+(defun environment-strings ()
+  "The process environment as a list of \"NAME=value\" strings."
+  #+sbcl (sb-ext:posix-environ)
+  #+ecl (ext:environ)
+  #+ccl (ccl::get-env-strings)
+  #+abcl (loop for (k . v) in (ext:getenv-all) collect (format nil "~A=~A" k v))
+  #-(or sbcl ecl ccl abcl) '())
+
 (defprim "get-environment-variables" ()
   (mapcar (lambda (entry)
 	    (let ((eq (position #\= entry)))
 	      (cons (subseq entry 0 eq) (if eq (subseq entry (1+ eq)) ""))))
-	  #+sbcl (sb-ext:posix-environ)
-	  #-sbcl '()))
+	  (environment-strings)))
 
 (defprim "current-jiffy" () (get-internal-real-time))
 (defprim "jiffies-per-second" () internal-time-units-per-second)

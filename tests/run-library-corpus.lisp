@@ -16,6 +16,16 @@
 
 (require :asdf)
 
+;; The dependencies (float-features, cl-unicode, ...) come from
+;; Quicklisp when it's installed; QUICKLOAD fetches any that are missing.
+(let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+  (when (probe-file setup) (load setup)))
+
+(defun load-system (system)
+  (if (find-package "QL")
+      (uiop:symbol-call "QL" "QUICKLOAD" system :silent t)
+      (asdf:load-system system)))
+
 (defvar *root*
   (let ((here (make-pathname :name nil :type nil
 			     :defaults (or *load-truename* *load-pathname*))))
@@ -25,14 +35,13 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (asdf:load-system :pseudoscheme/api)))
+    (load-system :pseudoscheme/api)))
 
 (ps:disable-float-traps)
 
-(defparameter *args* (cdr (member "--end-toplevel-options" sb-ext:*posix-argv* :test #'string=)))
-(defparameter *verbose* (member "-v" sb-ext:*posix-argv* :test #'string=))
+(defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
 (defparameter *dir*
-  (or (find-if (lambda (a) (char/= (char a 0) #\-)) (cdr sb-ext:*posix-argv*))
+  (or (find-if (lambda (a) (char/= (char a 0) #\-)) (uiop:command-line-arguments))
       (error "usage: run-library-corpus.lisp DIR")))
 
 (defparameter *implementations*

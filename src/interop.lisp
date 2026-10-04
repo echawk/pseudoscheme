@@ -448,9 +448,7 @@ its value."
 ;;; caller's code.  Booleans cross as everywhere else.
 
 (defun lexical-variable-p (symbol env)
-  #+sbcl (eq (sb-cltl2:variable-information symbol env) :lexical)
-  #-sbcl (declare (ignore symbol env))
-  #-sbcl nil)
+  (eq (trivial-cltl2:variable-information symbol env) :lexical))
 
 (defun scheme-bound-p (symbol environment)
   "Does Scheme SYMBOL mean anything in psyntax ENVIRONMENT?"
