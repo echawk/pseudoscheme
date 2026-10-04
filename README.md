@@ -255,6 +255,11 @@ Then clear the fasl cache (ASDF's timestamps have one-second
 resolution), reload in a fresh image and run the tests. psyntax's image
 is rebuilt with `(psx:rebuild)`, see vendor/psyntax/README-pseudoscheme.md.
 
+The `.pso` files can also be made without Pseudoscheme, by the same
+translator sources running in Chibi, Guile, Gauche, CHICKEN, Chez,
+Racket or Scheme 48: `make bootstrap` (`SCHEME=guile` to choose). See
+boot/README.md.
+
 ## Tests
 
 ```sh
