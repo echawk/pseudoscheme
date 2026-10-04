@@ -19,7 +19,7 @@ See `src/psyntax.lisp` for the host side.
 | `psyntax/*.ss` | the expander, as R6RS libraries (patched, see below) |
 | `psyntax-buildscript.ss` | expands those sources into a single image (patched) |
 | `psyntax-pseudoscheme.pp` | **that image, built on Pseudoscheme**: what `(psx::boot)` loads |
-| `pre-built/psyntax-scheme48.pp` | the original Scheme48 image, kept as a bootstrap seed |
+| `pre-built/psyntax-scheme48.pp` | the original Scheme48 image (no longer usable as a seed, see below) |
 | `scheme48.r6rs.ss` | the original Scheme48 adapter, for reference |
 
 Only the Scheme48 image was kept of the original eleven pre-built ones;
@@ -27,24 +27,43 @@ it's plain R5RS, which is what the translator eats.
 
 ## Rebuilding
 
-After changing anything under `psyntax/` or the build script:
+After changing anything under `psyntax/` or the build script, from the
+repository root:
+
+```sh
+make bootstrap-psyntax
+```
+
+This builds an image from the sources with Chez Scheme, which runs
+the build script natively. Pseudoscheme then rebuilds with it until the
+image reproduces itself, and the result is installed as
+`psyntax-pseudoscheme.pp`; check it in. No pre-built image is involved.
+See boot/README.md. From Lisp, without Chez:
 
 ```lisp
 (asdf:load-system :pseudoscheme/r6rs)
 (psx:rebuild)              ; expands the sources with the current image
-(psx:rebuild :seed t)      ; ... or from the original Scheme48 image
 ```
 
 Run SBCL with a large control stack (`--control-stack-size 500MB`):
-the expander recurses deeply. A rebuild takes a few seconds and writes
-`psyntax-pseudoscheme.pp`; check it in. A rebuild from a rebuilt image
-reproduces itself, apart from gensym names.
+the expander recurses deeply. A rebuild takes a few seconds. It names
+the image's gensyms `g$1`, `g$2`, ... in order of appearance, so a
+rebuild from a rebuilt image reproduces it byte for byte.
+
+`pre-built/psyntax-scheme48.pp` is the original upstream image. The
+sources have outgrown it, so `(psx:rebuild :seed t)` no longer works:
+`compat.ss` imports `lisp-keyword?`, which its `$bootstrap` lacks.
 
 ## Patches
 
 Each is marked `PSEUDOSCHEME:` in the source.
 
 **Host integration**
+
+* `psyntax/expander.ss` excepts from `(rnrs)` only names it exports
+  (`environment`, `eval` and `null-environment` are `(rnrs eval)`'s and
+  `(rnrs r5rs)`'s), as R6RS requires and Chez enforces, so that Chez can
+  load the sources natively (boot/README.md). The output doesn't change.
 
 * `psyntax/main.ss` replaced: instead of running a script named on the
   command line and exiting, it hands the expander's entry points to the

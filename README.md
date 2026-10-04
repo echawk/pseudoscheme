@@ -253,12 +253,16 @@ integrations, or the reader/writer:
 
 Then clear the fasl cache (ASDF's timestamps have one-second
 resolution), reload in a fresh image and run the tests. psyntax's image
-is rebuilt with `(psx:rebuild)`, see vendor/psyntax/README-pseudoscheme.md.
+is rebuilt with `(psx:rebuild)` or `make bootstrap-psyntax`, see
+vendor/psyntax/README-pseudoscheme.md.
 
-The `.pso` files can also be made without Pseudoscheme, by the same
-translator sources running in Chibi, Guile, Gauche, CHICKEN, Chez,
-Racket or Scheme 48: `make bootstrap` (`SCHEME=guile` to choose). See
-boot/README.md.
+Both kinds of generated file can also be made from source alone, with
+`make bootstrap`. First the translator's sources, running in Chibi,
+Guile, Gauche, CHICKEN, Chez, Racket or Scheme 48, write the `.pso`
+files (`SCHEME=guile` to choose). Then Pseudoscheme, loaded from those,
+builds psyntax's image from a seed that Chez Scheme expands natively
+from psyntax's sources. `make bootstrap-check` verifies both without
+installing anything. See boot/README.md.
 
 ## Tests
 

@@ -190,14 +190,18 @@ the command line and exits; DROP-LAST skips it.)"
 (defun boot (&key seed)
   "Create *HOST* and load psyntax into it: our own rebuilt image if there
 is one, else the original Scheme48 one (which lacks our entry points;
-see REBUILD)."
+see REBUILD).  SEED: T for the Scheme48 image regardless, or the
+pathname of an image built from our sources elsewhere (boot/ builds one
+with Chez Scheme)."
   (setq *host* (make-host))
   (setf ps-r6rs::*globals-hook* #'host-ref)
   (ps-r6rs::install-exception-hooks)
   (install-primitives ps-r6rs:*primitives*)
   (install-adapter)
   (let ((own (vendor-file "psyntax-pseudoscheme.pp")))
-    (cond ((and (not seed) (probe-file own))
+    (cond ((and seed (not (eq seed t)))
+	   (load-image seed))
+	  ((and (not seed) (probe-file own))
 	   (load-image own))
 	  (t
 	   (load-image (vendor-file "pre-built/psyntax-scheme48.pp") :drop-last t)
@@ -335,17 +339,56 @@ installed, and what follows them, if anything, is run as a program."
 ;;; ------------------------------------------------------------------
 ;;; Rebuilding the expander image on Pseudoscheme itself
 
-(defun rebuild (&key seed)
-  "Run vendor/psyntax/psyntax-buildscript.ss -- the expander expanding
-its own sources -- writing vendor/psyntax/psyntax-pseudoscheme.pp.
-SEED: bootstrap from the original Scheme48 image instead of our own."
+(defun rebuild (&key seed (directory (vendor-file "")))
+  "Run psyntax-buildscript.ss -- the expander expanding its own sources --
+writing psyntax-pseudoscheme.pp.  SEED is as for BOOT.  DIRECTORY holds
+the build script and psyntax/ and receives the image; by default
+vendor/psyntax/, else (as for boot/) a copy of it."
   (boot :seed seed)
-  (let ((*default-pathname-defaults* (vendor-file ""))
-	(start (get-internal-real-time)))
-    (eval-program (read-file-forms (vendor-file "psyntax-buildscript.ss")))
+  (let* ((directory (truename directory))
+	 (*default-pathname-defaults* directory)
+	 (start (get-internal-real-time)))
+    (eval-program (read-file-forms (merge-pathnames "psyntax-buildscript.ss" directory)))
+    (canonicalize-gensyms (merge-pathnames "psyntax-pseudoscheme.pp" directory))
     (format t "~&Rebuilt psyntax in ~,1Fs~%"
 	    (/ (- (get-internal-real-time) start) internal-time-units-per-second)))
   (boot))
+
+(defun canonicalize-gensyms (image)
+  "Rename the gensyms in IMAGE, which carry this session's prefix (see
+*GENSYM-PREFIX*), to g$1, g$2 ... in order of appearance, so that the
+image depends only on the sources and the image that built it.  (The
+canonical names can't clash with those of a later session.)"
+  (let* ((lines (with-open-file (in image)
+		  (loop for line = (read-line in nil) while line collect line)))
+	 (header (loop for line in lines
+		       while (and (plusp (length line)) (char= (char line 0) #\;))
+		       collect line))
+	 (forms (read-file-forms image))
+	 (names (make-hash-table :test #'eq))
+	 (count 0))
+    (labels ((rename (x)
+	       (cond ((consp x)
+		      (let ((a (rename (car x))) (d (rename (cdr x))))
+			(if (and (eq a (car x)) (eq d (cdr x))) x (cons a d))))
+		     ((vectorp x) (if (stringp x) x (map 'vector #'rename x)))
+		     ((and (symbolp x)
+			   (eq (symbol-package x) (find-package "SCHEME"))
+			   (let ((name (symbol-name x)))
+			     (and (> (length name) (length *gensym-prefix*))
+				  (string= *gensym-prefix* name :end2 (length *gensym-prefix*)))))
+		      ;; Named as the gensym host primitive names them.
+		      (or (gethash x names)
+			  (setf (gethash x names)
+				(intern (format nil "g$~D" (incf count)) "SCHEME"))))
+		     (t x))))
+      (let ((forms (mapcar #'rename forms)))
+	(with-open-file (out image :direction :output :if-exists :supersede)
+	  (dolist (line header) (write-line line out))
+	  (terpri out)
+	  (dolist (form forms)
+	    (funcall ps:*scheme-write* form out)
+	    (format out "~%~%~%")))))))
 
 ;;; ------------------------------------------------------------------
 ;;; psyntax's identifier table

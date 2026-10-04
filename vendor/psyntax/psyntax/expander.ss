@@ -29,12 +29,13 @@
           interaction-library-name interaction-source-name
           identifier-binding)
   (import
+    ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
+    ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
+    ;; R6RS requires and Chez enforces (boot/: building from source).
     (except (rnrs) 
-      environment environment? identifier?
-      eval generate-temporaries free-identifier=?
+      identifier? generate-temporaries free-identifier=?
       bound-identifier=? datum->syntax
-      syntax->datum make-variable-transformer
-      null-environment)
+      syntax->datum make-variable-transformer)
     (rnrs base)
     (rnrs lists)
     (rnrs control)
