@@ -210,3 +210,32 @@ apostrophe or the like between letters (Unicode word breaks, roughly)."
 (defprim "char-foldcase" (c)
   (let ((s (full-casefold (string c))))
     (if (= (length s) 1) (char s 0) c)))
+
+;;; Characters by Unicode's simple case mappings and properties (1.1):
+;;; (char-upcase #\x3C2) => #\x3A3, though CL's CHAR-UPCASE leaves a
+;;; character alone unless it round-trips; and comparisons ignoring case
+;;; compare case-folded characters and strings, so (string-ci=? "Straße"
+;;; "STRASSE") => #t.
+
+(defprim "char-upcase" (c) (cl-unicode:uppercase-mapping c))
+(defprim "char-downcase" (c) (cl-unicode:lowercase-mapping c))
+(defprim "char-upper-case?" (c) (bool (cl-unicode:has-property c "Uppercase")))
+(defprim "char-lower-case?" (c) (bool (cl-unicode:has-property c "Lowercase")))
+(defprim "char-alphabetic?" (c) (bool (cl-unicode:has-property c "Alphabetic")))
+
+(defun char-fold-code (c) (char-code (funcall (prim "char-foldcase") c)))
+
+(macrolet ((def-ci (name test fold)
+	     `(defprim ,name (a b &rest more)
+		(let ((all (mapcar #',fold (list* a b more))))
+		  (bool (loop for (x y) on all while y always (,test x y)))))))
+  (def-ci "char-ci=?" = char-fold-code)
+  (def-ci "char-ci<?" < char-fold-code)
+  (def-ci "char-ci>?" > char-fold-code)
+  (def-ci "char-ci<=?" <= char-fold-code)
+  (def-ci "char-ci>=?" >= char-fold-code)
+  (def-ci "string-ci=?" string= full-casefold)
+  (def-ci "string-ci<?" string< full-casefold)
+  (def-ci "string-ci>?" string> full-casefold)
+  (def-ci "string-ci<=?" string<= full-casefold)
+  (def-ci "string-ci>=?" string>= full-casefold))
