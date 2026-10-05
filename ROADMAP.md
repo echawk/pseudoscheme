@@ -6,15 +6,15 @@ this file.
 
 | runner | result |
 |---|---|
-| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 975 of 977 |
-| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8711 pass, 191 fail (8712/190 with full continuations); all 25 programs run to completion |
+| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 976 of 978 (977 with full continuations) |
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8900 pass, 2 fail (all 8902 with full continuations); all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 188 of 189 (189 with full continuations; 183 of 188 with `--classic`) |
 | `tests/run-interop-tests.lisp` | 104/104 |
 | `tests/run-library-tests.lisp` | 55/55 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
-| `tests/run-continuation-tests.lisp` | 15/15 |
-| `make -C contrib/cli test` | 15/15 |
+| `tests/run-continuation-tests.lisp` | 16/16 |
+| `make -C contrib/cli test` | 20/20 |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
 | `bench/` (r7rs-benchmarks) | 57/57; geometric mean 3.0× Chez's time (Guile 2.8×, Gauche 9.2×) |
 
@@ -40,33 +40,23 @@ bridge is described in docs/interop.md.
 
 ## 1. Conformance: the remaining failures
 
+Every remaining failure but one re-enters a continuation, and passes
+with full continuations (section 3).
+
 **R7RS (2).**
 
 - `(sqrt -1.0-0.0i)`: chibi's test expects `+i`, but R7RS 6.2.4 puts
   the branch cut so that `(imag-part (log -1.0-0.0i))` is −π, which
   makes the answer `-i`, as here. Chibi doesn't distinguish `-0.0` in
   that position. Not a bug.
-- One `dynamic-wind` test re-enters a continuation (see 3).
+- One `dynamic-wind` test re-enters a continuation.
 
-**R6RS (191).** By program:
+**R6RS (2).** `base`'s `dynamic-wind` re-entry test, and the
+`exceptions` test of a `guard` that re-raises in the dynamic
+environment of the `raise` (R6RS's `guard` re-enters the handler for
+that; escape-only, it re-raises from the guard's own context).
 
-| program | failures |
-|---|---|
-| bytevectors | 70 |
-| io/ports | 63 |
-| base | 27 |
-| flonums | 9 |
-| syntax-case | 8 |
-| unicode | 6 |
-| records/syntactic | 4 |
-| exceptions | 2 |
-| r5rs | 2 |
-
-Not triaged yet; `tests/run-r6rs-tests.lisp -v NAME` lists them.
-
-**R5RS (1).** The continuation re-entry test, which passes with full
-continuations (section 3). R5RS is on psyntax now; the classic front
-end's four macro failures are gone.
+**R5RS (1).** The continuation re-entry test.
 
 ## 2. Speed
 
@@ -114,6 +104,10 @@ previous build. The worst ratios point at what to do next:
     `PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY` moves it.
 
   Left to do:
+  - A library whose source holds something the Lisp printer can't print
+    readably (a NaN literal, as R6RS's `base` and `flonums` test
+    libraries do) isn't cached: the cache writes the translation as Lisp
+    source for `compile-file`.
   - Libraries that aren't found through the library path aren't cached:
     those defined at the REPL or in a program file, and `(cl
     <package>)` libraries, whose expansions hold Lisp functions.
@@ -157,13 +151,12 @@ after the call. Assigned variables held across calls are boxed; long
 sequences are cut into chunks so no machine is huge. (A first version
 made two closures per call site; SBCL can't compile that at scale:
 a thousand closures over one variable take 162 s.)
-- tests/run-continuation-tests.lisp: 15 of 15 (re-entry, multi-shot,
+- tests/run-continuation-tests.lisp: 16 of 16 (re-entry, multi-shot,
   `dynamic-wind`, re-entry into `map`).
-- R7RS with full continuations: 976 of 977 (only the `sqrt`
+- R7RS with full continuations: 977 of 978 (only the `sqrt`
   disagreement is left).
 - R5RS with full continuations: 189 of 189, on psyntax (below).
-- R6RS with full continuations: 8712 pass, 190 fail, every program as
-  in the default mode (`base` passes one more), in 6.5 s. Two things made
+- R6RS with full continuations: all 8902. Two things made
   the big test libraries compilable. SBCL compiles a top-level form,
   closures included, as one component; with `debug` ≥ 1 and ≥ `speed`,
   each function that binds specials keeps its binding stack pointer in
@@ -182,7 +175,7 @@ Left before full continuations can be the default:
 - **Re-entry through Lisp frames is silently wrong.** A Lisp function
   that calls a Scheme procedure (vector-map, string-for-each, the sorts,
   R6RS's find, filter and folds, hashtable-update!, call-with-port,
-  with-exception-handler, the bridge's Lisp functions) isn't a frame: a
+  the bridge's Lisp functions) isn't a frame: a
   continuation captured in the callback and re-entered later resumes as
   if the Lisp function had returned at once. Make the common ones
   frame-aware, as map and for-each are (Scheme compiled with the
@@ -190,10 +183,11 @@ Left before full continuations can be the default:
   so that re-entering through one is an error (escaping still works).
   The same goes for procedures of src/r7rs/base.scm, compiled at boot
   without the transformation.
-- **Dynamic state isn't part of a continuation**: the exception handler
-  stack and parameterizations aren't re-established on re-entry, and
-  re-entry unwinds and rewinds every `dynamic-wind`, even those the
-  current and target continuations share.
+- **Dynamic state**: parameterizations aren't re-established on
+  re-entry, and re-entry unwinds and rewinds every `dynamic-wind`, even
+  those the current and target continuations share. (Exception
+  handlers are: `with-exception-handler`'s thunk and a raised-to
+  handler run in frames that rebind the handler stack.)
 - **Cost**: a "may capture" analysis would let calls to procedures that
   can't reach call/cc or an unknown procedure (fib calling fib) skip the
   frame, which is most calls in most code; and the special binding per
@@ -214,9 +208,8 @@ translator for the translator's own bootstrap.
 
 Without it, `call/cc` is escape-only (Lisp `catch`), and re-entering a
 continuation signals an error. SRFI 158's coroutine generators are
-buffered as a result (src/srfi/README.md). Of the remaining test
-failures, R7RS's `dynamic-wind` re-entry test and R5RS's equivalent
-need this.
+buffered as a result (src/srfi/README.md). All but one of the
+remaining test failures (section 1) need this.
 
 ## 4. The Lisp bridge, next
 

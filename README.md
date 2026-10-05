@@ -67,8 +67,8 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 
 | | front end | tests |
 |---|---|---|
-| R6RS | psyntax | Racket's R6RS suite: 8711 pass, 191 fail (8712/190 with full continuations); all 25 library test programs run |
-| R7RS-small | psyntax | chibi's R7RS suite: 975 of 977 (976 with full continuations) |
+| R6RS | psyntax | Racket's R6RS suite: 8900 of 8902 (all with full continuations); all 25 library test programs run |
+| R7RS-small | psyntax | chibi's R7RS suite: 976 of 978 (977 with full continuations) |
 | R5RS | psyntax | chibi's R5RS suite: 188 of 189 (189 with full continuations) |
 
 Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 3.0× Chez's

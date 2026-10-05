@@ -68,7 +68,8 @@ Each is marked `PSEUDOSCHEME:` in the source.
 * `psyntax/main.ss` replaced: instead of running a script named on the
   command line and exiting, it hands the expander's entry points to the
   host as globals (`psyntax:eval-r6rs-top-level`,
-  `psyntax:library-expander`, `psyntax:eval-top-level`, ...).
+  `psyntax:library-expander`, `psyntax:eval-top-level`,
+  `psyntax:syntax->datum`, ...).
 * `psyntax/library-manager.ss` exports `library-path`, `file-locator`
   and `library-locator`, so the host can search a library path for
   `.sls`, `.ss`, `.sld` and `.scm` files, and translate R7RS
@@ -79,13 +80,13 @@ Each is marked `PSEUDOSCHEME:` in the source.
   the `$core-rtd` bindings go to `$all` (the original leaves this to each
   port), and `$delay`, which `delay` now expands into.
 
-**Escape-only continuations**
+**Continuations**
 
-* `guard` re-entered continuations (it called the guard's continuation
-  from a thunk invoked after that continuation's `call/cc` returned, and
-  re-raised by jumping back into the handler). Rewritten to escape with
-  a thunk and re-raise with `raise-continuable` from the guard's own
-  context. See docs/continuations.md.
+* `guard` re-enters its handler's continuation to re-raise when no
+  clause matches, which escape-only continuations can't do. It does so
+  through the host primitive `%guard-reraise` (in the build-script table,
+  for `$all` only), which re-raises from the guard's own context where
+  the continuation can't be re-entered. See docs/continuations.md.
 
 **Conformance with the final R6RS** (the 2007 code predates it)
 
@@ -106,6 +107,14 @@ Each is marked `PSEUDOSCHEME:` in the source.
   value; it was "not supported yet".
 * Bytevectors are literals (11.4.1), and so are vectors (R7RS 4.1.2;
   most R6RS systems accept them).
+* `define-record-type`'s clauses are `sealed` and `opaque` (it looked
+  for `sealed?` and `opaque?`), and `(parent-rtd rtd rcd)` gives a parent.
+* `identifier?` is false of a bare symbol (the expander's `id?` still
+  takes one for an identifier).
+* `scheme-report-environment` is the expander's, as `null-environment`
+  was (the name was bound to the host's), and `=>`, `else` and `...` are
+  in both R5RS environments.
+* `(file-options ...)` is an enum set.
 * Three identifiers missing from the build script's table:
   `bytevector-ieee-single-set!`, `bytevector-ieee-double-set!`,
   `i/o-error-position`. (Found by comparing the table against the entries of
@@ -169,8 +178,12 @@ Each is marked `PSEUDOSCHEME:` in the source.
 * `delay` expands into `($delay thunk)`, building an R7RS promise, so
   there's one promise type for `delay`, `delay-force`, `make-promise`
   and `force`.
-* `(file-options ...)` is the checked list of option symbols
-  (`compat.ss`'s `file-options-spec` was "not implemented").
+* `compat.ss`'s `define-record` makes opaque, nongenerative R6RS
+  records, not tagged vectors, so a syntax object isn't a vector to the
+  code it's handed to. With that, the `(not (stx? e))` fenders that kept
+  a syntax object from matching a vector pattern came out of `syntax` and
+  `quasisyntax`, so vector templates (`#(x ...)`) expand, and
+  `unsyntax-splicing` works in a `quasisyntax` vector.
 * For compiled libraries (src/library-cache.lisp): a `library-loader`
   parameter, tried in `find-external-library` before the library is
   looked for as source, and a `library-expanded-hook` that
@@ -185,7 +198,5 @@ Each is marked `PSEUDOSCHEME:` in the source.
 
 ## Known gaps
 
-* Ellipses inside *vector templates*, `#(x ...)`, aren't expanded
-  (`gen-syntax` only handles vectors that aren't syntax objects).
 * Phases are implicit (Ghuloum & Dybvig's "implicit phasing"), so
   `for` levels are accepted and ignored.

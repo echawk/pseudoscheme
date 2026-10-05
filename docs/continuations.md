@@ -20,13 +20,14 @@ What escape-only continuations cost in the test suites:
 
 * **R5RS (chibi):** one test, re-entering a `dynamic-wind` through a
   saved continuation (188 of 189; 189 with full continuations).
-* **R7RS (chibi):** the same `dynamic-wind` test (975 of 977; 976 with
+* **R7RS (chibi):** the same `dynamic-wind` test (976 of 978; 977 with
   full continuations, the other failure being the `sqrt` branch cut).
-* **R6RS (Racket's suite):** psyntax's own `guard` expansion
-  re-entered continuations, and was rewritten to escape only (see
-  vendor/psyntax/psyntax/expander.ss); with that, the suite's
-  `control` and `exceptions` tests don't depend on re-entry. One test
-  in `base` passes only with full continuations.
+* **R6RS (Racket's suite):** two tests (8900 of 8902; all with full
+  continuations): one in `base` re-enters a `dynamic-wind`, and one in
+  `exceptions` has a `guard` re-raise in the dynamic environment of the
+  `raise`. R6RS's `guard` re-enters its handler's continuation to do
+  that; escape-only, it re-raises from the guard's own context instead
+  (`%guard-reraise`, vendor/psyntax/psyntax/expander.ss).
 
 So full continuations matter for correctness at the margins and for a
 class of programs (coroutines, backtracking), not for most code.
@@ -231,10 +232,10 @@ What failed first, and why:
 
 ### Results
 
-- chibi's R5RS suite 189 of 189, R7RS 976 of 977 (the `sqrt` branch-cut
-  disagreement is the one left), Racket's R6RS suite 8712 pass and 190
-  fail (one more pass than escape-only), tests/run-continuation-tests.lisp
-  16 of 16. `make test-full` runs them.
+- chibi's R5RS suite 189 of 189, R7RS 977 of 978 (the `sqrt` branch-cut
+  disagreement is the one left), Racket's R6RS suite all 8902 (two more
+  than escape-only), tests/run-continuation-tests.lisp 16 of 16. `make
+  test-full` runs them.
 - Cost on bench/ against escape-only: ordinary code 1.36× slower as a
   geometric mean of 11 benchmarks (cpstak 0.98×, mazefun 1.17×, fib
   1.74×, earley 2.86×); call/cc-heavy code 2.1–2.3× (ctak, fibc).
@@ -253,7 +254,7 @@ procedures that aren't redefined yet (`vector-map`, `vector-for-each`,
 `find`, `filter`, `partition`, `fold-left`, `fold-right`, `exists`,
 `for-all`, `member`/`assoc` with a predicate, `hashtable-update!`),
 `call-with-port` and the file procedures that take a procedure,
-`with-exception-handler`, the procedures of src/r7rs/base.scm (Scheme,
+the procedures of src/r7rs/base.scm (Scheme,
 but compiled at boot without the transformation), and Lisp functions
 called through the bridge (docs/interop.md). Escaping through one works.
 But a continuation captured inside the callback and re-entered after the
@@ -293,8 +294,8 @@ Techniques, roughly in order:
 
 ### Dynamic state
 
-Today a continuation captures the `dynamic-wind` winders and nothing
-else, and re-entry is coarse.
+Today a continuation captures the `dynamic-wind` winders and the
+exception handlers, and re-entry is coarse.
 
 1. **Shared winders.** Re-entry throws to the base, which unwinds the
    whole Lisp stack and runs the after of every active `dynamic-wind`;
@@ -305,12 +306,17 @@ else, and re-entry is coarse.
    winders in a special around the throw, and have `winder-extent`'s
    unwind-protect skip the after of a winder the target shares; then run
    befores only for the target's winders outside the common tail.
-2. **Exception handlers.** `with-exception-handler` binds `*handlers*`
-   and a `handler-bind` (for Lisp errors) around its thunk; re-entry
-   doesn't re-establish either. Make it frame-aware: a `#(:handler
-   promoted handler)` frame, which rebuilding re-establishes (the
-   binding and the `handler-bind`), as `:winder` frames re-establish a
-   `dynamic-wind`.
+2. **Exception handlers** (done). `with-exception-handler` binds
+   `*handlers*` and a `handler-bind` (for Lisp errors) around its thunk,
+   in a `#(:handler promoted (handler . outer))` frame that rebuilding
+   re-establishes, as `:winder` frames re-establish a `dynamic-wind`;
+   `raise` calls the handler in a `:handlers` frame (the outer handlers)
+   under a `:k` frame (what `raise` does if the handler returns). The R7RS
+   layer's `raise-object` and `with-exception-handler` reach these
+   through hooks (`*call-handler*`, `*call-with-handler*`), so every
+   raise is re-enterable, `error`'s and the R6RS layer's included. R6RS's
+   `guard` relies on it: with no clause matching, it re-enters the
+   handler to re-raise in the dynamic environment of the `raise`.
 3. **Parameterizations.** `parameterize` assigns each parameter's one
    global value for the extent of its body (`parameterize*`), which is
    also wrong across threads (ROADMAP.md, 4). Bind parameters with
