@@ -28,7 +28,10 @@ for line in text.split('\n'):
         if re.fullmatch(r"[^\s()\"';,.]+|\.\.\.|[+*/<=>-]+|[a-z0-9!$%&*/:<=>?^_~+-]+", t):
             pdf_tokens.add(t)
 only_pdf = sorted(pdf_tokens - mine)
-only_mine = sorted(mine - pdf_tokens)
+# Deliberate additions (see *standard-libraries* in exports.lisp): _ is
+# the syntax-rules wildcard, which (scheme base) must bind for psyntax.
+EXTENSIONS = {'_'}
+only_mine = sorted(mine - pdf_tokens - EXTENSIONS)
 print(f"{len(mine)} distinct exports transcribed")
 print("in the transcription but NOT found in the PDF text:", only_mine)
 words = [t for t in only_pdf if re.fullmatch(r"[a-zA-Z]+", t)]

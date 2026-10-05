@@ -89,7 +89,7 @@
        (names (remove-duplicates (loop for f in files append (library-names-in f)) :test #'equal))
        (ok 0) (failures '()))
   (setf psx:*library-path* (cons (namestring dir) *extra-dirs*))
-  (ps-r7rs::boot)
+  (pseudoscheme-interop:boot)		; R7RS, and the bridge's (pseudoscheme lisp)
   (dolist (name (sort names #'string< :key (lambda (n) (format nil "~S" n))))
     (let ((result (try-import name)))
       (cond ((eq result :ok) (incf ok)

@@ -118,7 +118,11 @@
       values vector vector->list vector-fill! vector-length vector-ref
       vector-set! vector? with-input-from-file with-output-to-file write
       write-char zero?"))
-  "Each entry is (library-name \"export ...\"), straight from Appendix A.")
+  "Each entry is (library-name \"export ...\"), straight from Appendix A,
+with one addition: (scheme base) exports _, which Appendix A leaves out
+although syntax-rules gives it a meaning (4.3.2: it matches anything).
+psyntax recognizes the wildcard by its binding, so it must be bound, as
+chibi binds it too.")
 
 (defparameter *syntax-exports*
   '("and begin case case-lambda cond cond-expand define define-record-type
