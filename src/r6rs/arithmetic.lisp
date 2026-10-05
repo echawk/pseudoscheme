@@ -327,3 +327,29 @@
   (ieee (if x-p (progn (check-fl "flatan" x) (atan y x)) (atan y))))
 (def-fl "flsqrt" (x) (ieee (if (minusp x) (if (eql x -0d0) x ps::+nan+) (sqrt x))))
 (def-fl "flexpt" (x y) (ieee (real-result (expt x y))))
+;;; ------------------------------------------------------------------
+;;; Generic arithmetic where R6RS asks more than R7RS (11.7.4.3, 11.7.4.4)
+
+(defprim "log" (x &optional (base nil base-p))
+  (when (or (eql x 0) (and base-p (eql base 0)))
+    (r6rs-assertion-violation "log" "undefined for exact zero" x))
+  (if base-p (ps:scheme-log x base) (ps:scheme-log x)))
+
+(defprim "expt" (base power)
+  (if (and (eql base 0) (numberp power) (minusp (realpart power)))
+      (ps-r7rs:raise-object
+       (make-standard-condition "make-implementation-restriction-violation" "expt"
+				"exact zero to a negative power" (list base power))
+       nil)
+      (ps:scheme-expt base power)))
+
+;; The precision, a mantissa width, may be ignored: a flonum's shortest
+;; representation reads back as the same flonum.
+(defprim "number->string" (z &optional (radix 10) precision)
+  (declare (ignore precision))
+  (ps:format-scheme-number z radix))
+
+(defprim "integer->char" (n)
+  (unless (and (integerp n) (or (<= 0 n #xD7FF) (<= #xE000 n #x10FFFF)))
+    (r6rs-assertion-violation "integer->char" "not a Unicode scalar value" n))
+  (code-char n))

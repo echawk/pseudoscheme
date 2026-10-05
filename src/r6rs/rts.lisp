@@ -77,6 +77,10 @@ quotient isn't finite, else NIL to say \"go on\"."
 (def-division "div" "mod" "div-and-mod" div-of)
 (def-division "div0" "mod0" "div0-and-mod0" div0-of)
 
-(defprim "real-valued?" (x) (bool (realp x)))
-(defprim "rational-valued?" (x) (bool (rationalp x)))
-(defprim "integer-valued?" (x) (bool (and (realp x) (= x (round x)))))
+;; A complex with a zero imaginary part, 0.0 included, is real-valued.
+(defun real-value (x)
+  (cond ((realp x) x)
+	((and (complexp x) (zerop (imagpart x))) (realpart x))))
+(defprim "real-valued?" (x) (bool (real-value x)))
+(defprim "rational-valued?" (x) (bool (ps:rational-number-p (real-value x))))
+(defprim "integer-valued?" (x) (bool (ps:integer-number-p (real-value x))))

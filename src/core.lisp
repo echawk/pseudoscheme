@@ -169,6 +169,14 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 
 (defvar unspecific (make-photon "#{Unspecific}"))
 (defvar unassigned  (make-photon "#{Unassigned}"))
+
+; A letrec variable's value where its init expressions refer to it,
+; before it may have been assigned.
+(proclaim '(inline letrec-value))
+(defun letrec-value (value name)
+  (if (eq value unassigned) (letrec-unassigned name) value))
+(defun letrec-unassigned (name)
+  (scheme-error "variable used before its initialization:" name))
 (defvar eof-object  (make-photon "#{End-of-file}"))
 
 ; PROCEDURE?

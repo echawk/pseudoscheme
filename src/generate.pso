@@ -16,6 +16,12 @@
   (DECLARE (SPECIAL @LAMBDA-ENCOUNTERED?))
   (SETQ @LAMBDA-ENCOUNTERED? (MAKE-FLUID FALSE)))
 (SET-FUNCTION-FROM-VALUE '@LAMBDA-ENCOUNTERED? 'SCHEME::@LAMBDA-ENCOUNTERED?)
+(LOCALLY
+  (DECLARE (SPECIAL @UNASSIGNED-LETREC-VARS))
+  (SETQ @UNASSIGNED-LETREC-VARS (MAKE-FLUID 'NIL)))
+(SET-FUNCTION-FROM-VALUE
+ '@UNASSIGNED-LETREC-VARS
+ 'SCHEME::@UNASSIGNED-LETREC-VARS)
 (DEFUN GENERATE-TOP (NODE ENV IGNORE?)
   (CASE (NODE-TYPE NODE)
     ((SCHEME::BEGIN)
@@ -150,6 +156,7 @@
                 (DELIVER-VALUE-TO-CONT VAL CONT))))))
 (SET-VALUE-FROM-FUNCTION 'GENERATE-CONSTANT 'SCHEME::GENERATE-CONSTANT)
 (DEFUN GENERATE-LOCAL-VARIABLE (VAR ENV CONT)
+  (DECLARE (SPECIAL @UNASSIGNED-LETREC-VARS))
   ENV
   (LET ((SUB (VARIABLE-SUBSTITUTION VAR)))
     (DELIVER-VALUE-TO-CONT
@@ -159,7 +166,11 @@
            ((SCHEME::FUN)
             (CONS 'FUNCTION (LIST (CAR (THE CONS (CDR (THE CONS SUB)))))))
            (OTHERWISE (.ERROR "lossage in generate-local-variable" SUB)))
-         SUB)
+         (IF (MEMBER VAR (FLUID @UNASSIGNED-LETREC-VARS) :TEST #'EQ)
+             (CONS 'LETREC-VALUE
+                   (CONS SUB
+                         (LIST (CONS 'QUOTE (LIST (LOCAL-VARIABLE-NAME VAR))))))
+             SUB))
      CONT)))
 (SET-VALUE-FROM-FUNCTION
  'GENERATE-LOCAL-VARIABLE
@@ -438,11 +449,15 @@
  'GENERATE-CALL-TO-UNKNOWN
  'SCHEME::GENERATE-CALL-TO-UNKNOWN)
 (DEFUN GENERATE-LAMBDA (NODE ENV CONT)
-  (DECLARE (SPECIAL CONT/VALUE @LAMBDA-ENCOUNTERED?))
+  (DECLARE (SPECIAL CONT/VALUE @UNASSIGNED-LETREC-VARS @LAMBDA-ENCOUNTERED?))
   (SET-FLUID! @LAMBDA-ENCOUNTERED? TRUE)
   (DELIVER-VALUE-TO-CONT
    (CONS 'FUNCTION
-         (LIST (CONS 'LAMBDA (GENERATE-LAMBDA-AUX NODE ENV CONT/VALUE))))
+         (LIST (CONS 'LAMBDA
+                     (LET-FLUID @UNASSIGNED-LETREC-VARS
+                                'NIL
+                                #'(LAMBDA NIL
+                                    (GENERATE-LAMBDA-AUX NODE ENV CONT/VALUE))))))
    CONT))
 (SET-VALUE-FROM-FUNCTION 'GENERATE-LAMBDA 'SCHEME::GENERATE-LAMBDA)
 (DEFUN GENERATE-LAMBDA-AUX (NODE ENV CONT)
@@ -531,7 +546,7 @@
     (OTHERWISE (.ERROR "unknown strategy" (GET-LETREC-STRATEGY NODE)))))
 (SET-VALUE-FROM-FUNCTION 'GENERATE-LETREC 'SCHEME::GENERATE-LETREC)
 (DEFUN GENERATE-GENERAL-LETREC (NODE ENV CONT)
-  (DECLARE (SPECIAL CONT/VALUE))
+  (DECLARE (SPECIAL CONT/VALUE @UNASSIGNED-LETREC-VARS))
   (LET ((VARS (LETREC-VARS NODE)))
     (LET ((VALS (LETREC-VALS NODE)))
       (LET ((NEW-NAMES (CL-EXTERNALIZE-LOCALS VARS ENV)))
@@ -541,14 +556,18 @@
                   (CONS (MAPCAR #'(LAMBDA (NEW-NAME)
                                     (CONS NEW-NAME '(UNASSIGNED)))
                                 NEW-NAMES)
-                        (APPEND (MAPCAR #'(LAMBDA (VAR VAL)
-                                            (CONS 'SETQ
-                                                  (CONS VAR
-                                                        (LIST (GENERATE VAL
-                                                                        NEW-ENV
-                                                                        CONT/VALUE)))))
-                                        NEW-NAMES
-                                        VALS)
+                        (APPEND (LET-FLUID @UNASSIGNED-LETREC-VARS
+                                           (APPEND VARS
+                                                   (FLUID @UNASSIGNED-LETREC-VARS))
+                                           #'(LAMBDA NIL
+                                               (MAPCAR #'(LAMBDA (NEW-NAME VAL)
+                                                           (CONS 'SETQ
+                                                                 (CONS NEW-NAME
+                                                                       (LIST (GENERATE VAL
+                                                                                       NEW-ENV
+                                                                                       CONT/VALUE)))))
+                                                       NEW-NAMES
+                                                       VALS)))
                                 (DEPROGNIFY (GENERATE (LETREC-BODY NODE)
                                                       NEW-ENV
                                                       CONT)))))))))))

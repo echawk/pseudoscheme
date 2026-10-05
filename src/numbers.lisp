@@ -85,6 +85,17 @@ around a body, so this is per implementation."
   (or (integerp x)
       (and (floatp x) (rational-number-p x) (= x (ffloor x)))))
 
+;; odd? and even? take any integer, 5.0 included.
+(declaim (inline scheme-oddp scheme-evenp))
+(defun scheme-oddp (x) (oddp (if (integerp x) x (integral x))))
+(defun scheme-evenp (x) (evenp (if (integerp x) x (integral x))))
+(defun integral (x)
+  ;; An integral flonum's integer, else X itself for ODDP to reject.
+  (if (and (floatp x) (integer-number-p x)) (truncate x) x))
+
+;; A real's imaginary part is exact 0, a flonum's included.
+(defun scheme-imag-part (z) (if (realp z) 0 (imagpart z)))
+
 (defun dbl (x)
   "Make a CL result Scheme-inexact if it's a single float."
   (typecase x

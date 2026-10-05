@@ -16,6 +16,11 @@
 
 (define @lambda-encountered? (make-fluid #f))
 
+; The variables of the general letrecs whose init expressions are being
+; generated (outside any lambda in them): a reference to one checks that
+; it has been assigned.
+(define @unassigned-letrec-vars (make-fluid '()))
+
 ; GENERATE
 
 (define (generate-top node env ignore?)
@@ -146,7 +151,9 @@
 	   ((val) (cadr sub))
 	   ((fun) `(ps-lisp:function ,(cadr sub)))
 	   (else (error "lossage in generate-local-variable" sub)))
-	 sub)
+	 (if (memq var (fluid @unassigned-letrec-vars))
+	     `(ps:letrec-value ,sub (ps-lisp:quote ,(local-variable-name var)))
+	     sub))
      cont)))
 
 (define (generate-program-variable var env cont)
@@ -400,7 +407,9 @@
 (define (generate-lambda node env cont)
   (set-fluid! @lambda-encountered? #t)
   (deliver-value-to-cont
-     `(ps-lisp:function (ps-lisp:lambda ,@(generate-lambda-aux node env cont/value)))
+     `(ps-lisp:function
+       (ps-lisp:lambda ,@(let-fluid @unassigned-letrec-vars '()
+			   (lambda () (generate-lambda-aux node env cont/value)))))
      cont))
 
 ; Returns (bvl . body)
@@ -492,10 +501,13 @@
     `(ps-lisp:let ,(map (lambda (new-name)
 		       `(,new-name ps:unassigned))
 		     new-names)
-       ,@(map (lambda (var val)
-		`(ps-lisp:setq ,var ,(generate val new-env cont/value)))
-	      new-names
-	      vals)
+       ,@(let-fluid @unassigned-letrec-vars
+		    (append vars (fluid @unassigned-letrec-vars))
+	   (lambda ()
+	     (map (lambda (new-name val)
+		    `(ps-lisp:setq ,new-name ,(generate val new-env cont/value)))
+		  new-names
+		  vals)))
        ,@(deprognify (generate (letrec-body node) new-env cont)))))
 
 (define (generate-labels-letrec node env cont)
