@@ -27,7 +27,7 @@
 
   --r7rs           R7RS-small (the default)
   --r6rs           R6RS, expanded by psyntax
-  --r5rs           R5RS: case-folding reader, the classic translator
+  --r5rs           R5RS: (scheme r5rs), with a case-folding reader
   -e, --eval EXPR  evaluate EXPR (Scheme text); may be repeated
   -p, --print EXPR evaluate EXPR and write its value
   -L, --library-path DIR
@@ -40,6 +40,10 @@
                    Quicklisp if loaded) first; may be repeated
   --quicklisp      load Quicklisp (~/quicklisp/setup.lisp), so that
                    importing (cl <package>) can fetch missing systems
+  --continuations=full
+                   compile with full, re-entrant continuations (a
+                   continuation can be called after its call/cc has
+                   returned); without it they are escape-only
   -i, --interactive
                    start a REPL after running the file or expressions
   --version        print the version and exit
@@ -120,6 +124,8 @@ list of (:eval text) / (:print text)."
 		((member a '("-l" "--lisp-system") :test #'string=)
 		 (push (list :lisp-system (value)) actions))
 		((string= a "--quicklisp") (push (list :quicklisp nil) actions))
+		((string= a "--continuations=full")
+		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t))
 		((member a '("-i" "--interactive") :test #'string=) (setq interactive t))
 		((member a '("-h" "--help") :test #'string=)
 		 (write-string *usage*) (uiop:quit 0))
