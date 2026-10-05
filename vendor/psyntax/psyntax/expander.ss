@@ -1386,8 +1386,24 @@
              (define (pat x) (replace-ellipsis x ell (lambda (_) dots)))
              (define (tmp x)
                (replace-ellipsis x ell (lambda (x) (list (scheme-stx '...) x))))
+             ;; An ordinary ... in a rule's pattern is a pattern
+             ;; variable, so the template's ... must be renamed with it;
+             ;; otherwise it's a symbol, escaped as (... ...).
+             (define (binds-dots? p)
+               (let f ((x p))
+                 (cond
+                   ((id? x)
+                    (and (free-id=? x (scheme-stx '...))
+                         (not (and ell (bound-id=? x ell)))))
+                   (else
+                    (syntax-match x ()
+                      ((a . d) (or (f a) (f d)))
+                      (_ (and (syntax-vector? x)
+                              (exists f (syntax-vector->list x)))))))))
              (cons* 'syntax-rules (map pat lits)
-                    (map (lambda (p t) (list (pat p) (tmp t))) pat* tmp*)))
+                    (map (lambda (p t)
+                           (list (pat p) (if (binds-dots? p) (pat t) (tmp t))))
+                         pat* tmp*)))
            (syntax-rules-macro
              (cond
                ;; PSEUDOSCHEME: the custom ellipsis is a literal, so the
