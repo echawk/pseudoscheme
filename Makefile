@@ -1,10 +1,44 @@
 # Pseudoscheme.  The Lisp side is built with ASDF (pseudoscheme.asd);
-# this is for what isn't: regenerating the checked-in generated files
-# from source.  See boot/README.md.
+# this is for what isn't: running the tests, and regenerating the
+# checked-in generated files from source (see boot/README.md).
 
 SBCL ?= sbcl
 
-.PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean
+.PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
+	test test-full test-cli test-all
+
+# Tests.  `make test` runs every suite in the default mode; `make
+# test-full` the suites that can, with full continuations
+# (src/continuations.lisp); `make test-cli` builds and tests the command
+# line; `make test-all` all three.  Each suite prints its tally, and the
+# make stops at the first one that fails to finish.  The compiled-library
+# cache is off, so a stale cache can't hide anything.
+SCHEME_RUN = PSEUDOSCHEME_LIBRARY_CACHE=0 $(SBCL) --dynamic-space-size 4GB \
+	--control-stack-size 500MB --script
+
+SUITES = syntax-case library interop srfi-system r5rs r7rs r6rs continuation
+
+test:
+	@# one run first, so ASDF compiles whatever is stale once
+	@$(SCHEME_RUN) tests/run-syntax-case-tests.lisp | tail -1
+	@for t in $(filter-out syntax-case,$(SUITES)); do \
+	  $(SCHEME_RUN) tests/run-$$t-tests.lisp > /tmp/pseudoscheme-test-$$t.log 2>&1; \
+	  grep -hE "tests passed|of [0-9]+ tests" /tmp/pseudoscheme-test-$$t.log \
+	    || { echo "$$t: no result; see /tmp/pseudoscheme-test-$$t.log"; exit 1; }; \
+	done
+
+test-full:
+	@for t in r5rs r7rs r6rs; do \
+	  $(SCHEME_RUN) tests/run-$$t-tests.lisp --continuations=full > /tmp/pseudoscheme-test-full-$$t.log 2>&1; \
+	  grep -hE "tests passed|of [0-9]+ tests" /tmp/pseudoscheme-test-full-$$t.log \
+	    | sed 's/^/full continuations: /' \
+	    || { echo "$$t: no result; see /tmp/pseudoscheme-test-full-$$t.log"; exit 1; }; \
+	done
+
+test-cli:
+	$(MAKE) -C contrib/cli test
+
+test-all: test test-full test-cli
 
 # Everything, in order:
 #  1. the .pso files (and spack.lisp), in some other Scheme: $(SCHEME)
