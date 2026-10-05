@@ -284,8 +284,10 @@
   (ieee (if xs (reduce #'/ xs :initial-value x) (/ 1d0 x))))
 (def-fl "flabs" (x) (abs x))
 
-(defun fl-div (x y) (ieee (if (> y 0) (ffloor (/ x y)) (fceiling (/ x y)))))
-(defun fl-div0 (x y) (ieee (let ((q (/ x y))) (if (> y 0) (ffloor (+ q 0.5d0)) (fceiling (- q 0.5d0))))))
+;; (FFLOOR's second value, the remainder, isn't Scheme's.)
+(defun fl-div (x y) (ieee (values (if (> y 0) (ffloor (/ x y)) (fceiling (/ x y))))))
+(defun fl-div0 (x y)
+  (ieee (let ((q (/ x y))) (values (if (> y 0) (ffloor (+ q 0.5d0)) (fceiling (- q 0.5d0)))))))
 (def-fl "fldiv" (x y) (fl-div x y))
 (def-fl "flmod" (x y) (ieee (- x (* y (fl-div x y)))))
 (def-fl "fldiv-and-mod" (x y) (let ((q (fl-div x y))) (values q (ieee (- x (* y q))))))
@@ -294,7 +296,7 @@
 (def-fl "fldiv0-and-mod0" (x y) (let ((q (fl-div0 x y))) (values q (ieee (- x (* y q))))))
 
 (def-fl "flnumerator" (x)
-  (if (fl-finite-p x) (coerce (numerator (rational x)) 'double-float) x))
+  (if (and (fl-finite-p x) (not (zerop x))) (coerce (numerator (rational x)) 'double-float) x))
 (def-fl "fldenominator" (x)
   (cond ((fl-finite-p x) (coerce (denominator (rational x)) 'double-float))
 	((ps:nan-p x) x)
