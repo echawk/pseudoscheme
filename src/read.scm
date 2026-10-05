@@ -308,7 +308,19 @@
 	  value
 	  (reading-error port "unknown # syntax" name)))))
 
-(define-sharp-macro #\f (sharp-boolean #f "false"))
+(define-sharp-macro #\f
+  (let ((boolean (sharp-boolean #f "false")))
+    (lambda (c port)
+      ;; #f32( and #f64( are SRFI 4 vectors
+      (read-char port)                  ;consume f
+      (let ((next (peek-char port)))
+	(if (and (char? next) (char-numeric? next))
+	    (sharp-numeric-vector-after "f" c port)
+	    (let ((name (car (sub-read-token #\f port))))
+	      (if (or (= (string-length name) 1)
+		      (string=? (common-lisp:string-downcase name) "false"))
+		  #f
+		  (reading-error port "unknown # syntax" name))))))))
 (define-sharp-macro #\t (sharp-boolean #t "true"))
 
 ; Directives: #!fold-case and #!no-fold-case (R7RS 2.1), #!r6rs (R6RS
@@ -490,14 +502,28 @@
 (ps-lisp:setq ps:*scheme-read* scheme-read)
 
 
-;; Bytevectors: R7RS #u8(...) and R6RS #vu8(...).
+;; Bytevectors: R7RS #u8(...) and R6RS #vu8(...); and SRFI 4's (and
+;; SRFI 160's) homogeneous vectors, #s16(...), #f64(...), #c128(...).
 
-(define-sharp-macro #\u
-  (lambda (c port)
-    (read-char port)                   ;consume u
-    (if (not (and (eqv? (read-char port) #\8) (eqv? (read-char port) #\()))
-	(reading-error port "bad #u8 syntax"))
-    (ps:list->bytevector (sub-read-list c port))))
+(define (sharp-numeric-vector c port)
+  (sharp-numeric-vector-after (string (char-downcase (read-char port))) c port))
+
+;; After # and the tag's letter LETTER: digits, then the list.
+(define (sharp-numeric-vector-after letter c port)
+  (let loop ((digits '()))
+    (let ((d (peek-char port)))
+      (if (and (char? d) (char-numeric? d))
+	  (loop (cons (read-char port) digits))
+	  (let ((tag (string-append letter (list->string (reverse digits)))))
+	    (if (not (eqv? (read-char port) #\())
+		(reading-error port "bad homogeneous vector syntax" tag))
+	    (if (string=? tag "u8")
+		(ps:list->bytevector (sub-read-list c port))
+		(ps:list->numeric-vector tag (sub-read-list c port))))))))
+
+(define-sharp-macro #\u sharp-numeric-vector)
+(define-sharp-macro #\s sharp-numeric-vector)
+(define-sharp-macro #\c sharp-numeric-vector)
 
 (define-sharp-macro #\v
   (lambda (c port)

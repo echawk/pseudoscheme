@@ -335,7 +335,8 @@ libraries (ROADMAP), so each load expands the sources again.
 
 Akku and snow-fort lay libraries out the way `*library-path*` expects,
 so `(r7rs:add-library-directory ".akku/lib/")` (or `-L .akku/lib` on the
-command line) is all it takes. `tests/run-library-corpus.lisp`
+command line) is all it takes. docs/libraries.md walks through
+installing and using packages with each. `tests/run-library-corpus.lisp`
 measures how many load.
 
 ## 7. Not done yet

@@ -18,7 +18,7 @@ See `src/psyntax.lisp` for the host side.
 |---|---|
 | `psyntax/*.ss` | the expander, as R6RS libraries (patched, see below) |
 | `psyntax-buildscript.ss` | expands those sources into a single image (patched) |
-| `psyntax-pseudoscheme.pp` | **that image, built on Pseudoscheme**: what `(psx::boot)` loads |
+| `psyntax-pseudoscheme.pp` | **that image, built on Pseudoscheme**: what `(psx::boot)` loads, compiled by ASDF to a fasl (the `psyntax-image` component) |
 | `pre-built/psyntax-scheme48.pp` | the original Scheme48 image (no longer usable as a seed, see below) |
 | `scheme48.r6rs.ss` | the original Scheme48 adapter, for reference |
 
@@ -100,6 +100,10 @@ Each is marked `PSEUDOSCHEME:` in the source.
   (11.14); it raised `&error` and returned unspecified.
 * Version references: a bug compared sub-version references against the
   *spec* instead of the version being tested.
+* The body of `with-syntax` is a body, `(let () ...)` (11.19), so it
+  may contain definitions; it was a `begin`.
+* `(define id)` with no expression (11.2.1) gives `id` an unspecified
+  value; it was "not supported yet".
 * Bytevectors are literals (11.4.1), and so are vectors (R7RS 4.1.2;
   most R6RS systems accept them).
 * Three identifiers missing from the build script's table:
@@ -145,6 +149,11 @@ Each is marked `PSEUDOSCHEME:` in the source.
 * Lisp keywords (`#:name`) are self-evaluating constants, not
   identifiers (`id?`, `self-evaluating?`, the host primitive
   `lisp-keyword?`, added to the build-script table as `$boot`).
+* So are the host's other literals that aren't R6RS datatypes, SRFI 4
+  vectors such as `#s16(1 2 3)` (the host primitive `host-literal?`).
+* `environment-symbols`, Ikarus's list of the names an environment
+  binds, and `environment?`, as `psyntax:` entry points for `(ikarus)`
+  (src/compat/ikarus.scm).
 * `psyntax:library-export-bindings`, an entry point listing a
   library's exports with their binding types and locations, for
   `use-library`.

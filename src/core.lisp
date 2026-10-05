@@ -82,6 +82,61 @@
       (scheme-error "bytevector literal: not a byte: ~S" b)))
   (make-array (length list) :element-type '(unsigned-byte 8) :initial-contents list))
 
+;;; Homogeneous numeric vectors (SRFI 4, SRFI 160) are CL specialized
+;;; vectors: a u8vector is a bytevector, an s16vector a (simple-array
+;;; (signed-byte 16) (*)), an f64vector a (simple-array double-float
+;;; (*)).  The reader reads #s16(1 2 3) and the writer writes it.
+
+(defparameter numeric-vector-types
+  '(("u8" . (unsigned-byte 8)) ("s8" . (signed-byte 8))
+    ("u16" . (unsigned-byte 16)) ("s16" . (signed-byte 16))
+    ("u32" . (unsigned-byte 32)) ("s32" . (signed-byte 32))
+    ("u64" . (unsigned-byte 64)) ("s64" . (signed-byte 64))
+    ("f32" . single-float) ("f64" . double-float)
+    ("c64" . (complex single-float)) ("c128" . (complex double-float)))
+  "SRFI 4/160 tags and the element types of their vectors.")
+
+(defun numeric-vector-element (type x)
+  "X as an element of a vector of TYPE (from NUMERIC-VECTOR-TYPES), or
+NIL if it can't be one: reals become floats in a float vector."
+  (cond ((typep x type) x)
+	((not (numberp x)) nil)
+	((and (member type '(single-float double-float)) (realp x)) (coerce x type))
+	((and (consp type) (eq (car type) 'complex))
+	 (let ((part (cadr type)))
+	   (complex (coerce (realpart x) part) (coerce (imagpart x) part))))))
+
+(defun list->numeric-vector (tag list)
+  "For the reader's #<tag>(...) and SRFI 4's list->s16vector etc."
+  (let ((type (cdr (assoc tag numeric-vector-types :test #'string-equal))))
+    (unless type (scheme-error "unknown homogeneous vector type ~A" tag))
+    (make-array (length list) :element-type type
+	        :initial-contents
+		(mapcar (lambda (x)
+			  (or (numeric-vector-element type x)
+			      (scheme-error "#~A(...): not a valid element: ~S" tag x)))
+			list))))
+
+(defun numeric-vector-tag (x)
+  "The SRFI 4 tag of X (\"u8\", \"f64\", ...) if it's a homogeneous
+numeric vector, else NIL."
+  (and (typep x '(simple-array * (*)))
+       (not (stringp x))
+       (not (simple-vector-p x))
+       (car (find (array-element-type x) numeric-vector-types
+		  :key (lambda (e) (upgraded-array-element-type (cdr e)))
+		  :test #'equal))))
+
+(defun numeric-vector-elements (x)
+  "The elements of numeric vector X as Scheme numbers (inexact ones are
+double floats)."
+  (map 'list (lambda (e)
+	       (typecase e
+		 (single-float (coerce e 'double-float))
+		 ((complex single-float) (coerce e '(complex double-float)))
+		 (t e)))
+       x))
+
 (defvar *fold-case* nil
   "True when the Scheme reader folds symbols and character names to
 lower case (R5RS behavior, or after #!fold-case).")
@@ -315,6 +370,12 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 	((typep obj1 '(simple-array (unsigned-byte 8) (*)))
 	 (and (typep obj2 '(simple-array (unsigned-byte 8) (*)))
 	      (equalp obj1 obj2)))
+	;; SRFI 4 vectors: the same type, and elements EQV?
+	((numeric-vector-tag obj1)
+	 (and (typep obj2 '(simple-array * (*)))
+	      (equal (array-element-type obj1) (array-element-type obj2))
+	      (= (length obj1) (length obj2))
+	      (every #'eql obj1 obj2)))
         (t nil)))
 
 

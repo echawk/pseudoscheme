@@ -664,8 +664,12 @@
 ;; differently from MzScheme's....
 ;; This should be written to be OS specific.
 
-(define (tm:local-tz-offset)
-  (date-time-zone-offset (seconds->date (current-seconds))))
+;; Pseudoscheme: optionally the offset in effect at a given instant (in
+;; seconds since the epoch), so that a date converted from a time gets
+;; that time's daylight-saving offset rather than today's.
+(define (tm:local-tz-offset . seconds)
+  (date-time-zone-offset
+   (seconds->date (if (pair? seconds) (car seconds) (current-seconds)))))
 
 ;; special thing -- ignores nanos
 (define (tm:time->julian-day-number seconds tz-offset)
@@ -690,7 +694,8 @@
 (define (tm:time->date time tz-offset ttype)
   (if (not (eq? (time-type time) ttype))
       (tm:time-error 'time->date 'incompatible-time-types  time))
-  (let* ( (offset (:optional tz-offset (tm:local-tz-offset))) )
+  ;; Pseudoscheme: the local offset at TIME, not now.
+  (let* ( (offset (:optional tz-offset (tm:local-tz-offset (time-second time)))) )
     (receive (secs date month year)
 	     (tm:decode-julian-day-number
 	      (tm:time->julian-day-number (time-second time) offset))

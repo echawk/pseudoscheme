@@ -125,13 +125,61 @@ sharing the very same bindings."
 ;;; ------------------------------------------------------------------
 ;;; Features (R7RS appendix B), for cond-expand
 
+;;; R7RS appendix B names the standard ones; SRFI 0 asks that each
+;;; supported SRFI N be a feature srfi-N.
+
+(defun platform-features ()
+  "Feature identifiers for the machine and operating system, in the
+spellings R7RS appendix B suggests."
+  (let ((m (string-downcase (machine-type)))
+	(s (string-downcase (software-type))))
+    (flet ((has (x string) (search x string)))
+      (append
+       (cond ((or (has "x86-64" m) (has "x86_64" m) (has "amd64" m)) '("x86-64"))
+	     ((or (has "arm64" m) (has "aarch64" m)) '("aarch64" "arm64"))
+	     ((or (has "x86" m) (has "386" m)) '("i386"))
+	     ((has "ppc" m) '("ppc"))
+	     ((has "arm" m) '("arm")))
+       (cond ((has "darwin" s) '("darwin" "macosx" "unix" "posix"))
+	     ((has "linux" s) '("gnu-linux" "linux" "unix" "posix"))
+	     ((has "freebsd" s) '("freebsd" "bsd" "unix" "posix"))
+	     ((has "openbsd" s) '("openbsd" "bsd" "unix" "posix"))
+	     ((has "netbsd" s) '("netbsd" "bsd" "unix" "posix"))
+	     ((has "win" s) '("windows")))
+       ;; SBCL, CCL and ECL put the byte order in *FEATURES*
+       (list #+big-endian "big-endian" #-big-endian "little-endian")
+       (list (string-downcase (lisp-implementation-type)))))))
+
+(defun srfi-features ()
+  "srfi-N for each SRFI library in src/srfi/, and the SRFIs that are
+built in rather than libraries: 0 (cond-expand), 30 (#| |# comments),
+46 (syntax-rules with a custom ellipsis), 62 (#; comments) and 97 (R6RS
+names for SRFI libraries)."
+  (let ((numbers (append '(0 30 46 62 97)
+			 (loop for path in (directory (merge-pathnames
+						       (make-pathname :name :wild :type "sld")
+						       (asdf:system-relative-pathname :pseudoscheme "src/srfi/")))
+			       for n = (ignore-errors (parse-integer (pathname-name path)))
+			       when n collect n)
+			 ;; SRFIs made only of sub-libraries: src/srfi/160/u8.sld
+			 (loop for dir in (directory (merge-pathnames
+						      (make-pathname :directory '(:relative :wild))
+						      (asdf:system-relative-pathname :pseudoscheme "src/srfi/")))
+			       for n = (ignore-errors (parse-integer (car (last (pathname-directory dir)))))
+			       when n collect n))))
+    (mapcar (lambda (n) (format nil "srfi-~D" n))
+	    (sort (remove-duplicates numbers) #'<))))
+
 (defparameter *scheme-features*
-  (append '("r7rs" "exact-closed" "exact-complex" "ieee-float" "ratios"
-	    "pseudoscheme" "common-lisp")
-	  (when (> char-code-limit 255) '("full-unicode"))
-	  (list (string-downcase (lisp-implementation-type))
-		(string-downcase (machine-type))
-		(string-downcase (software-type))))
+  (remove-duplicates
+   (append '("r7rs" "r6rs" "exact-closed" "exact-complex" "ieee-float" "ratios"
+	     "pseudoscheme" "common-lisp")
+	   (when (> char-code-limit 255) '("full-unicode"))
+	   (platform-features)
+	   (srfi-features)
+	   ;; SRFI 115's optional features, all supported (src/srfi/115.sld)
+	   '("regexp-non-greedy" "regexp-look-around" "regexp-backrefs" "regexp-unicode"))
+   :test #'string= :from-end t)
   "Feature identifiers (R7RS appendix B) satisfied by this implementation.")
 
 (defun read-forms-from-file (name)

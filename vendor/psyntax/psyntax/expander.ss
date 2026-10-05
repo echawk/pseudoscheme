@@ -27,7 +27,7 @@
           null-environment
           ;; PSEUDOSCHEME
           interaction-library-name interaction-source-name
-          identifier-binding)
+          identifier-binding environment-symbols)
   (import
     ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
@@ -443,8 +443,10 @@
       (or (number? x) (string? x) (char? x) (boolean? x)
           (bytevector? x) (vector? x)
           ;; PSEUDOSCHEME: Lisp keywords (#:test), for Lisp keyword
-          ;; arguments; see docs/interop.md.
-          (lisp-keyword? x))))
+          ;; arguments; see docs/interop.md.  And whatever else the
+          ;; host's reader makes that evaluates to itself, such as
+          ;; SRFI 4's #s16(1 2 3).
+          (lisp-keyword? x) (host-literal? x))))
 
   ;;; strip is used to remove the wrap of a syntax object.
   ;;; It takes an stx's expr and marks.  If the marks contain
@@ -762,12 +764,15 @@
 
   (define parse-define
     (lambda (x)
-      ;;; FIXME:  (define f) is not supported yet
+      ;;; PSEUDOSCHEME: (define id), which R6RS allows, gives id an
+      ;;; unspecified value.
       (syntax-match x ()
         ((_ (id . fmls) b b* ...) (id? id)
          (values id (cons 'defun (cons fmls (cons b b*)))))
         ((_ id val) (id? id)
-         (values id (cons 'expr val))))))
+         (values id (cons 'expr val)))
+        ((_ id) (id? id)
+         (values id (cons 'expr (bless '(if #f #f))))))))
 
   (define parse-define-syntax
     (lambda (x)
@@ -1016,13 +1021,15 @@
             (else x)))
         '() '())))
   
+  ;;; PSEUDOSCHEME: the body is a body, (let () b b* ...), as R6RS
+  ;;; specifies (11.19), so it may begin with definitions.
   (define with-syntax-macro
     (lambda (e)
       (syntax-match e ()
         ((_ ((fml* expr*) ...) b b* ...)
          (bless
            `(syntax-case (list . ,expr*) ()
-              (,fml* (begin ,b . ,b*))))))))
+              (,fml* (let () ,b . ,b*))))))))
   
   (define let-macro
     (lambda (stx)
@@ -3274,6 +3281,14 @@
   
   (define environment?
     (lambda (x) (env? x)))
+
+  ;;; PSEUDOSCHEME: Ikarus's environment-symbols, the names an
+  ;;; environment binds, for the (ikarus) compatibility library.
+  (define environment-symbols
+    (lambda (x)
+      (unless (env? x)
+        (assertion-violation 'environment-symbols "not an environment" x))
+      (map car (env-subst x))))
   
   ;;; This is R6RS's environment.  It parses the import specs 
   ;;; and constructs an env record that can be used later by 

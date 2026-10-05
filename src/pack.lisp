@@ -38,6 +38,9 @@
 	   "INTERN-SCHEME-SYMBOL"	;for STRING->SYMBOL
 	   "*FOLD-CASE*"		;reader case folding
 	   "LIST->BYTEVECTOR"		;reader #u8(...)
+	   ;; SRFI 4/160 vectors: reader #s16(...), writer
+	   "NUMERIC-VECTOR-TYPES" "LIST->NUMERIC-VECTOR" "NUMERIC-VECTOR-TAG"
+	   "NUMERIC-VECTOR-ELEMENTS" "NUMERIC-VECTOR-ELEMENT"
 	   ;; Numbers (numbers.lisp)
 	   "PARSE-SCHEME-NUMBER" "FORMAT-SCHEME-NUMBER"
 	   "INEXACT" "EXACT" "EXACT-P" "INEXACT-P" "INTEGER-NUMBER-P"

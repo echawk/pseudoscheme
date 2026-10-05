@@ -144,6 +144,14 @@
 	((output-port? obj) (write-string "#{Output-port}" port))
 	((eof-object? obj) (write-string "#{End-of-file}" port))
 	((vector? obj) (write-vector obj port recur))
+	((ps:true? (ps:numeric-vector-tag obj))  ;bytevectors, SRFI 4 vectors
+	 => (lambda (tag)
+	      (write-string "#" port)
+	      (write-string tag port)
+	      (let ((elements (ps:numeric-vector-elements obj)))
+		(if (null? elements)
+		    (write-string "()" port)
+		    (write-list elements port recur)))))
 	((eq? obj (if #f #f)) (write-string "#{Unspecific}" port))
 	(else
 	 ;; (write-string "#{Random object}" port)

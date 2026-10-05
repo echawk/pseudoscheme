@@ -5,7 +5,7 @@
 
 (library (psyntax system $bootstrap)
   (export void gensym eval-core symbol-value set-symbol-value!
-          pretty-print lisp-keyword?)
+          pretty-print lisp-keyword? host-literal?)
   (import (except (chezscheme) gensym pretty-print))
 
   ;; Interned, so the expanded code they end up in can be written out
@@ -50,4 +50,5 @@
         (write x p))
       (newline p)))
 
-  (define (lisp-keyword? x) #f))
+  (define (lisp-keyword? x) #f)
+  (define (host-literal? x) #f))

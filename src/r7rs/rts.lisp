@@ -473,7 +473,10 @@ objects are known.")
     (write-string s port :start start :end end)
     ps:unspecific))
 
-(defprim "file-exists?" (name) (bool (probe-file name)))
+;; Chez's (and so (chezscheme)'s, the same binding) takes follow?.
+(defprim "file-exists?" (name &optional follow?)
+  (declare (ignore follow?))
+  (bool (and (probe-file name) t)))
 (defprim "delete-file" (name) (delete-file name) ps:unspecific)
 
 ;;; ------------------------------------------------------------------

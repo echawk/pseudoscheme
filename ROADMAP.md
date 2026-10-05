@@ -7,12 +7,13 @@ this file.
 | runner | result |
 |---|---|
 | `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 948 of 975 |
-| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8690 pass, 212 fail; all 25 programs run to completion |
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8704 pass, 198 fail; all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 183 of 188 |
-| `tests/run-interop-tests.lisp` | 73/73 |
-| `tests/run-library-tests.lisp` | 44/44 |
+| `tests/run-interop-tests.lisp` | 104/104 |
+| `tests/run-library-tests.lisp` | 55/55 |
+| `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
-| `make -C contrib/cli test` | 13/13 |
+| `make -C contrib/cli test` | 15/15 |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
 | `bench/` (r7rs-benchmarks) | 57/57; geometric mean 3.0× Chez's time (Guile 2.8×, Gauche 9.2×) |
 
@@ -64,14 +65,14 @@ docs/interop.md.
   - some invalid input isn't rejected.
 - One `dynamic-wind` test re-enters a continuation (see 3).
 
-**R6RS (212).** By program:
+**R6RS (198).** By program:
 
 | program | failures |
 |---|---|
 | bytevectors | 70 |
-| io/ports | 69 |
+| io/ports | 65 |
 | base | 30 |
-| flonums | 19 |
+| flonums | 9 |
 | syntax-case | 8 |
 | unicode | 8 |
 | records/syntactic | 4 |
@@ -105,14 +106,27 @@ previous build. The worst ratios point at what to do next:
   declarations in the translator's output.
 - **`mbrotZ` (7.5×).** Complex arithmetic, which is also wrong (single
   floats; section 1).
-- **Compiled libraries.** Every run re-expands the libraries it
-  imports, and booting psyntax re-translates its image (about 1.7 s; the
-  CLI avoids this by booting at build time).
-  - Translate `psyntax-pseudoscheme.pp` to a `.pso` that ASDF compiles.
-  - Serialize expanded libraries (export substitution, environment,
-    visit and invoke code) into fasls, as Ikarus's later psyntax does.
-    Then the `:r7rs-library` ASDF components (src/asdf.lisp) can really
-    compile.
+- **Compiled libraries.** psyntax's own image is compiled once by ASDF
+  (the `psyntax-image` component; `psx::compile-image`), so booting
+  psyntax takes milliseconds rather than about 1.7 s. Every run still
+  re-expands the libraries it imports (`(srfi 1)` takes about 0.1 s).
+  Next, serialize expanded libraries into fasls, as Ikarus's later
+  psyntax does:
+  - make psyntax's marks gensyms rather than fresh strings compared
+    with `eq?`, so that syntax objects keep their identity across fasl
+    files (labels already are gensyms, for the same reason);
+  - write each library as its id, name, version, the ids of the
+    libraries it was expanded against, its export substitution and
+    environment, and its visit and invoke code translated to Lisp;
+  - add a hook to psyntax's library manager to load such a file before
+    expanding the source, valid only while every dependency still has
+    the id it was compiled against;
+  - cache under `~/.cache/pseudoscheme/`, keyed by the library form
+    (after `include` and `cond-expand`), the dependencies' ids and the
+    image; refuse to cache expansions holding live Lisp objects (the
+    `(cl <package>)` bridge's `verbatim` closures);
+  - then the `:r7rs-library` ASDF components (src/asdf.lisp) can really
+    compile, and the SRFIs can be compiled into the CLI image.
 
 ## 3. Continuations
 
@@ -153,22 +167,60 @@ Next:
   `BT`, system `bordeaux-threads`), so that `(cl bt)` autoloads.
 - **Predicate overrides** per import, for functions like Ironclad's
   `verify-signature` whose names don't say they're predicates.
-- **An Akku/snow helper**: point at a project's `.akku/lib`, or install
-  snow packages, from Lisp.
-- **Thread safety**: psyntax's state is global and unlocked.
+- **An Akku/snow helper** for Lisp: find a project's `.akku/lib` (the
+  command line's `--akku` does) or install snow packages from Lisp.
+  docs/libraries.md describes the manual way.
+- **Bridge issues found while writing SRFIs 18, 106, 126 and 170:**
+  - `lisp-funcall` passes `#f` to the function unconverted, contrary to
+    docs/interop.md: `to-lisp` wraps the function and `scheme-facing`
+    unwraps it again through `*originals*`.
+  - A Lisp function treated as a predicate keeps only its first value
+    (`mkstemp`, say).
+  - A Lisp condition reaching a Scheme handler has been turned into a
+    plain `&assertion` (`foreign-condition`, src/r6rs/conditions.lisp).
+    Keeping the original in a condition component would let `guard`
+    clauses test its type.
+  - `#f` returned through a Lisp macro's body comes back as `()`.
+  - A `(cl ...)` export that is both a function and a type
+    (`cl:character`) is the function; `lisp-symbol` gets the type.
+  - Inside a `lisp` form, `pkg::sym` isn't read as a Lisp symbol.
+- **Thread safety**: psyntax's state is global and unlocked: the
+  library table, the gensym counter, the interaction environment and
+  the parameters the front end sets. Two steps would fix it:
+  - first, one recursive lock (bordeaux-threads, already used by the
+    R6RS test runner) around everything that expands or installs
+    libraries: `psx:eval-library`, `eval-program`, `eval-top-level` and
+    `expand`, and the library locator they call back into. Code that has
+    already been expanded runs outside the lock, so only expansion is
+    serialized. This is enough for SRFI 18 threads running ordinary
+    code;
+  - `parameterize` assigns the parameter's one global value for the
+    extent of its body (`parameterize*`, src/r7rs/rts.lisp), so threads
+    see each other's bindings. It should bind a special variable
+    instead, which SRFI 18's `make-thread` would capture so that new
+    threads inherit the current bindings. Only the port parameters are
+    per-thread today;
+  - later, per-thread state where it matters (the interaction library,
+    `*include-directory*`), so that threads can expand at the same
+    time.
 
 ## 5. Real-world libraries
 
 From the corpus runs (`tests/run-library-corpus.lisp` over Akku and
 snow-fort trees):
 
-- An `(ikarus)` compat library would let xitomatl load (55 of the Akku
-  failures). Chez's `meta-cond`/`meta` would let some chez-srfi variants
-  load (15).
-- More SRFIs in `src/srfi/`. Asked for so far: 60, 113, 115, 146, 225 and
-  227.
-- SRFI 14's char-sets are Latin-1 only; Unicode char-sets would
-  replace the reference implementation's representation.
+- xitomatl: 123 of its 127 libraries load, with the `(ikarus)` library
+  (src/compat/ikarus.scm), `get-mode`/`chmod`/`file-change-time` and a
+  real `machine-type` in `(chezscheme)` (chez-srfi derives `posix` from
+  it), `%xx` escapes in file names, `(define x)` and definitions in
+  `with-syntax` bodies. Left: `(xitomatl profiler ...)` (chez-srfi's
+  SRFI 19 hides definitions with a `let-syntax`-bound `define`, which
+  doesn't take effect) and `(xitomatl R6RS-lexer)` (an identifier made
+  with `identifier-append` isn't found).
+- Chez's `meta-cond`/`meta` would let some chez-srfi variants load (15).
+- SRFIs not yet in `src/srfi/`: 38 (needs datum labels, section 1)
+  and 226 (needs re-entrant continuations, section 3), among the
+  commonly used ones.
 - Some libraries depend on chibi- or Gauche-specific leniency, such as
   duplicate pattern variables in `syntax-rules`, and are not counted as
   bugs here.

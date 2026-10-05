@@ -949,6 +949,7 @@
     (symbol-value             $boot)
     (set-symbol-value!        $boot)
     (lisp-keyword?            $boot)  ; PSEUDOSCHEME: self-evaluating Lisp keywords
+    (host-literal?            $boot)  ; PSEUDOSCHEME: the host's other self-evaluating data
     (eval-core                $boot)
     (pretty-print             $boot)
     (module                   cm)

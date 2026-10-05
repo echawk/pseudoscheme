@@ -30,6 +30,8 @@
   -L, --library-path DIR
                    look for libraries in DIR too (foo/bar.sld etc.
                    for (foo bar)); may be repeated
+  --akku           look for libraries in the Akku project's .akku/lib
+                   (in the current directory or the nearest one above)
   -l, --lisp-system SYSTEM
                    load the Common Lisp system SYSTEM (with ASDF, or
                    Quicklisp if loaded) first; may be repeated
@@ -40,6 +42,9 @@
   --version        print the version and exit
   -h, --help       print this and exit
   --               end of options: the next argument is the file
+
+PSEUDOSCHEME_LIBRARY_PATH, a list of directories separated by colons,
+is searched before the -L directories.
 
 With a FILE, it is run as a program: for R6RS/R7RS, any (library ...) /
 (define-library ...) forms are installed and the (import ...) program
@@ -84,6 +89,14 @@ name first (see -l and --quicklisp; docs/interop.md).
   (let ((dir (namestring (uiop:ensure-directory-pathname (uiop:parse-native-namestring dir)))))
     (setf psx:*library-path* (append psx:*library-path* (list dir)))))
 
+(defun akku-library-directory ()
+  "The .akku/lib of the Akku project the current directory is in."
+  (loop for dir = (uiop:getcwd) then (uiop:pathname-parent-directory-pathname dir)
+	for lib = (merge-pathnames ".akku/lib/" dir)
+	when (uiop:directory-exists-p lib) return (namestring lib)
+	when (equal dir (uiop:pathname-parent-directory-pathname dir))
+	  do (die "--akku: no .akku/lib here or above (run akku install first)")))
+
 (defun parse-arguments (args)
   "Returns (values actions file file-args interactive), ACTIONS being a
 list of (:eval text) / (:print text)."
@@ -100,6 +113,7 @@ list of (:eval text) / (:print text)."
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
 		((member a '("-p" "--print") :test #'string=) (push (list :print (value)) actions))
 		((member a '("-L" "--library-path") :test #'string=) (add-library-path (value)))
+		((string= a "--akku") (add-library-path (akku-library-directory)))
 		((member a '("-l" "--lisp-system") :test #'string=)
 		 (push (list :lisp-system (value)) actions))
 		((string= a "--quicklisp") (push (list :quicklisp nil) actions))
@@ -148,6 +162,8 @@ system being loaded, may REQUIRE contribs such as SB-POSIX.")
 (defun main ()
   (ps:disable-float-traps)
   (find-sbcl-contribs)
+  (dolist (dir (uiop:split-string (or (uiop:getenv "PSEUDOSCHEME_LIBRARY_PATH") "") :separator ":"))
+    (when (plusp (length dir)) (add-library-path dir)))
   (multiple-value-bind (actions file file-args interactive)
       (parse-arguments (uiop:command-line-arguments))
     (setf ps-r7rs:*command-line* (cons (or file "pseudoscheme") file-args))

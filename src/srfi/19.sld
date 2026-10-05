@@ -18,13 +18,16 @@
 ;;; - date->julian-day divided by the negated zone offset rather than
 ;;;   subtracting it from the seconds: a division by zero for any UTC
 ;;;   date (a bug in the reference implementation).
+;;; - tm:local-tz-offset takes an optional instant, and time->date
+;;;   conversions use the local offset in effect at the time converted
+;;;   (so a winter date gets standard time, a summer one daylight time),
+;;;   instead of the offset in effect now.
 ;;; The reference string->date also calls an undefined time-error where
 ;;; it means tm:time-error; that is supplied below rather than edited.
 ;;;
-;;; Time zones: Pseudoscheme has no access to the host's time zone, so
-;;; the local time zone offset is taken to be 0 (UTC).  current-date
-;;; and the other converters therefore produce UTC dates unless given
-;;; an explicit tz-offset.
+;;; Time zones: the local offset comes from Common Lisp's
+;;; decode-universal-time, which follows the host's time zone (TZ),
+;;; daylight saving included.
 (define-library (srfi 19)
   (export time-tai time-utc time-monotonic time-thread
           time-process time-duration current-time time-resolution
@@ -57,7 +60,8 @@
           time-tai->time-utc time-tai->time-utc!
           date->string string->date)
   (import (scheme base) (scheme char) (scheme cxr) (scheme file) (scheme read) (scheme write)
-          (scheme time))
+          (scheme time)
+          (only (prefix (cl common-lisp) cl:) cl:decode-universal-time))
   (begin
     ;; The host clock, as MzScheme's procedures.
     (define (current-seconds) (exact (floor (current-second))))
@@ -66,9 +70,19 @@
     (define (current-process-milliseconds)
       (quotient (* 1000 (current-jiffy)) (jiffies-per-second)))
     (define (current-gc-milliseconds) 0)
-    ;; No host time zone information: every date is in UTC (offset 0).
+    ;; MzScheme's seconds->date and date-time-zone-offset, as far as
+    ;; tm:local-tz-offset needs them: the "date" is the instant itself,
+    ;; and its zone offset (seconds east of UTC) is the host's, by
+    ;; decode-universal-time.  Lisp's zone is in hours west of UTC,
+    ;; excluding daylight saving; DST, a Lisp generalized boolean, is
+    ;; NIL (Scheme's '()) when daylight saving is not in effect.
     (define (seconds->date seconds) seconds)
-    (define (date-time-zone-offset date) 0)
+    (define (date-time-zone-offset seconds)
+      (call-with-values
+          (lambda ()
+            (cl:decode-universal-time (+ (exact (floor seconds)) 2208988800)))
+        (lambda (s mi h d mo y dow dst zone)
+          (exact (round (* -3600 (- zone (if (null? dst) 0 1))))))))
     (define (exact->inexact x) (inexact x))
     (define (inexact->exact x) (exact x))
     (define eof (eof-object))

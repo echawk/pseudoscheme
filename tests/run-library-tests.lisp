@@ -395,5 +395,81 @@ program after them, through psyntax; return the program's last value."
      (error 'me \"oops\"))"
   "(error me)")
 
+(deftest "SRFI 0: each shipped SRFI is a feature" (r7)
+  "(import (scheme base))
+   (list (cond-expand (srfi-1 1) (else 2))
+         (cond-expand ((and srfi-0 srfi-9) 1) (else 2))
+         (cond-expand (srfi-9999 1) (else 2)))"
+  "(1 1 2)")
+
+(deftest "SRFI 0: it is an error for no clause to apply" (r7)
+  "(import (scheme base)) (cond-expand (no-such-feature 1))"
+  :error)
+
+(deftest "SRFI 0 from R6RS, as (srfi :0)" (r6)
+  "(import (rnrs) (srfi :0)) (cond-expand ((and r6rs srfi-0) 'yes) (else 'no))"
+  "yes")
+
+(deftest "R6RS (define x) with no expression" (r6)
+  "(import (rnrs)) (define x) (set! x 5) x"
+  "5")
+
+(deftest "with-syntax's body may begin with definitions" (r6)
+  "(import (rnrs))
+   (define-syntax m
+     (lambda (x) (with-syntax ((a 1)) (define b #'2) #`(+ a #,b))))
+   (m)"
+  "3")
+
+(deftest "(ikarus)" (r6)
+  "(import (rnrs) (ikarus))
+   (list (add1 1) (fxsub1 3) (port-closed? (current-output-port))
+         (environment-symbols (environment '(only (rnrs) car))))"
+  "(2 2 #f (car))")
+
+(deftest "(chezscheme) machine-type names the platform" (r6)
+  "(import (rnrs) (chezscheme))
+   (let ((m (symbol->string (machine-type))))
+     (and (char=? (string-ref m 0) #\\t) (> (string-length m) 3)))"
+  "#t")
+
+(deftest "SRFI 4: homogeneous vectors, literals and write" (r7)
+  "(import (scheme base) (scheme write) (srfi 4))
+   (let ((p (open-output-string))
+         (v '#s16(1 -2 3)))
+     (write (list v #f64(0.5) (f32vector 1.5) (u8vector 1 2) (bytevector 7) #c64() #f #t) p)
+     (list (get-output-string p)
+           (s16vector-ref v 1) (s16vector? v) (vector? v) (u8vector? (bytevector 1))
+           (equal? v (s16vector 1 -2 3)) (equal? v (s32vector 1 -2 3))))"
+  "(\"(#s16(1 -2 3) #f64(0.5) #f32(1.5) #u8(1 2) #u8(7) #c64() #f #t)\" -2 #t #f #t #t #f)")
+
+(deftest "SRFI 4: elements are checked" (r7)
+  "(import (scheme base) (srfi 4)) (s8vector 200)"
+  :error)
+
+(deftest "SRFI 160" (r7)
+  "(import (scheme base) (srfi 160 u16) (srfi 160 base))
+   (list (u16vector->list (u16vector-map (lambda (x) (* x 2)) (u16vector 1 2 3)))
+         (u16vector-fold + 0 #u16(1 2 3))
+         (u16? 70000)
+         (c128vector-ref (c128vector 1+2i) 0))"
+  "((2 4 6) 6 #f 1.0+2.0i)")
+
+;; Akku escapes characters in file names: (lib let-optionals*) is
+;; lib/let-optionals%2a.sls.
+(let ((dir (uiop:ensure-directory-pathname
+	    (merge-pathnames (format nil "pseudoscheme-lib-test-~D/" (random 1000000))
+			     (uiop:temporary-directory)))))
+  (ensure-directories-exist (merge-pathnames "lib/" dir))
+  (with-open-file (out (merge-pathnames "lib/let-optionals%2a.sls" dir) :direction :output)
+    (write-string "(library (lib let-optionals*) (export lo) (import (rnrs)) (define lo 'found))" out))
+  (push (namestring dir) psx:*library-path*)
+  (unwind-protect
+       (deftest "%xx escapes in library file names" (r6)
+	 "(import (rnrs) (lib let-optionals*)) lo"
+	 "found")
+    (pop psx:*library-path*)
+    (uiop:delete-directory-tree dir :validate t)))
+
 (format t "~&library layer / R7RS / R6RS: ~A of ~A tests passed.~%" *passed* *run*)
 (uiop:quit (if (= *passed* *run*) 0 1))

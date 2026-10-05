@@ -39,6 +39,9 @@ cat > $tmp/uselib.scm <<'S'
 (display (twice 21)) (newline)
 S
 check "r7rs library from -L" "42" $PS -L $tmp/lib $tmp/uselib.scm
+check "PSEUDOSCHEME_LIBRARY_PATH" "42" env PSEUDOSCHEME_LIBRARY_PATH=/nonexistent:$tmp/lib $PS $tmp/uselib.scm
+mkdir -p $tmp/proj/.akku/lib/my $tmp/proj/src && cp $tmp/lib/my/lib.sld $tmp/proj/.akku/lib/my/
+check "--akku finds .akku/lib above" "42" sh -c "cd $tmp/proj/src && $PS --akku $tmp/uselib.scm"
 
 cat > $tmp/lib/my/lib6.sls <<'S'
 (library (my lib6)

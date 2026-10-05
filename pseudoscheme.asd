@@ -14,6 +14,24 @@
   (declare (ignore component system))
   "pso")
 
+;;; psyntax's expanded image (vendor/psyntax/psyntax-pseudoscheme.pp),
+;;; compiled: the compile-op translates it to Lisp in a psyntax host and
+;;; compiles that (PSX::COMPILE-IMAGE); the load-op only records the
+;;; fasl, which PSX::BOOT loads into each host it creates.
+(defclass psyntax-image (source-file)
+  ((type :initform "pp")))
+
+(defmethod output-files ((o compile-op) (c psyntax-image))
+  (list (make-pathname :type (uiop:compile-file-type) :defaults (component-pathname c))))
+
+(defmethod perform ((o compile-op) (c psyntax-image))
+  (uiop:symbol-call "PSEUDOSCHEME-PSYNTAX" "COMPILE-IMAGE"
+		    (component-pathname c) (output-file o c)))
+
+(defmethod perform ((o load-op) (c psyntax-image))
+  (setf (symbol-value (uiop:find-symbol* "*IMAGE-FASL*" "PSEUDOSCHEME-PSYNTAX"))
+	(first (input-files o c))))
+
 ;;; Pseudoscheme is split into a core run-time (rts), the self-hosted
 ;;; Scheme-to-Common-Lisp translator (translator), and an evaluator/REPL
 ;;; layer built on both.  Language-standard surfaces (r5rs, r6rs, r7rs)
@@ -149,14 +167,19 @@
 			     (:file "conditions" :depends-on ("records"))
 			     (:file "arithmetic" :depends-on ("conditions"))
 			     (:file "bytevectors" :depends-on ("conditions"))
+			     (:file "numeric-vectors" :depends-on ("conditions"))
 			     (:file "enums" :depends-on ("conditions"))
 			     (:file "ports" :depends-on ("bytevectors"))
 			     (:file "r7rs-compat" :depends-on ("ports"))))
 	       (:module "compat"
 		:depends-on ("r6rs" "psyntax")
 		:components ((:file "chezscheme-host")
-			     (:static-file "chezscheme.scm")))
-	       (:file "psyntax" :depends-on ("r6rs"))))
+			     (:static-file "chezscheme.scm")
+			     (:static-file "ikarus.scm")))
+	       (:file "psyntax" :depends-on ("r6rs"))
+	       (psyntax-image "psyntax-pseudoscheme"
+		:pathname "../vendor/psyntax/psyntax-pseudoscheme"
+		:depends-on ("r6rs" "compat" "psyntax"))))
 
 ;;; The Common Lisp face: packages R5RS, R6RS and R7RS (EVAL, LOAD,
 ;;; REPL, EXPAND, USE-LIBRARY, ...), and the bridge between the

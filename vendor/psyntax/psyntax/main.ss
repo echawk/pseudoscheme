@@ -41,6 +41,8 @@
   (set-symbol-value! 'psyntax:eval eval)
   (set-symbol-value! 'psyntax:expand expand)
   (set-symbol-value! 'psyntax:environment environment)
+  (set-symbol-value! 'psyntax:environment? environment?)
+  (set-symbol-value! 'psyntax:environment-symbols environment-symbols)
   (set-symbol-value! 'psyntax:null-environment null-environment)
   (set-symbol-value! 'psyntax:installed-libraries installed-libraries)
   (set-symbol-value! 'psyntax:library-exists? library-exists?)

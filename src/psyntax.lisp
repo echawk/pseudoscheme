@@ -81,6 +81,7 @@
   (defhost "set-symbol-value!" (s v) (host-set! s v) ps:unspecific)
   (defhost "eval-core" (x) (host-eval x))
   (defhost "lisp-keyword?" (x) (ps:true? (keywordp x)))
+  (defhost "host-literal?" (x) (ps:true? (and (ps:numeric-vector-tag x) t)))
   (defhost "pretty-print" (x &optional (port *standard-output*))
     (funcall ps:*scheme-write* x port) (terpri port) ps:unspecific))
 
@@ -127,14 +128,14 @@ about psyntax's output, not the user's program, so they're muffled."
   "Names the host's INSTALL-PRIMITIVES (re)defines."
   (mapcar (lambda (p) (sym (car p))) ps-r6rs:*primitives*))
 
-(defun make-host ()
+(defun make-host (&optional (package-name *host-package-name*))
   "The host environment: a copy of the R7RS implementation env's
 bindings -- except that where a binding is still R5RS's own built-in
 (same value, and not redefined by the R6RS layer), the host shares the
 R5RS binding itself, so the translator open-codes it ((+ a b) becomes
 CL's +, (vector-ref v i) SVREF) as it does in R5RS code.  A copy would
 be a fresh variable, called out of line."
-  (let ((env (psl:new-library-env "psyntax host"))
+  (let ((env (fresh-host-env package-name))
 	(base (psl:base-structure))
 	(overridden (overridden-primitive-names))
 	(shared '()))
@@ -155,6 +156,19 @@ be a fresh variable, called out of line."
 	      (psl:copy-bindings! env ps-r7rs:*implementation-env* (list name))))))
     (setq *shared-primitives* shared)
     env))
+
+(defparameter *host-package-name* "LIBRARY psyntax host"
+  "The CL package of the host environment's globals.  Its name is fixed,
+not numbered like other library environments', because compiled code
+refers to it: the fasl of psyntax's image (see COMPILE-IMAGE).")
+
+(defun fresh-host-env (package-name)
+  "An empty program environment for a new host, in a package of its own
+named PACKAGE-NAME: a previous host's package is deleted, so nothing of
+it (bindings, say, from a REBUILD's seed) carries over."
+  (let ((old (find-package package-name)))
+    (when old (delete-package old)))
+  (psl:tr "MAKE-PROGRAM-ENV" (intern package-name "SCHEME") '()))
 
 (defun install-primitives (alist)
   "ALIST of (name-string . function), e.g. from DEFPRIM registries."
@@ -187,20 +201,110 @@ the command line and exits; DROP-LAST skips it.)"
     (dolist (form (if drop-last (butlast forms) forms))
       (host-eval form))))
 
-(defun boot (&key seed)
-  "Create *HOST* and load psyntax into it: our own rebuilt image if there
-is one, else the original Scheme48 one (which lacks our entry points;
-see REBUILD).  SEED: T for the Scheme48 image regardless, or the
-pathname of an image built from our sources elsewhere (boot/ builds one
-with Chez Scheme)."
-  (setq *host* (make-host))
+;;; psyntax's image is compiled once, by ASDF (the PSYNTAX-IMAGE
+;;; component in pseudoscheme.asd): translated to Lisp, which
+;;; COMPILE-FILE compiles.  Translating the image takes a moment; it's
+;;; the Lisp compiler that's slow, and BOOT would otherwise run it on
+;;; every start.  The fasl is valid only for a host built the same way,
+;;; with the same shared primitives (see MAKE-HOST), which it checks.
+
+(defvar *image-fasl* nil
+  "The compiled psyntax-pseudoscheme.pp, if ASDF has built it.")
+
+(defun prepare-host (&optional (package-name *host-package-name*))
+  "Create *HOST*, with everything psyntax's image expects of it."
+  (setq *host* (make-host package-name))
   (setf ps-r6rs::*globals-hook* #'host-ref)
   (ps-r6rs::install-exception-hooks)
   (install-primitives ps-r6rs:*primitives*)
   (install-adapter)
+  *host*)
+
+(defun host-signature ()
+  "What compiled code depends on in a host: which primitives are R5RS's
+own bindings, and so open-coded."
+  (sort (mapcar #'ps:scheme-symbol-name *shared-primitives*) #'string<))
+
+(defun compile-image (image fasl)
+  "Translate the psyntax IMAGE (a .pp file) to Lisp and compile it into
+FASL.  The translating is done in a host of its own, under another
+package name, so that a host already running in this Lisp (ASDF may
+recompile the image in a live session) is left alone; the code is then
+written with the real host package's name."
+  (let* ((compiling (concatenate 'string *host-package-name* " (compiling)"))
+	 (*host* nil)
+	 (*shared-primitives* '())
+	 (ps-r6rs::*globals-hook* ps-r6rs::*globals-hook*)
+	 ;; Written under temporary names and renamed into place: other
+	 ;; Lisp processes sharing the fasl cache may be loading the old
+	 ;; fasl.
+	 (temp (format nil "~A-~36R" (pathname-name fasl) (random (expt 36 8) (make-random-state t))))
+	 (lisp (make-pathname :name temp :type "lisp" :defaults fasl))
+	 (temp-fasl (make-pathname :name temp :defaults fasl))
+	 (forms (read-file-forms image)))
+    (prepare-host compiling)
+    (let* ((from (find-package compiling))
+	   (to (or (find-package *host-package-name*)
+		   (make-package *host-package-name* :use '("COMMON-LISP"))))
+	   (signature (host-signature))
+	   (code (handler-bind ((warning #'muffle-warning))
+		   (mapcar (lambda (form) (psl:tr "TRANSLATE" (open-primitives form) *host*))
+			   forms))))
+      (labels ((rename (x)
+		 (cond ((and (symbolp x) (eq (symbol-package x) from))
+			(intern (symbol-name x) to))
+		       ((consp x)		; iterative along the list
+			(let* ((head (list nil)) (tail head))
+			  (loop while (consp x)
+				do (setf tail (setf (cdr tail) (list (rename (pop x))))))
+			  (setf (cdr tail) (rename x))
+			  (cdr head)))
+		       (t x))))
+	(setq code (mapcar #'rename code)))
+      (delete-package from)
+      (ensure-directories-exist lisp)
+      (with-open-file (out lisp :direction :output :if-exists :supersede)
+	(with-standard-io-syntax
+	  (let ((*package* (find-package "SCHEME"))
+		(*print-circle* t)
+		(*print-readably* t))
+	    (format out ";;; ~A, translated by COMPILE-IMAGE.~%" (file-namestring image))
+	    (print `(unless (equal (host-signature) ',signature)
+		      (throw 'stale-image nil))
+		   out)
+	    (dolist (form code) (print form out))))))
+    (handler-bind ((warning #'muffle-warning))
+      (with-standard-io-syntax
+	(let ((*package* (find-package "SCHEME")))
+	  (compile-file lisp :output-file temp-fasl))))
+    (delete-file lisp)
+    (uiop:rename-file-overwriting-target temp-fasl fasl)
+    fasl))
+
+(defun load-compiled-image ()
+  "Load *IMAGE-FASL* into *HOST*; false if there's none, if the image has
+changed since (a REBUILD rewrites it), or if it was compiled for a host
+that differs from this one."
+  (and *image-fasl*
+       (probe-file *image-fasl*)
+       (>= (file-write-date *image-fasl*)
+	   (or (file-write-date (vendor-file "psyntax-pseudoscheme.pp")) 0))
+       (catch 'stale-image
+	 (handler-bind ((warning #'muffle-warning))
+	   (load *image-fasl*))
+	 t)))
+
+(defun boot (&key seed)
+  "Create *HOST* and load psyntax into it: our own rebuilt image if there
+is one (compiled, if ASDF has compiled it), else the original Scheme48
+one (which lacks our entry points; see REBUILD).  SEED: T for the
+Scheme48 image regardless, or the pathname of an image built from our
+sources elsewhere (boot/ builds one with Chez Scheme)."
+  (prepare-host)
   (let ((own (vendor-file "psyntax-pseudoscheme.pp")))
     (cond ((and seed (not (eq seed t)))
 	   (load-image seed))
+	  ((and (not seed) (load-compiled-image)))
 	  ((and (not seed) (probe-file own))
 	   (load-image own))
 	  (t

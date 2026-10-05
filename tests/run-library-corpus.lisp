@@ -12,7 +12,10 @@
 ;;;;
 ;;;; Usage:
 ;;;;   sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
-;;;;        --script tests/run-library-corpus.lisp DIR [-v]
+;;;;        --script tests/run-library-corpus.lisp DIR [-v] [-L LIBDIR ...]
+;;;;
+;;;; -L adds a directory the libraries in DIR may import from (searched
+;;;; after DIR), without testing its own libraries.
 
 (require :asdf)
 
@@ -40,9 +43,13 @@
 (ps:disable-float-traps)
 
 (defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
+(defparameter *extra-dirs*
+  (loop for (a b) on (uiop:command-line-arguments)
+	when (string= a "-L") collect b))
 (defparameter *dir*
-  (or (find-if (lambda (a) (char/= (char a 0) #\-)) (uiop:command-line-arguments))
-      (error "usage: run-library-corpus.lisp DIR")))
+  (or (loop for (prev a) on (cons nil (uiop:command-line-arguments))
+	    when (and a (char/= (char a 0) #\-) (not (equal prev "-L"))) return a)
+      (error "usage: run-library-corpus.lisp DIR [-v] [-L LIBDIR ...]")))
 
 (defparameter *implementations*
   '("chezscheme" "guile" "ikarus" "mosh" "ypsilon" "larceny" "ironscheme" "vicare"
@@ -72,14 +79,16 @@
 	(ps-r7rs::eval-forms (list (list (ps:intern-scheme-symbol "import") name)))
 	:ok)
     (serious-condition (e)
-      (string-trim '(#\Space #\Newline)
-		   (substitute #\Space #\Newline (princ-to-string e))))))
+      ;; Errors can carry whole expander environments: print them short.
+      (let ((*print-length* 10) (*print-level* 4))
+	(string-trim '(#\Space #\Newline)
+		     (substitute #\Space #\Newline (princ-to-string e)))))))
 
 (let* ((dir (uiop:ensure-directory-pathname *dir*))
        (files (remove-if-not #'portable-file-p (directory (merge-pathnames "**/*.*" dir))))
        (names (remove-duplicates (loop for f in files append (library-names-in f)) :test #'equal))
        (ok 0) (failures '()))
-  (setf psx:*library-path* (list (namestring dir)))
+  (setf psx:*library-path* (cons (namestring dir) *extra-dirs*))
   (ps-r7rs::boot)
   (dolist (name (sort names #'string< :key (lambda (n) (format nil "~S" n))))
     (let ((result (try-import name)))
@@ -89,4 +98,4 @@
 	       (format t "~&FAIL ~A~%     ~A~%" (ps-r7rs::write-scheme-to-string name)
 		       (subseq result 0 (min 200 (length result))))))
       (finish-output)))
-  (format t "~&~%~D of ~D libraries load.~%" ok (length names)))
+  (format t "~&~%~D of ~D libraries load.~%" ok (+ ok (length failures))))

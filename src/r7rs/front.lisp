@@ -49,14 +49,17 @@
     "chez:current-directory" "chez:file-directory?" "chez:file-regular?"
     "chez:file-symbolic-link?" "chez:directory-list" "chez:mkdir"
     "chez:delete-directory" "chez:rename-file" "chez:file-modification-time"
-    "chez:library-directories" "chez:timezone-offset")
+    "chez:library-directories" "chez:timezone-offset" "chez:get-mode"
+    "chez:chmod" "chez:file-change-time" "chez:machine-type"
+    "psyntax:environment?" "psyntax:environment-symbols")
   "Host globals (pseudoscheme host) exports besides R7RS procedure names.")
 
 (defun host-library-exports ()
   (let ((names (remove-duplicates
 		(append (loop for (nil s) in *standard-libraries*
 			      append (remove-if #'syntax-export-p (split-names s)))
-			*host-extras*)
+			*host-extras*
+			(ps-r6rs::numeric-vector-names))
 		:test #'string=)))
     (mapcar (lambda (n) (cons n n))
 	    (remove-if-not (lambda (n) (boundp (psx::location (ssym n)))) names))))
@@ -104,8 +107,7 @@ of the library or program being processed.")
 
 (defun feature-satisfied-p (req)
   (cond ((symbolp req)
-	 (or (string= (ps:scheme-symbol-name req) "else")
-	     (member (ps:scheme-symbol-name req) psl:*scheme-features* :test #'string=)))
+	 (member (ps:scheme-symbol-name req) psl:*scheme-features* :test #'string=))
 	((head-is req "and") (every #'feature-satisfied-p (cdr req)))
 	((head-is req "or") (some #'feature-satisfied-p (cdr req)))
 	((head-is req "not") (not (feature-satisfied-p (cadr req))))
@@ -122,8 +124,12 @@ declarations."
   (loop for d in decls
 	append (cond ((head-is d "cond-expand")
 		      (flatten-declarations
-		       (loop for clause in (cdr d)
-			     when (feature-satisfied-p (car clause)) return (cdr clause))))
+		       (loop for (clause . more) on (cdr d)
+			     when (if (and (symbolp (car clause))
+					   (string= (ps:scheme-symbol-name (car clause)) "else"))
+				      (or (null more) (error "cond-expand: else clause is not last"))
+				      (feature-satisfied-p (car clause)))
+			       return (cdr clause))))
 		     ((head-is d "include-library-declarations")
 		      (flatten-declarations
 		       (loop for f in (cdr d) append (read-forms (include-path f)))))
@@ -171,17 +177,41 @@ we no longer know which file the library came from."
 ;;; ------------------------------------------------------------------
 ;;; Finding libraries in files
 
+(defun percent-encode (name safe)
+  "NAME with each character not in the string SAFE (or alphanumeric)
+written %xx, as Akku names library files: let-optionals* is
+let-optionals%2a."
+  (with-output-to-string (out)
+    (loop for c across name
+	  do (if (or (and (char< c (code-char 128)) (alphanumericp c)) (find c safe))
+		 (write-char c out)
+		 (loop for byte across (if (< (char-code c) 256)
+					   (vector (char-code c))
+					   (funcall (primitive "string->utf8") (string c)))
+		       do (format out "%~(~2,'0X~)" byte))))))
+
 (defun name-part-candidates (part)
   "File-name spellings to try for one part of a library name."
   (let ((name (sname* part)))
     (remove-duplicates
      (append (list name)
-	     ;; (srfi :1): R7RS libraries are named (srfi 1) on disk;
-	     ;; Akku spells the colon %3a.
+	     ;; (srfi :1): R7RS libraries are named (srfi 1) on disk.
 	     (when (and (> (length name) 1) (char= (char name 0) #\:))
-	       (list (subseq name 1) (concatenate 'string "%3a" (subseq name 1))
-		     (concatenate 'string "%3A" (subseq name 1)))))
+	       (list (subseq name 1)))
+	     ;; Akku escapes other characters, in psyntax's style or
+	     ;; Ikarus's: (srfi :1) is srfi/%3a1.
+	     (list (percent-encode name "-._~") (percent-encode name ".-+_")
+		   (string-upcase-escapes (percent-encode name "-._~"))))
      :test #'string=)))
+
+(defun string-upcase-escapes (name)
+  "NAME with the hex digits of its %xx escapes upper-cased."
+  (let ((s (copy-seq name)))
+    (loop for i from 0 below (length s)
+	  when (char= (char s i) #\%)
+	    do (setf (subseq s (+ i 1) (min (length s) (+ i 3)))
+		     (string-upcase (subseq s (+ i 1) (min (length s) (+ i 3))))))
+    s))
 
 (defun stems (name)
   (if (null name)
@@ -231,7 +261,19 @@ form, translated to an R6RS library, or NIL."
     ("scheme sort" . "srfi :132") ("scheme comparator" . "srfi :128")
     ("scheme generator" . "srfi :158") ("scheme stream" . "srfi :41")
     ("scheme box" . "srfi :111") ("scheme bitwise" . "srfi :151")
-    ("scheme fixnum" . "srfi :143") ("scheme division" . "srfi :141"))
+    ("scheme fixnum" . "srfi :143") ("scheme division" . "srfi :141")
+    ("scheme set" . "srfi :113") ("scheme rlist" . "srfi :101")
+    ("scheme text" . "srfi :135") ("scheme mapping" . "srfi :146")
+    ("scheme mapping hash" . "srfi :146 hash")
+    ("scheme regex" . "srfi :115") ("scheme flonum" . "srfi :144")
+    ("scheme list-queue" . "srfi :117") ("scheme lseq" . "srfi :127")
+    ("scheme ideque" . "srfi :134")
+    ("scheme vector u8" . "srfi :160 u8") ("scheme vector s8" . "srfi :160 s8")
+    ("scheme vector u16" . "srfi :160 u16") ("scheme vector s16" . "srfi :160 s16")
+    ("scheme vector u32" . "srfi :160 u32") ("scheme vector s32" . "srfi :160 s32")
+    ("scheme vector u64" . "srfi :160 u64") ("scheme vector s64" . "srfi :160 s64")
+    ("scheme vector f32" . "srfi :160 f32") ("scheme vector f64" . "srfi :160 f64")
+    ("scheme vector c64" . "srfi :160 c64") ("scheme vector c128" . "srfi :160 c128"))
   "R7RS-large library names (Red and Tangerine editions) and the
 libraries that implement them.")
 
@@ -345,6 +387,7 @@ the host has no such procedure.")
 		  unless (equal (mapcar #'sname* name) '("scheme" "r5rs"))
 		    collect (format nil "(~{~(~A~)~^ ~})" (mapcar #'sname* name))))))
   (install-chezscheme-library)
+  (install-ikarus-library)
   ;; the R7RS REPL's own interaction library
   (funcall (psx:host-ref "psyntax:install-library")
 	   (funcall (psx:host-ref "gensym"))
@@ -360,6 +403,7 @@ the host has no such procedure.")
     "file-directory?" "file-regular?" "file-symbolic-link?" "directory-list"
     "mkdir" "delete-directory" "rename-file" "file-modification-time"
     "directory-separator" "machine-type" "library-directories"
+    "get-mode" "chmod" "file-change-time"
     "source-directories" "record-writer" "collect" "weak-cons" "weak-pair?"
     "bwp-object?" "iota" "box" "box?" "unbox" "set-box!" "format" "printf"
     "fprintf" "pretty-print" "errorf" "assertion-violationf" "warningf"
@@ -388,6 +432,37 @@ the host has no such procedure.")
                                   (only (pseudoscheme r7rs syntax) parameterize include)
                                   (prefix (pseudoscheme host) %))")
 	    (read-forms (asdf:system-relative-pathname :pseudoscheme "src/compat/chezscheme.scm"))))))
+
+;;; (ikarus): what Ikarus variants of libraries (foo.ikarus.sls) import.
+;;; R6RS, the extensions Ikarus shares with Chez, from (chezscheme), and
+;;; src/compat/ikarus.scm.
+
+(defparameter *ikarus-from-chezscheme*
+  '("void" "add1" "sub1" "gensym" "getenv" "system" "with-input-from-string"
+    "with-output-to-string" "current-directory" "file-directory?"
+    "file-regular?" "file-symbolic-link?" "directory-list" "delete-directory"
+    "rename-file" "format" "printf" "fprintf" "pretty-print" "fluid-let"
+    "time" "parameterize" "make-parameter" "include" "last-pair" "make-list"
+    "open-input-string" "open-output-string" "get-output-string"
+    "library-directories"))
+
+(defparameter *ikarus-extras*
+  '("fxadd1" "fxsub1" "die" "port-closed?" "library-path" "stale-when"
+    "read-annotated" "environment?" "environment-symbols" "print-condition"))
+
+(defun install-ikarus-library ()
+  (let ((r6rs (remove-duplicates (psx:table-exports '("r" "mp" "ms" "r5" "ev")) :test #'string=))
+	(own (append *ikarus-from-chezscheme* *ikarus-extras*)))
+    (psx:eval-library
+     (list* (ssym "library") (list (ssym "ikarus"))
+	    (cons (ssym "export")
+		  (mapcar #'ssym (append (remove-if (lambda (n) (member n own :test #'string=)) r6rs)
+					 own)))
+	    (list* (ssym "import")
+		   (list* (ssym "only") (list (ssym "chezscheme")) (mapcar #'ssym *ikarus-from-chezscheme*))
+		   (read-scheme "((rnrs) (rnrs mutable-pairs) (rnrs mutable-strings) (rnrs r5rs) (rnrs eval)
+                                  (prefix (pseudoscheme host) %))"))
+	    (read-forms (asdf:system-relative-pathname :pseudoscheme "src/compat/ikarus.scm"))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Host procedures the libraries above need

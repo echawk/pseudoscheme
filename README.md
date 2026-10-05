@@ -75,10 +75,15 @@ Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 3.0× Chez's
 time as a geometric mean, close to Guile's 2.8×. See bench/RESULTS.md.
 
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
-libraries and 91 of 130 snow-fort libraries load. SRFIs 1, 2, 6, 8, 9,
-11, 13, 14, 16, 19, 23, 26, 27, 28, 31, 39, 41, 43, 45, 61, 64, 69, 87,
-98, 111, 125, 128, 130, 132, 133, 141, 143, 145, 151 and 158 ship in
-`src/srfi/`.
+libraries and 91 of 130 snow-fort libraries load.
+
+SRFIs 0, 1, 2, 4, 6, 8, 9, 11, 13, 14, 16, 18, 19, 23, 26, 27, 28, 31,
+34, 35, 36, 37, 39, 41, 42, 43, 45, 48, 51, 54, 60, 61, 64, 69, 71, 78,
+87, 95, 98, 101, 106, 111, 113, 115, 117, 121, 125, 126, 127, 128, 130,
+132, 133, 134, 135, 141, 143, 144, 145, 146, 151, 152, 156, 158, 170,
+175, 189, 195, 196, 197, 210, 219, 223, 225, 227, 228, 229, 231, 235 and
+236 ship in `src/srfi/`. See src/srfi/README.md for where each comes
+from.
 
 All of `(rnrs ...)` is present. The R6RS libraries' namespaces and
 syntax come from psyntax; the procedures behind them are in `src/r6rs/`
@@ -105,8 +110,8 @@ src/r7rs/            -- R7RS-small: its procedures, and define-library
                         on psyntax (front.lisp, syntax.sls)
 src/srfi/            -- SRFI libraries, mostly reference implementations
                         (see src/srfi/README.md)
-src/compat/          -- (chezscheme), for the Chez variants of Akku
-                        packages
+src/compat/          -- (chezscheme) and (ikarus), for the Chez and
+                        Ikarus variants of Akku packages
 src/environments.lisp
                      -- native environments the R5RS/R7RS layers build on
 src/api.lisp         -- the R5RS / R6RS / R7RS packages for Lisp
@@ -123,7 +128,8 @@ bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
                         results
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
-docs/                -- interop (the bridge), continuations (design)
+docs/                -- interop (the bridge), libraries (Akku and
+                        snow), continuations (design)
 ```
 
 ## Systems
@@ -176,7 +182,9 @@ the command line): `(foo bar)` is `foo/bar.sls`, `.ss`, `.sld` or
 `.scm`. Akku's layout also works:
 - implementation variants such as `foo.chezscheme.sls` are tried after
   a generic file (`psx:*implementation-variants*`);
-- `:1` and `%3a1` are accepted in file names.
+- `:1` is accepted in file names, and so are Akku's escapes for other
+  characters: `(srfi :1)` is `srfi/%3a1.sls`, `let-optionals*` is
+  `let-optionals%2a.sls`.
 
 `src/srfi/` comes after the user's path, so `(srfi 1)`, `(srfi :1 lists)`
 and the R7RS-large names like `(scheme list)` resolve with no setup.
@@ -196,8 +204,10 @@ Scheme has no ASDF. The two package managers that matter are:
 
 Both lay files out the way the search path expects, so pointing `-L` (or
 `psx:*library-path*`) at `.akku/lib`, or at a snow install directory,
-is all it takes. `tests/run-library-corpus.lisp DIR` imports every
-portable library in such a tree and reports what loads.
+is all it takes; `--akku` finds the project's `.akku/lib`. docs/libraries.md
+is a walkthrough of both, from the shell and from Lisp.
+`tests/run-library-corpus.lisp DIR` imports every portable library in
+such a tree and reports what loads.
 
 ## Symbols and case
 
@@ -254,7 +264,10 @@ integrations, or the reader/writer:
 Then clear the fasl cache (ASDF's timestamps have one-second
 resolution), reload in a fresh image and run the tests. psyntax's image
 is rebuilt with `(psx:rebuild)` or `make bootstrap-psyntax`, see
-vendor/psyntax/README-pseudoscheme.md.
+vendor/psyntax/README-pseudoscheme.md. ASDF compiles the image to a
+fasl like any other source (the `psyntax-image` component), so booting
+psyntax is quick; that fasl is a build product, not checked in, and a
+boot falls back to the `.pp` while the fasl is older than it.
 
 Both kinds of generated file can also be made from source alone, with
 `make bootstrap`. First the translator's sources, running in Chibi,

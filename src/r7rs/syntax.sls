@@ -137,8 +137,9 @@
                             #'(if (memv k '(d ...)) (begin e1 e2 ...) rest))))))))
              #'(let ((k key)) body)))))))
 
-  ;; cond-expand (R7RS 4.2.1): requirements are checked at expansion time
-  ;; against the host's feature list and available libraries.
+  ;; cond-expand (R7RS 4.2.1, SRFI 0): requirements are checked at
+  ;; expansion time against the host's feature list and available
+  ;; libraries.  It is an error for no clause to apply.
   (define-syntax cond-expand
     (lambda (x)
       (syntax-case x ()
@@ -148,7 +149,10 @@
                (syntax-violation 'cond-expand "no clause applies" (syntax->datum x))
                (syntax-case (car cs) ()
                  ((req body ...)
-                  (if (%cond-expand-satisfied? (syntax->datum #'req))
+                  (if (if (and (identifier? #'req) (eq? (syntax->datum #'req) 'else))
+                          (or (null? (cdr cs))
+                              (syntax-violation 'cond-expand "else clause is not last" (syntax->datum x)))
+                          (%cond-expand-satisfied? (syntax->datum #'req)))
                       #'(begin body ...)
                       (loop (cdr cs)))))))))))
 

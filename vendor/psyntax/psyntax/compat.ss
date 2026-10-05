@@ -21,12 +21,12 @@
 (library (psyntax compat)
   (export make-parameter parameterize define-record pretty-print
           gensym void eval-core symbol-value set-symbol-value!
-          file-options-spec lisp-keyword?)
+          file-options-spec lisp-keyword? host-literal?)
   (import 
     (rnrs)
     (only (psyntax system $bootstrap)
           void gensym eval-core set-symbol-value! symbol-value 
-          pretty-print lisp-keyword?))
+          pretty-print lisp-keyword? host-literal?))
 
   (define make-parameter
     (case-lambda

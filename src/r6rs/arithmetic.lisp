@@ -300,10 +300,11 @@
 	((ps:nan-p x) x)
 	(t 1d0)))
 
-(def-fl "flfloor" (x) (if (fl-finite-p x) (ffloor x) x))
-(def-fl "flceiling" (x) (if (fl-finite-p x) (fceiling x) x))
-(def-fl "fltruncate" (x) (if (fl-finite-p x) (ftruncate x) x))
-(def-fl "flround" (x) (if (fl-finite-p x) (fround x) x))
+;; (VALUES ...): CL's FFLOOR and friends also return the remainder.
+(def-fl "flfloor" (x) (if (fl-finite-p x) (values (ffloor x)) x))
+(def-fl "flceiling" (x) (if (fl-finite-p x) (values (fceiling x)) x))
+(def-fl "fltruncate" (x) (if (fl-finite-p x) (values (ftruncate x)) x))
+(def-fl "flround" (x) (if (fl-finite-p x) (values (fround x)) x))
 
 (defun real-result (z)
   "CL returns complexes where R6RS flonum operations want NaN."
