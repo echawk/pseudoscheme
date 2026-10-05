@@ -5,7 +5,7 @@
 ;;;; a time at the R7RS REPL (so one bad form doesn't sink the rest), the
 ;;;; file's first form, its (import ...), included.
 ;;;;
-;;;; Usage:  sbcl --script tests/run-r7rs-tests.lisp [-v]
+;;;; Usage:  sbcl --script tests/run-r7rs-tests.lisp [-v] [--continuations=full]
 
 (require :asdf)
 
@@ -43,8 +43,11 @@
 	  collect form)))
 
 ;; Boot psyntax and the R7RS libraries, then (chibi test), the shim next
-;; to the tests.
+;; to the tests.  With --continuations=full, (chibi test) and the tests
+;; are compiled with full continuations (src/continuations.lisp).
 (ps-r7rs::boot)
+(when (member "--continuations=full" (uiop:command-line-arguments) :test #'string=)
+  (setq psx::*full-continuations* t))
 (dolist (form (read-all (merge-pathnames "chibi/chibi-test.scm" *here*)))
   (ps-r7rs::eval-at-repl form))
 

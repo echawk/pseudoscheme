@@ -125,7 +125,27 @@ the design. In order:
 - opt-in at first (`--continuations=full`), then measure;
 - one-shot continuations from threads for code compiled without it.
 
-Today `call/cc` is escape-only (Lisp `catch`), and re-entering a
+**Prototype** (src/continuations.lisp, opt-in with
+`psx::*full-continuations*`, or `--continuations=full` in the R7RS
+and R6RS test runners). It uses CL's condition system as the stack
+inspection: capturing signals a condition, and each call site's
+handler records its frame and declines, so nothing is unwound to
+capture. Re-entry throws to a base around each top-level evaluation,
+which rebuilds the frames. Results so far:
+- R7RS with full continuations: 976 of 977, the `dynamic-wind`
+  re-entry test included (only the `sqrt` disagreement is left).
+- R6RS with full continuations: every program but two gives the same
+  results. `base` times out and `io/ports` fails in SBCL's assembler
+  (`(UNSIGNED-BYTE 11)`): both are code size, two closures per call
+  site in very large top-level forms. Next: emit the frame as a Lisp
+  macro (a translator integration) instead of closures passed to a
+  function, and measure the cost on bench/.
+- Not yet: R5RS mode (it doesn't go through psyntax), barrier
+  detection at Lisp frames, dynamic-winds shared between the current
+  and target continuation (re-entry unwinds and rewinds all of them),
+  and re-establishing exception handlers and parameterizations.
+
+Without it, `call/cc` is escape-only (Lisp `catch`), and re-entering a
 continuation signals an error. SRFI 158's coroutine generators are
 buffered as a result (src/srfi/README.md). Of the remaining test
 failures, R7RS's `dynamic-wind` re-entry test and R5RS's equivalent

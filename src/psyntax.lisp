@@ -107,12 +107,17 @@ host global."
 	(t (let ((a (open-primitives (car form))) (d (open-primitives (cdr form))))
 	     (if (and (eq a (car form)) (eq d (cdr form))) form (cons a d))))))
 
+(defvar *full-continuations*)		; src/continuations.lisp
+
 (defun host-eval (form)
   "Translate and evaluate core FORM in *HOST*.  The CL compiler's
 style warnings about the generated code (an unknown arity, say) are
 about psyntax's output, not the user's program, so they're muffled."
   (handler-bind ((warning #'muffle-warning))
-    (ps:scheme-eval (open-primitives form) *host*)))
+    (if *full-continuations*
+	(let ((form (cc-transform (open-primitives form))))
+	  (call-with-continuation-base (lambda () (ps:scheme-eval form *host*))))
+	(ps:scheme-eval (open-primitives form) *host*))))
 
 ;;; ------------------------------------------------------------------
 ;;; Building the host environment
@@ -218,6 +223,7 @@ the command line and exits; DROP-LAST skips it.)"
   (ps-r6rs::install-exception-hooks)
   (install-primitives ps-r6rs:*primitives*)
   (install-adapter)
+  (install-continuation-primitives)
   *host*)
 
 (defun host-signature ()

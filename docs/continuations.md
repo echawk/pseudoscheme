@@ -1,7 +1,7 @@
 # Full continuations
 
-Status: decided (generalized stack inspection, see "Decision"); nothing
-implemented yet.
+Status: decided (generalized stack inspection, see "Decision"); a
+prototype is in src/continuations.lisp (ROADMAP.md, section 3).
 
 ## What fails today, and why
 

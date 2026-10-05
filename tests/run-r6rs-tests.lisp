@@ -7,7 +7,7 @@
 ;;;; tests failed" line it prints is tallied.
 ;;;;
 ;;;; Usage:  sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
-;;;;              --script tests/run-r6rs-tests.lisp [-v] [name ...]
+;;;;              --script tests/run-r6rs-tests.lisp [-v] [--continuations=full] [name ...]
 ;;;; e.g. ... --script tests/run-r6rs-tests.lisp lists sorting
 
 (require :asdf)
@@ -38,6 +38,9 @@
 (ps:disable-float-traps)
 
 (defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
+;; --continuations=full: compile the programs and the libraries they load
+;; with full continuations (src/continuations.lisp).
+(defparameter *full* (member "--continuations=full" (uiop:command-line-arguments) :test #'string=))
 (defparameter *only* (remove-if (lambda (a) (char= (char a 0) #\-))
 				(uiop:command-line-arguments)))
 
@@ -73,7 +76,8 @@
 		       ;; The io tests create files: keep them out of the repo.
 		       (*default-pathname-defaults* *scratch*))
 		   (psx::boot)
-		   (psx:load-file path)
+		   (let ((psx::*full-continuations* (and *full* t)))
+		     (psx:load-file path))
 		   :ok))
 	     (bt:timeout () :timeout)
 	     (serious-condition (e)

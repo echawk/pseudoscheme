@@ -178,9 +178,10 @@
 			     (:static-file "chezscheme.scm")
 			     (:static-file "ikarus.scm")))
 	       (:file "psyntax" :depends-on ("r6rs"))
+	       (:file "continuations" :depends-on ("psyntax"))
 	       (psyntax-image "psyntax-pseudoscheme"
 		:pathname "../vendor/psyntax/psyntax-pseudoscheme"
-		:depends-on ("r6rs" "compat" "psyntax"))))
+		:depends-on ("r6rs" "compat" "psyntax" "continuations"))))
 
 ;;; The Common Lisp face: packages R5RS, R6RS and R7RS (EVAL, LOAD,
 ;;; REPL, EXPAND, USE-LIBRARY, ...), and the bridge between the
