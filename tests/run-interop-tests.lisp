@@ -282,7 +282,7 @@ written form of its value."
 (test "r5rs:scheme" 63 (r5rs:scheme (define (twice f) (lambda (x) (f (f x)))) ((twice (lambda (x) (* x 3))) 7)))
 (test "r5rs:eval folds case" 3 (r5rs:eval "(DEFINE (Add A B) (+ a b)) (add 1 2)"))
 (test "r5rs:procedure" 9 (funcall (r5rs:procedure "add") 4 5))
-(test "r5rs:expand / translate" (t t) (list (consp (r5rs:expand '(let ((x 1)) x))) (consp (r5rs:translate '(define (f x) x)))))
+(test "r5rs:expand / translate" (t t) (list (consp (r5rs:expand '(let ((x 1)) x))) (consp (r5rs:translate '(lambda (x) x)))))
 (test "r5rs:read-from-string folds case" "hello" (ps:scheme-symbol-name (r5rs:read-from-string "HELLO")))
 
 ;;; ------------------------------------------------------------------

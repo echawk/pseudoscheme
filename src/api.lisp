@@ -234,13 +234,16 @@ PSEUDOSCHEME-INTEROP:USE-LIBRARY."
   (pseudoscheme-interop:library-exports name))
 
 ;;; ------------------------------------------------------------------
-;;; R5RS: the classic translator, in the R5RS user environment, with
-;;; case folding
+;;; R5RS: psyntax too, at a top level of its own whose bindings are
+;;; (pseudoscheme r5rs), reading with case folding.  (The translator's
+;;; own classic front end, ps:scheme-user-environment, is what the
+;;; translator is bootstrapped with; it isn't used here.)
 
 (defun r5rs-eval-forms (forms)
-  (let ((v ps:unspecific))
-    (dolist (form forms v)
-      (setq v (ps:scheme-eval form ps:scheme-user-environment)))))
+  (ensure-psyntax)
+  (let ((values (list ps:unspecific)))
+    (dolist (form forms (values-list values))
+      (setq values (multiple-value-list (ps-r7rs::eval-at-r5rs-repl form))))))
 
 (defun r5rs-forms (source)
   (if (stringp source)
@@ -258,20 +261,15 @@ R5RS."
     (r5rs-eval-forms (psl:read-forms-from-file path))))
 
 (defun r5rs:expand (source)
-  "SOURCE expanded to core Scheme by psyntax in R5RS's environment
-(scheme-report-environment 5).  R5RS evaluation itself goes through
-the translator's own expander; R5RS:TRANSLATE shows its result."
+  "The core Scheme that psyntax expands SOURCE, an expression, to in
+R5RS's environment."
   (let ((forms (r5rs-forms source)))
-    (ensure-psyntax)
-    (values (psx:expand (if (cdr forms) (cons (ps:intern-scheme-symbol "begin") forms) (car forms))
-			(psyntax-environment '("psyntax" "scheme-report-environment-5"))))))
+    (psyntax-expand (if (cdr forms) (cons (ps:intern-scheme-symbol "begin") forms) (car forms))
+		    '("pseudoscheme" "r5rs"))))
 
 (defun r5rs:translate (source)
-  "The Lisp code SOURCE translates to in the R5RS user environment."
-  (let ((forms (r5rs-forms source)))
-    (scheme-translator:translate
-     (if (cdr forms) (cons (ps:intern-scheme-symbol "begin") forms) (car forms))
-     ps:scheme-user-environment)))
+  "The Lisp code SOURCE translates to."
+  (scheme-translator:translate (psx::open-primitives (r5rs:expand source)) psx:*host*))
 
 (defun r5rs:read-from-string (string)
   "The first datum in STRING, read by the Scheme reader, case-folded."
