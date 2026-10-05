@@ -11,6 +11,7 @@
 (define (s0:table-delete! t k) (hash-table-delete! t k))
 (define (s0:table-keys t) (hash-table-keys t))
 (define (s0:host-delete-file name) (sys-unlink name))
+(define (s0:host-file-exists? name) (file-exists? name))
 
 (load (string-append (sys-dirname (current-load-path)) "/../stage0.scm"))
 (s0:build)

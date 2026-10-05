@@ -345,10 +345,10 @@ system, `#lang`, macros and `racket/base` are Racket's own code.
 
 - Bootstrapping without an existing Pseudoscheme is done (boot/README.md):
   the `.pso` files come from any of seven Schemes, and psyntax's image
-  from a seed built by Chez Scheme or, through boot/stage0/, by an
-  R7RS-small Scheme without R6RS (Gauche, Chibi). Every seed ends in the
-  same image, byte for byte; `make bootstrap-check` and CI check Chez's
-  and Gauche's. Left: an s7 adapter for the `.pso` step (untested), and
-  stage0 adapters for more hosts (CHICKEN, Guile) if wanted.
+  from a seed built by Chez Scheme or, through boot/stage0/, by any R5RS
+  Scheme (Chibi, Scheme 48, Gauche). Every seed ends in the same image,
+  byte for byte; `make bootstrap-check` and CI check Chez's and Chibi's.
+  Left: an s7 adapter for the `.pso` step (untested), and stage0
+  adapters for more hosts (CHICKEN, Guile) if wanted.
 - ASDF's one-second timestamps can leave a stale fasl after `.pso`
   regeneration. Clear the fasl cache (README, "Bootstrap artifacts").

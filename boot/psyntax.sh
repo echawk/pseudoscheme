@@ -9,9 +9,10 @@
 #      --seed=chez (the default): Chez Scheme, which has R6RS libraries
 #        and syntax-case natively and loads psyntax's sources as they are
 #        (boot/psyntax/chez/);
-#      --seed=stage0: an R7RS-small Scheme without R6RS, $STAGE0_HOST
-#        (gauche, the default, or chibi), through boot/stage0/, which
-#        flattens psyntax's libraries and expands their macros itself.
+#      --seed=stage0: a Scheme without R6RS, R5RS or R7RS-small,
+#        $STAGE0_HOST (chibi, the default; gauche; scheme48), through
+#        boot/stage0/, which flattens psyntax's libraries and expands
+#        their macros itself.
 #      The seeds differ, but step 2 rebuilds until the image reproduces
 #      itself, so every seed must end in the same image.
 #      PSYNTAX_SEED=<file.pp> uses that image instead: one built from
@@ -36,7 +37,7 @@ SBCL=${SBCL:-sbcl}
 CHEZ=${CHEZ:-chez}
 build=boot/build/psyntax
 
-STAGE0_HOST=${STAGE0_HOST:-gauche}
+STAGE0_HOST=${STAGE0_HOST:-chibi}
 
 install=yes
 seed_kind=chez
@@ -49,11 +50,14 @@ for arg in "$@"; do
     esac
 done
 
+# Run in the seed's work directory, which holds a copy of boot/stage0/
+# as stage0/.
 stage0_command() {
     case "$1" in
-	gauche) echo "gosh $PWD/boot/stage0/hosts/gauche.scm" ;;
-	chibi)  echo "chibi-scheme $PWD/boot/stage0/hosts/chibi.scm" ;;
-	*) echo "STAGE0_HOST=$1: unknown (try gauche or chibi)" >&2; exit 2 ;;
+	chibi)    echo "chibi-scheme stage0/hosts/chibi.scm" ;;
+	gauche)   echo "gosh stage0/hosts/gauche.scm" ;;
+	scheme48) echo "scheme48 -h 0 < stage0/hosts/scheme48.scm" ;;
+	*) echo "STAGE0_HOST=$1: unknown (try chibi, gauche or scheme48)" >&2; exit 2 ;;
     esac
 }
 
@@ -77,6 +81,7 @@ if [ -z "$seed" ] && [ "$seed_kind" = stage0 ]; then
     dir=$build/stage0-$STAGE0_HOST
     printf 'Building a psyntax seed image with stage0 on %s ... ' "$STAGE0_HOST"
     copy_sources "$dir"
+    cp -R boot/stage0 "$dir/stage0"
     if ! (cd "$dir" && sh -c "$command") >"$build/stage0-$STAGE0_HOST.log" 2>&1 \
 	 || [ ! -s "$dir/psyntax-pseudoscheme.pp" ]; then
 	echo "failed; see $build/stage0-$STAGE0_HOST.log"

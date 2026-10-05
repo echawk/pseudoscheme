@@ -46,8 +46,8 @@ test-all: test test-full test-cli
 #  2. then, with Pseudoscheme loaded from those, psyntax's image, from a
 #     seed another Scheme builds from psyntax's sources: SEED=chez (the
 #     default) with Chez Scheme, which has R6RS natively, or SEED=stage0
-#     with an R7RS-small Scheme through boot/stage0/ (STAGE0_HOST=gauche,
-#     the default, or chibi).
+#     with any R5RS or R7RS-small Scheme through boot/stage0/
+#     (STAGE0_HOST=chibi, the default, scheme48 or gauche).
 SEED ?= chez
 
 bootstrap: bootstrap-pso bootstrap-psyntax

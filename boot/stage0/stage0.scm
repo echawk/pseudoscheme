@@ -1,10 +1,10 @@
-;;; boot/stage0/stage0.scm -- run psyntax on a Scheme without R6RS.
+;;; boot/stage0/stage0.scm -- run psyntax on any R5RS Scheme.
 ;;;
 ;;; psyntax is written as R6RS libraries that use syntax-case, so the
 ;;; first image of it has to come from somewhere that can run those
 ;;; sources.  boot/psyntax.sh normally gets it from Chez Scheme, which
-;;; has R6RS libraries natively.  This file gets it from any R7RS-small
-;;; Scheme instead: it reads psyntax's libraries and build script,
+;;; has R6RS libraries natively.  This file gets it from any R5RS (or
+;;; R7RS-small) Scheme instead: it reads psyntax's libraries and build script,
 ;;; flattens them into plain top-level definitions, expands the few
 ;;; macros they define (syntax-rules macros, and four procedural ones
 ;;; rewritten here by hand), and evaluates the result in the host.  Then
@@ -13,6 +13,10 @@
 ;;; image.  Pseudoscheme rebuilds from the seed until the image
 ;;; reproduces itself, so nothing of this stage survives into the result;
 ;;; boot/psyntax.sh checks that it comes out the same as from Chez's seed.
+;;;
+;;; stage0.scm is R5RS, and so is the code it generates; beyond R5RS
+;;; it needs only string ports (open-output-string, get-output-string:
+;;; SRFI 6) and error (SRFI 23), which nearly every R5RS Scheme has.
 ;;;
 ;;; This is not a general expander.  It is just enough for psyntax's own
 ;;; sources, which define few macros:
@@ -28,12 +32,14 @@
 ;;;
 ;;; Every local variable gets a fresh name, so nothing the expansion
 ;;; introduces can be captured.  Each library's definitions are renamed
-;;; library:name.  R6RS procedures an R7RS host lacks (or has with other
+;;; library:name.  R6RS procedures an R5RS host lacks (or has with other
 ;;; arguments, like error) are defined here as r6:name.
 ;;;
 ;;; A host adapter (boot/stage0/hosts/*.scm) defines, before loading
 ;;; this file:
 ;;;   (s0:host-eval form)          evaluate FORM at top level
+;;;   (s0:host-file-exists? name)
+;;;   (s0:host-delete-file name)
 ;;;   (s0:make-table)              a mutable table keyed by eq?
 ;;;   (s0:table-ref table key default)
 ;;;   (s0:table-set! table key value)
@@ -47,11 +53,10 @@
 ;;; Utilities
 
 (define (s0:die msg . irritants)
-  (display "stage0: " (current-error-port))
-  (display msg (current-error-port))
-  (for-each (lambda (x) (display " " (current-error-port)) (write x (current-error-port)))
-            irritants)
-  (newline (current-error-port))
+  (display "stage0: ")
+  (display msg)
+  (for-each (lambda (x) (display " ") (write x)) irritants)
+  (newline)
   (error "stage0 failed" msg))
 
 (define s0:counter 0)
@@ -143,7 +148,10 @@
     hashtable-contains? hashtable-keys hashtable-size hashtable?
     open-string-output-port call-with-string-output-port
     string-hash equal-hash symbol-hash div mod
-    syntax-violation condition? file-exists? delete-file))
+    syntax-violation condition? file-exists? delete-file
+    ;; variadic in R6RS, two arguments in R5RS
+    char=? char<? char>? char<=? char>=? char-ci=?
+    string=? string<? string>? string<=? string>=? string-ci=?))
 
 (define (s0:import-allows? spec name)
   ;; Whether import SPEC, e.g. (psyntax compat) or (only (psyntax x) a b),
@@ -262,14 +270,13 @@
     ((quasiquote) (list 'quasiquote (s0:expand-quasi (cadr x) 1 env lib)))
     ((lambda) (s0:expand-lambda (cadr x) (cddr x) env lib))
     ((case-lambda)
-     (cons 'case-lambda
-           (map (lambda (clause)
-                  (cdr (s0:expand-lambda (car clause) (cdr clause) env lib)))
-                (cdr x))))
+     (s0:case-lambda->r5rs
+      (map (lambda (clause) (s0:expand-lambda (car clause) (cdr clause) env lib))
+           (cdr x))))
     ((set!)
      (let ((b (s0:resolve (cadr x) env lib)))
-       (unless (memq (car b) '(local global))
-         (s0:die "set! of a non-variable" (s0:strip (cadr x))))
+       (if (not (memq (car b) '(local global)))
+           (s0:die "set! of a non-variable" (s0:strip (cadr x))))
        (list 'set! (cdr b) (s0:expand (caddr x) env lib))))
     ((if) (cons 'if (s0:expand* (cdr x) env lib)))
     ((begin)
@@ -304,8 +311,8 @@
             (frame (s0:new-frame))
             (vars (map (lambda (b) (s0:bind-local! frame (car b))) bindings))
             (env2 (cons frame env)))
-       (list 'letrec* (map (lambda (v b) (list v (s0:expand (cadr b) env2 lib))) vars bindings)
-             (s0:expand-body (cddr x) env2 lib))))
+       (s0:letrec*->r5rs (map (lambda (v b) (list v (s0:expand (cadr b) env2 lib))) vars bindings)
+                         (list (s0:expand-body (cddr x) env2 lib)))))
     ((let-values let*-values)
      ;; as nested let-values, one binding each (let*-values's scoping,
      ;; which let-values's code here doesn't rely on differing from)
@@ -315,8 +322,8 @@
            (let* ((init (s0:expand (cadr (car bindings)) env lib))
                   (frame (s0:new-frame))
                   (formals (s0:bind-formals! frame (car (car bindings)))))
-             (list 'let-values (list (list formals init))
-                   (loop (cdr bindings) (cons frame env)))))))
+             (list 'call-with-values (list 'lambda '() init)
+                   (list 'lambda formals (loop (cdr bindings) (cons frame env))))))))
     ((do)
      (let* ((specs (cadr x))
             (inits (s0:expand* (map cadr specs) env lib))
@@ -354,7 +361,10 @@
                                   (list '=> (s0:expand (caddr clause) env lib))
                                   (s0:expand* (cdr clause) env lib))))
                       (cddr x)))))
-    ((and or when unless delay) (cons k (s0:expand* (cdr x) env lib)))
+    ((and or delay) (cons k (s0:expand* (cdr x) env lib)))
+    ((when) (list 'if (s0:expand (cadr x) env lib) (cons 'begin (s0:expand* (cddr x) env lib))))
+    ((unless) (list 'if (s0:expand (cadr x) env lib) (s0:unspecified)
+                    (cons 'begin (s0:expand* (cddr x) env lib))))
     ((assert)
      (list 'if (s0:expand (cadr x) env lib) (s0:unspecified)
            (list 'r6:assertion-violation ''assert "assertion failed"
@@ -364,6 +374,34 @@
     ((syntax-rules)
      (s0:die "syntax-rules outside define-syntax"))
     (else (s0:die "unexpected keyword" k))))
+
+;;; R7RS forms in R5RS
+
+(define (s0:letrec*->r5rs bindings body)
+  ;; (letrec* ((v e) ...) body ...): (let ((v #f) ...) (set! v e) ... body ...)
+  (cons 'let
+        (cons (map (lambda (b) (list (car b) #f)) bindings)
+              (append (map (lambda (b) (list 'set! (car b) (cadr b))) bindings)
+                      body))))
+
+(define (s0:case-lambda->r5rs lambdas)
+  ;; LAMBDAS, host (lambda formals body) forms: one procedure that applies
+  ;; the first whose formals accept the number of arguments.
+  (let ((args (s0:fresh 'args)) (n (s0:fresh 'n)))
+    (define (arity formals)
+      ;; (count . rest?)
+      (let loop ((f formals) (k 0))
+        (cond ((null? f) (cons k #f)) ((symbol? f) (cons k #t)) (else (loop (cdr f) (+ k 1))))))
+    (list 'lambda args
+          (list 'let (list (list n (list 'length args)))
+                (cons 'cond
+                      (append
+                       (map (lambda (l)
+                              (let ((a (arity (cadr l))))
+                                (list (list (if (cdr a) '>= '=) n (car a))
+                                      (list 'apply l args))))
+                            lambdas)
+                       (list (list 'else (list 'error "case-lambda: wrong number of arguments" n)))))))))
 
 (define (s0:keyword-alias k env lib)
   ;; An alias that resolves to keyword K whatever the use site binds.
@@ -393,7 +431,8 @@
         (else (s0:strip x))))
 
 ;;; Bodies: definitions (internal define and define-syntax, also from
-;;; macros and begin) then expressions, as letrec*.
+;;; macros and begin) then expressions, as letrec* (in R5RS: variables
+;;; bound to #f, then assigned in order).
 
 (define (s0:head-expand x env lib)
   ;; Expand macro uses at the head of X until it isn't one.
@@ -421,7 +460,7 @@
                                  (reverse defs)))
                   (exprs (let ((e (s0:expand* (reverse exprs) env2 lib)))
                            (if (null? e) (list (s0:unspecified)) e))))
-              (cond ((pair? bindings) (cons 'letrec* (cons bindings exprs)))
+              (cond ((pair? bindings) (s0:letrec*->r5rs bindings exprs))
                     ((null? (cdr exprs)) (car exprs))
                     (else (cons 'begin exprs)))))
           (let* ((env2 (cons frame env))
@@ -430,9 +469,10 @@
             (case k
               ((begin) (loop (append (cdr x) (cdr forms)) defs exprs))
               ((define)
-               (let-values (((name expr) (s0:define-parts x)))
-                 (let ((host (s0:bind-local! frame name)))
-                   (loop (cdr forms) (cons (cons host expr) defs) exprs))))
+               (call-with-values (lambda () (s0:define-parts x))
+                 (lambda (name expr)
+                   (let ((host (s0:bind-local! frame name)))
+                     (loop (cdr forms) (cons (cons host expr) defs) exprs)))))
               ((define-syntax)
                (s0:table-set! frame (cadr x)
                               (cons 'macro (s0:make-transformer (cadr x) (caddr x) env2 lib)))
@@ -503,7 +543,7 @@
 (define (s0:list-prefix x keep fail)
   ;; Split list X so that KEEP elements (and any improper tail) are left.
   (let ((n (let loop ((x x) (n 0)) (if (pair? x) (loop (cdr x) (+ n 1)) n))))
-    (when (< n keep) (fail #f))
+    (if (< n keep) (fail #f))
     (let loop ((x x) (i (- n keep)) (acc '()))
       (if (= i 0) (cons (reverse acc) x) (loop (cdr x) (- i 1) (cons (car x) acc))))))
 
@@ -532,7 +572,7 @@
         ((and (pair? t) (pair? (cdr t)) (s0:ellipsis? (cadr t)))
          (let* ((vars (filter-vars (s0:template-vars (car t)) b))
                 (series (map (lambda (v) (cddr (assq v b))) vars)))
-           (when (null? vars) (s0:die "ellipsis with no pattern variable" (s0:strip t)))
+           (if (null? vars) (s0:die "ellipsis with no pattern variable" (s0:strip t)))
            (let loop ((series series) (acc '()))
              (if (null? (car series))
                  (append (reverse acc) (s0:instantiate (cddr t) b renames def-env def-lib))
@@ -675,7 +715,8 @@
                      ((eq? name '_) (values '() `(,(r 'lambda) (,x) ,(q '()))))
                      (else (values (list pat) `(,(r 'lambda) (,x) (,(r 'list) ,x)))))))
             ((and (pair? pat) (pair? (cdr pat)) (s0:ellipsis? (cadr pat)) (null? (cddr pat)))
-             (let-values (((pvars decon) (parse-pat (car pat))))
+             (call-with-values (lambda () (parse-pat (car pat)))
+              (lambda (pvars decon)
                (let ((f (r 'f)) (x (r 'x)) (cars (r 'cars)) (cdrs (r 'cdrs)))
                  (values pvars
                          `(,(r 'letrec)
@@ -689,10 +730,12 @@
                                   ((,(r 'syntax-null?) ,x)
                                    (,(r 'list) ,@(map (lambda (v) (q '())) pvars)))
                                   (,(r 'else) #f)))))
-                           ,f)))))
+                           ,f))))))
             ((and (pair? pat) (pair? (cdr pat)) (s0:ellipsis? (cadr pat)))
-             (let-values (((p1 d1) (parse-pat (car pat)))
-                          ((p2 d2) (parse-pat (cddr pat))))
+             (call-with-values (lambda () (parse-pat (car pat)))
+              (lambda (p1 d1)
+             (call-with-values (lambda () (parse-pat (cddr pat)))
+              (lambda (p2 d2)
                (let ((f (r 'f)) (x (r 'x)) (cars (r 'cars)) (df (r 'df)) (d (r 'd)) (y (r 'y)))
                  (values (append p1 p2)
                          `(,(r 'letrec)
@@ -712,10 +755,12 @@
                                       ,d))))))))
                            (,(r 'lambda) (,y)
                             (,(r 'let) ((,y (,f ,y)))
-                             (,(r 'and) ,y (,(r 'append) (,(r 'car) ,y) (,(r 'cdr) ,y))))))))))
+                             (,(r 'and) ,y (,(r 'append) (,(r 'car) ,y) (,(r 'cdr) ,y)))))))))))))
             ((pair? pat)
-             (let-values (((p1 d1) (parse-pat (car pat)))
-                          ((p2 d2) (parse-pat (cdr pat))))
+             (call-with-values (lambda () (parse-pat (car pat)))
+              (lambda (p1 d1)
+             (call-with-values (lambda () (parse-pat (cdr pat)))
+              (lambda (p2 d2)
                (let ((x (r 'x)) (a (r 'a)) (b (r 'b)))
                  (values (append p1 p2)
                          `(,(r 'lambda) (,x)
@@ -723,14 +768,15 @@
                             (,(r 'let) ((,a (,d1 (,(r 'syntax-car) ,x))))
                              (,(r 'and) ,a
                               (,(r 'let) ((,b (,d2 (,(r 'syntax-cdr) ,x))))
-                               (,(r 'and) ,b (,(r 'append) ,a ,b)))))))))))
+                               (,(r 'and) ,b (,(r 'append) ,a ,b))))))))))))))
             ((vector? pat)
-             (let-values (((pvars d) (parse-pat (vector->list pat))))
+             (call-with-values (lambda () (parse-pat (vector->list pat)))
+              (lambda (pvars d)
                (let ((x (r 'x)))
                  (values pvars
                          `(,(r 'lambda) (,x)
                            (,(r 'and) (,(r 'syntax-vector?) ,x)
-                            (,d (,(r 'syntax-vector->list) ,x))))))))
+                            (,d (,(r 'syntax-vector->list) ,x)))))))))
             (else
              (let ((x (r 'x)))
                (values '()
@@ -742,13 +788,14 @@
                (pat (car clause))
                (guard (if (null? (cddr clause)) #t (cadr clause)))
                (body (if (null? (cddr clause)) (cadr clause) (caddr clause))))
-          (let-values (((pvars decon) (parse-pat pat)))
+          (call-with-values (lambda () (parse-pat pat))
+           (lambda (pvars decon)
             (let ((t (r 't)) (ls (r 'ls)))
               `(,(r 'let) ((,t ,expr))
                 (,(r 'let) ((,ls (,decon ,t)))
                  (,(r 'if) (,(r 'and) ,ls (,(r 'apply) (,(r 'lambda) ,pvars ,guard) ,ls))
                   (,(r 'apply) (,(r 'lambda) ,pvars ,body) ,ls)
-                  (,(r 'syntax-match) ,t ,(caddr form) ,@(cdr clauses)))))))))))
+                  (,(r 'syntax-match) ,t ,(caddr form) ,@(cdr clauses))))))))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Loading a library or the program: flattened into host definitions
@@ -769,10 +816,11 @@
           (case k
             ((begin) (loop (append (cdr x) (cdr forms)) items))
             ((define)
-             (let-values (((name expr) (s0:define-parts x)))
-               (let ((host (s0:global-name lib name)))
-                 (s0:table-set! (s0:lib-bindings lib) (s0:strip name) (cons 'global host))
-                 (loop (cdr forms) (cons (list 'define host expr) items)))))
+             (call-with-values (lambda () (s0:define-parts x))
+               (lambda (name expr)
+                 (let ((host (s0:global-name lib name)))
+                   (s0:table-set! (s0:lib-bindings lib) (s0:strip name) (cons 'global host))
+                   (loop (cdr forms) (cons (list 'define host expr) items))))))
             ((define-syntax)
              (s0:table-set! (s0:lib-bindings lib) (s0:strip (cadr x))
                             (cons 'macro (s0:make-transformer (cadr x) (caddr x) '() lib)))
@@ -800,7 +848,7 @@
     (s0:load-body! lib (cdr forms))))
 
 ;;; ------------------------------------------------------------------
-;;; R6RS procedures an R7RS-small host lacks (or has differently)
+;;; R6RS procedures an R5RS host lacks (or has differently)
 
 (define (r6:error who msg . irritants)
   (apply error
@@ -812,6 +860,25 @@
 
 (define (s0:->string x)
   (let ((p (open-output-string))) (write x p) (get-output-string p)))
+
+;;; R5RS's comparisons of characters and strings take two arguments.
+(define (s0:chain compare)
+  (lambda (a b . more)
+    (let loop ((a a) (b b) (more more))
+      (and (compare a b)
+           (or (null? more) (loop b (car more) (cdr more)))))))
+(define r6:char=? (s0:chain char=?))
+(define r6:char<? (s0:chain char<?))
+(define r6:char>? (s0:chain char>?))
+(define r6:char<=? (s0:chain char<=?))
+(define r6:char>=? (s0:chain char>=?))
+(define r6:char-ci=? (s0:chain char-ci=?))
+(define r6:string=? (s0:chain string=?))
+(define r6:string<? (s0:chain string<?))
+(define r6:string>? (s0:chain string>?))
+(define r6:string<=? (s0:chain string<=?))
+(define r6:string>=? (s0:chain string>=?))
+(define r6:string-ci=? (s0:chain string-ci=?))
 
 (define (r6:assertion-violation who msg . irritants)
   (apply r6:error who msg irritants))
@@ -872,10 +939,15 @@
           (merge (sort l h) (sort (list-tail l h) (- n h))))))
   (sort l (length l)))
 (define (r6:vector-sort less? v) (list->vector (r6:list-sort less? (vector->list v))))
-(define (r6:div x y) (floor-quotient x y))
-(define (r6:mod x y) (floor-remainder x y))
-(define (r6:file-exists? name)
-  (guard (e (#t #f)) (call-with-input-file name (lambda (p) #t))))
+(define (r6:div x y)
+  ;; R6RS div for integers: the floor of x/y when y is positive, the
+  ;; ceiling when it's negative, so that 0 <= (mod x y) < |y|
+  (let ((q (quotient x y)) (r (remainder x y)))
+    (cond ((>= r 0) q)
+          ((> y 0) (- q 1))
+          (else (+ q 1)))))
+(define (r6:mod x y) (- x (* y (r6:div x y))))
+(define (r6:file-exists? name) (s0:host-file-exists? name))
 (define (r6:delete-file name) (s0:host-delete-file name))
 
 ;;; Hashtables: the host's eq tables, wrapped so that hashtable? works.
@@ -954,12 +1026,9 @@
                           (cond ((null? f) '()) ((symbol? f) (list f)) (else (cons (car f) (loop (cdr f))))))))
               (list 'lambda (cadr x) (s0:core->host (caddr x) (append vars bound)))))
            ((case-lambda)
-            (cons 'case-lambda
-                  (map (lambda (c)
-                         (let ((vars (let loop ((f (car c)))
-                                       (cond ((null? f) '()) ((symbol? f) (list f)) (else (cons (car f) (loop (cdr f))))))))
-                           (list (car c) (s0:core->host (cadr c) (append vars bound)))))
-                       (cdr x))))
+            (s0:case-lambda->r5rs
+             (map (lambda (c) (s0:core->host (list 'lambda (car c) (cadr c)) bound))
+                  (cdr x))))
            ((if begin) (cons (car x) (map (lambda (y) (s0:core->host y bound)) (cdr x))))
            ((set! define)
             (if (memq (cadr x) bound)
@@ -967,8 +1036,8 @@
                 (list 's0:set-symbol-value! (list 'quote (cadr x)) (s0:core->host (caddr x) bound))))
            ((letrec letrec*)
             (let ((bound (append (map car (cadr x)) bound)))
-              (list 'letrec* (map (lambda (b) (list (car b) (s0:core->host (cadr b) bound))) (cadr x))
-                    (s0:core->host (caddr x) bound))))
+              (s0:letrec*->r5rs (map (lambda (b) (list (car b) (s0:core->host (cadr b) bound))) (cadr x))
+                                (list (s0:core->host (caddr x) bound)))))
            ((primitive) (s0:die "a primitive with no location" (cadr x)))
            (else (map (lambda (y) (s0:core->host y bound)) x))))))
 

@@ -26,7 +26,8 @@
    (define (s0:table-set! t k v) (hash-table-set! t k v))
    (define (s0:table-delete! t k) (hash-table-delete! t k))
    (define (s0:table-keys t) (hash-table-keys t))
-   (define (s0:host-delete-file name) (delete-file name))))
+   (define (s0:host-delete-file name) (delete-file name))
+   (define (s0:host-file-exists? name) (file-exists? name))))
 
 (load (path-resolve "../stage0.scm" (path-directory (car (command-line)))) env)
 (eval '(s0:build) env)
