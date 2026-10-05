@@ -62,6 +62,15 @@ check "r6rs program + library from -L" "(2 1)" $PS --r6rs -L $tmp/lib $tmp/prog6
 check "--continuations=full re-enters" "(2 3 5)" $PS --continuations=full -p "(let ((k #f) (n 0)) (let ((v (call/cc (lambda (c) (set! k c) 0)))) (set! n (+ n 1)) (if (< n 3) (k n) (list v n (+ v n)))))"
 check "--r5rs --continuations=full" "3" $PS --r5rs --continuations=full -p "(let ((k #f) (n 0)) (call-with-current-continuation (lambda (c) (set! k c))) (set! n (+ n 1)) (if (< n 3) (k #f) n))"
 
+mkdir -p $tmp/home
+cat > $tmp/home/.sbclrc <<'S'
+(defun cl-user::rc-loaded-p () 42)
+S
+check "the init file is loaded" "42" env HOME=$tmp/home $PS -p '(begin (import (pseudoscheme lisp)) ((lisp-function "rc-loaded-p" "cl-user")))'
+check "--no-userinit skips it" "no" env HOME=$tmp/home sh -c "$PS --no-userinit -p '(begin (import (pseudoscheme lisp)) ((lisp-function \"rc-loaded-p\" \"cl-user\")))' >/dev/null 2>&1 && echo yes || echo no"
+printf '(error "broken rc")\n' > $tmp/home/.sbclrc
+check "an error in it is reported, and the program runs" "3" env HOME=$tmp/home sh -c "$PS -p '(+ 1 2)' 2>/dev/null"
+
 check "error exit" "Error: not a pair 5" sh -c "$PS -e '(car 5)' 2>&1 | head -1"
 check "repl" "3" sh -c "printf '(+ 1 2)\n,q\n' | $PS | grep -v '^Pseudoscheme' | tr -d '> r7s' "
 

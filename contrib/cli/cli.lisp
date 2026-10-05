@@ -40,6 +40,7 @@
                    Quicklisp if loaded) first; may be repeated
   --quicklisp      load Quicklisp (~/quicklisp/setup.lisp), so that
                    importing (cl <package>) can fetch missing systems
+  --no-userinit    don't load the Lisp's init file (~/.sbclrc for SBCL)
   --continuations=full
                    compile with full, re-entrant continuations (a
                    continuation can be called after its call/cc has
@@ -52,6 +53,10 @@
 
 PSEUDOSCHEME_LIBRARY_PATH, a list of directories separated by colons,
 is searched before the -L directories.
+
+The Lisp's init file (~/.sbclrc for SBCL) is loaded first, as the Lisp
+itself would, so it can set up Quicklisp dists such as Ultralisp, ASDF's
+search paths, and so on.
 
 With a FILE, it is run as a program: for R6RS/R7RS, any (library ...) /
 (define-library ...) forms are installed and the (import ...) program
@@ -124,6 +129,7 @@ list of (:eval text) / (:print text)."
 		((member a '("-l" "--lisp-system") :test #'string=)
 		 (push (list :lisp-system (value)) actions))
 		((string= a "--quicklisp") (push (list :quicklisp nil) actions))
+		((string= a "--no-userinit") (setq *userinit* nil))
 		((string= a "--continuations=full")
 		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t))
 		((member a '("-i" "--interactive") :test #'string=) (setq interactive t))
@@ -151,6 +157,31 @@ system being loaded, may REQUIRE contribs such as SB-POSIX.")
       (when (has-contribs-p *build-sbcl-home*)
 	(setf sb-sys::*sbcl-homedir-pathname* *build-sbcl-home*)))))
 
+(defvar *userinit* t
+  "Whether to load the Lisp's init file; --no-userinit clears it.")
+
+(defun user-init-file ()
+  "The init file the host Lisp itself would load, if there is one."
+  (let ((home (user-homedir-pathname)))
+    (probe-file
+     (merge-pathnames
+      #+sbcl ".sbclrc" #+ccl "ccl-init.lisp" #+ecl ".eclrc" #+clisp ".clisprc.lisp"
+      #-(or sbcl ccl ecl clisp) ".lisprc"
+      home))))
+
+(defun load-user-init-file ()
+  "Load the user's init file, in CL-USER as the Lisp would; an error in it
+is reported, and the program runs anyway."
+  (let ((file (user-init-file)))
+    (when file
+      (handler-case
+	  (let ((*package* (find-package "CL-USER")))
+	    (load file))
+	(error (e)
+	  (format *error-output* "~&pseudoscheme: error loading ~A: ~A~%"
+		  (namestring file) e)
+	  (finish-output *error-output*))))))
+
 (defun load-quicklisp ()
   (let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
     (unless (probe-file setup)
@@ -175,6 +206,7 @@ system being loaded, may REQUIRE contribs such as SB-POSIX.")
     (when (plusp (length dir)) (add-library-path dir)))
   (multiple-value-bind (actions file file-args interactive)
       (parse-arguments (uiop:command-line-arguments))
+    (when *userinit* (load-user-init-file))
     (setf ps-r7rs:*command-line* (cons (or file "pseudoscheme") file-args))
     (when (eq *standard* :r5rs) (setf ps:*fold-case* t))
     (handler-bind ((serious-condition
