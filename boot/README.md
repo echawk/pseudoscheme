@@ -24,10 +24,13 @@ make clean                     # remove boot/build/
 2. **psyntax's image** (`boot/psyntax.sh`). psyntax is written as
    R6RS libraries that use `syntax-case`, so it can't be expanded
    without an expander, and every image so far was built by an earlier
-   image. Here the first image comes from Chez Scheme, which has R6RS
-   libraries and `syntax-case` natively. Chez loads psyntax's sources
-   as ordinary libraries and runs `psyntax-buildscript.ss`
-   (`boot/psyntax/chez/`). Then Pseudoscheme, loaded from the `.pso`
+   image. Here the first image comes from another Scheme: Chez Scheme,
+   which has R6RS libraries and `syntax-case` natively, loads psyntax's
+   sources as ordinary libraries and runs `psyntax-buildscript.ss`
+   (`boot/psyntax/chez/`); or, with `--seed=stage0`, an R7RS-small
+   Scheme without R6RS (Gauche or Chibi) runs them through
+   `boot/stage0/`, which flattens the libraries and expands their few
+   macros itself. Then Pseudoscheme, loaded from the `.pso`
    files of step 1, rebuilds psyntax with that image, and again with
    its own result, until the image reproduces itself
    (`boot/psyntax.lisp`).
@@ -143,10 +146,10 @@ check must report no differences.
 
 ## psyntax's image
 
-`boot/psyntax.sh [--no-install]` runs step 2 alone, using whatever
-`.pso` files are in `src/`.
+`boot/psyntax.sh [--no-install] [--seed=chez|stage0]` runs step 2
+alone, using whatever `.pso` files are in `src/`.
 
-- **Seed.** `boot/psyntax/chez/psyntax/system/$bootstrap.ss` is the one
+- **Seed from Chez** (the default). `boot/psyntax/chez/psyntax/system/$bootstrap.ss` is the one
   host library psyntax's sources import (`compat.ss`): `gensym`,
   `eval-core`, `symbol-value`, `set-symbol-value!`, `void`,
   `pretty-print` and `lisp-keyword?`. Its gensyms are interned
@@ -155,6 +158,9 @@ check must report no differences.
   `identifier?`, `generate-temporaries`, `syntax->datum` and so on
   replace Chez's. Transformers run during expansion call those by
   name. The build takes about 0.3 s.
+- **Seed from stage0** (`--seed=stage0`, `STAGE0_HOST=gauche` or
+  `chibi`). `boot/stage0/` runs psyntax on a Scheme with no R6RS: see
+  boot/stage0/README.md. About 1 s on Gauche, 8 s on Chibi.
 - **Stages.** Each stage runs the build script in a fresh copy of
   `vendor/psyntax/` (`boot/build/psyntax/stage<N>/`) with the previous
   stage's image. Stage 1 uses the seed. In practice, stage 2 reproduces
@@ -174,5 +180,8 @@ check must report no differences.
   its `$bootstrap` lacks.
 
 Any Scheme with R6RS libraries, `syntax-case`, `eval` into a mutable
-environment, and top-level variable access could build the seed. Chez
-is the only one done so far.
+environment, and top-level variable access could build a seed the way
+Chez does; any R7RS-small Scheme with `eval` and an eq hash table can
+through stage0 (an adapter of a dozen lines, `boot/stage0/hosts/`).
+The seeds from Chez, Gauche and Chibi all end in the same image, byte
+for byte, and `make bootstrap-check` checks Chez's and Gauche's.
