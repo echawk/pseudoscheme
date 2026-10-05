@@ -7,7 +7,7 @@
 (define char->ascii #'ps-lisp:char-code)
 (define ascii->char #'ps-lisp:code-char)
 (define ascii-whitespaces '(32 10 9 12 13)) ;space linefeed tab page return
-(define ascii-limit 256)
+(define ascii-limit 128)
 
 (define (reverse-list->string l n)
   ;; Significantly faster than (list->string (reverse l))
@@ -74,20 +74,24 @@
 ; Main dispatch
 
 ; Characters beyond the dispatch tables (anything non-ASCII) are
-; symbol constituents, as R6RS and R7RS allow for most of Unicode.
+; whitespace if Unicode says so, and otherwise symbol constituents, as
+; R6RS and R7RS allow for most of Unicode.
 
 (define (sub-read port)
   (let ((c (read-char port)))
     (cond ((eof-object? c) c)
 	  ((>= (char->ascii c) ascii-limit)
-	   (parse-token (sub-read-token c port) port))
+	   (if (char-whitespace? c)
+	       (sub-read port)
+	       (parse-token (sub-read-token c port) port)))
 	  (else
 	   ((vector-ref read-dispatch-vector (char->ascii c))
 	    c port)))))
 
 (define (terminating? c)
-  (and (< (char->ascii c) ascii-limit)
-       (vector-ref read-terminating?-vector (char->ascii c))))
+  (if (< (char->ascii c) ascii-limit)
+      (vector-ref read-terminating?-vector (char->ascii c))
+      (char-whitespace? c)))
 
 (define read-dispatch-vector
   (make-vector ascii-limit
