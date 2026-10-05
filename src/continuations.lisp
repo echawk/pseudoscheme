@@ -181,6 +181,24 @@ restore the site's live variables and continue after it."
 		  statements))))
 
 (defmacro %return (x) `(return-from %machine ,x))
+
+;;; SBCL compiles a top-level form, closures and all, as one component,
+;;; and some of its costs grow with the product of the component's
+;;; functions and blocks.  On arm64 and x86-64, with DEBUG >= 1 and
+;;; DEBUG >= SPEED, each function saves its binding stack pointer in a
+;;; stack slot live across the whole component (INSERT-DEBUG-CATCH), so
+;;; the register allocator's tables are #functions x #blocks.
+(defparameter *full-policy*
+  '(optimize #+sbcl (sb-c::insert-debug-catch 0)))
+
+(defun call-with-full-policy (thunk)
+  "Call THUNK, which compiles full-continuation code, under *FULL-POLICY*."
+  #+sbcl (with-compilation-unit (:policy *full-policy*) (funcall thunk))
+  #-sbcl (funcall thunk))
+
+(defmacro %lifted (lambda)
+  "LAMBDA, a closed procedure, compiled on its own (its own component)."
+  `(load-time-value (locally (declare ,*full-policy*) ,lambda) t))
 (defmacro %go (label) `(go ,(second label)))
 
 ;;; ------------------------------------------------------------------
@@ -299,9 +317,13 @@ are Lisp symbols are the transformation's own, or the translator's."
   (let ((counts (make-hash-table :test 'eq))	; lexical -> assignments
 	(binder (make-hash-table :test 'eq))	; lexical -> machine-p of its procedure
 	(exempt (make-hash-table :test 'eq))
-	(boxed (make-hash-table :test 'eq)))
+	(boxed (make-hash-table :test 'eq))
+	(lifted (make-hash-table :test 'eq))	; lexical -> free in a chunk to be lifted
+	(lexicals (and *lift-chunks* (lexical-variables form))))
     (labels ((scan (e machine-p)
 	       ;; MACHINE-P: whether the enclosing procedure has sites
+	       (when (and *lift-chunks* (chunk-call-p e))
+		 (dolist (v (free-lexicals e lexicals)) (setf (gethash v lifted) t)))
 	       (cond ((atom e))
 		     ((quote-form-p e))
 		     ((lambda-form-p e)
@@ -353,8 +375,10 @@ are Lisp symbols are the transformation's own, or the translator's."
 		     (t (mapcar #'rewrite e)))))
       (scan form (not (tail-simple-p form)))
       (maphash (lambda (v n)
-		 (when (and (plusp n) (gethash v binder)
-			    (not (and (= n 1) (gethash v exempt))))
+		 (when (and (plusp n)
+			    (or (gethash v lifted)
+				(and (gethash v binder)
+				     (not (and (= n 1) (gethash v exempt))))))
 		   (setf (gethash v boxed) t)))
 	       counts)
       ;; letrec-bound variables are bound by LETREC, not a lambda: box them
@@ -595,6 +619,75 @@ bound to a variable first if one after it may capture, to keep order."
 (defparameter *chunk-sites* 32
   "About how many calls that may capture a chunk of a sequence holds.")
 
+(defvar *chunk-markers*)
+(setf (documentation '*chunk-markers* 'variable)
+      "The rest parameters of the chunks CHUNK-SEQUENCES made, in the form
+CC-TRANSFORM is transforming.")
+
+(defvar *lift-chunks* t
+  "True to compile each chunk on its own: closure-converted, its free
+variables passed as arguments (assigned ones boxed), and wrapped in
+%LIFTED.  Without that, a procedure of thousands of calls (a test suite)
+is one SBCL component, and SBCL's compile time grows with the square of
+a component's size; nor can a component have more than 2047 entry
+points.")
+
+(defun chunk-call-p (e)
+  (and (consp e) (null (cdr e)) (lambda-form-p (car e))
+       (symbolp (cadr (car e))) (gethash (cadr (car e)) *chunk-markers*)))
+
+(defun lexical-variables (form)
+  "The variables FORM binds (lambda parameters and letrec variables)."
+  (let ((table (make-hash-table :test 'eq)))
+    (labels ((walk (e)
+	       (cond ((atom e))
+		     ((quote-form-p e))
+		     ((lambda-form-p e)
+		      (dolist (v (formal-variables (cadr e))) (setf (gethash v table) t))
+		      (walk (caddr e)))
+		     ((keyword-p (car e) "LETREC")
+		      (dolist (b (cadr e)) (setf (gethash (car b) table) t) (walk (cadr b)))
+		      (walk (caddr e)))
+		     (t (loop for x on e do (walk (car x)))))))
+      (walk form))
+    table))
+
+(defun free-lexicals (e lexicals)
+  "The variables of LEXICALS free in E, in a fixed order."
+  (let ((found '()))
+    (labels ((walk (e bound)
+	       (cond ((symbolp e)
+		      (when (and (gethash e lexicals) (not (member e bound)))
+			(pushnew e found)))
+		     ((atom e))
+		     ((quote-form-p e))
+		     ((lambda-form-p e)
+		      (walk (caddr e) (append (formal-variables (cadr e)) bound)))
+		     ((keyword-p (car e) "LETREC")
+		      (let ((bound (append (mapcar #'car (cadr e)) bound)))
+			(dolist (b (cadr e)) (walk (cadr b) bound))
+			(walk (caddr e) bound)))
+		     (t (loop for x on e
+			      do (walk (car x) bound)
+				 (unless (listp (cdr x)) (walk (cdr x) bound)))))))
+      (walk e '()))
+    (reverse found)))
+
+(defun lift-chunks (e lexicals)
+  "E with each chunk call made a call to a closed procedure, compiled on
+its own, of the chunk's free variables."
+  (labels ((lift (e)
+	     (cond ((atom e) e)
+		   ((quote-form-p e) e)
+		   ((chunk-call-p e)
+		    (let ((fvs (free-lexicals e lexicals)))
+		      `((%lifted (,(sym "lambda") ,fvs ,(lift (caddr (car e))))) ,@fvs)))
+		   (t (map-tree e))))
+	   (map-tree (x)
+	     (cond ((consp x) (cons (lift (car x)) (map-tree (cdr x))))
+		   (t x))))
+    (lift e)))
+
 (defun count-sites (e)
   "Calls in E (outside nested lambdas) that may capture."
   (cond ((atomic-p e) 0)
@@ -630,23 +723,36 @@ bound to a variable first if one after it may capture, to keep order."
 		   ;; (lambda args ...), not (lambda () ...), which FLAT
 		   ;; would take for a let and put back in place
 		   ,@(mapcar (lambda (c)
-			       `((,(sym "lambda") ,(fresh) (,(sym "begin") ,@c))))
+			       (let ((marker (fresh)))
+					 (setf (gethash marker *chunk-markers*) t)
+					 `((,(sym "lambda") ,marker (,(sym "begin") ,@c)))))
 			     (reverse chunks)))))))
 	((quote-form-p e) e)
 	(t (mapcar #'chunk-sequences e))))
 
+(defun prepare (form)
+  "FORM, chunked, its assigned variables boxed, and its chunks lifted."
+  (let ((form (box-assigned (chunk-sequences form))))
+    (if *lift-chunks*
+	(lift-chunks form (lexical-variables form))
+	form)))
+
 (defun cc-transform (form)
   "Top-level FORM for full continuations."
+  (let ((*chunk-markers* (make-hash-table :test 'eq)))
+    (cc-transform-1 form)))
+
+(defun cc-transform-1 (form)
   (cond ((and (consp form) (keyword-p (car form) "BEGIN") (cdr form))
-	 `(,(car form) ,@(mapcar #'cc-transform (cdr form))))
+	 `(,(car form) ,@(mapcar #'cc-transform-1 (cdr form))))
 	((and (consp form) (keyword-p (car form) "DEFINE"))
 	 (if (simple-p (caddr form))
-	     `(,(car form) ,(cadr form) ,(simple (box-assigned (chunk-sequences (caddr form)))))
+	     `(,(car form) ,(cadr form) ,(simple (prepare (caddr form))))
 	     ;; defined first, so that the assignment can be in a frame
 	     `(,(sym "begin")
 	       (,(car form) ,(cadr form) (,(sym "quote") ,ps:false))
-	       ,(cc-transform `(,(sym "set!") ,(cadr form) ,(caddr form))))))
-	(t (let ((form (box-assigned (chunk-sequences form))))
+	       ,(cc-transform-1 `(,(sym "set!") ,(cadr form) ,(caddr form))))))
+	(t (let ((form (prepare form)))
 	     (if (tail-simple-p form)
 		 (simple form)
 		 `(,(build-machine '() form)))))))

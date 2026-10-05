@@ -250,7 +250,9 @@ NIL if that didn't work."
 		(with-standard-io-syntax
 		  (let ((*package* (find-package "SCHEME")))
 		    (multiple-value-bind (output warnings-p failure-p)
-			(compile-file lisp :output-file temp-fasl :verbose nil :print nil)
+			(if *full-continuations*
+			    (call-with-full-policy (lambda () (compile-file lisp :output-file temp-fasl :verbose nil :print nil)))
+			    (compile-file lisp :output-file temp-fasl :verbose nil :print nil))
 		      (declare (ignore warnings-p))
 		      (when (or failure-p (null output))
 			(error "compiling ~A failed" lisp))))))

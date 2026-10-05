@@ -124,7 +124,7 @@ about psyntax's output, not the user's program, so they're muffled."
   (handler-bind ((warning #'muffle-warning))
     (if *full-continuations*
 	(let ((form (cc-transform (open-primitives form))))
-	  (call-with-continuation-base (lambda () (ps:scheme-eval form *host*))))
+	  (call-with-full-policy (lambda () (call-with-continuation-base (lambda () (ps:scheme-eval form *host*))))))
 	(ps:scheme-eval (open-primitives form) *host*))))
 
 ;;; ------------------------------------------------------------------

@@ -160,13 +160,16 @@ a thousand closures over one variable take 162 s.)
 - R7RS with full continuations: 976 of 977 (only the `sqrt`
   disagreement is left).
 - R5RS with full continuations: 189 of 189, on psyntax (below).
-- R6RS with full continuations: **open**: the `base` test library still
-  doesn't compile in reasonable time or memory, though the same library
-  compiles in 1.7 s without the transformation and its translation is
-  only about 3× larger. Some construct in the generated code is
-  superlinear for SBCL; being narrowed down (special binding and
-  `dynamic-extent` per call site, `tagbody` with closures inside, and
-  hoisted variables captured by closures are the suspects).
+- R6RS with full continuations: 8712 pass, 190 fail, every program as
+  in the default mode (`base` passes one more), in 6.5 s. Two things made
+  the big test libraries compilable. SBCL compiles a top-level form,
+  closures included, as one component; with `debug` ≥ 1 and ≥ `speed`,
+  each function that binds specials keeps its binding stack pointer in
+  a slot live across the whole component (`insert-debug-catch`), so the
+  register allocator's tables grow as functions × blocks. Full-mode code
+  is compiled with `(sb-c::insert-debug-catch 0)`. And each chunk of a
+  long sequence is closure-converted and compiled as a component of its
+  own (`%lifted`).
 - Not yet: measuring the cost on bench/, barrier detection at Lisp
   frames, `dynamic-wind`s shared between the current and target
   continuation (re-entry unwinds and rewinds all of them),
