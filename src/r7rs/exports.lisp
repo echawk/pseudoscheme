@@ -22,7 +22,7 @@
 
 (defparameter *standard-libraries*
   '(((scheme base)
-     "* + - ... / < <= = => > >= abs and append apply assoc assq assv begin
+     "* + - ... / < <= = => > >= _ abs and append apply assoc assq assv begin
       binary-port? boolean=? boolean? bytevector bytevector-append
       bytevector-copy bytevector-copy! bytevector-length bytevector-u8-ref
       bytevector-u8-set! bytevector? caar cadr call-with-current-continuation
@@ -122,7 +122,7 @@
 
 (defparameter *syntax-exports*
   '("and begin case case-lambda cond cond-expand define define-record-type
-     define-syntax define-values delay delay-force do else => ... guard if
+     define-syntax define-values delay delay-force do else => ... _ guard if
      include include-ci lambda let let* let*-values let-syntax let-values
      letrec letrec* letrec-syntax or parameterize quasiquote quote set!
      syntax-error syntax-rules unless unquote unquote-splicing when")
