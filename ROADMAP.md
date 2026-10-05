@@ -6,8 +6,8 @@ this file.
 
 | runner | result |
 |---|---|
-| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 948 of 975 |
-| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8704 pass, 198 fail; all 25 programs run to completion |
+| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 962 of 976 |
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8709 pass, 193 fail; all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 183 of 188 |
 | `tests/run-interop-tests.lisp` | 104/104 |
 | `tests/run-library-tests.lisp` | 55/55 |
@@ -38,18 +38,12 @@ docs/interop.md.
 
 ## 1. Conformance: the remaining failures
 
-**R7RS (27).** Most of these are small and independent.
+**R7RS (14).** Most of these are small and independent.
 
-- Numbers:
-  - complex functions (`make-polar`, `magnitude`, `angle`, `sqrt` of a
-    complex) compute in single floats;
-  - `truncate/` rejects inexact integers;
-  - `rationalize` of an inexact should be inexact;
-  - the branch cut of `sqrt` of `-1.0-0.0i` is on the wrong side.
-- `char-numeric?` returns the digit weight instead of `#t`, and
-  `char-whitespace?` misses some Unicode spaces.
-- `file-error?` and `read-error?` don't recognize the R6RS conditions
-  that raise for those errors.
+- `(sqrt -1.0-0.0i)`: chibi's test expects `+i`, but R7RS 6.2.4 puts
+  the branch cut so that `(imag-part (log -1.0-0.0i))` is −π, which
+  makes the answer `-i`, as here. Chibi doesn't distinguish `-0.0` in
+  that position. Not a bug.
 - Reader and writer:
   - datum labels: reading `#0=` / `#0#`, and `write-shared` (`write`
     also doesn't detect cycles);
@@ -58,16 +52,16 @@ docs/interop.md.
   - some invalid input isn't rejected.
 - One `dynamic-wind` test re-enters a continuation (see 3).
 
-**R6RS (198).** By program:
+**R6RS (193).** By program:
 
 | program | failures |
 |---|---|
 | bytevectors | 70 |
 | io/ports | 65 |
-| base | 30 |
+| base | 27 |
 | flonums | 9 |
 | syntax-case | 8 |
-| unicode | 8 |
+| unicode | 6 |
 | records/syntactic | 4 |
 | exceptions | 2 |
 | r5rs | 2 |
@@ -97,8 +91,7 @@ previous build. The worst ratios point at what to do next:
   arithmetic: `+`/`-` are CL's generic versions. Fixnum fast paths like
   the comparisons' (src/numbers.lisp) might help, and so might SBCL
   declarations in the translator's output.
-- **`mbrotZ` (7.5×).** Complex arithmetic, which is also wrong (single
-  floats; section 1).
+- **`mbrotZ` (7.5×).** Complex arithmetic.
 - **Compiled libraries.** psyntax's own image is compiled once by ASDF
   (the `psyntax-image` component; `psx::compile-image`), so booting
   psyntax takes milliseconds rather than about 1.7 s. Every run still

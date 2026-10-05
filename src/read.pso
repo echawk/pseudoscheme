@@ -369,7 +369,7 @@
      #'(LAMBDA (C PORT)
          (.READ-CHAR PORT)
          (LET ((NEXT (.PEEK-CHAR PORT)))
-           (IF (AND (CHARACTERP NEXT) (DIGIT-CHAR-P NEXT))
+           (IF (AND (CHARACTERP NEXT) (CHAR-NUMERIC-P NEXT))
                (SHARP-NUMERIC-VECTOR-AFTER "f" C PORT)
                (LET ((NAME (CAR (THE CONS (SUB-READ-TOKEN #\f PORT)))))
                  (IF (OR (SCHEME= (LENGTH (THE SIMPLE-STRING NAME)) 1)
@@ -538,7 +538,7 @@
   (DECLARE (SPECIAL DOT STRANGE-SYMBOL-NAMES))
   (LET ((.STRING (CAR (THE CONS TOKEN))))
     (IF (LET ((C (CHAR (THE SIMPLE-STRING .STRING) 0)))
-          (OR (DIGIT-CHAR-P C) (CHAR= C #\+) (CHAR= C #\-) (CHAR= C #\.)))
+          (OR (CHAR-NUMERIC-P C) (CHAR= C #\+) (CHAR= C #\-) (CHAR= C #\.)))
         (LET ((TEMP (STRING->NUMBER .STRING)))
           (IF (TRUEP TEMP)
               TEMP
@@ -546,7 +546,7 @@
                   (INTERN-TOKEN .STRING)
                   (IF (STRING= .STRING ".")
                       DOT
-                      (IF (DIGIT-CHAR-P (CHAR (THE SIMPLE-STRING .STRING) 0))
+                      (IF (CHAR-NUMERIC-P (CHAR (THE SIMPLE-STRING .STRING) 0))
                           (READING-ERROR
                            PORT
                            "unsupported number syntax"
@@ -581,7 +581,7 @@
     LOOP
     (LET ((DIGITS .DIGITS.0))
       (LET ((D (.PEEK-CHAR PORT)))
-        (IF (AND (CHARACTERP D) (DIGIT-CHAR-P D))
+        (IF (AND (CHARACTERP D) (CHAR-NUMERIC-P D))
             (PROGN (SETQ .DIGITS.0 (CONS (.READ-CHAR PORT) DIGITS)) (GO LOOP))
             (LET ((TAG (STRING-APPEND
                         LETTER

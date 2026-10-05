@@ -237,8 +237,15 @@
 ; RATIONALIZE - implementation from IEEE Scheme standard
 
 (defune rationalize (x e)
-  (let ((e (abs e)))
-    (simplest-rational (- x e) (+ x e))))
+  ;; Inexact if either argument is (R7RS 6.2.6).
+  (flet ((nanp (x) (ps:nan-p x))
+	 (infp (x) (ps:infinite-p x)))
+    (cond ((or (nanp x) (nanp e)) (if (nanp x) x e))
+	  ((infp e) (if (infp x) (- e e) 0d0))
+	  ((infp x) x)
+	  (t (let* ((e (abs e))
+		    (r (simplest-rational (cl:rational (- x e)) (cl:rational (+ x e)))))
+	       (if (or (cl:floatp x) (cl:floatp e)) (cl:float r 1d0) r))))))
 
 (defun simplest-rational (x y)
   (labels ((simplest-rational-internal

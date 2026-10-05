@@ -190,15 +190,25 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 
 ; Mumble
 
-(proclaim '(inline booleanp char-whitespace-p output-port-p))
+(proclaim '(inline booleanp char-whitespace-p char-numeric-p output-port-p))
 
 (defun booleanp (obj)
   (or (eq obj true)
       (eq obj false)))
 
 (defun char-whitespace-p (char)
-  (or (char= char #\space)
-      (not (graphic-char-p char))))
+  ;; Unicode's White_Space property.
+  (let ((code (char-code char)))
+    (or (<= 9 code 13) (= code 32) (= code #x85) (= code #xA0)
+	(and (>= code #x1680)
+	     (or (= code #x1680) (<= #x2000 code #x200A)
+		 (= code #x2028) (= code #x2029) (= code #x202F)
+		 (= code #x205F) (= code #x3000))))))
+
+(defun char-numeric-p (char)
+  ;; R7RS's char-numeric? is #t, not the digit's weight.  DIGIT-CHAR-P
+  ;; recognizes the Unicode decimal digits (Nd) on SBCL.
+  (and (digit-char-p char) t))
 
 (defun input-port-p (obj)
   (and (streamp obj)

@@ -6,7 +6,7 @@
 (define-library (chibi test)
   (export test test-values test-assert test-error test-begin test-end
           test-results)
-  (import (scheme base) (scheme write))
+  (import (scheme base) (scheme complex) (scheme write))
   (begin
     (define *run* 0)
     (define *passed* 0)
@@ -16,10 +16,19 @@
     (define (test-begin . name) #t)
     (define (test-end . name) #t)
 
+    ;; As chibi's own test-equal?: inexact numbers agree to a relative
+    ;; epsilon of 1e-5, complex numbers part by part.
+    (define (approx-equal? a b)
+      (cond ((> (abs a) (abs b)) (approx-equal? b a))
+            ((zero? a) (< (abs b) 1e-5))
+            (else (< (abs (/ (- a b) b)) 1e-5))))
+
     (define (close-enough? a b)
       (or (equal? a b)
-          (and (real? a) (real? b) (inexact? a) (inexact? b)
-               (< (abs (- a b)) (* 1e-8 (max 1 (abs a) (abs b)))))
+          (and (real? a) (inexact? a) (real? b) (approx-equal? a b))
+          (and (number? a) (number? b) (not (real? a)) (not (real? b))
+               (close-enough? (real-part a) (real-part b))
+               (close-enough? (imag-part a) (imag-part b)))
           (and (pair? a) (pair? b)
                (close-enough? (car a) (car b))
                (close-enough? (cdr a) (cdr b)))))

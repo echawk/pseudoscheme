@@ -93,8 +93,13 @@ around a body, so this is per implementation."
     (t x)))
 
 (defun arg (x)
-  "Prepare an argument for a CL transcendental function."
-  (if (rationalp x) (coerce x 'double-float) x))
+  "Prepare an argument for a CL transcendental function, which would
+compute an exact one in single floats."
+  (cond ((rationalp x) (coerce x 'double-float))
+	((and (complexp x) (rationalp (realpart x)))
+	 (complex (coerce (realpart x) 'double-float)
+		  (coerce (imagpart x) 'double-float)))
+	(t x)))
 
 ;;; ------------------------------------------------------------------
 ;;; Operations whose exactness CL gets differently
@@ -146,6 +151,19 @@ around a body, so this is per implementation."
   (if x-p
       (if (and (eql y 0) (rationalp x) (> x 0)) 0 (dbl (atan (arg y) (arg x))))
       (if (eql y 0) 0 (dbl (atan (arg y))))))
+
+(defun scheme-magnitude (z)
+  (cond ((rationalp z) (abs z))
+	;; Exact when it can be: (magnitude 3+4i) => 5.
+	((rationalp (realpart z))
+	 (scheme-sqrt (+ (* (realpart z) (realpart z)) (* (imagpart z) (imagpart z)))))
+	(t (abs z))))
+
+(defun scheme-angle (z)
+  (if (and (rationalp z) (>= z 0)) 0 (dbl (phase (arg z)))))
+
+(defun scheme-make-polar (magnitude angle)
+  (if (eql angle 0) magnitude (* magnitude (cis (arg angle)))))
 
 (defun scheme-expt (base power)
   (dbl (if (and (rationalp base) (floatp power)) (expt (arg base) power) (expt base power))))

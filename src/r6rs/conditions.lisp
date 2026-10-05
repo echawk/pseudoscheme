@@ -254,8 +254,8 @@ function (#f is a symbol) or as a type error expecting a function."
 (defprim "error-object-irritants" (x)
   (let ((s (component-of x "&irritants")))
     (if s (svref (record-values s) 0) '())))
-(defprim "file-error?" (x) (ps:true? (component-of x "&i/o-filename")))
+(defprim "file-error?" (x) (ps:true? (and (component-of x "&i/o-filename") t)))
 (defprim "read-error?" (x)
-  (ps:true? (or (component-of x "&lexical") (component-of x "&i/o-read"))))
+  (ps:true? (and (or (component-of x "&lexical") (component-of x "&i/o-read")) t)))
 
 (install-condition-types)
