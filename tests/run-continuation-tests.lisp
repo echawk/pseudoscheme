@@ -50,6 +50,9 @@
 ("(let ((k #f) (n 0)) (let ((l (map (lambda (x) (call/cc (lambda (c) (if (= x 2) (set! k c)) x))) '(1 2 3)))) (set! n (+ n 1)) (if (= n 1) (k 20) (list n l))))" . "(2 (1 20 3))")
 ("(let ((x 1) (k #f)) (let ((v (call/cc (lambda (c) (set! k c) 0)))) (set! x (+ x 1)) (if (< v 2) (k (+ v 1)) x)))" . "4")
 ("(let ((acc '()) (k #f)) (dynamic-wind (lambda () (set! acc (cons 'in acc))) (lambda () (call/cc (lambda (c) (set! k c))) (set! acc (cons 'body acc))) (lambda () (set! acc (cons 'out acc)))) (if (< (length acc) 6) (k #f) (reverse acc)))" . "(in body out in body out)")
+;; a generator walking a tree: resumed from different depths, so captures
+;; share frames promoted by earlier ones
+("(let () (define (walk tree yield) (cond ((null? tree) #f) ((pair? tree) (walk (car tree) yield) (walk (cdr tree) yield)) (else (yield tree)))) (define (make-gen tree) (define return #f) (define resume #f) (define (yield v) (call/cc (lambda (r) (set! resume r) (return v)))) (lambda () (call/cc (lambda (ret) (set! return ret) (if resume (resume #f) (begin (walk tree yield) (return 'done))))))) (let ((g (make-gen '((1 2) (3 (4 5)) 6)))) (let loop ((acc '())) (let ((v (g))) (if (eq? v 'done) (reverse acc) (loop (cons v acc)))))))" . "(1 2 3 4 5 6)")
 ))
 
 (let ((pass 0))

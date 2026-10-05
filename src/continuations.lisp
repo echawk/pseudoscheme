@@ -12,7 +12,7 @@
 ;;;; call (a "site") and the procedure's local variables hoisted to its
 ;;;; top.  A site pushes a frame, a stack-allocated vector
 ;;;;
-;;;;    #(machine site-number parameter-count live-variable ...)
+;;;;    #(machine promoted site-number parameter-count live-variable ...)
 ;;;;
 ;;;; onto *FSTACK* for the extent of the call.  Capturing a continuation
 ;;;; copies the frames up to the base.  Re-entering one rebuilds them,
@@ -67,7 +67,7 @@ continuation throws.")
 
 (defun call-with-frame (thunk k)
   "Call THUNK with a frame whose continuation is K, a Lisp function."
-  (let ((frame (vector :k k)))
+  (let ((frame (vector :k nil k)))
     (declare (dynamic-extent frame))
     (multiple-value-call k (with-frame (frame) (funcall thunk)))))
 
@@ -86,7 +86,7 @@ rebuilds it."
 (defun winder-extent (winder thunk)
   "Call THUNK inside dynamic-wind WINDER (whose before has run): its
 after runs however THUNK is left."
-  (let ((frame (vector :winder winder))
+  (let ((frame (vector :winder nil winder))
 	(normal nil))
     (declare (dynamic-extent frame))
     (multiple-value-prog1
@@ -105,25 +105,42 @@ after runs however THUNK is left."
 (defun full-call-with-values (producer consumer)
   (call-with-frame producer (lambda (&rest values) (apply consumer values))))
 
+;;; A frame's slot 1, PROMOTED, is (complete . copies) once a capture has
+;;; copied it: COPIES the heap copies of it and of every frame outside
+;;; it, innermost first, and COMPLETE whether they reach a base.  What is
+;;; outside a frame doesn't change while the frame is on the stack, so a
+;;; later capture copies only the frames pushed since, and shares the
+;;; rest: repeated captures (generators, ctak) cost the new frames only.
+
 (defun capture-frames ()
-  "Copies of the current frames, outermost first, and whether they reach
+  "Copies of the current frames, innermost first, and whether they reach
 a base."
-  (let ((frames '()))
+  (let ((new '()) (tail '()) (complete nil))
     (do ((s *fstack* (cdr s)))
-	((null s) (values frames nil))
-      (if (eq (car s) :base)
-	  (return (values frames t))
-	  (push (copy-seq (car s)) frames)))))
+	((null s))
+      (let ((frame (car s)))
+	(cond ((eq frame :base) (setq complete t) (return))
+	      ((svref frame 1)
+	       (setq complete (car (svref frame 1)) tail (cdr (svref frame 1)))
+	       (return))
+	      (t (push frame new)))))
+    ;; NEW is outermost first: copy each onto TAIL, and promote it
+    (dolist (frame new)
+      (let ((copy (copy-seq frame)))
+	(setq tail (cons copy tail))
+	(setf (svref copy 1) (cons complete tail)
+	      (svref frame 1) (svref copy 1))))
+    (values tail complete)))
 
 (defun resume-frame (frame inner)
   "Re-establish FRAME around INNER, a thunk computing what the frame's
 call returns, then continue the frame."
   (let ((head (svref frame 0)))
     (case head
-      (:k (multiple-value-call (svref frame 1) (with-frame (frame) (funcall inner))))
-      (:winder (winder-extent (svref frame 1) inner))
+      (:k (multiple-value-call (svref frame 2) (with-frame (frame) (funcall inner))))
+      (:winder (winder-extent (svref frame 2) inner))
       (t (let ((value (with-frame (frame) (funcall inner))))
-	   (apply head (svref frame 1) value frame (make-list (svref frame 2))))))))
+	   (apply head (svref frame 2) value frame (make-list (svref frame 3))))))))
 
 (defun rebuild-frames (frames values)
   "Re-establish FRAMES, outermost first, and return VALUES to the
@@ -139,7 +156,7 @@ innermost."
     (dolist (w (reverse winders))
       (let ((*winders* outer)) (funcall (car w)))
       (push w outer)))
-  (rebuild-frames frames values))
+  (rebuild-frames (reverse frames) values))
 
 (defun full-call/cc (f)
   (multiple-value-bind (frames rebuildable) (capture-frames)
@@ -582,7 +599,7 @@ bound to a variable first if one after it may capture, to keep order."
 						    (and d u (< d i) (> u i))))
 					  collect v)))
 		       (setf (second site-form)
-			     `(vector ,m ,site ,n ,@live))
+			     `(vector ,m (,(sym "quote") ()) ,site ,n ,@live))
 		       ;; Resuming the site: restore its live variables, set
 		       ;; its variable to the value returned, and go on after it.
 		       (let ((resume (new-label)))
@@ -590,7 +607,7 @@ bound to a variable first if one after it may capture, to keep order."
 			 (setq resumes
 			       (append resumes
 				       `(',resume
-					 ,@(loop for v in live for j from 3
+					 ,@(loop for v in live for j from 4
 						 collect `(,(sym "set!") ,v (svref ,frame ,j)))
 					 ,@(when var `((,(sym "set!") ,var ,value)))
 					 (%go ',(second info))))))))))
