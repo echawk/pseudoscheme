@@ -59,7 +59,7 @@
                    swap)))))))))
 
   ;;; we represent records as vectors for portability but this is 
-  ;;; not nice.  If your system supports compile-time generative
+  ;;; not nice.  (PSEUDOSCHEME: no longer; see below.)  If your system supports compile-time generative
   ;;; records, replace the definition of define-record with your 
   ;;; system supplied definition (which you should support in the 
   ;;; expander first of course).
@@ -106,8 +106,11 @@
                               (symbol->string 
                                 (syntax->datum (syntax name)))
                               "?")))) 
-                       (<rtd> 
-                        (datum->syntax (syntax name) (gensym)))
+                       (uid
+                        (datum->syntax (syntax name)
+                          (string->symbol
+                            (string-append "psyntax-record-"
+                              (symbol->string (syntax->datum (syntax name)))))))
                        ((accessor ...)
                         (map 
                           (lambda (x) 
@@ -132,30 +135,22 @@
                                   "!"))))
                           (syntax (field* ...))))
                        ((idx ...)
-                        (iota 1 (+ 1 (length (syntax (field* ...)))))))
+                        (iota 0 (length (syntax (field* ...))))))
+           ;;; PSEUDOSCHEME: R6RS records, opaque and nongenerative, not
+           ;;; vectors, so that a syntax object isn't a vector to the
+           ;;; code it's handed to, and so that one in compiled code
+           ;;; finds its record type again by the uid.
            (syntax (begin
+               (define rtd
+                 (make-record-type-descriptor 'name #f 'uid #t #t
+                   (list->vector '((mutable field*) ...))))
                (define constructor
-                 (lambda (field* ...) 
-                   (vector '<rtd> field* ...)))
-               (define predicate
-                 (lambda (x) 
-                   (and (vector? x) 
-                        (= (vector-length x) 
-                           (+ 1 (length '(field* ...))))
-                        (eq? (vector-ref x 0) '<rtd>))))
-               (define accessor
-                 (lambda (x)
-                   (if (predicate x) 
-                       (vector-ref x idx)
-                       (error 'accessor "~s is not of type ~s" x
-                              'name))))
+                 (record-constructor
+                   (make-record-constructor-descriptor rtd #f #f)))
+               (define predicate (record-predicate rtd))
+               (define accessor (record-accessor rtd idx))
                ...
-               (define mutator
-                 (lambda (x v)
-                   (if (predicate x) 
-                       (vector-set! x idx v)
-                       (error 'mutator "~s is not of type ~s" x
-                              'name))))
+               (define mutator (record-mutator rtd idx))
                ...)))))))
 
   ;; PSEUDOSCHEME: the option symbols of (file-options no-create ...),

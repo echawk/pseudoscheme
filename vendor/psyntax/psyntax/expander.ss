@@ -3549,7 +3549,9 @@
       (error 'expander "invalid syntax"
           (stx->datum x) (apply string-append args))))
   
-  (define identifier? (lambda (x) (id? x)))
+  ;;; PSEUDOSCHEME: a bare symbol is an identifier to the expander
+  ;;; (id?), but not to identifier?: only a syntax object is.
+  (define identifier? (lambda (x) (and (stx? x) (id? x))))
   
   (define datum->syntax
     (lambda (id datum)

@@ -165,7 +165,16 @@
 (defprim "assertion-violation" (who message &rest irritants)
   (apply #'r6rs-assertion-violation who message irritants))
 
+(defun form-name (form)
+  "Who a syntax violation is by when its WHO is #f (11.18): FORM if it's
+an identifier, or the identifier in its car."
+  (let ((datum (ignore-errors (funcall (r6rs-global "psyntax:syntax->datum") form))))
+    (cond ((ps:scheme-symbol-p datum) datum)
+	  ((and (consp datum) (ps:scheme-symbol-p (car datum))) (car datum))
+	  (t ps:false))))
+
 (defprim "syntax-violation" (who message form &optional (subform ps:false))
+  (when (eq who ps:false) (setq who (form-name form)))
   (ps-r7rs:raise-object
    (funcall (prim "condition")
 	    (funcall (prim "make-syntax-violation") form subform)
