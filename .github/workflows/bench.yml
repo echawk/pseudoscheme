@@ -1,0 +1,80 @@
+# ecraven's r7rs-benchmarks (bench/), escape-only and with full
+# continuations.  Run by hand: on GitHub, Actions -> Benchmarks -> Run
+# workflow.  The job summary has a table of both modes.
+
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # The two modes as two jobs in parallel; then a table of both.
+  # A benchmark that fails shows as such in the table rather than failing
+  # the job.
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [escape, full]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-lisp
+
+      - name: Build the command line
+        run: make -C contrib/cli
+
+      - name: Benchmarks (${{ matrix.mode }})
+        env:
+          CPU_LIMIT: 300
+          BENCH_TEMP: /tmp/r7rs-benchmarks
+        run: |
+          if [ "${{ matrix.mode }}" = full ]; then
+            printf '#!/bin/sh\nexec "%s/bin/pseudoscheme" --continuations=full "$@"\n' "$PWD" > /tmp/pseudoscheme-full
+            chmod +x /tmp/pseudoscheme-full
+            export PSEUDOSCHEME=/tmp/pseudoscheme-full
+          fi
+          bench/run.sh pseudoscheme
+
+      - name: Results
+        if: always()
+        # full continuations' results are named pseudoscheme_full, so the
+        # table has a column for each mode
+        run: |
+          mkdir -p /tmp/bench
+          r=bench/r7rs-benchmarks/results.Pseudoscheme
+          [ -f "$r" ] || exit 0
+          if [ "${{ matrix.mode }}" = full ]; then
+            sed 's/+!CSVLINE!+pseudoscheme-/+!CSVLINE!+pseudoscheme_full-/' "$r" > /tmp/bench/results.PseudoschemeFull
+          else
+            cp "$r" /tmp/bench/results.Pseudoscheme
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ matrix.mode }}
+          path: /tmp/bench
+
+  bench-summary:
+    needs: bench
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          merge-multiple: true
+          path: /tmp/bench
+
+      - name: Summary
+        # each benchmark's time in both modes, and full continuations'
+        # ratio to escape-only
+        run: |
+          echo "## r7rs-benchmarks: escape-only and full continuations" >> "$GITHUB_STEP_SUMMARY"
+          python3 bench/summarize.py /tmp/bench --baseline pseudoscheme | tee -a "$GITHUB_STEP_SUMMARY"

@@ -306,7 +306,9 @@ python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 continuations, `make test-cli` the command line's. GitHub Actions
 (`.github/workflows/ci.yml`) runs all of them, plus the bootstrap chain
 from other Schemes (both kinds of generated file must come out as
-checked in) and the benchmarks in both modes.
+checked in). The benchmarks, in both modes, are a workflow of their own
+that runs by hand (`.github/workflows/bench.yml`: Actions, Benchmarks,
+Run workflow).
 
 `tests/r6rs/` is Racket's R6RS test suite (MIT/Apache-2.0, see its
 `LICENSE-racket.txt`); `tests/chibi/` has chibi-scheme's R5RS and R7RS
