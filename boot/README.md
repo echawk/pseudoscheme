@@ -185,4 +185,5 @@ environment, and top-level variable access could build a seed the way
 Chez does; any R5RS Scheme with `eval` and an eq hash table can through
 stage0 (an adapter of a dozen lines, `boot/stage0/hosts/`). The seeds
 from Chez, Chibi, Scheme 48 and Gauche all end in the same image, byte
-for byte, and `make bootstrap-check` checks Chez's and Chibi's.
+for byte. `make bootstrap-check` checks Chez's and Chibi's, CI Chez's
+and Scheme 48's.

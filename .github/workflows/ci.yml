@@ -15,12 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The generated files from source alone, with two fast Schemes: Chez
-  # Scheme (R6RS) and Chibi (R7RS-small, no R6RS).  Both write the .pso
+  # The generated files from source alone, with two fast Schemes from
+  # Ubuntu: Chez Scheme (R6RS) and Scheme 48 (R5RS).  Both write the .pso
   # files, which must agree; then psyntax's image is rebuilt from a seed
-  # each of them builds (Chez natively, Chibi through boot/stage0/), with
-  # Pseudoscheme loaded from those .pso files.  Everything must come out
-  # as checked in.  If Ubuntu has Scheme 48 (R5RS), its stage0 seed too.
+  # each of them builds (Chez natively, Scheme 48 through boot/stage0/),
+  # with Pseudoscheme loaded from those .pso files.  Everything must come
+  # out as checked in.
   bootstrap:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -29,48 +29,23 @@ jobs:
 
       - uses: ./.github/actions/setup-lisp
 
-      - name: Install Chez Scheme
-        # boot/ calls Chez Scheme "chez"; Debian calls it scheme or
-        # chezscheme.
+      - name: Install Chez Scheme and Scheme 48
+        # boot/ calls Chez Scheme "chez"; Debian calls it chezscheme.
+        # Chez finds its boot files by the name it was run as, so "chez"
+        # is a script that runs chezscheme, not a link to it.
         run: |
-          sudo apt-get install -y -qq chezscheme
+          sudo apt-get install -y -qq chezscheme scheme48
           if ! command -v chez >/dev/null; then
-            sudo ln -s "$(command -v chezscheme || command -v scheme)" /usr/local/bin/chez
+            printf '#!/bin/sh\nexec chezscheme "$@"\n' | sudo tee /usr/local/bin/chez >/dev/null
+            sudo chmod +x /usr/local/bin/chez
           fi
           echo '(display (scheme-version))' | chez -q; echo
+          echo ',exit' | scheme48 | head -1
 
-      - name: Cache Chibi Scheme
-        uses: actions/cache@v4
-        with:
-          path: ~/chibi
-          key: chibi-0.12-${{ runner.os }}
-
-      - name: Build Chibi Scheme
-        # Ubuntu doesn't package it; it builds in about a minute.
-        run: |
-          if [ ! -x ~/chibi/bin/chibi-scheme ]; then
-            git clone --depth 1 --branch 0.12 https://github.com/ashinn/chibi-scheme /tmp/chibi \
-              || git clone --depth 1 https://github.com/ashinn/chibi-scheme /tmp/chibi
-            make -C /tmp/chibi -j4 PREFIX="$HOME/chibi"
-            make -C /tmp/chibi PREFIX="$HOME/chibi" install
-          fi
-          echo "$HOME/chibi/bin" >> "$GITHUB_PATH"
-          echo "LD_LIBRARY_PATH=$HOME/chibi/lib" >> "$GITHUB_ENV"
-
-      - name: Install Scheme 48, if Ubuntu has it
-        run: |
-          if sudo apt-get install -y -qq scheme48; then
-            echo "SCHEME48=yes" >> "$GITHUB_ENV"
-          else
-            echo "::notice::no Scheme 48 package; skipping its stage0 seed"
-          fi
-
-      - name: The .pso files, from Chez and from Chibi
+      - name: The .pso files, from Chez and from Scheme 48
         # They must agree with each other and, form for form, with
         # Pseudoscheme's own translation (--check).  Installed in src/.
-        run: |
-          chibi-scheme -V
-          BOOT_HOSTS="chez chibi" boot/bootstrap.sh --all --check
+        run: BOOT_HOSTS="chez scheme48" boot/bootstrap.sh --all --check
 
       - name: The .pso files match what's checked in
         # apart from the header comment naming the Scheme that wrote them
@@ -82,14 +57,9 @@ jobs:
       - name: psyntax's image matches what's checked in
         run: git diff --exit-code -- vendor/psyntax/psyntax-pseudoscheme.pp
 
-      - name: psyntax's image, from stage0's seed on Chibi
-        # An unrelated expander's seed must end in the same image.
-        run: |
-          STAGE0_HOST=chibi boot/psyntax.sh --no-install --seed=stage0
-          cmp boot/build/psyntax/psyntax-pseudoscheme.pp vendor/psyntax/psyntax-pseudoscheme.pp
-
-      - name: psyntax's image, from stage0's seed on Scheme 48 (R5RS)
-        if: env.SCHEME48 == 'yes'
+      - name: psyntax's image, from stage0's seed on Scheme 48
+        # An unrelated expander's seed, on an R5RS Scheme, must end in
+        # the same image.
         run: |
           STAGE0_HOST=scheme48 boot/psyntax.sh --no-install --seed=stage0
           cmp boot/build/psyntax/psyntax-pseudoscheme.pp vendor/psyntax/psyntax-pseudoscheme.pp

@@ -74,8 +74,8 @@ Pseudoscheme rebuilds psyntax from the seed, then from its own result,
 until the image reproduces itself, and names the image's gensyms in
 order of appearance. So nothing of the seed survives into the result:
 the seeds from Chez, Chibi, Scheme 48 and Gauche all end in the same
-image, byte for byte. `make bootstrap-check` and CI check that Chez's and
-Chibi's do, and match what's checked in.
+image, byte for byte. `make bootstrap-check` checks that Chez's and Chibi's
+do, and match what's checked in; CI checks Chez's and Scheme 48's.
 
 Two seeds from unrelated expanders ending in the same image is also
 evidence that neither put anything into it that the sources don't say:

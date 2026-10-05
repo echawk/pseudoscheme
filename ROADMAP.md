@@ -347,7 +347,8 @@ system, `#lang`, macros and `racket/base` are Racket's own code.
   the `.pso` files come from any of seven Schemes, and psyntax's image
   from a seed built by Chez Scheme or, through boot/stage0/, by any R5RS
   Scheme (Chibi, Scheme 48, Gauche). Every seed ends in the same image,
-  byte for byte; `make bootstrap-check` and CI check Chez's and Chibi's.
+  byte for byte; `make bootstrap-check` checks Chez's and Chibi's, CI
+  Chez's and Scheme 48's.
   Left: an s7 adapter for the `.pso` step (untested), and stage0
   adapters for more hosts (CHICKEN, Guile) if wanted.
 - ASDF's one-second timestamps can leave a stale fasl after `.pso`
