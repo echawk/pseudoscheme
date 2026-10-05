@@ -171,6 +171,14 @@ Each is marked `PSEUDOSCHEME:` in the source.
   and `force`.
 * `(file-options ...)` is the checked list of option symbols
   (`compat.ss`'s `file-options-spec` was "not implemented").
+* For compiled libraries (src/library-cache.lisp): a `library-loader`
+  parameter, tried in `find-external-library` before the library is
+  looked for as source, and a `library-expanded-hook` that
+  `library-expander` calls with everything `install-library` needs and
+  thunks for the visit and invoke code (thunks because converting the
+  code looks up primitives, which a bootstrap's table may lack).
+  `psyntax:library-spec-by-name` finds or loads a library and returns
+  its (id name version).
 * Marks are gensyms, not fresh one-character strings, so that, like
   labels, they keep their identity across a write and a read: the first
   step towards serializing expanded libraries (ROADMAP.md, 2).
@@ -181,6 +189,3 @@ Each is marked `PSEUDOSCHEME:` in the source.
   (`gen-syntax` only handles vectors that aren't syntax objects).
 * Phases are implicit (Ghuloum & Dybvig's "implicit phasing"), so
   `for` levels are accepted and ignored.
-* Libraries aren't serialized: each run re-expands library sources.
-  Ikarus's later psyntax added serialization; that's the model for
-  compiled libraries (ROADMAP.md, 2).

@@ -209,6 +209,13 @@ is a walkthrough of both, from the shell and from Lisp.
 `tests/run-library-corpus.lisp DIR` imports every portable library in
 such a tree and reports what loads.
 
+Libraries loaded from files are compiled once and cached, in
+`~/.cache/pseudoscheme/libraries/`; later imports load the compiled
+code, unless the library or something it depends on has changed.
+`PSEUDOSCHEME_LIBRARY_CACHE=0` turns that off, and
+`PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY` puts the cache elsewhere
+(src/library-cache.lisp).
+
 ## Symbols and case
 
 Scheme symbols are CL symbols in the `SCHEME` package named by

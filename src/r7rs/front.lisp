@@ -544,6 +544,7 @@ once per host."
 		when (boundp (psx:location (ssym name)))
 		  collect (cons (psx:host-ref name) var)))
     (setf psx:*library-form-hook* #'locate-library-form)
-    (install-standard-libraries)
+    ;; the same ids every session, for compiled libraries
+    (psx::with-boot-gensyms (install-standard-libraries))
     (setq *booted-host* psx:*host*))
   t)

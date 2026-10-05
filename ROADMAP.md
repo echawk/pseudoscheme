@@ -88,27 +88,44 @@ previous build. The worst ratios point at what to do next:
   the comparisons' (src/numbers.lisp) might help, and so might SBCL
   declarations in the translator's output.
 - **`mbrotZ` (7.5×).** Complex arithmetic.
-- **Compiled libraries.** psyntax's own image is compiled once by ASDF
-  (the `psyntax-image` component; `psx::compile-image`), so booting
-  psyntax takes milliseconds rather than about 1.7 s. Every run still
-  re-expands the libraries it imports (`(srfi 1)` takes about 0.1 s).
-  Next, serialize expanded libraries into fasls, as Ikarus's later
-  psyntax does:
-  - make psyntax's marks gensyms rather than fresh strings compared
-    with `eq?`, so that syntax objects keep their identity across fasl
-    files (labels already are gensyms, for the same reason);
-  - write each library as its id, name, version, the ids of the
-    libraries it was expanded against, its export substitution and
-    environment, and its visit and invoke code translated to Lisp;
-  - add a hook to psyntax's library manager to load such a file before
-    expanding the source, valid only while every dependency still has
-    the id it was compiled against;
-  - cache under `~/.cache/pseudoscheme/`, keyed by the library form
-    (after `include` and `cond-expand`), the dependencies' ids and the
-    image; refuse to cache expansions holding live Lisp objects (the
-    `(cl <package>)` bridge's `verbatim` closures);
-  - then the `:r7rs-library` ASDF components (src/asdf.lisp) can really
-    compile, and the SRFIs can be compiled into the CLI image.
+- **Compiled libraries.** Done for libraries loaded from files
+  (src/library-cache.lisp). Importing a library spends about 90% of
+  its time in SBCL's `compile` of the translated code, and only about
+  10% in expansion, so the cache holds compiled fasls, under
+  `~/.cache/pseudoscheme/libraries/`. Importing five SRFIs takes
+  0.018 s from the cache instead of 0.39 s (0.50 s the first time,
+  which writes the cache).
+  - psyntax hooks (vendor/psyntax/README-pseudoscheme.md): a loader
+    tried before expanding a library from source, and a hook given
+    everything `install-library` needs once a library is expanded.
+  - Keyed by the library's form (after `include` and `cond-expand`),
+    a build signature (the Lisp, and the names and dates of
+    Pseudoscheme's source files) and the continuations mode. A
+    compiled library is installed only if each library it was expanded
+    against has the same id; otherwise it is expanded and compiled
+    again, so a changed dependency recompiles its dependents.
+  - The R7RS standard libraries are expanded at boot with gensyms named
+    the same every session (`with-boot-gensyms`), so their ids are
+    stable. Session gensyms carry a random part, and a saved image
+    (the command line's) gets a new prefix each time it starts.
+  - `PSEUDOSCHEME_LIBRARY_CACHE=0` turns it off;
+    `PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY` moves it.
+
+  Left to do:
+  - Libraries that aren't found through the library path aren't cached:
+    those defined at the REPL or in a program file, and `(cl
+    <package>)` libraries, whose expansions hold Lisp functions.
+    Libraries that depend on one aren't either.
+  - Nothing removes stale entries. A cleanup by age, or `pseudoscheme
+    --clear-cache`, would do.
+  - The `:r7rs-library` ASDF components (src/asdf.lisp) could compile
+    into the system's own fasls instead of the cache, and the SRFIs
+    could be compiled into the command line's image.
+  - The build signature changes whenever any source file's date
+    changes, which is safe but coarse: every edit to Pseudoscheme
+    recompiles every cached library.
+  - Two processes writing the same entry is safe (write to a temporary
+    file, then rename), but there's no locking for cleanup.
 
 ## 3. Continuations
 

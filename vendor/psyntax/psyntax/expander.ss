@@ -3415,6 +3415,13 @@
            (lambda () (visit! macro*))
            (lambda () (eval-core (expanded->core invoke-code)))
            #t)
+        ;; PSEUDOSCHEME: for compiled libraries (library-manager.ss).
+        ;; The code is passed as thunks: converting it to core forms
+        ;; looks up primitives, which a bootstrap may not have.
+        ((library-expanded-hook) id name ver imp* vis* inv*
+           export-subst export-env
+           (lambda () (expanded->core (build-visit-code macro*)))
+           (lambda () (expanded->core invoke-code)))
         (values invoke-code
                 (build-visit-code macro*)
                 export-subst export-env))))

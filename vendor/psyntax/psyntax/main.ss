@@ -50,6 +50,12 @@
   (set-symbol-value! 'psyntax:file-locator file-locator)
   (set-symbol-value! 'psyntax:library-locator library-locator)
   (set-symbol-value! 'psyntax:install-library install-library)
+  ;; Compiled libraries (src/library-cache.lisp): the parameters, and a
+  ;; library's (id name version), found or loaded by name.
+  (set-symbol-value! 'psyntax:library-loader library-loader)
+  (set-symbol-value! 'psyntax:library-expanded-hook library-expanded-hook)
+  (set-symbol-value! 'psyntax:library-spec-by-name
+    (lambda (name) (library-spec (find-library-by-name name))))
   (set-symbol-value! 'psyntax:interaction-library-name interaction-library-name)
   (set-symbol-value! 'psyntax:interaction-source-name interaction-source-name)
   (set-symbol-value! 'psyntax:identifier-binding identifier-binding)

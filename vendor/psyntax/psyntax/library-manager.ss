@@ -26,7 +26,9 @@
     current-library-collection
     ;; PSEUDOSCHEME: exported so the host can set the search path and
     ;; the file-name mapping (see psyntax/main.ss).
-    library-path file-locator library-locator)
+    library-path file-locator library-locator
+    ;; PSEUDOSCHEME: for compiled libraries (src/library-cache.lisp).
+    library-loader library-expanded-hook)
   (import (rnrs) (psyntax compat) (rnrs r5rs))
 
   (define (make-collection)
@@ -155,6 +157,29 @@
             (error 'library-expander 
                    "not a procedure" f)))))
 
+  ;;; PSEUDOSCHEME: (library-loader) is tried before a library is
+  ;;; looked for as source: given the library's name, it may install the
+  ;;; library itself (from a compiled file) and return #t, or return #f.
+  (define library-loader
+    (make-parameter
+      (lambda (x) #f)
+      (lambda (f)
+        (if (procedure? f)
+            f
+            (error 'library-loader "not a procedure" f)))))
+
+  ;;; PSEUDOSCHEME: called by library-expander with everything
+  ;;; install-library needs, and thunks returning the visit and invoke
+  ;;; code as core forms:
+  ;;; (hook id name ver imp* vis* inv* subst env visit-thunk invoke-thunk).
+  (define library-expanded-hook
+    (make-parameter
+      (lambda args #f)
+      (lambda (f)
+        (if (procedure? f)
+            f
+            (error 'library-expanded-hook "not a procedure" f)))))
+
   (define external-pending-libraries 
     (make-parameter '()))
 
@@ -164,15 +189,16 @@
              name))
     (parameterize ((external-pending-libraries
                     (cons name (external-pending-libraries))))
-      (let ((lib-expr ((library-locator) name)))
-        (unless lib-expr 
-          (error #f "cannot find library" name))
-        ((current-library-expander) lib-expr)
-        (or (find-library-by
+      (unless ((library-loader) name)
+        (let ((lib-expr ((library-locator) name)))
+          (unless lib-expr
+            (error #f "cannot find library" name))
+          ((current-library-expander) lib-expr)))
+      (or (find-library-by
               (lambda (x) (equal? (library-name x) name)))
             (error #f
               "handling external library did not yield the currect library"
-               name)))))
+               name))))
           
   (define (find-library-by-name name)
     (or (find-library-by

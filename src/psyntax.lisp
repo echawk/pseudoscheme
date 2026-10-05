@@ -65,12 +65,20 @@
 ;;; The adapter: what psyntax's (psyntax system $bootstrap) and compat
 ;;; expect of a host (compare vendor/psyntax/scheme48.r6rs.ss).
 
-(defvar *gensym-prefix*
+(defun session-gensym-prefix ()
   ;; Expanded code names library globals with gensyms, and expanded
-  ;; code can be saved (the .pp itself, translated files), so names
-  ;; must not repeat across sessions: prefix with the time.
-  (format nil "g$~(~36R~)$" (get-universal-time)))
+  ;; code is saved (the .pp itself, compiled libraries), so names must
+  ;; not repeat across sessions: prefix with the time and a random part,
+  ;; for sessions that start in the same second.
+  (format nil "g$~(~36R~36R~)$" (get-universal-time)
+	  (random (expt 36 4) (make-random-state t))))
+
+(defvar *gensym-prefix* (session-gensym-prefix))
 (defvar *gensym-count* 0)
+
+;; A saved image (the command line's) is a new session each time it starts.
+(uiop:register-image-restore-hook
+ (lambda () (setq *gensym-prefix* (session-gensym-prefix))) nil)
 
 (defun install-adapter ()
   (defhost "gensym" (&rest args)
@@ -327,6 +335,7 @@ sources elsewhere (boot/ builds one with Chez Scheme)."
     (funcall (host-ref "psyntax:file-locator") #'locate-library-file))
   (when (boundp (location (sym "psyntax:library-locator")))
     (funcall (host-ref "psyntax:library-locator") #'locate-library))
+  (install-library-cache-hooks)
   *host*)
 
 ;;; ------------------------------------------------------------------
@@ -389,9 +398,15 @@ version dropped."
 NIL; used before the plain file search, e.g. to translate R7RS
 define-library forms (src/r7rs/front.lisp).")
 
+(defvar *pending-libraries*)		; src/library-cache.lisp
+
 (defun locate-library (name)
   "psyntax's LIBRARY-LOCATOR: the form defining library NAME, or #f."
-  (or (and *library-form-hook* (funcall *library-form-hook* name))
+  (or (let ((pending (assoc name *pending-libraries* :test #'equal)))
+	;; just read by LOAD-COMPILED-LIBRARY, which found no compiled one
+	(and pending (fourth pending)
+	     (prog1 (fourth pending) (setf (fourth pending) nil))))
+      (and *library-form-hook* (funcall *library-form-hook* name))
       (let ((file (locate-library-file name)))
 	(and (stringp file)
 	     (with-open-file (in file) (funcall ps:*scheme-read* in))))
