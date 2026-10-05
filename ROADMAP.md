@@ -172,11 +172,35 @@ a thousand closures over one variable take 162 s.)
   is compiled with `(sb-c::insert-debug-catch 0)`. And each chunk of a
   long sequence is closure-converted and compiled as a component of its
   own (`%lifted`).
-- Not yet: measuring the cost on bench/, barrier detection at Lisp
-  frames, `dynamic-wind`s shared between the current and target
-  continuation (re-entry unwinds and rewinds all of them),
-  re-establishing exception handlers and parameterizations, a command
-  line option.
+- Cost (bench/, `--continuations=full` vs escape-only): ordinary code
+  1.36× slower as a geometric mean of 11 benchmarks (cpstak 0.98×,
+  mazefun 1.17×, fib 1.74×, earley 2.86×); call/cc-heavy code ctak
+  2.3×, fibc 2.1×, after captures began sharing the frames earlier
+  captures copied (they were 15.6× and 5.6×).
+
+Left before full continuations can be the default:
+- **Re-entry through Lisp frames is silently wrong.** A Lisp function
+  that calls a Scheme procedure (vector-map, string-for-each, the sorts,
+  R6RS's find, filter and folds, hashtable-update!, call-with-port,
+  with-exception-handler, the bridge's Lisp functions) isn't a frame: a
+  continuation captured in the callback and re-entered later resumes as
+  if the Lisp function had returned at once. Make the common ones
+  frame-aware, as map and for-each are (Scheme compiled with the
+  transformation), and push a barrier frame around calls to the rest,
+  so that re-entering through one is an error (escaping still works).
+  The same goes for procedures of src/r7rs/base.scm, compiled at boot
+  without the transformation.
+- **Dynamic state isn't part of a continuation**: the exception handler
+  stack and parameterizations aren't re-established on re-entry, and
+  re-entry unwinds and rewinds every `dynamic-wind`, even those the
+  current and target continuations share.
+- **Cost**: a "may capture" analysis would let calls to procedures that
+  can't reach call/cc or an unknown procedure (fib calling fib) skip the
+  frame, which is most calls in most code; and the special binding per
+  call could become an index into a per-thread stack.
+- Then: make it the default, with `--continuations=escape` to opt out;
+  SRFI 158's generators as real coroutines; SRFI 226 (delimited control),
+  which the frames make straightforward (capture up to a prompt).
 
 **R5RS.** R5RS mode's classic translator expands macros itself, so the
 transformation can't reach it. R5RS can now also run on psyntax
