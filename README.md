@@ -67,8 +67,8 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 
 | | front end | tests |
 |---|---|---|
-| R6RS | psyntax | Racket's R6RS suite: 8690 pass, 212 fail; all 25 library test programs run |
-| R7RS-small | psyntax | chibi's R7RS suite: 948 of 975 |
+| R6RS | psyntax | Racket's R6RS suite: 8711 pass, 191 fail; all 25 library test programs run |
+| R7RS-small | psyntax | chibi's R7RS suite: 975 of 977 (976 with full continuations) |
 | R5RS | native translator | chibi's R5RS suite: 183 of 188 |
 
 Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 3.0× Chez's
@@ -167,7 +167,8 @@ reference to a host global of the same name, which is what `src/r6rs/`
 provides.
 
 The 2007 code predates the final R6RS in a few places and assumed full
-continuations in one; the patches are listed in
+continuations in one. The patches, and the hooks added for compiled
+libraries, are listed in
 `vendor/psyntax/README-pseudoscheme.md`.
 
 R7RS is on psyntax too. A `define-library` is translated into an R6RS
@@ -288,8 +289,8 @@ installing anything. See boot/README.md.
 
 ```sh
 sbcl --script tests/run-r5rs-tests.lisp
-sbcl --script tests/run-r7rs-tests.lisp [-v]
-sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r6rs-tests.lisp [-v] [name ...]
+sbcl --script tests/run-r7rs-tests.lisp [-v] [--continuations=full]
+sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r6rs-tests.lisp [-v] [--continuations=full] [name ...]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-syntax-case-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-corpus.lisp DIR
@@ -306,9 +307,19 @@ suites.
 
 The big ones; `ROADMAP.md` has the rest.
 
-- **Escape-only continuations.** `call/cc` is a Lisp `catch`, so a
-  continuation can't be re-entered after its `call/cc` returns; trying
-  signals an error. This affects one R5RS test and a couple of R7RS
-  ones. docs/continuations.md weighs CPS against the alternatives.
-- **No compiled libraries.** Every run re-expands the library sources it
-  imports.
+- **Continuations are escape-only by default.** `call/cc` is a Lisp
+  `catch`, so a continuation can't be re-entered after its `call/cc`
+  returns; trying signals an error. Full, re-entrant continuations are
+  a prototype (src/continuations.lisp, opt-in with
+  `psx::*full-continuations*`; `--continuations=full` in the R7RS and
+  R6RS test runners), built on generalized stack inspection as
+  docs/continuations.md describes. It passes the R7RS suite's
+  re-entry test, but doesn't yet compile the largest R6RS test
+  programs, doesn't cover R5RS mode, and hasn't been measured on
+  `bench/`.
+- **Only libraries from files are cached.** Libraries defined at the
+  REPL or in a program, and `(cl <package>)` libraries, are expanded
+  and compiled again in every session, and so is whatever depends on
+  them. Nothing cleans stale cache entries yet.
+- **No Racket yet.** docs/racket.md plans a `--racket` mode that runs
+  Racket's own expander on Pseudoscheme by compiling linklets.
