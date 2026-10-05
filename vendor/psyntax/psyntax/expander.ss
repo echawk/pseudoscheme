@@ -1340,20 +1340,38 @@
   
   ;;; PSEUDOSCHEME: R7RS 4.3.2's custom ellipsis, (syntax-rules <ellipsis>
   ;;; (literal ...) rule ...).  Rewrite the rules into ordinary ones: the
-  ;;; custom ellipsis becomes ..., and ... (an ordinary identifier in such
-  ;;; rules) becomes a fresh one.
-  (define (replace-ellipsis x ell dots)
+  ;;; custom ellipsis ELL (if not #f) becomes ..., and ... (an ordinary
+  ;;; identifier in such rules) becomes (DOTS-FOR ...): a fresh
+  ;;; identifier in patterns, (... ...) in templates.
+  (define (replace-ellipsis x ell dots-for)
     (let f ((x x))
       (cond
         ((id? x)
          (cond
-           ((bound-id=? x ell) (scheme-stx '...))
-           ((free-id=? x (scheme-stx '...)) dots)
+           ((and ell (bound-id=? x ell)) (scheme-stx '...))
+           ((free-id=? x (scheme-stx '...)) (dots-for x))
            (else x)))
         (else
          (syntax-match x ()
            ((a . d) (cons (f a) (f d)))
            ;; vector patterns/templates: keep the elements' wraps
+           (_ (if (syntax-vector? x)
+                  (list->vector (map f (syntax-vector->list x)))
+                  x)))))))
+
+  ;;; PSEUDOSCHEME: R7RS 4.3.2 lets _ and the ellipsis be literals, which
+  ;;; then match only themselves.  An ellipsis literal can't be an
+  ;;; ellipsis in the templates either: each ... there becomes (... ...).
+  (define (escape-ellipsis x)
+    (let f ((x x))
+      (cond
+        ((id? x)
+         (if (free-id=? x (scheme-stx '...))
+             (list (scheme-stx '...) x)
+             x))
+        (else
+         (syntax-match x ()
+           ((a . d) (cons (f a) (f d)))
            (_ (if (syntax-vector? x)
                   (list->vector (map f (syntax-vector->list x)))
                   x)))))))
@@ -1364,28 +1382,45 @@
         ((_ ell (lits ...) (pat* tmp*) ...)
          (id? ell)
          (let ((dots (datum->syntax ell (gensym))))
+           (define (rewrite ell)
+             (define (pat x) (replace-ellipsis x ell (lambda (_) dots)))
+             (define (tmp x)
+               (replace-ellipsis x ell (lambda (x) (list (scheme-stx '...) x))))
+             (cons* 'syntax-rules (map pat lits)
+                    (map (lambda (p t) (list (pat p) (tmp t))) pat* tmp*)))
            (syntax-rules-macro
-             (cons* 'syntax-rules
-                    (map (lambda (l) (replace-ellipsis l ell dots)) lits)
-                    (map (lambda (p t)
-                           (list (replace-ellipsis p ell dots)
-                                 (replace-ellipsis t ell dots)))
-                         pat* tmp*)))))
+             (cond
+               ;; PSEUDOSCHEME: the custom ellipsis is a literal, so the
+               ;; rules have no ellipsis at all.  If it is ... itself,
+               ;; the next case handles that; otherwise ... is ordinary.
+               ((bound-id-member? ell lits)
+                (if (free-id=? ell (scheme-stx '...))
+                    (cons* 'syntax-rules lits (map list pat* tmp*))
+                    (rewrite #f)))
+               (else (rewrite ell))))))
         ((_ (lits ...)
             (pat* tmp*) ...)
          (begin
-           (unless (for-all
-                     (lambda (x)
-                       (and (id? x)
-                            (not (free-id=? x (scheme-stx '...)))
-                            (not (free-id=? x (scheme-stx '_)))))
-                     lits)
+           (unless (for-all id? lits)
              (stx-error e "invalid literals"))
-           (bless `(lambda (x)
-                     (syntax-case x ,lits
-                       ,@(map (lambda (pat tmp)
-                                `(,pat (syntax ,tmp)))
-                              pat* tmp*)))))))))
+           (let ((pat* (map (lambda (pat)
+                              ;; PSEUDOSCHEME: the keyword's position is
+                              ;; ignored (R6RS 11.19, R7RS 4.3.2), even
+                              ;; when it is _ and _ is a literal.
+                              (syntax-match pat ()
+                                ((_ . rest)
+                                 (cons (datum->syntax (scheme-stx 'syntax-rules) (gensym))
+                                       rest))
+                                (_ pat)))
+                            pat*))
+                 (tmp* (if (exists (lambda (x) (free-id=? x (scheme-stx '...))) lits)
+                           (map escape-ellipsis tmp*)
+                           tmp*)))
+             (bless `(lambda (x)
+                       (syntax-case x ,lits
+                         ,@(map (lambda (pat tmp)
+                                  `(,pat (syntax ,tmp)))
+                                pat* tmp*))))))))))
   
   (define quasiquote-macro
     (let ()
@@ -1886,6 +1921,11 @@
   (define convert-pattern
    ; returns syntax-dispatch pattern & ids
     (lambda (pattern keys)
+      ;; PSEUDOSCHEME: ... in keys (from syntax-rules) is a literal.
+      (define (ellipsis? x)
+        (and (id? x)
+             (free-id=? x (scheme-stx '...))
+             (not (bound-id-member? x keys))))
       (define cvt*
         (lambda (p* n ids)
           (if (null? p*)
@@ -2149,7 +2189,9 @@
         (syntax-match e ()
           ((_ expr (keys ...) clauses ...)
            (begin
-             (unless (for-all (lambda (x) (and (id? x) (not (ellipsis?  x)))) keys)
+             ;; PSEUDOSCHEME: ... may be a literal, as in R7RS's
+             ;; syntax-rules, which expands into syntax-case.
+             (unless (for-all id? keys)
                (stx-error e "invalid literals"))
              (let ((x (gen-lexical 'tmp)))
                (let ((body (gen-syntax-case x keys clauses r mr)))

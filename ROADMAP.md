@@ -40,13 +40,6 @@ docs/interop.md.
 
 **R7RS (27).** Most of these are small and independent.
 
-- `syntax-rules`:
-  - `_` should be a wildcard, not a pattern variable, so a pattern may
-    use it twice;
-  - `...` should be allowed as a literal, `(syntax-rules (...) ...)`.
-
-  Both belong in psyntax's `syntax-rules` and `syntax-case`, since R6RS
-  has the same rules.
 - Numbers:
   - complex functions (`make-polar`, `magnitude`, `angle`, `sqrt` of a
     complex) compute in single floats;

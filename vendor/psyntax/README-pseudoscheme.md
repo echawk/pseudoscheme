@@ -128,6 +128,12 @@ Each is marked `PSEUDOSCHEME:` in the source.
   `interaction-library-name` / `interaction-source-name`).
 * Custom ellipsis, `(syntax-rules ::: (lit ...) rule ...)`, by
   rewriting the rules; inside vector patterns too (`replace-ellipsis`).
+  An ordinary `...` in such rules stays `...` in the output.
+* `_` and the ellipsis may be `syntax-rules` literals (R7RS 4.3.2); an
+  ellipsis literal is escaped in the templates (`escape-ellipsis`), and
+  `syntax-case` accepts `...` among its literals for this. The
+  keyword's position in a `syntax-rules` pattern is ignored even when
+  `_` is a literal.
 * `let*-values` as a macro.
 * `let-syntax` / `letrec-syntax` bindings are scoped by their own rib,
   so imports in a macro's output can't shadow them.
@@ -171,9 +177,6 @@ Each is marked `PSEUDOSCHEME:` in the source.
 
 ## Known gaps
 
-* `_` isn't a wildcard in `syntax-rules`/`syntax-case` patterns (it's
-  an ordinary pattern variable), and `...` can't be a literal. These
-  show up as R7RS test failures.
 * Ellipses inside *vector templates*, `#(x ...)`, aren't expanded
   (`gen-syntax` only handles vectors that aren't syntax objects).
 * Phases are implicit (Ghuloum & Dybvig's "implicit phasing"), so
