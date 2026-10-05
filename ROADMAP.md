@@ -7,12 +7,13 @@ this file.
 | runner | result |
 |---|---|
 | `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 975 of 977 |
-| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8711 pass, 191 fail; all 25 programs run to completion |
-| `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 183 of 188 |
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8711 pass, 191 fail (8712/190 with full continuations); all 25 programs run to completion |
+| `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 188 of 189 (189 with full continuations; 183 of 188 with `--classic`) |
 | `tests/run-interop-tests.lisp` | 104/104 |
 | `tests/run-library-tests.lisp` | 55/55 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
+| `tests/run-continuation-tests.lisp` | 15/15 |
 | `make -C contrib/cli test` | 15/15 |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
 | `bench/` (r7rs-benchmarks) | 57/57; geometric mean 3.0× Chez's time (Guile 2.8×, Gauche 9.2×) |
@@ -20,21 +21,22 @@ this file.
 ## Architecture now
 
 ```
- R6RS source   R7RS source (define-library -> library)    R5RS source
-      \              /                                          |
-       psyntax  (vendor/psyntax; library system, syntax-case,   |
-       |         syntax-rules, (cl <package>) libraries)        |
-       v                                                        v
-   core Scheme -------> translator (src/*.scm, native syntax-rules) ---> Common Lisp
-       |
+ R5RS source     R6RS source     R7RS source (define-library -> library)
+        \             |              /
+         psyntax  (vendor/psyntax; library system, syntax-case,
+         |         syntax-rules, (cl <package>) libraries)
+         v
+   core Scheme --[src/continuations.lisp, opt-in]--> translator (src/*.scm) ---> Common Lisp
+         |
    host globals: src/r6rs/, src/r7rs/, src/numbers.lisp, src/compat/,
                  src/interop.lisp; SRFIs as Scheme in src/srfi/
 ```
 
-psyntax is the front end for R6RS and R7RS. The native classifier and
-its `syntax-rules` remain as R5RS mode's expander and the translator's
-own bootstrap expander. The Lisp/Scheme bridge is described in
-docs/interop.md.
+psyntax is the front end for every standard; R5RS runs at a top level
+whose bindings are `(pseudoscheme r5rs)`. The translator's native
+classifier and `syntax-rules` remain only as its own bootstrap
+expander (and `tests/run-r5rs-tests.lisp --classic`). The Lisp/Scheme
+bridge is described in docs/interop.md.
 
 ## 1. Conformance: the remaining failures
 
@@ -62,9 +64,9 @@ docs/interop.md.
 
 Not triaged yet; `tests/run-r6rs-tests.lisp -v NAME` lists them.
 
-**R5RS (5).** One re-enters a continuation (section 3). The other four
-are macro problems in R5RS mode's own front end, which psyntax handles
-(docs/continuations.md lists them).
+**R5RS (1).** The continuation re-entry test, which passes with full
+continuations (section 3). R5RS is on psyntax now; the classic front
+end's four macro failures are gone.
 
 ## 2. Speed
 

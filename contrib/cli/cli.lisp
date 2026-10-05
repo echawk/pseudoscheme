@@ -18,7 +18,10 @@
 
 (in-package "PSEUDOSCHEME-CLI")
 
-(defparameter *version* "0.2")
+(defparameter *version*
+  ;; "3.0", from the translator's "Pseudoscheme 3.0" (src/version.scm)
+  (let ((v (uiop:symbol-call "SCHEME-TRANSLATOR" "TRANSLATOR-VERSION")))
+    (subseq v (1+ (position #\Space v :from-end t)))))
 
 (defparameter *usage* "Usage: pseudoscheme [option ...] [file [argument ...]]
 

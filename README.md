@@ -1,13 +1,13 @@
 # Pseudoscheme
 
-Pseudoscheme is Jonathan Rees' Scheme-to-Common-Lisp translator and
-evaluator (originally 1991-1994, targeting CMU CL, Symbolics, VAX Lisp
-and LispWorks), brought up to date: it runs R5RS, R6RS and R7RS Scheme
+Pseudoscheme 3.0 is Jonathan Rees' Scheme-to-Common-Lisp translator and
+evaluator (versions up to 2.13 date from 1991-1994, targeting CMU CL,
+Symbolics, VAX Lisp and LispWorks), brought up to date: it runs R5RS, R6RS and R7RS Scheme
 on modern Common Lisp (developed on SBCL), as a library inside a Lisp
 image or as a standalone `pseudoscheme` command.
 
-Scheme is *compiled* to Lisp, not interpreted on top of it: R6RS and
-R7RS source is expanded by psyntax (the R6RS `syntax-case` expander)
+Scheme is *compiled* to Lisp, not interpreted on top of it: R5RS, R6RS
+and R7RS source is expanded by psyntax (the R6RS `syntax-case` expander)
 into a handful of core forms, the translator turns those into Common Lisp, and the host
 compiles that. Scheme procedures are Lisp functions, lists are Lisp
 lists, strings are Lisp strings, and errors in either language are
@@ -67,9 +67,9 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 
 | | front end | tests |
 |---|---|---|
-| R6RS | psyntax | Racket's R6RS suite: 8711 pass, 191 fail; all 25 library test programs run |
+| R6RS | psyntax | Racket's R6RS suite: 8711 pass, 191 fail (8712/190 with full continuations); all 25 library test programs run |
 | R7RS-small | psyntax | chibi's R7RS suite: 975 of 977 (976 with full continuations) |
-| R5RS | native translator | chibi's R5RS suite: 183 of 188 |
+| R5RS | psyntax | chibi's R5RS suite: 188 of 189 (189 with full continuations) |
 
 Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 3.0× Chez's
 time as a geometric mean, close to Guile's 2.8×. See bench/RESULTS.md.
@@ -174,9 +174,11 @@ libraries, are listed in
 R7RS is on psyntax too. A `define-library` is translated into an R6RS
 `library` form: `include` and `cond-expand` are handled, and integers in
 names become `(srfi :1)`-style symbols, as Akku does. The `(scheme ...)`
-libraries are generated from the R7RS export table. One expander serves
-every standard; the native `syntax-rules` remains as the translator's
-own bootstrap expander and as R5RS mode's.
+libraries are generated from the R7RS export table. R5RS runs on
+psyntax as well, at a top level whose bindings are `(pseudoscheme r5rs)`
+(`(scheme r5rs)` plus string ports), reading with case folding. One
+expander serves every standard; the translator's native `syntax-rules`
+remains only as its own bootstrap expander.
 
 Libraries are found on a search path (`psx:*library-path*`, or `-L` on
 the command line): `(foo bar)` is `foo/bar.sls`, `.ss`, `.sld` or
@@ -288,7 +290,8 @@ installing anything. See boot/README.md.
 ## Tests
 
 ```sh
-sbcl --script tests/run-r5rs-tests.lisp
+sbcl --script tests/run-r5rs-tests.lisp [--classic | --continuations=full]
+sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-continuation-tests.lisp
 sbcl --script tests/run-r7rs-tests.lisp [-v] [--continuations=full]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r6rs-tests.lisp [-v] [--continuations=full] [name ...]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-tests.lisp
@@ -310,13 +313,12 @@ The big ones; `ROADMAP.md` has the rest.
 - **Continuations are escape-only by default.** `call/cc` is a Lisp
   `catch`, so a continuation can't be re-entered after its `call/cc`
   returns; trying signals an error. Full, re-entrant continuations are
-  a prototype (src/continuations.lisp, opt-in with
-  `psx::*full-continuations*`; `--continuations=full` in the R7RS and
-  R6RS test runners), built on generalized stack inspection as
-  docs/continuations.md describes. It passes the R7RS suite's
-  re-entry test, but doesn't yet compile the largest R6RS test
-  programs, doesn't cover R5RS mode, and hasn't been measured on
-  `bench/`.
+  opt-in (src/continuations.lisp, `psx::*full-continuations*`;
+  `--continuations=full` in the R5RS, R7RS and R6RS test runners),
+  built on generalized stack inspection as docs/continuations.md
+  describes. With them every suite passes as many tests as without, and
+  the re-entry tests besides. Not yet: a command-line option, a
+  measurement on `bench/`, and detecting re-entry through Lisp frames.
 - **Only libraries from files are cached.** Libraries defined at the
   REPL or in a program, and `(cl <package>)` libraries, are expanded
   and compiled again in every session, and so is whatever depends on

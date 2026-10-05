@@ -39,6 +39,7 @@
 ;;; :pseudoscheme/r5rs below.
 
 (defsystem :pseudoscheme/rts
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:float-features		; IEEE infinities, NaNs and traps
@@ -57,6 +58,7 @@
      ))
 
 (defsystem :pseudoscheme/translator
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/rts)
@@ -88,12 +90,14 @@
    ))
 
 (defsystem :pseudoscheme/evaluator
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator)
   :components ((:file "eval")))
 
 (defsystem :pseudoscheme
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on
@@ -121,6 +125,7 @@
 ;;; always forces the CL-reader bridge back on for that regardless of
 ;;; what this system has set globally (see bootstrap.lisp).
 (defsystem :pseudoscheme/reader
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/rts)
@@ -136,6 +141,7 @@
 ;;; gates this system's R5RS claim -- see its header comment and the
 ;;; project README for remaining known gaps.
 (defsystem :pseudoscheme/r5rs
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator
@@ -144,6 +150,7 @@
 ;;; Building and filling program environments from Lisp; see
 ;;; src/environments.lisp.
 (defsystem :pseudoscheme/environments
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/rts :pseudoscheme/translator
@@ -155,6 +162,7 @@
 ;;; files of src/r6rs/ are the primitives those libraries refer to.  See
 ;;; src/psyntax.lisp.
 (defsystem :pseudoscheme/r6rs
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/r7rs-runtime
@@ -190,6 +198,7 @@
 ;;; Lisp packages.  See src/api.lisp, src/interop.lisp, docs/interop.md.
 ;;; The systems r5rs, r6rs and r7rs (r7rs.asd etc.) are shorthands.
 (defsystem :pseudoscheme/api
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/r7rs
@@ -202,6 +211,7 @@
 ;;; :r6rs-file, :r5rs-file, :r7rs-library, :r6rs-library.  See
 ;;; src/asdf.lisp.
 (defsystem :pseudoscheme/asdf
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/api)
@@ -210,6 +220,7 @@
 ;;; The R7RS procedures (and the native R7RS environment they're built
 ;;; in, which the psyntax host copies).  See src/r7rs/*.
 (defsystem :pseudoscheme/r7rs-runtime
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/r7rs/"
   :depends-on (:pseudoscheme/environments)
@@ -220,6 +231,7 @@
 ;;; R7RS-small on psyntax: define-library, the (scheme ...) libraries,
 ;;; programs and the REPL.  See src/r7rs/front.lisp.
 (defsystem :pseudoscheme/r7rs
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/r7rs/"
   :depends-on (:pseudoscheme/r6rs)
@@ -229,6 +241,7 @@
 ;;; Regenerates translator.files' .pso bootstrap artifacts from their
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.
 (defsystem :pseudoscheme/bootstrap
+  :version "3.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme)
