@@ -142,25 +142,46 @@ the design. In order:
 - opt-in at first (`--continuations=full`), then measure;
 - one-shot continuations from threads for code compiled without it.
 
-**Prototype** (src/continuations.lisp, opt-in with
-`psx::*full-continuations*`, or `--continuations=full` in the R7RS
-and R6RS test runners). It uses CL's condition system as the stack
-inspection: capturing signals a condition, and each call site's
-handler records its frame and declines, so nothing is unwound to
-capture. Re-entry throws to a base around each top-level evaluation,
-which rebuilds the frames. Results so far:
-- R7RS with full continuations: 976 of 977, the `dynamic-wind`
-  re-entry test included (only the `sqrt` disagreement is left).
-- R6RS with full continuations: every program but two gives the same
-  results. `base` times out and `io/ports` fails in SBCL's assembler
-  (`(UNSIGNED-BYTE 11)`): both are code size, two closures per call
-  site in very large top-level forms. Next: emit the frame as a Lisp
-  macro (a translator integration) instead of closures passed to a
-  function, and measure the cost on bench/.
-- Not yet: R5RS mode (it doesn't go through psyntax), barrier
-  detection at Lisp frames, dynamic-winds shared between the current
-  and target continuation (re-entry unwinds and rewinds all of them),
-  and re-establishing exception handlers and parameterizations.
+**Implementation** (src/continuations.lisp, opt-in with
+`psx::*full-continuations*`, or `--continuations=full` in the R5RS,
+R7RS and R6RS test runners). A procedure that makes a non-tail call
+that may capture becomes a state machine: one Lisp function, a flat
+`tagbody` with a label after each such call and its locals hoisted.
+Each such call pushes a stack-allocated frame
+`#(machine site parameter-count live-variable ...)` on a special
+variable; capturing copies the frames, and re-entry calls each frame's
+machine with its site, which restores the live variables and jumps
+after the call. Assigned variables held across calls are boxed; long
+sequences are cut into chunks so no machine is huge. (A first version
+made two closures per call site; SBCL can't compile that at scale:
+a thousand closures over one variable take 162 s.)
+- tests/run-continuation-tests.lisp: 15 of 15 (re-entry, multi-shot,
+  `dynamic-wind`, re-entry into `map`).
+- R7RS with full continuations: 976 of 977 (only the `sqrt`
+  disagreement is left).
+- R5RS with full continuations: 189 of 189, on psyntax (below).
+- R6RS with full continuations: **open**: the `base` test library still
+  doesn't compile in reasonable time or memory, though the same library
+  compiles in 1.7 s without the transformation and its translation is
+  only about 3× larger. Some construct in the generated code is
+  superlinear for SBCL; being narrowed down (special binding and
+  `dynamic-extent` per call site, `tagbody` with closures inside, and
+  hoisted variables captured by closures are the suspects).
+- Not yet: measuring the cost on bench/, barrier detection at Lisp
+  frames, `dynamic-wind`s shared between the current and target
+  continuation (re-entry unwinds and rewinds all of them),
+  re-establishing exception handlers and parameterizations, a command
+  line option.
+
+**R5RS.** R5RS mode's classic translator expands macros itself, so the
+transformation can't reach it. R5RS can now also run on psyntax
+(`ps-r7rs::eval-at-r5rs-repl`, a top level whose bindings are
+`(pseudoscheme r5rs)`: `(scheme r5rs)` plus string ports), which is what
+full continuations use. chibi's R5RS suite there: 188 of 189, and 189
+of 189 with full continuations, against 183 of 188 on the classic
+translator. Next: make psyntax R5RS's default front end (the API's
+`r5rs:` functions, the command line's `--r5rs`), keeping the classic
+translator for the translator's own bootstrap.
 
 Without it, `call/cc` is escape-only (Lisp `catch`), and re-entering a
 continuation signals an error. SRFI 158's coroutine generators are
