@@ -26,6 +26,7 @@
           eval-r6rs-top-level boot-library-expand eval-top-level
           null-environment
           ;; PSEUDOSCHEME
+          scheme-report-environment
           interaction-library-name interaction-source-name
           identifier-binding environment-symbols)
   (import
@@ -1711,23 +1712,27 @@
                      ((immutable name . rest) `(immutable ,name))
                      (name `(immutable ,name))))
                ls)))
+        ;;; PSEUDOSCHEME: the clauses are sealed and opaque, not sealed?
+        ;;; and opaque?, and a parent can be given as (parent-rtd rtd rcd).
         (let ((parent-rtd-code 
                (syntax-match (get-clause 'parent clause*) ()
                  ((_ name) `(record-type-descriptor ,name))
-                 (_ '#f)))
+                 (_ (syntax-match (get-clause 'parent-rtd clause*) ()
+                      ((_ rtd rcd) rtd)
+                      (_ '#f)))))
               (uid-code
                (syntax-match (get-clause 'nongenerative clause*) ()
                  ((_)     `',(gensym))
                  ((_ uid) `',uid)
                  (_       #f)))
               (sealed?
-               (syntax-match (get-clause 'sealed? clause*) ()
-                 ((_ #t) #t)
-                 (_      #f)))
+               (syntax-match (get-clause 'sealed clause*) ()
+                 ((_ v) (eq? (stx->datum v) #t))
+                 (_     #f)))
               (opaque?
-               (syntax-match (get-clause 'opaque? clause*) ()
-                 ((_ #t) #t)
-                 (_      #f)))
+               (syntax-match (get-clause 'opaque clause*) ()
+                 ((_ v) (eq? (stx->datum v) #t))
+                 (_     #f)))
               (fields 
                (syntax-match (get-clause 'fields clause*) ()
                  ((_ field-spec* ...)
@@ -1741,7 +1746,9 @@
         (let ((parent-rcd-code 
                (syntax-match (get-clause 'parent clause*) ()
                  ((_ name) `(record-constructor-descriptor ,name))
-                 (_ #f))))
+                 (_ (syntax-match (get-clause 'parent-rtd clause*) ()
+                      ((_ rtd rcd) rcd)
+                      (_ #f))))))
           `(make-record-constructor-descriptor ,foo-rtd
                ,parent-rcd-code ,protocol)))
       (define (get-protocol-code clause*)

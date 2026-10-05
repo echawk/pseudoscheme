@@ -395,10 +395,10 @@
     (vector-set!                                r ba se)
     (vector?                                    r ba se)
     (zero?                                      r ba se)
-    (...                                        r ba sc)
-    (=>                                         r ba ex)
+    (...                                        r ba sc se ne)
+    (=>                                         r ba ex se ne)
     (_                                          r ba sc)
-    (else                                       r ba ex)
+    (else                                       r ba ex se ne)
     ;;;
     (bitwise-arithmetic-shift                   r bw)
     (bitwise-arithmetic-shift-left              r bw)
