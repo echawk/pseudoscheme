@@ -1,0 +1,44 @@
+name: Set up SBCL and Quicklisp
+description: >
+  Installs SBCL from the distribution and Quicklisp, loads Pseudoscheme
+  once (fetching its dependencies and compiling it, psyntax's image
+  included), and caches both.
+
+runs:
+  using: composite
+  steps:
+    - name: Install SBCL
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq sbcl
+        sbcl --version
+
+    - name: Cache Quicklisp and compiled Lisp
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/quicklisp
+          ~/.cache/common-lisp
+        key: lisp-${{ runner.os }}-${{ hashFiles('pseudoscheme.asd', 'src/**/*.lisp', 'src/**/*.pso', 'vendor/psyntax/psyntax-pseudoscheme.pp') }}
+        restore-keys: lisp-${{ runner.os }}-
+
+    - name: Install Quicklisp
+      shell: bash
+      run: |
+        if [ ! -f ~/quicklisp/setup.lisp ]; then
+          curl -fsSLo /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --non-interactive --load /tmp/quicklisp.lisp \
+               --eval '(quicklisp-quickstart:install)'
+        fi
+
+    - name: Load Pseudoscheme once
+      shell: bash
+      # Fetches the dependencies and compiles everything, so the suites
+      # that run in parallel or one after another don't each do it.
+      run: |
+        sbcl --dynamic-space-size 4GB --control-stack-size 500MB --non-interactive \
+             --eval '(load (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname)))' \
+             --eval "(push (truename \"./\") asdf:*central-registry*)" \
+             --eval '(ql:quickload (list :pseudoscheme/api :bordeaux-threads) :silent t)' \
+             --eval '(format t "~&Pseudoscheme ~A loaded~%" (asdf:component-version (asdf:find-system :pseudoscheme)))'
