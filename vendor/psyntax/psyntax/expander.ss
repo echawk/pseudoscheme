@@ -1540,7 +1540,9 @@
             ((quasiquote p)
              (quasicons (app 'quote 'quasiquote) (quasi (list p) (+ lev 1))))
             ((p . q) (quasicons (quasi p lev) (quasi q lev)))
-            (#(x ...) (not (stx? x)) (quasivector (vquasi x lev)))
+            ;;; PSEUDOSCHEME: (not (stx? x)) kept a syntax object, a
+            ;;; vector in the original, from matching; it's a record now.
+            (#(x ...) (quasivector (vquasi x lev)))
             (p (app 'quote p)))))
       (lambda (x)
         (syntax-match x ()
@@ -1591,18 +1593,12 @@
                 (values (append lhs2* lhs*)
                         (append rhs2* rhs*)
                         (cons p q))))
-            (#(x ...) (not (stx? p))
-             (let-values (((lhs* rhs* x*)
-                           (let f ((x x))
-                             (cond
-                               ((null? x) (values '() '() '()))
-                               (else
-                                (let-values (((lhs* rhs* a) (quasi (car x) lev)))
-                                  (let-values (((lhs2* rhs2* d) (f (cdr x))))
-                                     (values (append lhs* lhs2*)
-                                             (append rhs* rhs2*)
-                                             (cons a d)))))))))
-                (values lhs* rhs* (list->vector x*))))
+            ;;; PSEUDOSCHEME: no (not (stx? p)) fender, as in quasi, and
+            ;;; the elements are one list, so that unsyntax-splicing works
+            ;;; in a vector as in a list.
+            (#(x ...)
+             (let-values (((lhs* rhs* x*) (quasi x lev)))
+               (values lhs* rhs* (list->vector x*))))
             (_ (values '() '() p)))))
       (lambda (x)
         (syntax-match x ()
@@ -2271,7 +2267,8 @@
                  (let-values (((ynew maps)
                                (gen-syntax src y r maps ellipsis? vec?)))
                    (values (gen-cons e x y xnew ynew) maps))))
-              (#(ls ...) (not (stx? e))
+              ;;; PSEUDOSCHEME: no (not (stx? e)) fender, as in quasi.
+              (#(ls ...)
                (let-values (((lsnew maps)
                              (gen-syntax src ls r maps ellipsis? #t)))
                  (values (gen-vector e ls lsnew) maps)))
