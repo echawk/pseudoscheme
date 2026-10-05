@@ -129,7 +129,7 @@ bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
 docs/                -- interop (the bridge), libraries (Akku and
-                        snow), continuations (design)
+                        snow), continuations and racket (designs)
 ```
 
 ## Systems

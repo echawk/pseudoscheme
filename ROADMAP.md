@@ -224,7 +224,28 @@ macros in Lisp) and, in the R6RS test runner, bordeaux-threads
 - `string-titlecase` finds word boundaries with a simple rule rather
   than full Unicode word breaking.
 
-## 7. Smaller items
+## 7. Racket (`--racket`)
+
+docs/racket.md has the investigation and plan. In short: make
+Pseudoscheme a third backend for Racket's linklet layer, beside Racket
+CS and BC, and run Racket's own expander on it, so that the module
+system, `#lang`, macros and `racket/base` are Racket's own code.
+
+- **Target linklets, not schemify's output.** Linklets are the
+  documented interface (`racket/linklet`) that the expander hands to a
+  backend. Schemify's output is Chez Scheme that depends on rumble,
+  Racket CS's internal runtime.
+- **Stages:** a linklet compiler to Lisp (reusing the translator's back
+  end); the primitive instances (`#%kernel` has 1070 names, about 1650
+  across all instances in Racket 9.3); hosting the expander linklet,
+  built from Racket's source with an installed Racket as Chez builds
+  psyntax's seed; then the command line and the Lisp bridge.
+- **Depends on:** continuation marks and prompts (section 3; Racket's
+  `parameterize` and exception handling are built on them), and the
+  compiled-library cache (section 2), since `racket/base` can't be
+  expanded from source on every start.
+
+## 8. Smaller items
 
 - Bootstrapping without an existing Pseudoscheme (the `todo` file's
   first item). Earlier analysis judged it feasible but substantial: it
