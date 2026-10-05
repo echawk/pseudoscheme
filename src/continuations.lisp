@@ -103,13 +103,13 @@ after runs however THUNK is left."
 (defun full-call-with-values (producer consumer)
   (call-with-frame producer (lambda (&rest values) (apply consumer values))))
 
-(defun rebuild (frames values)
+(defun rebuild-frames (frames values)
   "Re-establish FRAMES, outermost first, and return VALUES to the
 innermost."
   (if (null frames)
       (values-list values)
       (let ((frame (car frames)))
-	(flet ((inner () (rebuild (cdr frames) values)))
+	(flet ((inner () (rebuild-frames (cdr frames) values)))
 	  (if (frame-winder frame)
 	      (winder-extent (frame-winder frame) #'inner)
 	      (multiple-value-call (frame-k frame)
@@ -122,7 +122,7 @@ innermost."
     (dolist (w (reverse winders))
       (let ((*winders* outer)) (funcall (car w)))
       (push w outer)))
-  (rebuild frames values))
+  (rebuild-frames frames values))
 
 (defun full-call/cc (f)
   (let ((c (make-condition 'capture)))
