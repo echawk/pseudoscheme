@@ -165,6 +165,9 @@ Each is marked `PSEUDOSCHEME:` in the source.
   and `force`.
 * `(file-options ...)` is the checked list of option symbols
   (`compat.ss`'s `file-options-spec` was "not implemented").
+* Marks are gensyms, not fresh one-character strings, so that, like
+  labels, they keep their identity across a write and a read: the first
+  step towards serializing expanded libraries (ROADMAP.md, 2).
 
 ## Known gaps
 

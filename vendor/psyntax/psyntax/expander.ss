@@ -250,10 +250,13 @@
   ;;; or an antimark.
   ;;; (two marks must be eq?-comparable, so we use a string
   ;;; of one char (this assumes that strings are mutable)).
-  
+  ;;; PSEUDOSCHEME: a gensym instead, which, like a label, keeps its
+  ;;; identity when it is written to a file and read back, so that
+  ;;; syntax objects in compiled libraries still compare correctly.
+
   ;;; gen-mark generates a new unique mark
-  (define (gen-mark) ;;; faster
-    (string #\m))
+  (define (gen-mark)
+    (gensym 'm))
   
   ;(define gen-mark ;;; useful for debugging
   ;  (let ((i 0))
