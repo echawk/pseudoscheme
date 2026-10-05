@@ -89,7 +89,7 @@
     ((scheme time) "current-jiffy current-second jiffies-per-second")
     ((scheme write) "display write write-shared write-simple")
     ((scheme r5rs)
-     "* + - / < <= = > >= abs acos and angle append apply asin assoc assq assv
+     "* + - ... / < <= = => > >= abs else syntax-rules unquote unquote-splicing acos and angle append apply asin assoc assq assv
       atan begin boolean? caaaar caaadr caaar caadar caaddr caadr caar cadaar
       cadadr cadar caddar cadddr caddr cadr call-with-current-continuation
       call-with-input-file call-with-output-file call-with-values car case

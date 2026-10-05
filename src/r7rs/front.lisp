@@ -367,6 +367,28 @@ the host has no such procedure.")
   (with-input-from-string (in string)
     (funcall ps:*scheme-read* in)))
 
+(defparameter *pseudoscheme-r5rs-library*
+  (format nil "(library (pseudoscheme r5rs)
+     (export ~A
+             open-output-string open-input-string get-output-string
+             call-with-output-string with-output-to-string flush-output)
+     (import (scheme r5rs)
+             (only (scheme base) open-output-string open-input-string get-output-string
+                   parameterize current-output-port flush-output-port))
+     (define (call-with-output-string proc)
+       (let ((port (open-output-string)))
+         (proc port)
+         (get-output-string port)))
+     (define (with-output-to-string thunk)
+       (let ((port (open-output-string)))
+         (parameterize ((current-output-port port)) (thunk))
+         (get-output-string port)))
+     (define (flush-output . port)
+       (apply flush-output-port port)))"
+	  (second (assoc '(scheme r5rs) *standard-libraries* :test #'equal)))
+  "What R5RS on psyntax starts with: (scheme r5rs), and the string ports
+R5RS mode's classic environment has as an extension.")
+
 (defun install-standard-libraries ()
   (install-host-library '("pseudoscheme" "host") (host-library-exports))
   (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme "src/r7rs/syntax.sls")))
@@ -388,11 +410,13 @@ the host has no such procedure.")
 		    collect (format nil "(~{~(~A~)~^ ~})" (mapcar #'sname* name))))))
   (install-chezscheme-library)
   (install-ikarus-library)
-  ;; the R7RS REPL's own interaction library
-  (funcall (psx:host-ref "psyntax:install-library")
-	   (funcall (psx:host-ref "gensym"))
-	   (mapcar #'ssym '("pseudoscheme" "r7rs" "interaction"))
-	   '() '() '() '() '() '() (lambda () ps:unspecific) (lambda () ps:unspecific) t))
+  (psx:eval-library (read-scheme *pseudoscheme-r5rs-library*))
+  ;; the interaction libraries of the R7RS REPL, and of R5RS on psyntax
+  (dolist (name '(("pseudoscheme" "r7rs" "interaction") ("pseudoscheme" "r5rs" "interaction")))
+    (funcall (psx:host-ref "psyntax:install-library")
+	     (funcall (psx:host-ref "gensym"))
+	     (mapcar #'ssym name)
+	     '() '() '() '() '() '() (lambda () ps:unspecific) (lambda () ps:unspecific) t)))
 
 ;;; (chezscheme): what Chez variants of libraries (foo.chezscheme.sls)
 ;;; import.  R6RS, as Chez's re-exports it, plus src/compat/chezscheme.scm.
@@ -514,6 +538,18 @@ then the rest."
 	  (old (funcall param)))
      (funcall param ,value)
      (unwind-protect (progn ,@body) (funcall param old))))
+
+(defun eval-at-r5rs-repl (form)
+  "Evaluate FORM at an R5RS top level on psyntax: the bindings of
+(pseudoscheme r5rs), in an interaction library of its own.  Unlike R5RS mode's classic
+translator, this goes through psyntax, so it can be compiled with full
+continuations (src/continuations.lisp)."
+  (boot)
+  (with-psyntax-parameter ("psyntax:interaction-library-name"
+			   (mapcar #'ssym '("pseudoscheme" "r5rs" "interaction")))
+    (with-psyntax-parameter ("psyntax:interaction-source-name"
+			     (mapcar #'ssym '("pseudoscheme" "r5rs")))
+      (psx:eval-top-level form))))
 
 (defun eval-at-repl (form)
   "Evaluate FORM in the R7RS REPL's environment.  (import ...) works."

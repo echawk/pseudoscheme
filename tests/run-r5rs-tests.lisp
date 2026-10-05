@@ -4,7 +4,7 @@
 ;;;; Pseudoscheme and reports the pass count.
 ;;;;
 ;;;; Usage:
-;;;;   sbcl --script tests/run-r5rs-tests.lisp
+;;;;   sbcl --script tests/run-r5rs-tests.lisp [--psyntax] [--continuations=full]
 ;;;; or, from an already-running image with :pseudoscheme loaded:
 ;;;;   (load "tests/run-r5rs-tests.lisp")
 
@@ -35,6 +35,28 @@
 ;;; uses throughout, or Scheme string escapes like \n, both of which
 ;;; this test file needs.
 
+(defparameter *arguments* (uiop:command-line-arguments))
+;; --psyntax: R5RS on psyntax ((scheme r5rs) at a top level of its own)
+;; rather than the classic translator; --continuations=full implies it.
+(defparameter *full* (member "--continuations=full" *arguments* :test #'string=))
+(defparameter *psyntax* (or *full* (member "--psyntax" *arguments* :test #'string=)))
+
+(when *psyntax*
+  (load-system :pseudoscheme/r7rs)
+  (ps:disable-float-traps)
+  (uiop:symbol-call "PSEUDOSCHEME-R7RS" "BOOT")
+  (when *full* (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t)))
+
+(defun evaluate (form)
+  (if *psyntax*
+      (uiop:symbol-call "PSEUDOSCHEME-R7RS" "EVAL-AT-R5RS-REPL" form)
+      (ps:scheme-eval form ps:scheme-user-environment)))
+
+(defun global-value (name)
+  (if *psyntax*
+      (evaluate (ps:intern-scheme-symbol name))
+      (symbol-value (intern (string-upcase name) "SCHEME"))))
+
 (defparameter *r5rs-tests-file*
   (merge-pathnames "chibi/r5rs-tests.scm"
 		    (or *load-truename* *load-pathname*)))
@@ -59,13 +81,13 @@
       (when (eq form ps:eof-object)
 	(return))
       (handler-case
-	  (ps:scheme-eval form ps:scheme-user-environment)
+	  (evaluate form)
 	(error (e)
 	  (incf *harness-failures*)
 	  (format t "~&[HARNESS ERROR] ~A on form:~%  ~S~%" e form))))))
 
-(let ((passed (symbol-value (intern "*TESTS-PASSED*" "SCHEME")))
-      (run (symbol-value (intern "*TESTS-RUN*" "SCHEME"))))
+(let ((passed (global-value "*tests-passed*"))
+      (run (global-value "*tests-run*")))
   (format t "~&~%R5RS: ~A of ~A tests passed (~A harness-level errors~:[~; -- stopped early on a reader limitation~]).~%"
 	  passed run *harness-failures* *reader-stopped-early*)
   (uiop:quit (if (and (= passed run) (zerop *harness-failures*)
