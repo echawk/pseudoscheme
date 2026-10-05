@@ -83,7 +83,7 @@
 	  ((>= (char->ascii c) ascii-limit)
 	   (if (char-whitespace? c)
 	       (sub-read port)
-	       (parse-token (sub-read-token c port) port)))
+	       (parse-token (sub-read-symbol-token c port) port)))
 	  (else
 	   ((vector-ref read-dispatch-vector (char->ascii c))
 	    c port)))))
@@ -115,12 +115,12 @@
 
 (let ((sub-read-constituent
        (lambda (c port)
-	 (parse-token (sub-read-token c port) port))))
+	 (parse-token (sub-read-symbol-token c port) port))))
   (for-each (lambda (c)
               (set-standard-syntax! c #f sub-read-constituent))
             (string->list
              (string-append "!$%&*+-./0123456789:<=>?@^_~ABCDEFGHIJKLM"
-                            "NOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))))
+                            "NOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\\"))))
 
 ; Usual read macros
 
@@ -490,10 +490,40 @@
              (let ((c (read-char port)))
                (loop (cons c l) (+ n 1))))))))
 
+; A token that may be a symbol: R6RS's \x<hex>; escapes in it stand for
+; characters, and a token with one is a symbol, never a number.
+
+(define (sub-read-symbol-token c port)
+  (let loop ((l '()) (n 1) (c c) (escaped? #f))
+    (let* ((escape? (char=? c #\\))
+	   (l (cons (if escape? (read-symbol-escape port) c) l))
+	   (escaped? (or escaped? escape?))
+	   (p (peek-char port)))
+      (if (or (eof-object? p) (terminating? p))
+	  (cons (reverse-list->string l n) (if escaped? '(escaped) '()))
+	  (loop l (+ n 1) (read-char port) escaped?)))))
+
+(define (read-symbol-escape port)
+  (if (not (eqv? (read-char port) #\x))
+      (reading-error port "invalid escape in symbol: expected \\x"))
+  (let loop ((digits '()))
+    (let ((d (read-char port)))
+      (cond ((eof-object? d)
+	     (reading-error port "end of file in symbol escape"))
+	    ((char=? d #\;)
+	     (let* ((hex (list->string (reverse digits)))
+		    (n (string->number hex 16)))
+	       (if (and n (exact? n) (integer? n)
+			(or (<= 0 n #xD7FF) (<= #xE000 n #x10FFFF)))
+		   (ascii->char n)
+		   (reading-error port (string-append "out of range escape: `\\x" hex ";'")))))
+	    (else (loop (cons d digits)))))))
+
 (define (parse-token token port)
   (let ((string (car token)))
-    (if (let ((c (string-ref string 0)))
-	  (or (char-numeric? c) (char=? c #\+) (char=? c #\-) (char=? c #\.)))
+    (if (and (null? (cdr token))
+	     (let ((c (string-ref string 0)))
+	  (or (char-numeric? c) (char=? c #\+) (char=? c #\-) (char=? c #\.))))
 	(cond ((string->number string))
 	      ((member string strange-symbol-names)
 	       (intern-token string))

@@ -88,7 +88,7 @@
         (IF (SCHEME>= (CHAR->ASCII C) ASCII-LIMIT)
             (IF (CHAR-WHITESPACE-P C)
                 (SUB-READ PORT)
-                (PARSE-TOKEN (SUB-READ-TOKEN C PORT) PORT))
+                (PARSE-TOKEN (SUB-READ-SYMBOL-TOKEN C PORT) PORT))
             (FUNCALL (SVREF READ-DISPATCH-VECTOR (CHAR->ASCII C)) C PORT)))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ 'SCHEME::SUB-READ)
 (DEFUN TERMINATING? (C)
@@ -129,12 +129,12 @@
 (AT-TOP-LEVEL
   (FLET ((SUB-READ-CONSTITUENT
           (C PORT)
-          (PARSE-TOKEN (SUB-READ-TOKEN C PORT) PORT)))
+          (PARSE-TOKEN (SUB-READ-SYMBOL-TOKEN C PORT) PORT)))
     (MAPC #'(LAMBDA (C) (SET-STANDARD-SYNTAX! C FALSE #'SUB-READ-CONSTITUENT))
           (COERCE (THE SIMPLE-STRING
                        (STRING-APPEND
                         "!$%&*+-./0123456789:<=>?@^_~ABCDEFGHIJKLM"
-                        "NOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
+                        "NOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\\"))
                   'LIST))))
 (DEFUN SET-STANDARD-READ-MACRO! (C TERMINATING? PROC)
   (SET-STANDARD-SYNTAX! C TERMINATING? PROC))
@@ -567,11 +567,69 @@
               (PSETQ .L.0 (CONS .C.2 L) .N.1 (+ N 1))
               (GO LOOP)))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-TOKEN 'SCHEME::SUB-READ-TOKEN)
+(DEFUN SUB-READ-SYMBOL-TOKEN (C PORT)
+  (PROG (.L.0 .N.1 .C.2 .ESCAPED?.3)
+    (PSETQ .L.0 'NIL .N.1 1 .C.2 C .ESCAPED?.3 FALSE)
+    (GO LOOP)
+    LOOP
+    (LET ((L .L.0) (N .N.1) (.C.4 .C.2) (ESCAPED? .ESCAPED?.3))
+      (LET ((ESCAPE? (TRUE? (CHAR= .C.4 #\\))))
+        (LET ((.L.5 (CONS (IF (TRUEP ESCAPE?) (READ-SYMBOL-ESCAPE PORT) .C.4) L)))
+          (LET ((.ESCAPED?.6 (LET ((TEMP ESCAPED?))
+                               (IF (TRUEP TEMP) TEMP ESCAPE?))))
+            (LET ((P (.PEEK-CHAR PORT)))
+              (LET NIL
+                (IF (OR (EQ P EOF-OBJECT) (TRUEP (TERMINATING? P)))
+                    (RETURN (CONS (REVERSE-LIST->STRING .L.5 N)
+                                  (IF (TRUEP .ESCAPED?.6)
+                                      '(SCHEME::ESCAPED)
+                                      'NIL)))
+                    (PROGN
+                      (PSETQ .L.0
+                             .L.5
+                             .N.1
+                             (+ N 1)
+                             .C.2
+                             (.READ-CHAR PORT)
+                             .ESCAPED?.3
+                             .ESCAPED?.6)
+                      (GO LOOP)))))))))))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-SYMBOL-TOKEN 'SCHEME::SUB-READ-SYMBOL-TOKEN)
+(DEFUN READ-SYMBOL-ESCAPE (PORT)
+  (IF (NOT (EQL (.READ-CHAR PORT) #\x))
+      (READING-ERROR PORT "invalid escape in symbol: expected \\x"))
+  (PROG (.DIGITS.0)
+    (SETQ .DIGITS.0 'NIL)
+    (GO LOOP)
+    LOOP
+    (LET ((DIGITS .DIGITS.0))
+      (LET ((D (.READ-CHAR PORT)))
+        (IF (EQ D EOF-OBJECT)
+            (RETURN (READING-ERROR PORT "end of file in symbol escape"))
+            (IF (CHAR= D #\;)
+                (LET ((HEX (COERCE (THE LIST (REVERSE DIGITS)) 'SIMPLE-STRING)))
+                  (LET ((N (STRING->NUMBER HEX 16)))
+                    (LET NIL
+                      (IF (AND (TRUEP N)
+                               (EXACT-P N)
+                               (INTEGER-NUMBER-P N)
+                               (OR (SCHEME<= 0 N 55295)
+                                   (SCHEME<= 57344 N 1114111)))
+                          (RETURN (ASCII->CHAR N))
+                          (RETURN (READING-ERROR
+                                   PORT
+                                   (STRING-APPEND
+                                    "out of range escape: `\\x"
+                                    HEX
+                                    ";'")))))))
+                (PROGN (SETQ .DIGITS.0 (CONS D DIGITS)) (GO LOOP))))))))
+(SET-VALUE-FROM-FUNCTION 'READ-SYMBOL-ESCAPE 'SCHEME::READ-SYMBOL-ESCAPE)
 (DEFUN PARSE-TOKEN (TOKEN PORT)
   (DECLARE (SPECIAL DOT STRANGE-SYMBOL-NAMES))
   (LET ((.STRING (CAR (THE CONS TOKEN))))
-    (IF (LET ((C (CHAR (THE SIMPLE-STRING .STRING) 0)))
-          (OR (CHAR-NUMERIC-P C) (CHAR= C #\+) (CHAR= C #\-) (CHAR= C #\.)))
+    (IF (AND (NULL (CDR (THE CONS TOKEN)))
+             (LET ((C (CHAR (THE SIMPLE-STRING .STRING) 0)))
+               (OR (CHAR-NUMERIC-P C) (CHAR= C #\+) (CHAR= C #\-) (CHAR= C #\.))))
         (LET ((TEMP (STRING->NUMBER .STRING)))
           (IF (TRUEP TEMP)
               TEMP
