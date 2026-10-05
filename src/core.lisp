@@ -255,6 +255,8 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 (defvar *scheme-read*)
 (defvar *scheme-write*)
 (defvar *scheme-display*)
+(defvar *scheme-write-shared*)
+(defvar *scheme-write-simple*)
 
 (defvar *define-syntax!*
   #'(lambda (name+exp) (declare (ignore name+exp)) 'define-syntax))
@@ -493,6 +495,92 @@ directives left it, and no datum labels yet."
 			    irritants))
 	     message
 	     irritants)))
+
+;;; Datum labels for the writer (R7RS 6.13.3): write and display label
+;;; the pairs and vectors on a cycle, write-shared every one reached more
+;;; than once, write-simple none.
+
+(defvar *write-labels* nil
+  "While writing, a table from the objects that need labels to their
+label numbers (NIL until written), or NIL if none do.")
+(defvar *write-label-count* 0)
+
+(defun datum-labels (object shared)
+  "A table of the pairs and vectors in OBJECT that need labels: those
+reached more than once if SHARED, else those on a cycle.  NIL if none."
+  (let ((state (make-hash-table :test 'eq))
+	(labels nil))
+    (labels ((need (x)
+	       (unless labels (setq labels (make-hash-table :test 'eq)))
+	       (setf (gethash x labels) nil))
+	     (visit (x)
+	       ;; True if X is new and should be walked.
+	       (case (gethash x state)
+		 ((nil) (setf (gethash x state) :active) t)
+		 (:active (need x) nil)
+		 (t (when shared (need x)) nil)))
+	     (walk (x)
+	       ;; Down the cdrs by iteration, so long lists don't recurse.
+	       (let ((spine '()))
+		 (loop
+		   (cond ((consp x)
+			  (unless (visit x) (return))
+			  (push x spine)
+			  (walk (car x))
+			  (setq x (cdr x)))
+			 ((and (simple-vector-p x) (plusp (length x)))
+			  (when (visit x)
+			    (loop for e across x do (walk e))
+			    (setf (gethash x state) :done))
+			  (return))
+			 (t (return))))
+		 (dolist (p spine) (setf (gethash p state) :done)))))
+      (walk object))
+    labels))
+
+(defun call-with-write-labels (object mode thunk)
+  "Write OBJECT by calling THUNK, labelling as MODE says: 0, nothing; 1,
+what is on a cycle; 2, whatever is shared."
+  (let ((*write-labels* (and (or (consp object) (simple-vector-p object))
+			     (/= mode 0)
+			     (datum-labels object (= mode 2))))
+	(*write-label-count* 0))
+    (funcall thunk)))
+
+(defun write-labelled-p (object)
+  (and *write-labels* (nth-value 1 (gethash object *write-labels*))))
+
+(defun write-label-reference (object)
+  "OBJECT's label number if it has been written already, else #f."
+  (or (and *write-labels* (gethash object *write-labels*)) false))
+
+(defun write-label-definition (object)
+  "A new label number for OBJECT if it needs one and has none, else #f."
+  (if (and (write-labelled-p object) (null (gethash object *write-labels*)))
+      (prog1 (setf (gethash object *write-labels*) *write-label-count*)
+	(incf *write-label-count*))
+      false))
+
+;;; Symbols that wouldn't read back as themselves are written |like this|.
+
+(defun symbol-needs-bars-p (name)
+  (or (zerop (length name))
+      (string= name ".")
+      (find-if (lambda (c)
+		 (or (member c '(#\( #\) #\[ #\] #\" #\; #\' #\` #\, #\| #\\))
+		     (char-whitespace-p c)
+		     (not (graphic-char-p c))))
+	       name)
+      (char= (char name 0) #\#)
+      (digit-char-p (char name 0))
+      ;; +5, -.5, +i, +inf.0 ...
+      (and (member (char name 0) '(#\+ #\- #\.))
+	   (> (length name) 1)
+	   (let ((c (char name 1)))
+	     (or (digit-char-p c)
+		 (and (char= c #\.) (> (length name) 2) (digit-char-p (char name 2)))
+		 (member (string-downcase name) '("+i" "-i" "+inf.0" "-inf.0" "+nan.0" "-nan.0")
+			 :test #'string=))))))
 
 ; PP (nonstandard)
 

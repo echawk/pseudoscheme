@@ -462,6 +462,13 @@ objects are known.")
 	 (n (read-sequence buf port)))
     (if (and (zerop n) (plusp k)) ps:eof-object (coerce (subseq buf 0 n) 'simple-string))))
 
+(defprim "write-shared" (obj &optional (port *standard-output*))
+  (funcall ps:*scheme-write-shared* obj port)
+  ps:unspecific)
+(defprim "write-simple" (obj &optional (port *standard-output*))
+  (funcall ps:*scheme-write-simple* obj port)
+  ps:unspecific)
+
 (defprim "write-string" (s &optional (port *standard-output*) start end)
   (multiple-value-bind (start end) (range "write-string" (length s) start end)
     (write-string s port :start start :end end)

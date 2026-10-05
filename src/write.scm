@@ -36,9 +36,38 @@
 ;  3. (define (disclose x) #f)
 
 (define (scheme-write obj . port-option)
-  (let ((port (output-port-option port-option)))
-    (let recur ((obj obj))
-      (recurring-write obj port recur))))
+  (write-labelled obj (output-port-option port-option) 1))
+
+(define (scheme-write-shared obj . port-option)
+  (write-labelled obj (output-port-option port-option) 2))
+
+(define (scheme-write-simple obj . port-option)
+  (write-labelled obj (output-port-option port-option) 0))
+
+; Datum labels, #n= and #n# (R7RS 6.13.3): which objects get them is
+; worked out beforehand (ps:call-with-write-labels).  MODE is 0 for
+; none, 1 for those on a cycle, 2 for every shared one.
+
+(define (write-labelled obj port mode)
+  (ps:call-with-write-labels obj mode
+    (lambda ()
+      (let recur ((obj obj))
+	(write-with-label obj port recur
+	  (lambda () (recurring-write obj port recur)))))))
+
+(define (write-with-label obj port recur write-it)
+  (cond ((ps:write-label-reference obj)
+	 => (lambda (n)
+	      (write-char #\# port)
+	      (write-number n port)
+	      (write-char #\# port)))
+	((ps:write-label-definition obj)
+	 => (lambda (n)
+	      (write-char #\# port)
+	      (write-number n port)
+	      (write-char #\= port)
+	      (write-it)))
+	(else (write-it))))
 
 (define (recurring-write obj port recur)
   (cond ((null? obj) (write-string "()" port))
@@ -55,7 +84,26 @@
   (cond ((ps:true? (ps-lisp:keywordp obj))     ;#:name, see read.scm
          (write-string "#:" port)
          (write-string (ps:scheme-symbol-name obj) port))
+        ((ps:true? (ps:symbol-needs-bars-p (symbol->string obj)))
+	 (write-barred-symbol (symbol->string obj) port))
         (else (write-string (symbol->string obj) port))))
+
+; |symbol| (R7RS 2.1), with \| \\ and \x<hex>; escapes.
+
+(define (write-barred-symbol name port)
+  (write-char #\| port)
+  (let ((len (string-length name)))
+    (do ((i 0 (+ i 1)))
+	((= i len) (write-char #\| port))
+      (let ((c (string-ref name i)))
+	(cond ((or (char=? c #\|) (char=? c #\\))
+	       (write-char #\\ port)
+	       (write-char c port))
+	      ((or (< (char->integer c) 32) (= (char->integer c) 127))
+	       (write-string "\\x" port)
+	       (write-string (number->string (char->integer c) 16) port)
+	       (write-char #\; port))
+	      (else (write-char c port)))))))
 
 (define (write-boolean mumble port)
   (write-char #\# port)
@@ -87,7 +135,8 @@
 	(write-char c port)))))
 
 (define (write-list obj port recur)
-  (cond ((quotation? obj)
+  (cond ((and (quotation? obj)
+	      (not (ps:true? (ps:write-labelled-p (cdr obj)))))
          (write-char #\' port)
          (recur (cadr obj)))
         (else
@@ -95,7 +144,9 @@
          (recur (car obj))
          (let loop ((l (cdr obj))
                     (n 1))
-              (cond ((not (pair? l))
+              (cond ((or (not (pair? l))
+			 ;; a labelled tail is written as a datum
+			 (ps:true? (ps:write-labelled-p l)))
                      (cond ((not (null? l))
                             (write-string " . " port)
                             (recur l))))
@@ -184,11 +235,18 @@
 
 (define (scheme-display obj . port-option)
   (let ((port (output-port-option port-option)))
-    (let recur ((obj obj))
-      (cond ((string? obj) (write-string obj port))
-	    ((char? obj) (write-char obj port))
-	    (else
-	     (recurring-write obj port recur))))))
+    (ps:call-with-write-labels obj 1
+      (lambda ()
+	(let recur ((obj obj))
+	  (cond ((string? obj) (write-string obj port))
+		((char? obj) (write-char obj port))
+		((and (symbol? obj) (not (ps:true? (ps-lisp:keywordp obj))))
+		 (write-string (symbol->string obj) port))
+		(else
+		 (write-with-label obj port recur
+		   (lambda () (recurring-write obj port recur))))))))))
 
 (ps-lisp:setq ps:*scheme-write* scheme-write)
+(ps-lisp:setq ps:*scheme-write-shared* scheme-write-shared)
+(ps-lisp:setq ps:*scheme-write-simple* scheme-write-simple)
 (ps-lisp:setq ps:*scheme-display* scheme-display)

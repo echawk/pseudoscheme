@@ -411,5 +411,3 @@
 ;;; Aliases and small things
 
 (define call/cc call-with-current-continuation)
-(define write-simple write)
-(define write-shared write)

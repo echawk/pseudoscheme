@@ -19,10 +19,45 @@
 (SET-VALUE-FROM-FUNCTION 'WRITE-STRING 'SCHEME::WRITE-STRING)
 (DEFUN SCHEME-WRITE (OBJ &REST PORT-OPTION)
   (MAYBE-FIX-&REST-PARAMETER PORT-OPTION)
-  (LET ((PORT (OUTPUT-PORT-OPTION PORT-OPTION)))
-    (LABELS ((RECUR (.OBJ.0) (RECURRING-WRITE .OBJ.0 PORT #'RECUR)))
-      (RECUR OBJ))))
+  (WRITE-LABELLED OBJ (OUTPUT-PORT-OPTION PORT-OPTION) 1))
 (SET-VALUE-FROM-FUNCTION 'SCHEME-WRITE 'SCHEME::SCHEME-WRITE)
+(DEFUN SCHEME-WRITE-SHARED (OBJ &REST PORT-OPTION)
+  (MAYBE-FIX-&REST-PARAMETER PORT-OPTION)
+  (WRITE-LABELLED OBJ (OUTPUT-PORT-OPTION PORT-OPTION) 2))
+(SET-VALUE-FROM-FUNCTION 'SCHEME-WRITE-SHARED 'SCHEME::SCHEME-WRITE-SHARED)
+(DEFUN SCHEME-WRITE-SIMPLE (OBJ &REST PORT-OPTION)
+  (MAYBE-FIX-&REST-PARAMETER PORT-OPTION)
+  (WRITE-LABELLED OBJ (OUTPUT-PORT-OPTION PORT-OPTION) 0))
+(SET-VALUE-FROM-FUNCTION 'SCHEME-WRITE-SIMPLE 'SCHEME::SCHEME-WRITE-SIMPLE)
+(DEFUN WRITE-LABELLED (OBJ PORT MODE)
+  (CALL-WITH-WRITE-LABELS
+   OBJ
+   MODE
+   #'(LAMBDA NIL
+       (LABELS ((RECUR (.OBJ.0)
+                       (WRITE-WITH-LABEL
+                        .OBJ.0
+                        PORT
+                        #'RECUR
+                        #'(LAMBDA NIL (RECURRING-WRITE .OBJ.0 PORT #'RECUR)))))
+         (RECUR OBJ)))))
+(SET-VALUE-FROM-FUNCTION 'WRITE-LABELLED 'SCHEME::WRITE-LABELLED)
+(DEFUN WRITE-WITH-LABEL (OBJ PORT RECUR WRITE-IT)
+  (LET ((N (WRITE-LABEL-REFERENCE OBJ)))
+    (IF (TRUEP N)
+        (PROGN
+          (WRITE-CHAR #\# PORT)
+          (WRITE-NUMBER N PORT)
+          (WRITE-CHAR #\# PORT))
+        (LET ((.N.0 (WRITE-LABEL-DEFINITION OBJ)))
+          (IF (TRUEP .N.0)
+              (PROGN
+                (WRITE-CHAR #\# PORT)
+                (WRITE-NUMBER .N.0 PORT)
+                (WRITE-CHAR #\= PORT)
+                (FUNCALL WRITE-IT))
+              (FUNCALL WRITE-IT))))))
+(SET-VALUE-FROM-FUNCTION 'WRITE-WITH-LABEL 'SCHEME::WRITE-WITH-LABEL)
 (DEFUN RECURRING-WRITE (OBJ PORT RECUR)
   (IF (NULL OBJ)
       (WRITE-STRING "()" PORT)
@@ -47,8 +82,34 @@
       (PROGN
         (WRITE-STRING "#:" PORT)
         (WRITE-STRING (SCHEME-SYMBOL-NAME OBJ) PORT))
-      (WRITE-STRING (SYMBOL->STRING OBJ) PORT)))
+      (IF (SYMBOL-NEEDS-BARS-P (SYMBOL->STRING OBJ))
+          (WRITE-BARRED-SYMBOL (SYMBOL->STRING OBJ) PORT)
+          (WRITE-STRING (SYMBOL->STRING OBJ) PORT))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-SYMBOL 'SCHEME::WRITE-SYMBOL)
+(DEFUN WRITE-BARRED-SYMBOL (NAME PORT)
+  (WRITE-CHAR #\| PORT)
+  (LET ((LEN (LENGTH (THE SIMPLE-STRING NAME))))
+    (PROG (.I.0)
+      (SETQ .I.0 0)
+      (GO |.loop.167|)
+      |.loop.167|
+      (LET ((I .I.0))
+        (IF (SCHEME= I LEN)
+            (RETURN (WRITE-CHAR #\| PORT))
+            (PROGN
+              (LET ((C (CHAR (THE SIMPLE-STRING NAME) I)))
+                (IF (OR (CHAR= C #\|) (CHAR= C #\\))
+                    (PROGN (WRITE-CHAR #\\ PORT) (WRITE-CHAR C PORT))
+                    (IF (OR (SCHEME< (CHAR-CODE C) 32)
+                            (SCHEME= (CHAR-CODE C) 127))
+                        (PROGN
+                          (WRITE-STRING "\\x" PORT)
+                          (WRITE-STRING (NUMBER->STRING (CHAR-CODE C) 16) PORT)
+                          (WRITE-CHAR #\; PORT))
+                        (WRITE-CHAR C PORT))))
+              (SETQ .I.0 (+ I 1))
+              (GO |.loop.167|)))))))
+(SET-VALUE-FROM-FUNCTION 'WRITE-BARRED-SYMBOL 'SCHEME::WRITE-BARRED-SYMBOL)
 (DEFUN WRITE-BOOLEAN (MUMBLE PORT)
   (WRITE-CHAR #\# PORT)
   (WRITE-SYMBOL MUMBLE PORT))
@@ -70,8 +131,8 @@
   (LET ((LEN (LENGTH (THE SIMPLE-STRING OBJ))))
     (PROG (.I.0)
       (SETQ .I.0 0)
-      (GO |.loop.171|)
-      |.loop.171|
+      (GO |.loop.179|)
+      |.loop.179|
       (LET ((I .I.0))
         (IF (SCHEME= I LEN)
             (RETURN (WRITE-CHAR #\" PORT))
@@ -80,29 +141,31 @@
                 (IF (OR (CHAR= C #\\) (CHAR= C #\")) (WRITE-CHAR #\\ PORT))
                 (WRITE-CHAR C PORT))
               (SETQ .I.0 (+ I 1))
-              (GO |.loop.171|)))))))
+              (GO |.loop.179|)))))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-STRING-LITERAL 'SCHEME::WRITE-STRING-LITERAL)
 (DEFUN WRITE-LIST (OBJ PORT RECUR)
-  (IF (TRUEP (QUOTATION? OBJ))
+  (IF (AND (TRUEP (QUOTATION? OBJ))
+           (NOT (WRITE-LABELLED-P (CDR (THE CONS OBJ)))))
       (PROGN
         (WRITE-CHAR #\' PORT)
         (FUNCALL RECUR (CAR (THE CONS (CDR (THE CONS OBJ))))))
       (PROGN
         (WRITE-CHAR #\( PORT)
         (FUNCALL RECUR (CAR (THE CONS OBJ)))
-        (PROG (L N)
-          (PSETQ L (CDR (THE CONS OBJ)) N 1)
+        (PROG (.L.0 .N.1)
+          (PSETQ .L.0 (CDR (THE CONS OBJ)) .N.1 1)
           (GO LOOP)
           LOOP
-          (IF (NOT (CONSP L))
-              (IF (NOT (NULL L))
-                  (PROGN (WRITE-STRING " . " PORT) (RETURN (FUNCALL RECUR L)))
-                  (RETURN UNSPECIFIC))
-              (PROGN
-                (WRITE-CHAR #\Space PORT)
-                (FUNCALL RECUR (CAR (THE CONS L)))
-                (PSETQ L (CDR (THE CONS L)) N (+ N 1))
-                (GO LOOP))))
+          (LET ((L .L.0) (N .N.1))
+            (IF (OR (NOT (CONSP L)) (WRITE-LABELLED-P L))
+                (IF (NOT (NULL L))
+                    (PROGN (WRITE-STRING " . " PORT) (RETURN (FUNCALL RECUR L)))
+                    (RETURN UNSPECIFIC))
+                (PROGN
+                  (WRITE-CHAR #\Space PORT)
+                  (FUNCALL RECUR (CAR (THE CONS L)))
+                  (PSETQ .L.0 (CDR (THE CONS L)) .N.1 (+ N 1))
+                  (GO LOOP)))))
         (WRITE-CHAR #\) PORT))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-LIST 'SCHEME::WRITE-LIST)
 (DEFUN QUOTATION? (OBJ)
@@ -177,8 +240,8 @@
                   (WRITE-CHAR (CHAR-UPCASE (CHAR (THE SIMPLE-STRING S) 0)) PORT)
                   (PROG (.I.0)
                     (SETQ .I.0 1)
-                    (GO |.loop.198|)
-                    |.loop.198|
+                    (GO |.loop.208|)
+                    |.loop.208|
                     (LET ((I .I.0))
                       (OR (SCHEME>= I LEN)
                           (PROGN
@@ -186,22 +249,40 @@
                                          (CHAR (THE SIMPLE-STRING S) I))
                                         PORT)
                             (SETQ .I.0 (+ I 1))
-                            (GO |.loop.198|))))))
+                            (GO |.loop.208|))))))
                 (DISPLAY NAME PORT)))))
       (DISPLAY NAME PORT)))
 (SET-VALUE-FROM-FUNCTION 'DISPLAY-TYPE-NAME 'SCHEME::DISPLAY-TYPE-NAME)
 (DEFUN SCHEME-DISPLAY (OBJ &REST PORT-OPTION)
   (MAYBE-FIX-&REST-PARAMETER PORT-OPTION)
   (LET ((PORT (OUTPUT-PORT-OPTION PORT-OPTION)))
-    (LABELS ((RECUR (.OBJ.0)
-                    (IF (SIMPLE-STRING-P .OBJ.0)
-                        (WRITE-STRING .OBJ.0 PORT)
-                        (IF (CHARACTERP .OBJ.0)
-                            (WRITE-CHAR .OBJ.0 PORT)
-                            (RECURRING-WRITE .OBJ.0 PORT #'RECUR)))))
-      (RECUR OBJ))))
+    (CALL-WITH-WRITE-LABELS
+     OBJ
+     1
+     #'(LAMBDA NIL
+         (LABELS ((RECUR (.OBJ.0)
+                         (IF (SIMPLE-STRING-P .OBJ.0)
+                             (WRITE-STRING .OBJ.0 PORT)
+                             (IF (CHARACTERP .OBJ.0)
+                                 (WRITE-CHAR .OBJ.0 PORT)
+                                 (IF (AND (SCHEME-SYMBOL-P .OBJ.0)
+                                          (NOT (KEYWORDP .OBJ.0)))
+                                     (WRITE-STRING (SYMBOL->STRING .OBJ.0) PORT)
+                                     (WRITE-WITH-LABEL
+                                      .OBJ.0
+                                      PORT
+                                      #'RECUR
+                                      #'(LAMBDA NIL
+                                          (RECURRING-WRITE .OBJ.0 PORT #'RECUR))))))))
+           (RECUR OBJ))))))
 (SET-VALUE-FROM-FUNCTION 'SCHEME-DISPLAY 'SCHEME::SCHEME-DISPLAY)
 (LOCALLY (DECLARE (SPECIAL SCHEME-WRITE)) (SETQ *SCHEME-WRITE* SCHEME-WRITE))
+(LOCALLY
+  (DECLARE (SPECIAL SCHEME-WRITE-SHARED))
+  (SETQ *SCHEME-WRITE-SHARED* SCHEME-WRITE-SHARED))
+(LOCALLY
+  (DECLARE (SPECIAL SCHEME-WRITE-SIMPLE))
+  (SETQ *SCHEME-WRITE-SIMPLE* SCHEME-WRITE-SIMPLE))
 (LOCALLY
   (DECLARE (SPECIAL SCHEME-DISPLAY))
   (SETQ *SCHEME-DISPLAY* SCHEME-DISPLAY))

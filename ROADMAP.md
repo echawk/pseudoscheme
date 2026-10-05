@@ -6,8 +6,8 @@ this file.
 
 | runner | result |
 |---|---|
-| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 969 of 976 |
-| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8709 pass, 193 fail; all 25 programs run to completion |
+| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 975 of 977 |
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8711 pass, 191 fail; all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 183 of 188 |
 | `tests/run-interop-tests.lisp` | 104/104 |
 | `tests/run-library-tests.lisp` | 55/55 |
@@ -38,23 +38,20 @@ docs/interop.md.
 
 ## 1. Conformance: the remaining failures
 
-**R7RS (7).**
+**R7RS (2).**
 
 - `(sqrt -1.0-0.0i)`: chibi's test expects `+i`, but R7RS 6.2.4 puts
   the branch cut so that `(imag-part (log -1.0-0.0i))` is −π, which
   makes the answer `-i`, as here. Chibi doesn't distinguish `-0.0` in
   that position. Not a bug.
-- The writer: `write-shared` doesn't write datum labels, `write`
-  doesn't detect cycles, and symbols that need `|...|` aren't written
-  with bars. (The reader handles datum labels.)
 - One `dynamic-wind` test re-enters a continuation (see 3).
 
-**R6RS (193).** By program:
+**R6RS (191).** By program:
 
 | program | failures |
 |---|---|
 | bytevectors | 70 |
-| io/ports | 65 |
+| io/ports | 63 |
 | base | 27 |
 | flonums | 9 |
 | syntax-case | 8 |
@@ -201,9 +198,9 @@ snow-fort trees):
   doesn't take effect) and `(xitomatl R6RS-lexer)` (an identifier made
   with `identifier-append` isn't found).
 - Chez's `meta-cond`/`meta` would let some chez-srfi variants load (15).
-- SRFIs not yet in `src/srfi/`: 38 (needs datum labels, section 1)
-  and 226 (needs re-entrant continuations, section 3), among the
-  commonly used ones.
+- SRFIs not yet in `src/srfi/`: 38 (now possible: the reader and
+  writer handle datum labels) and 226 (needs re-entrant continuations,
+  section 3), among the commonly used ones.
 - Some libraries depend on chibi- or Gauche-specific leniency, such as
   duplicate pattern variables in `syntax-rules`, and are not counted as
   bugs here.
