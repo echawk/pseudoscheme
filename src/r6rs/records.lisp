@@ -66,7 +66,7 @@
 	    (when uid (setf (gethash uid *nongenerative-types*) rtd))
 	    rtd)))))
 
-(defprim "record-type-descriptor?" (x) (ps:true? (rtd-p x)))
+(defprim "record-type-descriptor?" (x) (bool (rtd-p x)))
 
 (defprim "make-record-constructor-descriptor" (rtd parent-rcd protocol)
   (check-rtd "make-record-constructor-descriptor" rtd)
@@ -131,7 +131,7 @@ type FINAL whose fields after RCD's type's are TAIL."
 
 (defprim "record-predicate" (rtd)
   (check-rtd "record-predicate" rtd)
-  (lambda (x) (ps:true? (and (record-p x) (rtd-descends-p (record-rtd x) rtd)))))
+  (lambda (x) (bool (and (record-p x) (rtd-descends-p (record-rtd x) rtd)))))
 
 (defun field-index (who rtd k)
   (unless (and (integerp k) (< -1 k (length (rtd-fields rtd))))
@@ -162,7 +162,7 @@ type FINAL whose fields after RCD's type's are TAIL."
 
 ;;; 6.4 Inspection
 
-(defprim "record?" (x) (ps:true? (and (record-p x) (not (rtd-opaque (record-rtd x))))))
+(defprim "record?" (x) (bool (and (record-p x) (not (rtd-opaque (record-rtd x))))))
 (defprim "record-rtd" (x)
   (unless (and (record-p x) (not (rtd-opaque (record-rtd x))))
     (r6rs-assertion-violation "record-rtd" "not a non-opaque record" x))
@@ -170,14 +170,14 @@ type FINAL whose fields after RCD's type's are TAIL."
 (defprim "record-type-name" (rtd) (check-rtd "record-type-name" rtd) (rtd-name rtd))
 (defprim "record-type-parent" (rtd) (check-rtd "record-type-parent" rtd) (or (rtd-parent rtd) ps:false))
 (defprim "record-type-uid" (rtd) (check-rtd "record-type-uid" rtd) (or (rtd-uid rtd) ps:false))
-(defprim "record-type-generative?" (rtd) (check-rtd "record-type-generative?" rtd) (ps:true? (null (rtd-uid rtd))))
-(defprim "record-type-sealed?" (rtd) (check-rtd "record-type-sealed?" rtd) (ps:true? (rtd-sealed rtd)))
-(defprim "record-type-opaque?" (rtd) (check-rtd "record-type-opaque?" rtd) (ps:true? (rtd-opaque rtd)))
+(defprim "record-type-generative?" (rtd) (check-rtd "record-type-generative?" rtd) (bool (null (rtd-uid rtd))))
+(defprim "record-type-sealed?" (rtd) (check-rtd "record-type-sealed?" rtd) (bool (rtd-sealed rtd)))
+(defprim "record-type-opaque?" (rtd) (check-rtd "record-type-opaque?" rtd) (bool (rtd-opaque rtd)))
 (defprim "record-type-field-names" (rtd)
   (check-rtd "record-type-field-names" rtd)
   (map 'simple-vector #'cdr (rtd-fields rtd)))
 (defprim "record-field-mutable?" (rtd k)
   (check-rtd "record-field-mutable?" rtd)
   (field-index "record-field-mutable?" rtd k)
-  (ps:true? (car (svref (rtd-fields rtd) k))))
+  (bool (car (svref (rtd-fields rtd) k))))
 

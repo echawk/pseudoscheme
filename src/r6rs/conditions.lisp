@@ -44,11 +44,11 @@
   (unless (condition-p* c) (ps:scheme-error "simple-conditions: not a condition: ~S" c))
   (copy-list (components c)))
 
-(defprim "condition?" (x) (ps:true? (condition-p* x)))
+(defprim "condition?" (x) (bool (condition-p* x)))
 
 (defun condition-predicate* (rtd)
   (lambda (x)
-    (ps:true? (some (lambda (s) (rtd-descends-p (record-rtd s) rtd)) (components x)))))
+    (bool (some (lambda (s) (rtd-descends-p (record-rtd s) rtd)) (components x)))))
 
 (defprim "condition-predicate" (rtd)
   (check-rtd "condition-predicate" rtd)
@@ -243,7 +243,7 @@ function (#f is a symbol) or as a type error expecting a function."
 ;;; R7RS's views of the same objects (R7RS 6.11), so R7RS code running
 ;;; in the R6RS host sees one exception model.
 
-(defprim "error-object?" (x) (ps:true? (condition-p* x)))
+(defprim "error-object?" (x) (bool (condition-p* x)))
 (defun component-of (x type)
   (let ((rtd (gethash type *condition-types*)))
     (find-if (lambda (s) (rtd-descends-p (record-rtd s) rtd)) (components x))))
@@ -254,8 +254,8 @@ function (#f is a symbol) or as a type error expecting a function."
 (defprim "error-object-irritants" (x)
   (let ((s (component-of x "&irritants")))
     (if s (svref (record-values s) 0) '())))
-(defprim "file-error?" (x) (ps:true? (and (component-of x "&i/o-filename") t)))
+(defprim "file-error?" (x) (bool (and (component-of x "&i/o-filename") t)))
 (defprim "read-error?" (x)
-  (ps:true? (and (or (component-of x "&lexical") (component-of x "&i/o-read")) t)))
+  (bool (and (or (component-of x "&lexical") (component-of x "&i/o-read")) t)))
 
 (install-condition-types)

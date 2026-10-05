@@ -178,7 +178,7 @@
 			     (:file "bytevectors" :depends-on ("conditions"))
 			     (:file "numeric-vectors" :depends-on ("conditions"))
 			     (:file "enums" :depends-on ("conditions"))
-			     (:file "ports" :depends-on ("bytevectors"))
+			     (:file "ports" :depends-on ("bytevectors" "enums"))
 			     (:file "r7rs-compat" :depends-on ("ports"))))
 	       (:module "compat"
 		:depends-on ("r6rs" "psyntax")

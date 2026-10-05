@@ -2385,7 +2385,9 @@
       (syntax-match x ()
         ((_ opt* ...)
          (and (for-all id? opt*) (file-options-spec (map id->sym opt*)))
-         (bless `(quote ,(file-options-spec (map id->sym opt*))))))))
+         (bless `((enum-set-constructor
+                     (make-enumeration '(no-create no-fail no-truncate)))
+                   '(,@(file-options-spec (map id->sym opt*)))))))))
 
   (define symbol-macro
     (lambda (x set)

@@ -24,7 +24,10 @@
      (if cell (setf (cdr cell) fn)
 	 (setq *primitives* (nconc *primitives* (list (cons ,name fn)))))))
 
-(defun bool (x) (ps:true? x))
+; A Scheme boolean from any Lisp truth value: unlike PS:TRUE?, a true
+; value that isn't T (a MEMBER tail, a procedure) becomes #t.
+(declaim (inline bool))
+(defun bool (x) (if x t ps:false))
 
 ;;; ------------------------------------------------------------------
 ;;; Numbers (11.7.4.1): div/mod and div0/mod0.  div and mod are floor

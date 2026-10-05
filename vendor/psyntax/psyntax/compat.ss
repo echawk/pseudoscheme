@@ -158,9 +158,8 @@
                               'name))))
                ...)))))))
 
-  ;; PSEUDOSCHEME: (file-options no-create ...) is the list of option
-  ;; symbols, checked; the port procedures interpret it.  (R6RS makes it
-  ;; an enum set; a list is what the expander can quote.)
+  ;; PSEUDOSCHEME: the option symbols of (file-options no-create ...),
+  ;; checked; the expander makes them an enum set.
   (define (file-options-spec x)
     (for-each
       (lambda (o)

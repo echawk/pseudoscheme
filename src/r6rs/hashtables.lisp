@@ -47,7 +47,7 @@
   (check-procedure "make-hashtable" equiv)
   (%make-hashtable (make-hash-table :test 'eql) :custom hash equiv t))
 
-(defprim "hashtable?" (x) (ps:true? (hashtable-p x)))
+(defprim "hashtable?" (x) (bool (hashtable-p x)))
 
 (defun custom-hash (h key)
   (let ((v (funcall (hashtable-hash h) key)))
@@ -108,7 +108,7 @@
 (defprim "hashtable-contains?" (h key)
   (check-hashtable "hashtable-contains?" h)
   (let ((missing (load-time-value (list 'missing))))
-    (ps:true? (not (eq (table-ref h key missing) missing)))))
+    (bool (not (eq (table-ref h key missing) missing)))))
 
 (defprim "hashtable-update!" (h key proc default)
   (check-mutable "hashtable-update!" h)
@@ -152,7 +152,7 @@
 
 (defprim "hashtable-mutable?" (h)
   (check-hashtable "hashtable-mutable?" h)
-  (ps:true? (hashtable-mutable h)))
+  (bool (hashtable-mutable h)))
 
 ;;; 13.3 Hash functions
 

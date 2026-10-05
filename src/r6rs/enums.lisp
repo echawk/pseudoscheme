@@ -30,9 +30,15 @@
 (defun enum-index (universe symbol)
   (position symbol (universe-symbols universe)))
 
+;; Universes are shared by symbol list, so that two evaluations of
+;; (file-options ...) or of one define-enumeration make compatible sets.
+(defvar *universes* (trivial-garbage:make-weak-hash-table :test 'equal :weakness :value))
+
 (defprim "make-enumeration" (symbols)
   (let* ((distinct (remove-duplicates symbols :from-end t))
-	 (universe (make-universe (coerce distinct 'simple-vector))))
+	 (universe (or (gethash distinct *universes*)
+		       (setf (gethash distinct *universes*)
+			     (make-universe (coerce distinct 'simple-vector))))))
     (make-enum-set universe (1- (ash 1 (length distinct))))))
 
 (defprim "enum-set-universe" (set)
@@ -61,7 +67,7 @@
 (defprim "enum-set-member?" (symbol set)
   (check-enum "enum-set-member?" set)
   (let ((i (enum-index (enum-set-universe set) symbol)))
-    (ps:true? (and i (logbitp i (enum-set-mask set))))))
+    (bool (and i (logbitp i (enum-set-mask set))))))
 
 (defun enum-subset-p (a b)
   (let ((ua (universe-symbols (enum-set-universe a)))
@@ -72,11 +78,11 @@
 
 (defprim "enum-set-subset?" (a b)
   (check-enum "enum-set-subset?" a) (check-enum "enum-set-subset?" b)
-  (ps:true? (enum-subset-p a b)))
+  (bool (enum-subset-p a b)))
 
 (defprim "enum-set=?" (a b)
   (check-enum "enum-set=?" a) (check-enum "enum-set=?" b)
-  (ps:true? (and (enum-subset-p a b) (enum-subset-p b a))))
+  (bool (and (enum-subset-p a b) (enum-subset-p b a))))
 
 (defmacro def-enum-op (name op)
   `(defprim ,name (a b)
@@ -180,7 +186,7 @@ apostrophe or the like between letters (Unicode word breaks, roughly)."
   (cl-unicode:titlecase-mapping c))
 
 (defprim "char-title-case?" (c)
-  (ps:true? (string= (unicode-category-name c) "Lt")))
+  (bool (string= (unicode-category-name c) "Lt")))
 
 (defprim "char-general-category" (c)
   (ps:intern-scheme-symbol (unicode-category-name c)))

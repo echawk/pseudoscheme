@@ -48,20 +48,8 @@
 (defprim "transcoder-eol-style" (tc) (transcoder-eol-style tc))
 (defprim "transcoder-error-handling-mode" (tc) (transcoder-handling tc))
 
-(defun encode (string codec)
-  (cond ((eq codec *latin-1-codec*)
-	 (map '(vector (unsigned-byte 8)) (lambda (c) (min 255 (char-code c))) string))
-	((eq codec *utf-16-codec*) (funcall (prim "string->utf16") string))
-	(t (funcall (ps-r7rs::primitive "string->utf8") string))))
-
-(defun decode (bytes codec)
-  (let ((bytes (coerce bytes 'octets)))
-    (cond ((eq codec *latin-1-codec*) (map 'simple-string #'code-char bytes))
-	  ((eq codec *utf-16-codec*) (funcall (prim "utf16->string") bytes (ps:intern-scheme-symbol "big")))
-	  (t (funcall (ps-r7rs::primitive "utf8->string") bytes)))))
-
-(defprim "string->bytevector" (string tc) (coerce (encode string (transcoder-codec tc)) 'octets))
-(defprim "bytevector->string" (bv tc) (decode bv (transcoder-codec tc)))
+(defun symbol-is (symbol name)
+  (and (symbolp symbol) (string= (ps:scheme-symbol-name symbol) name)))
 
 ;;; ------------------------------------------------------------------
 ;;; Gray stream classes
@@ -224,48 +212,213 @@
 		 :get-position (proc-or-nil get-position)
 		 :set-position! (proc-or-nil set-position!) :closer (proc-or-nil close)))
 
-;;; Transcoded ports (8.2.6): a textual view of a binary port.
+;;; Transcoded ports (8.2.6): a textual view of a binary port.  The
+;;; transcoder's codec, eol style and error-handling mode all apply
+;;; here, and bytevector->string and string->bytevector are these
+;;; ports over bytevector ports.
 
-(defclass transcoded-input-port (scheme-port trivial-gray-streams:fundamental-character-input-stream)
-  ((binary :initarg :binary :reader binary)
-   (unread :initform nil :accessor unread)))
+(defclass transcoded-port (scheme-port)
+  ((binary :initarg :binary :reader binary)))
 
-(defun read-utf8-char (bin)
+(defmethod close ((s transcoded-port) &key abort)
+  (close (binary s) :abort abort)
+  (call-next-method))
+
+(defmethod trivial-gray-streams:stream-file-position ((s transcoded-port))
+  (file-position (binary s)))
+
+(defclass transcoded-input-port (transcoded-port trivial-gray-streams:fundamental-character-input-stream)
+  ((unread :initform nil :accessor unread)	; given back by unread-char
+   (pending :initform nil :accessor pending)	; decoded past a CR, or :eof
+   (endian :initform nil :accessor endian)))	; UTF-16's, once the BOM is read
+
+(defmethod (setf trivial-gray-streams:stream-file-position) (position (s transcoded-port))
+  (when (typep s 'transcoded-input-port)
+    (setf (unread s) nil (pending s) nil))
+  (file-position (binary s) position))
+
+(defun raise-coding-error (port constructor &rest args)
+  (ps-r7rs:raise-object
+   (funcall (prim "condition")
+	    (apply (prim constructor) port args)
+	    (funcall (prim "make-message-condition")
+		     (if (string= constructor "make-i/o-decoding-error")
+			 "cannot decode"
+			 "cannot encode")))
+   nil))
+
+(defun decoding-error (s)
+  ;; An undecodable byte sequence: by the error-handling mode, a
+  ;; replacement character, nothing (:skip), or &i/o-decoding.
+  (let ((mode (transcoder-handling (port-transcoder* s))))
+    (cond ((symbol-is mode "ignore") :skip)
+	  ((symbol-is mode "raise") (raise-coding-error s "make-i/o-decoding-error"))
+	  (t (code-char #xFFFD)))))
+
+(defun take-byte-if (bin predicate)
+  ;; The next byte, consumed, if it satisfies PREDICATE.  Otherwise NIL,
+  ;; and the byte stays unread where the binary port has lookahead.
+  (let ((b (if (typep bin 'binary-input-port) (peek-byte bin) (read-byte bin nil :eof))))
+    (and (integerp b) (funcall predicate b)
+	 (progn (when (typep bin 'binary-input-port) (read-byte bin)) b))))
+
+(defun decode-utf-8 (s bin)
   (let ((b (read-byte bin nil :eof)))
     (cond ((eq b :eof) :eof)
 	  ((< b #x80) (code-char b))
-	  (t (let* ((n (cond ((< b #xE0) 1) ((< b #xF0) 2) (t 3)))
-		    (code (logand b (ash #x3F (- n)))))
-	       (dotimes (i n)
-		 (let ((c (read-byte bin nil 0)))
-		   (setq code (logior (ash code 6) (logand c #x3F)))))
-	       (code-char code))))))
+	  (t (multiple-value-bind (n least)
+		 (cond ((<= #xC2 b #xDF) (values 1 #x80))
+		       ((<= #xE0 b #xEF) (values 2 #x800))
+		       ((<= #xF0 b #xF4) (values 3 #x10000))
+		       (t (values 0 nil)))
+	       (if (null least)
+		   (decoding-error s)
+		   (let ((code (logand b (ash #x3F (- n)))))
+		     (dotimes (i n)
+		       (let ((c (take-byte-if bin (lambda (c) (= (logand c #xC0) #x80)))))
+			 (unless c (return-from decode-utf-8 (decoding-error s)))
+			 (setq code (logior (ash code 6) (logand c #x3F)))))
+		     (if (or (< code least) (<= #xD800 code #xDFFF) (> code #x10FFFF))
+			 (decoding-error s)
+			 (code-char code)))))))))
+
+(defun decode-utf-16 (s bin)
+  ;; Big-endian, unless a byte-order mark at the start says otherwise.
+  (flet ((unit ()
+	   (let ((b1 (read-byte bin nil :eof)))
+	     (if (eq b1 :eof)
+		 :eof
+		 (let ((b2 (read-byte bin nil :eof)))
+		   (cond ((eq b2 :eof) :odd)
+			 ((eq (endian s) :little) (logior b1 (ash b2 8)))
+			 (t (logior (ash b1 8) b2))))))))
+    (let ((u (unit)))
+      (unless (endian s)
+	(setf (endian s) :big)
+	(case u
+	  (#xFEFF (setq u (unit)))
+	  (#xFFFE (setf (endian s) :little) (setq u (unit)))))
+      (cond ((eq u :eof) :eof)
+	    ((eq u :odd) (decoding-error s))
+	    ((<= #xD800 u #xDBFF)
+	     (let ((low (unit)))
+	       (if (and (integerp low) (<= #xDC00 low #xDFFF))
+		   (code-char (+ #x10000 (ash (- u #xD800) 10) (- low #xDC00)))
+		   (decoding-error s))))
+	    ((<= #xDC00 u #xDFFF) (decoding-error s))
+	    (t (code-char u))))))
+
+(defun decode-char (s)
+  (let ((bin (binary s))
+	(codec (transcoder-codec (port-transcoder* s))))
+    (loop
+      (let ((c (cond ((pending s) (shiftf (pending s) nil))
+		     ((eq codec *latin-1-codec*)
+		      (let ((b (read-byte bin nil :eof))) (if (eq b :eof) :eof (code-char b))))
+		     ((eq codec *utf-16-codec*) (decode-utf-16 s bin))
+		     (t (decode-utf-8 s bin)))))
+	(unless (eq c :skip) (return c))))))
 
 (defmethod trivial-gray-streams:stream-read-char ((s transcoded-input-port))
-  (let ((u (unread s)))
-    (if u
-	(progn (setf (unread s) nil) u)
-	(let ((codec (transcoder-codec (port-transcoder* s))))
-	  (if (eq codec *latin-1-codec*)
-	      (let ((b (read-byte (binary s) nil :eof))) (if (eq b :eof) :eof (code-char b)))
-	      (read-utf8-char (binary s)))))))
+  (if (unread s)
+      (shiftf (unread s) nil)
+      (let ((c (decode-char s)))
+	;; Any eol style but none reads every line ending as a linefeed.
+	(cond ((symbol-is (transcoder-eol-style (port-transcoder* s)) "none") c)
+	      ((eql c #\Return)
+	       (let ((next (decode-char s)))
+		 (unless (member next '(#\Newline #.(code-char #x85)))
+		   (setf (pending s) next))
+		 #\Newline))
+	      ((member c '(#.(code-char #x85) #.(code-char #x2028))) #\Newline)
+	      (t c)))))
+
 (defmethod trivial-gray-streams:stream-unread-char ((s transcoded-input-port) c) (setf (unread s) c) nil)
 
-(defclass transcoded-output-port (scheme-port trivial-gray-streams:fundamental-character-output-stream)
-  ((binary :initarg :binary :reader binary)
-   (column :initform 0 :accessor column)))
+(defclass transcoding-output ()
+  ((column :initform 0 :accessor column)))
 
-(defmethod trivial-gray-streams:stream-write-char ((s transcoded-output-port) c)
-  (loop for b across (encode (string c) (transcoder-codec (port-transcoder* s)))
-	do (write-byte b (binary s)))
+(defclass transcoded-output-port (transcoded-port transcoding-output
+				  trivial-gray-streams:fundamental-character-output-stream)
+  ())
+
+(defclass transcoded-io-port (transcoded-input-port transcoding-output
+			      trivial-gray-streams:fundamental-character-output-stream)
+  ())
+
+(defun encode-char (c codec emit)
+  ;; Calls EMIT on each byte of C in CODEC; NIL if CODEC can't encode C.
+  (let ((code (char-code c)))
+    (cond ((eq codec *latin-1-codec*)
+	   (and (< code 256) (progn (funcall emit code) t)))
+	  ((eq codec *utf-16-codec*)
+	   (flet ((unit (u) (funcall emit (ash u -8)) (funcall emit (logand u #xFF))))
+	     (if (< code #x10000)
+		 (unit code)
+		 (let ((v (- code #x10000)))
+		   (unit (+ #xD800 (ash v -10)))
+		   (unit (+ #xDC00 (logand v #x3FF))))))
+	   t)
+	  (t
+	   (flet ((more (shift) (funcall emit (logior #x80 (logand (ash code (- shift)) #x3F)))))
+	     (cond ((< code #x80) (funcall emit code))
+		   ((< code #x800) (funcall emit (logior #xC0 (ash code -6))) (more 0))
+		   ((< code #x10000) (funcall emit (logior #xE0 (ash code -12))) (more 6) (more 0))
+		   (t (funcall emit (logior #xF0 (ash code -18))) (more 12) (more 6) (more 0))))
+	   t))))
+
+(defun eol-chars (style)
+  (cond ((symbol-is style "cr") '(#\Return))
+	((symbol-is style "crlf") '(#\Return #\Newline))
+	((symbol-is style "nel") '(#.(code-char #x85)))
+	((symbol-is style "crnel") '(#\Return #.(code-char #x85)))
+	((symbol-is style "ls") '(#.(code-char #x2028)))
+	(t '(#\Newline))))
+
+(defun transcode-char (s c)
+  (let* ((tc (port-transcoder* s))
+	 (codec (transcoder-codec tc))
+	 (bin (binary s))
+	 (emit (lambda (b) (write-byte b bin))))
+    (unless (encode-char c codec emit)
+      ;; Only latin-1 can fail; its replacement character is ?.
+      (let ((mode (transcoder-handling tc)))
+	(cond ((symbol-is mode "ignore"))
+	      ((symbol-is mode "raise") (raise-coding-error s "make-i/o-encoding-error" c))
+	      (t (encode-char #\? codec emit)))))))
+
+(defmethod trivial-gray-streams:stream-write-char ((s transcoding-output) c)
+  (if (char= c #\Newline)
+      (dolist (e (eol-chars (transcoder-eol-style (port-transcoder* s))))
+	(transcode-char s e))
+      (transcode-char s c))
   (setf (column s) (if (char= c #\Newline) 0 (1+ (column s))))
   c)
-(defmethod trivial-gray-streams:stream-line-column ((s transcoded-output-port)) (column s))
+(defmethod trivial-gray-streams:stream-line-column ((s transcoding-output)) (column s))
+(defmethod trivial-gray-streams:stream-force-output ((s transcoding-output)) (force-output (binary s)))
+(defmethod trivial-gray-streams:stream-finish-output ((s transcoding-output)) (finish-output (binary s)))
 
 (defprim "transcoded-port" (binary tc)
-  (if (input-stream-p binary)
-      (make-instance 'transcoded-input-port :binary binary :transcoder tc)
-      (make-instance 'transcoded-output-port :binary binary :transcoder tc)))
+  (make-instance (cond ((and (input-stream-p binary) (output-stream-p binary)) 'transcoded-io-port)
+		       ((input-stream-p binary) 'transcoded-input-port)
+		       (t 'transcoded-output-port))
+		 :binary binary :transcoder tc))
+
+(defprim "bytevector->string" (bv tc)
+  (let ((in (make-instance 'transcoded-input-port :transcoder tc
+			   :binary (make-instance 'bytevector-input-port
+						  :bytes (check-bv "bytevector->string" bv))))
+	(out (make-string-output-stream)))
+    (loop for c = (read-char in nil :eof)
+	  until (eq c :eof)
+	  do (write-char c out))
+    (coerce (get-output-stream-string out) 'simple-string)))
+
+(defprim "string->bytevector" (string tc)
+  (let* ((bin (make-instance 'bytevector-output-port))
+	 (out (make-instance 'transcoded-output-port :binary bin :transcoder tc)))
+    (write-string string out)
+    (take-bytes bin)))
 
 (defprim "port-transcoder" (port)
   (or (and (typep port 'scheme-port) (port-transcoder* port))
@@ -277,7 +430,8 @@
 ;;; Opening ports (8.2.7 - 8.2.13)
 
 (defun options-include (options name)
-  (and (listp options) (member name options :key #'ps:scheme-symbol-name :test #'string=)))
+  (let ((options (if (enum-set-p options) (enum-members options) options)))
+    (and (listp options) (member name options :key #'ps:scheme-symbol-name :test #'string=))))
 
 (defprim "open-bytevector-input-port" (bv &optional tc)
   (let ((port (make-instance 'bytevector-input-port :bytes (check-bv "open-bytevector-input-port" bv))))
@@ -307,25 +461,29 @@
 	(io-error-filename who name "make-i/o-file-already-exists-error"))
       (when (and (not exists) (options-include options "no-create"))
 	(io-error-filename who name "make-i/o-file-does-not-exist-error")))
-    (let* ((textual (and tc (transcoder-p tc)))
-	   (stream (open name :direction direction
-			      :element-type (if textual 'character '(unsigned-byte 8))
-			      :external-format :utf-8
+    (let* ((stream (open name :direction direction :element-type '(unsigned-byte 8)
 			      :if-exists (if (options-include options "no-truncate") :overwrite :supersede)
-			      :if-does-not-exist :create)))
-      (cond (textual stream)
-	    ((eq direction :input) (make-instance 'octet-stream-input-port :stream stream))
-	    (t stream)))))
+			      :if-does-not-exist :create))
+	   (binary (if (eq direction :input)
+		       (make-instance 'octet-stream-input-port :stream stream)
+		       stream)))
+      (if (and tc (transcoder-p tc))
+	  (funcall (prim "transcoded-port") binary tc)
+	  binary))))
+
+(defvar *buffer-modes* (trivial-garbage:make-weak-hash-table :weakness :key)
+  "The buffer mode each file port was opened with.")
+
+(defun with-buffer-mode (port mode)
+  (when (symbolp mode) (setf (gethash port *buffer-modes*) mode))
+  port)
 
 (defprim "open-file-input-port" (name &optional options buffer-mode tc)
-  (declare (ignore buffer-mode))
-  (open-file "open-file-input-port" name :input options tc))
+  (with-buffer-mode (open-file "open-file-input-port" name :input options tc) buffer-mode))
 (defprim "open-file-output-port" (name &optional options buffer-mode tc)
-  (declare (ignore buffer-mode))
-  (open-file "open-file-output-port" name :output options tc))
+  (with-buffer-mode (open-file "open-file-output-port" name :output options tc) buffer-mode))
 (defprim "open-file-input/output-port" (name &optional options buffer-mode tc)
-  (declare (ignore buffer-mode))
-  (open-file "open-file-input/output-port" name :io options tc))
+  (with-buffer-mode (open-file "open-file-input/output-port" name :io options tc) buffer-mode))
 
 ;;; Fresh binary ports on the process's standard streams (8.2.7).
 ;;; Closing one must not close the file descriptor underneath, which
@@ -374,9 +532,10 @@
   (make-instance 'standard-binary-output-port :stream (fd-stream 2 :output)))
 
 (defprim "buffer-mode?" (x)
-  (ps:true? (and (symbolp x) (member (ps:scheme-symbol-name x) '("none" "line" "block") :test #'string=))))
+  (bool (and (symbolp x) (member (ps:scheme-symbol-name x) '("none" "line" "block") :test #'string=))))
 
-(defprim "output-port-buffer-mode" (port) (declare (ignore port)) (ps:intern-scheme-symbol "block"))
+(defprim "output-port-buffer-mode" (port)
+  (values (gethash port *buffer-modes* (ps:intern-scheme-symbol "block"))))
 
 ;;; ------------------------------------------------------------------
 ;;; Port positions, eof
@@ -384,14 +543,16 @@
 (defun has-position-p (port)
   (or (typep port 'bytevector-input-port) (typep port 'octet-stream-input-port)
       (typep port 'file-stream)
+      (and (typep port 'transcoded-port) (has-position-p (binary port)))
       (and (typep port '(or custom-binary-input-port custom-binary-output-port
 			  custom-textual-input-port custom-textual-output-port))
 	   (slot-value port 'get-position))))
 
-(defprim "port-has-port-position?" (port) (ps:true? (has-position-p port)))
+(defprim "port-has-port-position?" (port) (bool (has-position-p port)))
 (defprim "port-has-set-port-position!?" (port)
-  (ps:true? (or (typep port 'bytevector-input-port) (typep port 'octet-stream-input-port)
+  (bool (or (typep port 'bytevector-input-port) (typep port 'octet-stream-input-port)
 		(typep port 'file-stream)
+		(and (typep port 'transcoded-port) (has-position-p (binary port)))
 		(and (typep port '(or custom-binary-input-port custom-binary-output-port
 				    custom-textual-input-port custom-textual-output-port))
 		     (slot-value port 'set-position!)))))
@@ -400,19 +561,25 @@
   (if (and (typep port '(or custom-binary-input-port custom-binary-output-port
 			  custom-textual-input-port custom-textual-output-port))
 	   (slot-value port 'get-position))
-      (funcall (slot-value port 'get-position))
+      ;; less a byte read ahead by lookahead-u8
+      (- (funcall (slot-value port 'get-position))
+	 (if (and (typep port 'binary-input-port) (integerp (peeked port))) 1 0))
       (or (file-position port) (r6rs-assertion-violation "port-position" "port has no position" port))))
 
 (defprim "set-port-position!" (port pos)
   (if (and (typep port '(or custom-binary-input-port custom-binary-output-port
 			  custom-textual-input-port custom-textual-output-port))
 	   (slot-value port 'set-position!))
-      (funcall (slot-value port 'set-position!) pos)
+      (progn
+	(typecase port
+	  (binary-input-port (setf (peeked port) nil))
+	  (custom-textual-input-port (setf (unread port) nil)))
+	(funcall (slot-value port 'set-position!) pos))
       (file-position port pos))
   ps:unspecific)
 
 (defprim "port-eof?" (port)
-  (ps:true? (if (typep port 'binary-input-port)
+  (bool (if (typep port 'binary-input-port)
 		(eq (peek-byte port) :eof)
 		(eq (peek-char nil port nil :eof) :eof))))
 
@@ -533,6 +700,6 @@
 ;;; (rnrs io simple) port predicates over Gray ports
 
 (defprim "textual-port?" (x)
-  (ps:true? (and (streamp x) (subtypep (stream-element-type x) 'character))))
+  (bool (and (streamp x) (subtypep (stream-element-type x) 'character))))
 (defprim "binary-port?" (x)
-  (ps:true? (and (streamp x) (not (subtypep (stream-element-type x) 'character)))))
+  (bool (and (streamp x) (not (subtypep (stream-element-type x) 'character)))))

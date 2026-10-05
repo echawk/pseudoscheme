@@ -30,7 +30,7 @@
 
 (defprim "bytevector=?" (a b)
   (check-bv "bytevector=?" a) (check-bv "bytevector=?" b)
-  (ps:true? (equalp a b)))
+  (bool (equalp a b)))
 
 (defprim "bytevector-fill!" (bv fill)
   (check-bv "bytevector-fill!" bv)
