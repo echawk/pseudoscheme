@@ -8,8 +8,9 @@
 
 (library (pseudoscheme r7rs syntax)
   (export define-record-type parameterize define-values case cond-expand
-          syntax-error delay-force include include-ci)
-  (import (except (rnrs) define-record-type case)
+          syntax-error delay-force include include-ci let-syntax letrec-syntax)
+  (import (except (rnrs) define-record-type case let-syntax letrec-syntax)
+          (prefix (only (rnrs) let-syntax letrec-syntax) rnrs:)
           (prefix (pseudoscheme host) %))
 
   ;; (define-record-type <name> (<constructor> <field> ...) <predicate>
@@ -166,6 +167,48 @@
   (define-syntax delay-force
     (syntax-rules ()
       ((_ expression) (%$delay-force (lambda () expression)))))
+
+  ;; let-syntax and letrec-syntax (R7RS 4.3.1): the body is a body of
+  ;; its own, where R6RS splices it into the surrounding one.  But forms
+  ;; that end in a definition aren't a body (one needs an expression), so
+  ;; those are spliced, as R6RS does and as code written for R5RS
+  ;; systems that splice expects: Chibi's R5RS tests define with
+  ;; let-syntax, its R7RS tests scope with it.
+  (define-syntax let-syntax
+    (lambda (x)
+      (define (ends-in-definition? forms)
+        (or (null? forms)
+            (if (null? (cdr forms))
+                (syntax-case (car forms) (define define-syntax define-values define-record-type)
+                  ((define . _) #t)
+                  ((define-syntax . _) #t)
+                  ((define-values . _) #t)
+                  ((define-record-type . _) #t)
+                  (_ #f))
+                (ends-in-definition? (cdr forms)))))
+      (syntax-case x ()
+        ((_ bindings form ...)
+         (if (ends-in-definition? #'(form ...))
+             #'(rnrs:let-syntax bindings form ...)
+             #'(rnrs:let-syntax bindings (let () form ...)))))))
+
+  (define-syntax letrec-syntax
+    (lambda (x)
+      (define (ends-in-definition? forms)
+        (or (null? forms)
+            (if (null? (cdr forms))
+                (syntax-case (car forms) (define define-syntax define-values define-record-type)
+                  ((define . _) #t)
+                  ((define-syntax . _) #t)
+                  ((define-values . _) #t)
+                  ((define-record-type . _) #t)
+                  (_ #f))
+                (ends-in-definition? (cdr forms)))))
+      (syntax-case x ()
+        ((_ bindings form ...)
+         (if (ends-in-definition? #'(form ...))
+             #'(rnrs:letrec-syntax bindings form ...)
+             #'(rnrs:letrec-syntax bindings (let () form ...)))))))
 
   ;; include / include-ci (R7RS 4.1.7): the forms of the files, read
   ;; now, in the context of the include form.

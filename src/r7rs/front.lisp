@@ -308,7 +308,7 @@ names of *LIBRARY-ALIASES*."
 
 (defparameter *syntax-from-r7rs-syntax*
   '("define-record-type" "parameterize" "define-values" "case" "cond-expand"
-    "syntax-error" "delay-force" "include" "include-ci"))
+    "syntax-error" "delay-force" "include" "include-ci" "let-syntax" "letrec-syntax"))
 
 (defparameter *syntax-from-r5rs* '("delay"))
 
@@ -349,7 +349,7 @@ the host has no such procedure.")
     (read-scheme
      (format nil "(library (~{~A~^ ~})
                     (export ~{~A~^ ~})
-                    (import (except (rnrs) define-record-type case)
+                    (import (except (rnrs) define-record-type case let-syntax letrec-syntax)
                             (only (rnrs r5rs) delay null-environment scheme-report-environment)
                             (only (rnrs eval) eval environment)
                             (pseudoscheme r7rs syntax)
