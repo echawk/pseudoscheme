@@ -1087,19 +1087,15 @@
                                 "not a procedure" v)))))
              (stx-error stx "invalid formals"))))))
   
-  ;;; PSEUDOSCHEME: the original expansion re-enters continuations: it
-  ;;; calls the guard's continuation from inside a thunk invoked after
-  ;;; that continuation's CALL/CC has returned, and re-raises by
-  ;;; jumping back into the handler.  Pseudoscheme's CALL/CC is
-  ;;; escape-only (CL BLOCK/RETURN-FROM), so this version escapes from
-  ;;; the handler to the guard with a thunk, and when no clause
-  ;;; matches re-raises with RAISE-CONTINUABLE from the guard's own
-  ;;; dynamic context rather than the original raise's.  The only
-  ;;; observable difference is for a handler-return value travelling
-  ;;; back through a non-matching guard.
+  ;;; PSEUDOSCHEME: R6RS's expansion, whose handler, when no clause
+  ;;; matches, re-enters its own continuation to re-raise in the dynamic
+  ;;; environment of the RAISE -- through %guard-reraise, which falls
+  ;;; back to re-raising from the guard's own context where that
+  ;;; continuation can't be re-entered (escape-only continuations).  A
+  ;;; normal return from the body returns its values' thunk directly.
   (define guard-macro
     (lambda (x)
-      (define (gen-clauses con outerk clause*) 
+      (define (gen-clauses con outerk handlerk clause*) 
         (define (f x k) 
           (syntax-match x (=>) 
             ((e => p) 
@@ -1115,7 +1111,7 @@
             (_ (stx-error x "invalid guard clause"))))
         (define (f* x*)
           (syntax-match x* (else)
-            (() `(raise-continuable ,con))
+            (() `(%guard-reraise ,handlerk (lambda () (raise-continuable ,con))))
             (((else e e* ...))
              `(begin ,e ,@e*))
             ((cls . cls*) 
@@ -1125,13 +1121,15 @@
       (syntax-match x ()
         ((_ (con clause* ...) b b* ...)
          (id? con)
-         (let ((outerk (gensym)))
+         (let ((outerk (gensym)) (handlerk (gensym)))
            (bless
              `((call/cc
                  (lambda (,outerk)
                    (with-exception-handler
                      (lambda (,con)
-                       ,(gen-clauses con outerk clause*))
+                       ((call/cc
+                          (lambda (,handlerk)
+                            ,(gen-clauses con outerk handlerk clause*)))))
                      (lambda ()
                        (call-with-values
                          (lambda () #f ,b ,@b*)

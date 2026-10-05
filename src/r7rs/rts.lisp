@@ -300,6 +300,13 @@
 
 (defvar *handlers* '())
 
+(defvar *call-handler* 'call-handler
+  "CALL-HANDLER (below), or a function like it: src/continuations.lisp
+makes a handler's continuation one a full continuation can re-enter.")
+
+(defvar *call-with-handler* 'call-with-handler
+  "CALL-WITH-HANDLER (below), or a function like it.  (Likewise.)")
+
 (defstruct (error-object (:constructor make-error-object
 					 (message irritants &optional who (kind :error))))
   message irritants
@@ -337,13 +344,31 @@ Scheme handler sees.  (The R6RS layer makes R6RS conditions of them.)")
 (defun raise-object (obj continuable)
   (if (null *handlers*)
       (error 'uncaught-raise :payload obj)
-      (let* ((handler (car *handlers*))
-	     (outer (cdr *handlers*))
-	     (value (let ((*handlers* outer)) (funcall handler obj))))
-	(if continuable
-	    value
-	    (let ((*handlers* outer))
-	      (raise-object (funcall *non-continuable-condition* obj) nil))))))
+      (funcall *call-handler* (car *handlers*) (cdr *handlers*) obj continuable)))
+
+(defun call-handler (handler outer obj continuable)
+  "Call HANDLER on OBJ with the OUTER handlers installed, for a RAISE (or
+RAISE-CONTINUABLE, if CONTINUABLE) of OBJ."
+  (let ((value (let ((*handlers* outer)) (funcall handler obj))))
+    (if continuable
+	value
+	(let ((*handlers* outer))
+	  (raise-object (funcall *non-continuable-condition* obj) nil)))))
+
+(defun call-with-handler (handler outer thunk)
+  "Call THUNK with HANDLER installed in front of the OUTER handlers."
+  (let ((*handlers* (cons handler outer)))
+    (handler-bind ((error (lambda (c)
+			    ;; A Lisp error under this frame goes to *this*
+			    ;; frame's handler, with the outer handlers
+			    ;; installed, as for a RAISE; falling out of the
+			    ;; handler is the same secondary error.
+			    (unless (typep c 'uncaught-raise)
+			      (let ((*handlers* outer)
+				    (obj (funcall *foreign-condition-converter* c)))
+				(funcall handler obj)
+				(raise-object (funcall *non-continuable-condition* obj) nil))))))
+      (funcall thunk))))
 
 (defprim "raise" (obj) (raise-object obj nil))
 (defprim "raise-continuable" (obj) (raise-object obj t))
@@ -354,19 +379,7 @@ Scheme handler sees.  (The R6RS layer makes R6RS conditions of them.)")
 (defprim "with-exception-handler" (handler thunk)
   (unless (functionp handler)
     (scheme-error "with-exception-handler: handler is not a procedure: ~S" handler))
-  (let ((outer *handlers*))
-    (let ((*handlers* (cons handler outer)))
-      (handler-bind ((error (lambda (c)
-			      ;; A Lisp error under this frame goes to *this*
-			      ;; frame's handler, with the outer handlers
-			      ;; installed, as for a RAISE; falling out of the
-			      ;; handler is the same secondary error.
-			      (unless (typep c 'uncaught-raise)
-				(let ((*handlers* outer)
-				      (obj (funcall *foreign-condition-converter* c)))
-				  (funcall handler obj)
-				  (raise-object (funcall *non-continuable-condition* obj) nil))))))
-	(funcall thunk)))))
+  (funcall *call-with-handler* handler *handlers* thunk))
 
 (defprim "error-object?" (x)
   (bool (or (error-object-p x) (typep x 'error))))

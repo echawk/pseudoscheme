@@ -957,6 +957,7 @@
     ;; no library), via (psyntax modules) and so (pseudoscheme)
     (import                   cm)
     (syntax-dispatch ) ; only goes to $all
+    (%guard-reraise ) ; PSEUDOSCHEME: guard's expansion, so only $all
     ;; PSEUDOSCHEME: the run-time values behind the $core-rtd bindings
     ;; above (the comment there: "the implementation must export the
     ;; identifiers &condition-type-rtd ... and &condition-type-rcd");

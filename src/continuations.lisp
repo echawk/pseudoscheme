@@ -105,6 +105,52 @@ after runs however THUNK is left."
 (defun full-call-with-values (producer consumer)
   (call-with-frame producer (lambda (&rest values) (apply consumer values))))
 
+;;; Exception handlers (the R7RS layer's *HANDLERS*) are dynamic state
+;;; too: with-exception-handler's thunk runs in a :HANDLER frame, and a
+;;; handler RAISE calls in a :HANDLERS frame (the outer handlers) under
+;;; a :K frame (what RAISE does when the handler returns), so that a
+;;; continuation captured in a handler or under with-exception-handler
+;;; re-establishes them.  GUARD re-enters a handler this way (R6RS's
+;;; expansion), to re-raise in the dynamic environment of the RAISE.
+;;; These frames are pushed in escape mode too, where nothing captures
+;;; them.
+
+(defun handler-extent (handler outer thunk)
+  (let ((frame (vector :handler nil (cons handler outer))))
+    (declare (dynamic-extent frame))
+    (ps-r7rs::call-with-handler handler outer (lambda () (with-frame (frame) (funcall thunk))))))
+
+(defun handlers-extent (handlers thunk)
+  (let ((frame (vector :handlers nil handlers)))
+    (declare (dynamic-extent frame))
+    (let ((ps-r7rs::*handlers* handlers))
+      (with-frame (frame) (funcall thunk)))))
+
+(defun full-call-handler (handler outer obj continuable)
+  (call-with-frame
+   (lambda () (handlers-extent outer (lambda () (funcall handler obj))))
+   (if continuable
+       #'values
+       (lambda (&rest values)
+	 (declare (ignore values))
+	 (handlers-extent
+	  outer
+	  (lambda ()
+	    (ps-r7rs:raise-object (funcall ps-r7rs::*non-continuable-condition* obj) nil)))))))
+
+(setq ps-r7rs::*call-handler* 'full-call-handler
+      ps-r7rs::*call-with-handler* 'handler-extent)
+
+(define-condition continuation-not-reentrant (control-error) ()
+  (:report "continuation invoked after its extent ended, and not re-entrant (no base around its capture)"))
+
+(defun guard-reraise (k thunk)
+  "GUARD's re-raise when no clause matches: re-enter the handler's
+continuation K with THUNK, which re-raises there; or, where K can't be
+re-entered (escape mode), call THUNK in the guard's own context."
+  (handler-case (funcall k thunk)
+    (control-error () (funcall thunk))))
+
 ;;; A frame's slot 1, PROMOTED, is (complete . copies) once a capture has
 ;;; copied it: COPIES the heap copies of it and of every frame outside
 ;;; it, innermost first, and COMPLETE whether they reach a base.  What is
@@ -139,6 +185,8 @@ call returns, then continue the frame."
     (case head
       (:k (multiple-value-call (svref frame 2) (with-frame (frame) (funcall inner))))
       (:winder (winder-extent (svref frame 2) inner))
+      (:handler (handler-extent (car (svref frame 2)) (cdr (svref frame 2)) inner))
+      (:handlers (handlers-extent (svref frame 2) inner))
       (t (let ((value (with-frame (frame) (funcall inner))))
 	   (apply head (svref frame 2) value frame (make-list (svref frame 3))))))))
 
@@ -167,7 +215,7 @@ innermost."
 	       (cond ((car live) (throw tag (values-list values)))
 		     ((and rebuildable *base-tag*)
 		      (throw *base-tag* (lambda () (reenter frames winders values))))
-		     (t (ps:scheme-error "continuation invoked after its extent ended, and not re-entrant (no base around its capture)")))))
+		     (t (error 'continuation-not-reentrant)))))
 	(unwind-protect (catch tag (funcall f #'k))
 	  (setf (car live) nil))))))
 
@@ -807,6 +855,7 @@ its own, of the chunk's free variables."
   (defhost "%full-call/cc" (f) (full-call/cc f))
   (defhost "%full-dynamic-wind" (before thunk after) (full-dynamic-wind before thunk after))
   (defhost "%full-call-with-values" (producer consumer) (full-call-with-values producer consumer))
+  (defhost "%guard-reraise" (k thunk) (guard-reraise k thunk))
   (let ((*full-continuations* t))
     (dolist (form (read-scheme-text *full-scheme-definitions*))
       (host-eval form))))
