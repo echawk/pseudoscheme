@@ -9,6 +9,9 @@
 #                  the first one installed.
 #   --all          run every installed host, and check that they all
 #                  produce the same files.
+#   BOOT_HOSTS="<name> ..."  the hosts to consider, in order (default:
+#                  all of $HOSTS below); e.g. BOOT_HOSTS="chez gauche"
+#                  with --all runs just those two.
 #   --no-install   leave the results in boot/build/<host>/ instead of
 #                  copying them into src/.
 #   --check        also check the results against what Pseudoscheme's
@@ -21,7 +24,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-HOSTS="chibi guile gauche chicken chez racket scheme48 s7"
+HOSTS=${BOOT_HOSTS:-"chibi guile gauche chicken chez racket scheme48 s7"}
 
 # The command for a host, and the executable it needs.
 host_command() {

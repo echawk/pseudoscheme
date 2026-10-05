@@ -15,52 +15,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The generated files from source alone: the .pso files written by
-  # other Schemes, then psyntax's image seeded by Chez Scheme and rebuilt
-  # by Pseudoscheme (loaded from those .pso files) until it reproduces
-  # itself.  Both must match what's checked in.
+  # The generated files from source alone, with two fast Schemes: Chez
+  # Scheme (R6RS) and Gauche (R7RS-small, no R6RS).  Both write the .pso
+  # files, which must agree; then psyntax's image is rebuilt from a seed
+  # each of them builds (Chez natively, Gauche through boot/stage0/),
+  # with Pseudoscheme loaded from those .pso files.  Everything must come
+  # out as checked in.
   bootstrap:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-lisp
 
-      - name: Install the Schemes
-        # Each is optional: boot/bootstrap.sh --all uses whichever are
-        # installed (and they must all agree).  Chez is required, for the
-        # psyntax seed.  boot/ calls Chez Scheme "chez"; Debian calls it
-        # scheme or chezscheme.
+      - name: Install Chez Scheme and Gauche
+        # boot/ calls Chez Scheme "chez"; Debian calls it scheme or
+        # chezscheme.
         run: |
-          for p in chezscheme guile-3.0 gauche chicken-bin racket scheme48 chibi-scheme; do
-            sudo apt-get install -y -qq "$p" || echo "::warning::$p is not available"
-          done
+          sudo apt-get install -y -qq chezscheme gauche
           if ! command -v chez >/dev/null; then
             sudo ln -s "$(command -v chezscheme || command -v scheme)" /usr/local/bin/chez
           fi
-          chez --version
-          for c in chibi-scheme guile gosh csi plt-r5rs scheme48; do
-            command -v "$c" >/dev/null && echo "found $c" || echo "no $c"
-          done
+          echo '(display (scheme-version))' | chez -q; echo
+          gosh -V
 
-      - name: The .pso files, from every installed Scheme
-        # Each host translates the translator; they must agree with each
-        # other and, form for form, with Pseudoscheme's own translation
-        # (--check).  Installs the result in src/.
-        run: boot/bootstrap.sh --all --check
+      - name: The .pso files, from Chez and from Gauche
+        # They must agree with each other and, form for form, with
+        # Pseudoscheme's own translation (--check).  Installed in src/.
+        run: BOOT_HOSTS="chez gauche" boot/bootstrap.sh --all --check
 
       - name: The .pso files match what's checked in
-        # Apart from the header comment naming the Scheme that wrote them.
+        # apart from the header comment naming the Scheme that wrote them
         run: git diff --exit-code -I '^;' -- src
 
-      - name: psyntax's image, from a Chez seed
-        # Pseudoscheme, loaded from the .pso files just written, rebuilds
-        # the image until it reproduces itself.
-        run: boot/psyntax.sh
+      - name: psyntax's image, from Chez's seed
+        run: boot/psyntax.sh --seed=chez
 
       - name: psyntax's image matches what's checked in
         run: git diff --exit-code -- vendor/psyntax/psyntax-pseudoscheme.pp
+
+      - name: psyntax's image, from stage0's seed on Gauche
+        # An unrelated expander's seed must end in the same image.
+        run: |
+          boot/psyntax.sh --no-install --seed=stage0
+          cmp boot/build/psyntax/psyntax-pseudoscheme.pp vendor/psyntax/psyntax-pseudoscheme.pp
 
       - name: Logs
         if: failure()
@@ -110,11 +109,16 @@ jobs:
           path: /tmp/pseudoscheme-test-*.log
 
   # ecraven's r7rs-benchmarks on the command line, escape-only and with
-  # full continuations.  Results are artifacts; a benchmark that fails
-  # shows as such in the table rather than failing the job.
+  # full continuations, as two jobs in parallel; then a table of both.
+  # A benchmark that fails shows as such in the table rather than failing
+  # the job.
   bench:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [escape, full]
     steps:
       - uses: actions/checkout@v4
 
@@ -123,37 +127,55 @@ jobs:
       - name: Build the command line
         run: make -C contrib/cli
 
-      - name: Benchmarks
+      - name: Benchmarks (${{ matrix.mode }})
         env:
           CPU_LIMIT: 300
           BENCH_TEMP: /tmp/r7rs-benchmarks
         run: |
+          if [ "${{ matrix.mode }}" = full ]; then
+            printf '#!/bin/sh\nexec "%s/bin/pseudoscheme" --continuations=full "$@"\n' "$PWD" > /tmp/pseudoscheme-full
+            chmod +x /tmp/pseudoscheme-full
+            export PSEUDOSCHEME=/tmp/pseudoscheme-full
+          fi
           bench/run.sh pseudoscheme
+
+      - name: Results
+        if: always()
+        # full continuations' results are named pseudoscheme_full, so the
+        # table has a column for each mode
+        run: |
           mkdir -p /tmp/bench
-          mv bench/r7rs-benchmarks/results.Pseudoscheme /tmp/bench/results.Pseudoscheme
-
-      - name: Benchmarks with full continuations
-        env:
-          CPU_LIMIT: 300
-          BENCH_TEMP: /tmp/r7rs-benchmarks-full
-        run: |
-          printf '#!/bin/sh\nexec "%s/bin/pseudoscheme" --continuations=full "$@"\n' "$PWD" > /tmp/pseudoscheme-full
-          chmod +x /tmp/pseudoscheme-full
-          PSEUDOSCHEME=/tmp/pseudoscheme-full bench/run.sh pseudoscheme
-          # named pseudoscheme_full, so the summary has a column for each
-          sed 's/+!CSVLINE!+pseudoscheme-/+!CSVLINE!+pseudoscheme_full-/' \
-            bench/r7rs-benchmarks/results.Pseudoscheme > /tmp/bench/results.PseudoschemeFull
-          rm bench/r7rs-benchmarks/results.Pseudoscheme
-
-      - name: Summary
-        # Each benchmark's time in both modes, and full continuations'
-        # ratio to escape-only.
-        run: |
-          echo "## r7rs-benchmarks: escape-only and full continuations" >> "$GITHUB_STEP_SUMMARY"
-          python3 bench/summarize.py /tmp/bench --baseline pseudoscheme | tee -a "$GITHUB_STEP_SUMMARY"
+          r=bench/r7rs-benchmarks/results.Pseudoscheme
+          [ -f "$r" ] || exit 0
+          if [ "${{ matrix.mode }}" = full ]; then
+            sed 's/+!CSVLINE!+pseudoscheme-/+!CSVLINE!+pseudoscheme_full-/' "$r" > /tmp/bench/results.PseudoschemeFull
+          else
+            cp "$r" /tmp/bench/results.Pseudoscheme
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bench-results
+          name: bench-${{ matrix.mode }}
           path: /tmp/bench
+
+  bench-summary:
+    needs: bench
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          merge-multiple: true
+          path: /tmp/bench
+
+      - name: Summary
+        # each benchmark's time in both modes, and full continuations'
+        # ratio to escape-only
+        run: |
+          echo "## r7rs-benchmarks: escape-only and full continuations" >> "$GITHUB_STEP_SUMMARY"
+          python3 bench/summarize.py /tmp/bench --baseline pseudoscheme | tee -a "$GITHUB_STEP_SUMMARY"
