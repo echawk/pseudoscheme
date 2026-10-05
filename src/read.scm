@@ -46,15 +46,14 @@
 
 (define (scheme-read . port-option)
   (let ((port (input-port-option port-option)))
-    (let loop ()
-      (let ((form (sub-read port)))
-        (cond ((not (reader-token? form)) form)
-              ((eq? form close-paren)
-               ;; Too many right parens.
-	       (warn "discarding extraneous right parenthesis")
-               (loop))
-	      (else
-	       (reading-error port (cdr form))))))))
+    (ps:call-with-reader-state
+     port
+     (lambda ()
+       (let ((form (sub-read port)))
+	 ;; A token here is an unexpected ) or ., an error (R7RS 6.13.2).
+	 (if (reader-token? form)
+	     (reading-error port (cdr form))
+	     form))))))
 
 (define (sub-read-carefully port)
   (let ((form (sub-read port)))
@@ -130,6 +129,17 @@
            (reading-error port
 			  "end of file inside list -- unbalanced parentheses"))
           ((eq? form close-paren) '())
+	  ;; A dot needs a datum before it, (#;a . b) included.
+          ((eq? form dot)
+	   (reading-error port "nothing before \" . \" in a list"))
+          (else (cons form (sub-read-list-tail c port))))))
+
+(define (sub-read-list-tail c port)
+  (let ((form (sub-read port)))
+    (cond ((eof-object? form)
+           (reading-error port
+			  "end of file inside list -- unbalanced parentheses"))
+          ((eq? form close-paren) '())
           ((eq? form dot)
            (let* ((last-form (sub-read-carefully port))
                   (another-form (sub-read port)))
@@ -138,7 +148,7 @@
                     (reading-error port
 				   "randomness after form after dot"
 				   another-form)))))
-          (else (cons form (sub-read-list c port))))))
+          (else (cons form (sub-read-list-tail c port))))))
 
 (set-standard-read-macro! #\( #t sub-read-list)
 
@@ -331,11 +341,32 @@
   (lambda (c port)
     (read-char port)                   ;consume the !
     (let ((name (common-lisp:string-downcase (car (sub-read-token (read-char port) port)))))
-      (cond ((string=? name "fold-case")
-	     (ps-lisp:setq ps:*fold-case* ps-lisp:t))
-	    ((string=? name "no-fold-case")
-	     (ps-lisp:setq ps:*fold-case* ps-lisp:nil)))
+      ;; Folding is per port (R7RS 2.1): it applies to what is read
+      ;; from this port after the directive.
+      (if (or (string=? name "fold-case") (string=? name "no-fold-case"))
+	  (ps:set-port-fold-case port (ps-lisp:string= name "fold-case")))
       (sub-read port))))
+
+; Datum labels, #<n>=<datum> and #<n># (R7RS 2.4).
+
+(define (sub-read-datum-label c port)
+  c
+  (let loop ((n 0))
+    (let ((d (read-char port)))
+      (cond ((eof-object? d)
+	     (reading-error port "end of file in a datum label"))
+	    ((char-numeric? d)
+	     (loop (+ (* n 10) (- (char->ascii d) (char->ascii #\0)))))
+	    ((char=? d #\=)
+	     (ps:read-labelled-datum port n
+	       (lambda () (sub-read-carefully port))))
+	    ((char=? d #\#)
+	     (ps:datum-label-reference port n))
+	    (else
+	     (reading-error port "bad datum label" n d))))))
+
+(for-each (lambda (c) (define-sharp-macro c sub-read-datum-label))
+	  (string->list "0123456789"))
 
 (define named-characters
   `((space     . ,(ascii->char 32))
@@ -493,8 +524,7 @@
 ; Reader errors
 
 (define (reading-error port message . irritants)
-  port ;unused
-  (apply error message irritants))
+  (apply #'ps:scheme-reading-error port message irritants))
 
 
 ; Initialize for Pseudoscheme...

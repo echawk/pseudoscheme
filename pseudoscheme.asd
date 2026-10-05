@@ -41,7 +41,8 @@
 (defsystem :pseudoscheme/rts
   :author "Jonathan Rees"
   :pathname #p"src/"
-  :depends-on (:float-features)		; IEEE infinities, NaNs and traps
+  :depends-on (:float-features		; IEEE infinities, NaNs and traps
+	       :trivial-garbage)		; the reader's weak table of ports
   :components
     (
      (:file "pack")

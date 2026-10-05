@@ -6,7 +6,7 @@ this file.
 
 | runner | result |
 |---|---|
-| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 962 of 976 |
+| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 969 of 976 |
 | `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8709 pass, 193 fail; all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 183 of 188 |
 | `tests/run-interop-tests.lisp` | 104/104 |
@@ -38,18 +38,15 @@ docs/interop.md.
 
 ## 1. Conformance: the remaining failures
 
-**R7RS (14).** Most of these are small and independent.
+**R7RS (7).**
 
 - `(sqrt -1.0-0.0i)`: chibi's test expects `+i`, but R7RS 6.2.4 puts
   the branch cut so that `(imag-part (log -1.0-0.0i))` is −π, which
   makes the answer `-i`, as here. Chibi doesn't distinguish `-0.0` in
   that position. Not a bug.
-- Reader and writer:
-  - datum labels: reading `#0=` / `#0#`, and `write-shared` (`write`
-    also doesn't detect cycles);
-  - `#!fold-case` inside a `read` stream;
-  - symbols that need `|...|` aren't written with bars;
-  - some invalid input isn't rejected.
+- The writer: `write-shared` doesn't write datum labels, `write`
+  doesn't detect cycles, and symbols that need `|...|` aren't written
+  with bars. (The reader handles datum labels.)
 - One `dynamic-wind` test re-enters a continuation (see 3).
 
 **R6RS (193).** By program:

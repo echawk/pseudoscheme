@@ -399,6 +399,86 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 (defun scheme-warn (message &rest irritants)
   (signal-scheme-condition #'warn message irritants))
 
+;;; The reader's errors are Lisp READER-ERRORs, which Scheme handlers see
+;;; as &lexical conditions, so that R7RS's read-error? is true of them.
+
+(define-condition scheme-reader-error (reader-error simple-condition) ()
+  (:report (lambda (c stream)
+	     (apply #'format stream (simple-condition-format-control c)
+		    (simple-condition-format-arguments c)))))
+
+(defun scheme-reading-error (port message &rest irritants)
+  (signal-scheme-condition
+   (lambda (control &rest arguments)
+     (error 'scheme-reader-error :stream port
+	    :format-control control :format-arguments arguments))
+   message irritants))
+
+;;; State the reader keeps across one datum, or for a port.
+
+(defvar *port-fold-case*
+  (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq)
+  "Ports from which a #!fold-case or #!no-fold-case directive was read,
+and whether it was #!fold-case.  Other ports fold as *FOLD-CASE* says.")
+
+(defvar *datum-labels* '()
+  "The datum labels (R7RS 2.4) defined so far in the datum being read:
+an alist from label numbers to placeholders.")
+
+(defstruct (label-placeholder (:constructor make-label-placeholder ()))
+  (datum nil) (defined nil))
+
+(defun call-with-reader-state (port thunk)
+  "Read one datum from PORT by calling THUNK: case folding as PORT's
+directives left it, and no datum labels yet."
+  (let ((*fold-case* (multiple-value-bind (fold found) (gethash port *port-fold-case*)
+		       (if found fold *fold-case*)))
+	(*datum-labels* '()))
+    (funcall thunk)))
+
+(defun set-port-fold-case (port fold)
+  (setf (gethash port *port-fold-case*) fold
+	*fold-case* fold))
+
+(defun read-labelled-datum (port n thunk)
+  "#N=<datum>: the datum THUNK reads, in which #N# refers to itself."
+  (let ((placeholder (make-label-placeholder)))
+    (push (cons n placeholder) *datum-labels*)
+    (let ((datum (funcall thunk)))
+      (when (eq datum placeholder)
+	(scheme-reading-error port "datum label refers only to itself" n))
+      (setf (label-placeholder-datum placeholder) datum
+	    (label-placeholder-defined placeholder) t)
+      (replace-placeholder datum placeholder)
+      datum)))
+
+(defun datum-label-reference (port n)
+  "#N#: the datum labelled N, or its placeholder while it is being read."
+  (let ((placeholder (cdr (assoc n *datum-labels*))))
+    (cond ((null placeholder)
+	   (scheme-reading-error port "undefined datum label" n))
+	  ((label-placeholder-defined placeholder)
+	   (label-placeholder-datum placeholder))
+	  (t placeholder))))
+
+(defun replace-placeholder (datum placeholder)
+  "Replace PLACEHOLDER by the datum it stands for, in pairs and vectors."
+  (let ((seen (make-hash-table :test 'eq))
+	(value (label-placeholder-datum placeholder)))
+    (labels ((walk (x)
+	       (when (and (or (consp x) (simple-vector-p x))
+			  (not (gethash x seen)))
+		 (setf (gethash x seen) t)
+		 (if (consp x)
+		     (progn
+		       (if (eq (car x) placeholder) (setf (car x) value) (walk (car x)))
+		       (if (eq (cdr x) placeholder) (setf (cdr x) value) (walk (cdr x))))
+		     (dotimes (i (length x))
+		       (if (eq (svref x i) placeholder)
+			   (setf (svref x i) value)
+			   (walk (svref x i))))))))
+      (walk datum))))
+
 (defun signal-scheme-condition (fun message irritants)
   (if (or (not (stringp message))
 	  (find #\~ message))

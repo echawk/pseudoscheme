@@ -42,20 +42,15 @@
 (LOCALLY (DECLARE (SPECIAL .WARN)) (SETQ .WARN #'SCHEME-WARN))
 (SET-FUNCTION-FROM-VALUE '.WARN 'SCHEME::WARN)
 (DEFUN SCHEME-READ (&REST PORT-OPTION)
-  (DECLARE (SPECIAL CLOSE-PAREN))
   (MAYBE-FIX-&REST-PARAMETER PORT-OPTION)
   (LET ((PORT (INPUT-PORT-OPTION PORT-OPTION)))
-    (PROG NIL
-      (GO LOOP)
-      LOOP
-      (LET ((FORM (SUB-READ PORT)))
-        (IF (NOT (TRUEP (READER-TOKEN? FORM)))
-            (RETURN FORM)
-            (IF (EQ FORM CLOSE-PAREN)
-                (PROGN
-                  (.WARN "discarding extraneous right parenthesis")
-                  (GO LOOP))
-                (RETURN (READING-ERROR PORT (CDR (THE CONS FORM))))))))))
+    (CALL-WITH-READER-STATE
+     PORT
+     #'(LAMBDA NIL
+         (LET ((FORM (SUB-READ PORT)))
+           (IF (TRUEP (READER-TOKEN? FORM))
+               (READING-ERROR PORT (CDR (THE CONS FORM)))
+               FORM))))))
 (SET-VALUE-FROM-FUNCTION 'SCHEME-READ 'SCHEME::SCHEME-READ)
 (DEFUN SUB-READ-CAREFULLY (PORT)
   (LET ((FORM (SUB-READ PORT)))
@@ -152,6 +147,17 @@
         (IF (EQ FORM CLOSE-PAREN)
             'NIL
             (IF (EQ FORM DOT)
+                (READING-ERROR PORT "nothing before \" . \" in a list")
+                (CONS FORM (SUB-READ-LIST-TAIL C PORT)))))))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-LIST 'SCHEME::SUB-READ-LIST)
+(DEFUN SUB-READ-LIST-TAIL (C PORT)
+  (DECLARE (SPECIAL DOT CLOSE-PAREN))
+  (LET ((FORM (SUB-READ PORT)))
+    (IF (EQ FORM EOF-OBJECT)
+        (READING-ERROR PORT "end of file inside list -- unbalanced parentheses")
+        (IF (EQ FORM CLOSE-PAREN)
+            'NIL
+            (IF (EQ FORM DOT)
                 (LET ((LAST-FORM (SUB-READ-CAREFULLY PORT)))
                   (LET ((ANOTHER-FORM (SUB-READ PORT)))
                     (LET NIL
@@ -161,8 +167,8 @@
                            PORT
                            "randomness after form after dot"
                            ANOTHER-FORM)))))
-                (CONS FORM (SUB-READ-LIST C PORT)))))))
-(SET-VALUE-FROM-FUNCTION 'SUB-READ-LIST 'SCHEME::SUB-READ-LIST)
+                (CONS FORM (SUB-READ-LIST-TAIL C PORT)))))))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-LIST-TAIL 'SCHEME::SUB-READ-LIST-TAIL)
 (LOCALLY
   (DECLARE (SPECIAL SUB-READ-LIST))
   (SET-STANDARD-READ-MACRO! #\( TRUE SUB-READ-LIST))
@@ -384,12 +390,37 @@
        (.READ-CHAR PORT)
        (LET ((NAME (STRING-DOWNCASE
                     (CAR (THE CONS (SUB-READ-TOKEN (.READ-CHAR PORT) PORT))))))
-         (IF (STRING= NAME "fold-case")
-             (SETQ *FOLD-CASE* TRUE)
-             (IF (STRING= NAME "no-fold-case")
-                 (SETQ *FOLD-CASE*
-                       (SCHEME-ERROR '"unknown expression type" 'NIL))))
+         (IF (OR (STRING= NAME "fold-case") (STRING= NAME "no-fold-case"))
+             (SET-PORT-FOLD-CASE PORT (STRING= NAME "fold-case")))
          (SUB-READ PORT)))))
+(DEFUN SUB-READ-DATUM-LABEL (C PORT)
+  C
+  (PROG (.N.0)
+    (SETQ .N.0 0)
+    (GO LOOP)
+    LOOP
+    (LET ((N .N.0))
+      (LET ((D (.READ-CHAR PORT)))
+        (IF (EQ D EOF-OBJECT)
+            (RETURN (READING-ERROR PORT "end of file in a datum label"))
+            (IF (CHAR-NUMERIC-P D)
+                (PROGN
+                  (SETQ .N.0 (+ (* N 10) (- (CHAR->ASCII D) (CHAR->ASCII #\0))))
+                  (GO LOOP))
+                (IF (CHAR= D #\=)
+                    (RETURN (READ-LABELLED-DATUM
+                             PORT
+                             N
+                             #'(LAMBDA NIL (SUB-READ-CAREFULLY PORT))))
+                    (IF (CHAR= D #\#)
+                        (RETURN (DATUM-LABEL-REFERENCE PORT N))
+                        (RETURN (READING-ERROR PORT "bad datum label" N D))))))))))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-DATUM-LABEL 'SCHEME::SUB-READ-DATUM-LABEL)
+(AT-TOP-LEVEL
+  (LOCALLY
+    (DECLARE (SPECIAL SUB-READ-DATUM-LABEL))
+    (MAPC #'(LAMBDA (C) (DEFINE-SHARP-MACRO C SUB-READ-DATUM-LABEL))
+          (COERCE (THE SIMPLE-STRING "0123456789") 'LIST))))
 (LOCALLY
   (DECLARE (SPECIAL NAMED-CHARACTERS))
   (SETQ NAMED-CHARACTERS
@@ -562,10 +593,8 @@
   (INTERN-SCHEME-SYMBOL (IF *FOLD-CASE* (STRING-DOWNCASE .STRING) .STRING)))
 (SET-VALUE-FROM-FUNCTION 'INTERN-TOKEN 'SCHEME::INTERN-TOKEN)
 (DEFUN READING-ERROR (PORT MESSAGE &REST IRRITANTS)
-  (DECLARE (SPECIAL .ERROR))
   (MAYBE-FIX-&REST-PARAMETER IRRITANTS)
-  PORT
-  (APPLY .ERROR MESSAGE IRRITANTS))
+  (APPLY #'SCHEME-READING-ERROR PORT MESSAGE IRRITANTS))
 (SET-VALUE-FROM-FUNCTION 'READING-ERROR 'SCHEME::READING-ERROR)
 (LOCALLY (DECLARE (SPECIAL SCHEME-READ)) (SETQ *SCHEME-READ* SCHEME-READ))
 (DEFUN SHARP-NUMERIC-VECTOR (C PORT)
