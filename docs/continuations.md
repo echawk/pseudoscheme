@@ -1,6 +1,7 @@
-# Full continuations: should we CPS?
+# Full continuations
 
-Status: analysis and recommendation; nothing implemented yet.
+Status: decided (generalized stack inspection, see "Decision"); nothing
+implemented yet.
 
 ## What fails today, and why
 
@@ -105,7 +106,72 @@ CPS-converting only the body of a `reset`, as the CL library `cl-cont`
 does with macros. Code outside a prompt is untouched. That's attractive
 because it's explicit and pay-as-you-go, but it's not `call/cc`.
 
-## Recommendation
+## Decision
+
+Full continuations come from **generalized stack inspection** (option
+2), aiming for as much of Scheme's and Racket's control as we can
+support. CPS is no longer the plan, not even as a reference
+implementation.
+
+Why it fits Pseudoscheme:
+
+* Code stays direct style, so Scheme procedures remain ordinary Lisp
+  functions and docs/interop.md is unaffected. Code that never captures
+  a continuation pays only for a handler around each non-tail call.
+* The paper's mechanism is continuation marks, and Racket's
+  `parameterize`, exception handlers and prompts are built on
+  continuation marks too (docs/racket.md). One mechanism serves both.
+* CL has what the paper's .NET prototype used: `handler-case` (or
+  `catch`/`throw`) to unwind while each frame records itself, and
+  closures for the frame records.
+
+How the paper's .NET implementation works (section 4.2), and what it
+means here:
+
+1. **A-normal form** after psyntax, so every non-tail call's result is
+   bound to a variable and each call site has a well-defined set of
+   live variables.
+2. **A handler around each non-tail call.** On capture, a dedicated
+   condition (`save-continuation`) is signalled. Each handler on the way
+   out adds a record of its frame (which call site, and the values of
+   its live variables) and re-signals. The records are created only
+   while unwinding, so they cost nothing until a capture.
+3. **The top-level handler** turns the collected records into a
+   continuation object and resumes the program with it, so capture
+   looks like an ordinary return from `call/cc`.
+4. **Re-entry rebuilds the stack** from the oldest record: each frame's
+   resume function calls the next more recent one, then continues where
+   its call site left off. A frame that is resumed this way must not be
+   recorded twice by a later capture, so a restored frame's handler
+   links to the already-built records instead (the paper's figure 14).
+5. **Tail calls** aren't wrapped, so they stay tail calls (as far as the
+   Lisp compiler merges them).
+
+Also needed:
+
+* **Barriers.** Lisp frames between two Scheme frames can't be recorded
+  or rebuilt. A capture that would cross one raises a clear error;
+  escaping through one (today's `call/cc`) still works.
+* **`dynamic-wind`** as a winders list, consulted when a continuation is
+  re-entered or escaped from.
+* **Continuation marks** (`with-continuation-mark`,
+  `current-continuation-marks`) as first-class operations, built the
+  same way: a mark is part of a frame's record.
+* **Opt-in per library or program at first** (`--continuations=full`),
+  since the handlers and ANF cost something. Measure, then decide
+  whether it can be the default.
+* **One-shot continuations from threads** (option 3) remain a cheap
+  addition for generators and coroutines in code compiled without
+  full continuations.
+
+The first step is a pass framework between psyntax's output and the
+translator (core forms in, core forms out). ANF and the handler
+insertion are passes in it; so are the Lisp bridge's predicate wrapping
+and, later, the linklet compiler's analyses (docs/racket.md).
+
+## The earlier recommendation
+
+Kept for the reasoning; superseded by the decision above.
 
 1. **Don't make CPS the default.** It would make every Scheme procedure
    awkward to call from Lisp, the opposite of what docs/interop.md is

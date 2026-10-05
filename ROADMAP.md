@@ -62,7 +62,9 @@ docs/interop.md.
 
 Not triaged yet; `tests/run-r6rs-tests.lisp -v NAME` lists them.
 
-**R5RS (5).** These are continuations (3) and harness-level issues.
+**R5RS (5).** One re-enters a continuation (section 3). The other four
+are macro problems in R5RS mode's own front end, which psyntax handles
+(docs/continuations.md lists them).
 
 ## 2. Speed
 
@@ -110,17 +112,24 @@ previous build. The worst ratios point at what to do next:
 
 ## 3. Continuations
 
-docs/continuations.md describes the plan:
+Decided: full continuations from generalized stack inspection
+(Pettyjohn et al., ICFP 2005); docs/continuations.md, "Decision", has
+the design. In order:
 - a pass framework between psyntax's output and the translator;
-- an opt-in full-continuation mode, with CPS plus a trampoline as the
-  reference and generalized stack inspection as the candidate fast
-  path;
+- A-normal form, and a handler around each non-tail call that records
+  its frame when a capture unwinds the stack; re-entry rebuilds the
+  frames from the records;
+- continuation marks and `dynamic-wind` on the same mechanism (Racket
+  needs the marks too, section 7);
 - barrier errors at Lisp frames;
-- one-shot continuations from threads in the default mode.
+- opt-in at first (`--continuations=full`), then measure;
+- one-shot continuations from threads for code compiled without it.
 
 Today `call/cc` is escape-only (Lisp `catch`), and re-entering a
 continuation signals an error. SRFI 158's coroutine generators are
-buffered as a result (src/srfi/README.md).
+buffered as a result (src/srfi/README.md). Of the remaining test
+failures, R7RS's `dynamic-wind` re-entry test and R5RS's equivalent
+need this.
 
 ## 4. The Lisp bridge, next
 
