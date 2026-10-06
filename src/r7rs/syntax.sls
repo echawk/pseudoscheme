@@ -47,26 +47,22 @@
                                            ((bound-identifier=? (car cs) f) (car cs))
                                            (else (loop (cdr cs))))))
                                  fields)))
-                        #'(define ctor
-                            (record-constructor
-                             (make-record-constructor-descriptor
-                              rtd #f
-                              (lambda (p) (lambda (cfield ...) (p arg ...)))))))))
+                        #'(define (ctor cfield ...)
+                            (%r7rs:make-record rtd (vector arg ...))))))
                    (ctor
                     (identifier? #'ctor)
-                    #'(define ctor
-                        (record-constructor
-                         (make-record-constructor-descriptor rtd #f #f))))))
+                    #'(define (ctor field ...)
+                        (%r7rs:make-record rtd (vector field ...))))))
                 ((accessor-def ...)
                  (apply append
                         (map (lambda (f acc*)
                                (let ((i (field-index f fields)))
                                  (syntax-case acc* ()
                                    (() '())
-                                   ((acc) (list #`(define acc (record-accessor rtd #,i))))
+                                   ((acc) (list #`(define (acc r) (%r7rs:record-ref r rtd #,i 'acc))))
                                    ((acc mod)
-                                    (list #`(define acc (record-accessor rtd #,i))
-                                          #`(define mod (record-mutator rtd #,i)))))))
+                                    (list #`(define (acc r) (%r7rs:record-ref r rtd #,i 'acc))
+                                          #`(define (mod r v) (%r7rs:record-set! r rtd #,i v 'mod)))))))
                              fields
                              #'(accessors ...)))))
              #'(begin
@@ -76,7 +72,7 @@
                    (make-record-type-descriptor 'type #f #f #f #f (vector 'field-spec ...)))
                  (define type rtd)
                  ctor-def
-                 (define pred (record-predicate rtd))
+                 (define (pred x) (%r7rs:record? x rtd))
                  accessor-def ...))))))))
 
   ;; (parameterize ((param value) ...) body ...)   R7RS 4.2.6; parameter

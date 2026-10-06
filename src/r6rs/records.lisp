@@ -170,6 +170,31 @@ type FINAL whose fields after RCD's type's are TAIL."
     (ps:scheme-error "~A: bad field index ~S for ~A" who k (rtd-name rtd)))
   (+ (- (rtd-count rtd) (length (rtd-fields rtd))) k))
 
+;;; What R7RS's define-record-type (src/r7rs/syntax.sls) defines its
+;;; procedures with, so that they are procedures of the program's own,
+;;; called directly, rather than closures made by record-accessor and
+;;; friends.  WHO names the procedure for errors.
+
+(declaim (inline record-of-type-p))
+(defun record-of-type-p (x rtd)
+  (and (record-p x)
+       (let ((r (record-rtd x))) (or (eq r rtd) (rtd-descends-p r rtd)))))
+
+(defprim "r7rs:record-ref" (x rtd i who)
+  (unless (record-of-type-p x rtd)
+    (r6rs-assertion-violation who "not a record of the right type" x))
+  (svref (record-values x) i))
+
+(defprim "r7rs:record-set!" (x rtd i value who)
+  (unless (record-of-type-p x rtd)
+    (r6rs-assertion-violation who "not a record of the right type" x))
+  (setf (svref (record-values x) i) value)
+  ps:unspecific)
+
+(defprim "r7rs:record?" (x rtd) (bool (record-of-type-p x rtd)))
+
+(defprim "r7rs:make-record" (rtd values) (%make-record rtd values))
+
 (defprim "record-accessor" (rtd k)
   (check-rtd "record-accessor" rtd)
   (let ((i (field-index "record-accessor" rtd k))

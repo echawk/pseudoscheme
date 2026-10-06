@@ -51,7 +51,8 @@
     "chez:delete-directory" "chez:rename-file" "chez:file-modification-time"
     "chez:library-directories" "chez:timezone-offset" "chez:get-mode"
     "chez:chmod" "chez:file-change-time" "chez:machine-type"
-    "psyntax:environment?" "psyntax:environment-symbols")
+    "psyntax:environment?" "psyntax:environment-symbols"
+    "r7rs:record-ref" "r7rs:record-set!" "r7rs:record?" "r7rs:make-record")
   "Host globals (pseudoscheme host) exports besides R7RS procedure names.")
 
 (defun host-library-exports ()
