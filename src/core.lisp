@@ -542,6 +542,21 @@ braces; or with PORT's alternative reader, if it has one."
       (format stream "~A:" (keyword-object-name k))
       (write-string (keyword-object-name k) stream)))
 
+;;; Array literals (SRFI 163, src/read.scm): made by a procedure of the
+;;; rank, the tag (a string), the bounds ((lower . length-or-nil) ...)
+;;; and the datum, which *ARRAY-LITERAL-LOADER* returns (src/r7rs/front.lisp:
+;;; (srfi 163)'s) the first time one is read.
+
+(defvar *array-literal-constructor* nil)
+(defvar *array-literal-loader* nil)
+
+(defun make-array-literal (rank tag bounds datum)
+  (unless *array-literal-constructor*
+    (unless *array-literal-loader*
+      (scheme-reading-error nil "array literals aren't available here"))
+    (setq *array-literal-constructor* (funcall *array-literal-loader*)))
+  (funcall *array-literal-constructor* rank tag bounds datum))
+
 ;;; SRFI 10's #,(tag datum ...): the constructors define-reader-ctor
 ;;; registers, by tag.  A #,(tag ...) whose tag has none is R6RS's
 ;;; unsyntax.

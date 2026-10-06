@@ -449,8 +449,67 @@
 	       (lambda () (sub-read-carefully port))))
 	    ((char=? d #\#)
 	     (ps:datum-label-reference port n))
+	    ((char-alphabetic? d)
+	     (sub-read-array-literal n d port))
 	    (else
 	     (reading-error port "bad datum label" n d))))))
+
+; Array literals (SRFI 163, and SRFI 58's): #<rank><tag><bounds><datum>,
+; the tag a (or A) or a SRFI 4 tag (u32, f64, ...), or SRFI 58's A:type;
+; each bound @lower, :length or @lower:length.  The array is made by
+; ps:make-array-literal (src/core.lisp), with (srfi 163)'s procedure.
+
+(define (sub-read-array-literal rank first port)
+  (let* ((tag (read-array-tag first port))
+	 (bounds (read-array-bounds port))
+	 (datum (sub-read-carefully port)))
+    (ps:make-array-literal rank tag bounds datum)))
+
+(define (read-array-tag first port)
+  (let loop ((l (list first)))
+    (let ((c (peek-char port)))
+      (cond ((and (char? c) (or (char-alphabetic? c) (char-numeric? c)))
+	     (loop (cons (read-char port) l)))
+	    ;; SRFI 58's A:type, the type a name, not a length
+	    ((and (char? c) (char=? c #\:) (null? (cdr l))
+		  (char=? (char-downcase first) #\a))
+	     (read-char port)
+	     (let ((next (peek-char port)))
+	       (if (and (char? next) (char-alphabetic? next))
+		   (list->string (cons first (cons #\: (string->list (car (sub-read-token (read-char port) port))))))
+		   (begin
+		     ;; a length after all: put the : back as a bound
+		     (set! pending-length #t)
+		     (string first)))))
+	    (else (list->string (reverse l)))))))
+
+; READ-ARRAY-TAG may have consumed the : of a first :length bound.
+(define pending-length #f)
+
+(define (read-array-bounds port)
+  (define (read-integer)
+    (let loop ((l '()))
+      (let ((c (peek-char port)))
+	(if (and (char? c) (or (char-numeric? c) (and (null? l) (char=? c #\-))))
+	    (loop (cons (read-char port) l))
+	    (let ((n (string->number (list->string (reverse l)))))
+	      (or n (reading-error port "bad array bound")))))))
+  (let loop ((bounds '()))
+    (let ((c (peek-char port)))
+      (cond (pending-length
+	     (set! pending-length #f)
+	     (loop (cons (cons 0 (read-integer)) bounds)))
+	    ((eqv? c #\@)
+	     (read-char port)
+	     (let ((lower (read-integer)))
+	       (if (eqv? (peek-char port) #\:)
+		   (begin (read-char port)
+			  (loop (cons (cons lower (read-integer)) bounds)))
+		   (loop (cons (cons lower #f) bounds)))))
+	    ((eqv? c #\:)
+	     (read-char port)
+	     (loop (cons (cons 0 (read-integer)) bounds)))
+	    (else (reverse bounds))))))
 
 (for-each (lambda (c) (define-sharp-macro c sub-read-datum-label))
 	  (string->list "0123456789"))

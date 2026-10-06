@@ -89,8 +89,11 @@
   (defhost "set-symbol-value!" (s v) (host-set! s v) ps:unspecific)
   (defhost "eval-core" (x) (host-eval x))
   (defhost "lisp-keyword?" (x) (ps:true? (keywordp x)))
-  ;; SRFI 4's #s16(...), SRFI 88's foo:
-  (defhost "host-literal?" (x) (ps:true? (or (and (ps:numeric-vector-tag x) t) (ps:keyword-object-p x))))
+  ;; SRFI 4's #s16(...), SRFI 88's foo:, and records (SRFI 163's array
+  ;; literals)
+  (defhost "host-literal?" (x)
+    (ps:true? (or (and (ps:numeric-vector-tag x) t) (ps:keyword-object-p x)
+		  (typep x 'ps-r6rs::record))))
   (defhost "pretty-print" (x &optional (port *standard-output*))
     (funcall ps:*scheme-write* x port) (terpri port) ps:unspecific))
 

@@ -523,8 +523,109 @@
                              #'(LAMBDA NIL (SUB-READ-CAREFULLY PORT))))
                     (IF (CHAR= D #\#)
                         (RETURN (DATUM-LABEL-REFERENCE PORT N))
-                        (RETURN (READING-ERROR PORT "bad datum label" N D))))))))))
+                        (IF (ALPHA-CHAR-P D)
+                            (RETURN (SUB-READ-ARRAY-LITERAL N D PORT))
+                            (RETURN (READING-ERROR PORT "bad datum label" N D)))))))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-DATUM-LABEL 'SCHEME::SUB-READ-DATUM-LABEL)
+(DEFUN SUB-READ-ARRAY-LITERAL (RANK FIRST PORT)
+  (LET ((TAG (READ-ARRAY-TAG FIRST PORT)))
+    (LET ((BOUNDS (READ-ARRAY-BOUNDS PORT)))
+      (LET ((DATUM (SUB-READ-CAREFULLY PORT)))
+        (LET NIL (MAKE-ARRAY-LITERAL RANK TAG BOUNDS DATUM))))))
+(SET-VALUE-FROM-FUNCTION
+ 'SUB-READ-ARRAY-LITERAL
+ 'SCHEME::SUB-READ-ARRAY-LITERAL)
+(DEFUN READ-ARRAY-TAG (FIRST PORT)
+  (DECLARE (SPECIAL PENDING-LENGTH))
+  (PROG (.L.0)
+    (SETQ .L.0 (LIST FIRST))
+    (GO LOOP)
+    LOOP
+    (LET ((L .L.0))
+      (LET ((C (.PEEK-CHAR PORT)))
+        (IF (AND (CHARACTERP C) (OR (ALPHA-CHAR-P C) (CHAR-NUMERIC-P C)))
+            (PROGN (SETQ .L.0 (CONS (.READ-CHAR PORT) L)) (GO LOOP))
+            (IF (AND (CHARACTERP C)
+                     (CHAR= C #\:)
+                     (NULL (CDR (THE CONS L)))
+                     (CHAR= (CHAR-DOWNCASE FIRST) #\a))
+                (PROGN
+                  (.READ-CHAR PORT)
+                  (LET ((NEXT (.PEEK-CHAR PORT)))
+                    (IF (AND (CHARACTERP NEXT) (ALPHA-CHAR-P NEXT))
+                        (RETURN (COERCE (THE LIST
+                                             (CONS FIRST
+                                                   (CONS #\:
+                                                         (COERCE (THE SIMPLE-STRING
+                                                                      (CAR (THE CONS
+                                                                                (SUB-READ-TOKEN
+                                                                                 (.READ-CHAR PORT)
+                                                                                 PORT))))
+                                                                 'LIST))))
+                                        'SIMPLE-STRING))
+                        (PROGN
+                          (SET!-AUX 'SCHEME::PENDING-LENGTH
+                                    TRUE
+                                    'PENDING-LENGTH)
+                          (RETURN (.STRING FIRST))))))
+                (RETURN (COERCE (THE LIST (REVERSE L)) 'SIMPLE-STRING))))))))
+(SET-VALUE-FROM-FUNCTION 'READ-ARRAY-TAG 'SCHEME::READ-ARRAY-TAG)
+(LOCALLY (DECLARE (SPECIAL PENDING-LENGTH)) (SETQ PENDING-LENGTH FALSE))
+(SET-FUNCTION-FROM-VALUE 'PENDING-LENGTH 'SCHEME::PENDING-LENGTH)
+(DEFUN READ-ARRAY-BOUNDS (PORT)
+  (DECLARE (SPECIAL PENDING-LENGTH))
+  (LABELS ((READ-INTEGER NIL
+                         (PROG (.L.0)
+                           (SETQ .L.0 'NIL)
+                           (GO LOOP)
+                           LOOP
+                           (LET ((L .L.0))
+                             (LET ((C (.PEEK-CHAR PORT)))
+                               (IF (AND (CHARACTERP C)
+                                        (OR (CHAR-NUMERIC-P C)
+                                            (AND (NULL L) (CHAR= C #\-))))
+                                   (PROGN
+                                     (SETQ .L.0 (CONS (.READ-CHAR PORT) L))
+                                     (GO LOOP))
+                                   (LET ((N (STRING->NUMBER
+                                             (COERCE (THE LIST (REVERSE L))
+                                                     'SIMPLE-STRING))))
+                                     (LET ((TEMP N))
+                                       (IF (TRUEP TEMP)
+                                           (RETURN TEMP)
+                                           (RETURN (READING-ERROR
+                                                    PORT
+                                                    "bad array bound")))))))))))
+    (PROG (BOUNDS)
+      (SETQ BOUNDS 'NIL)
+      (GO LOOP)
+      LOOP
+      (LET ((C (.PEEK-CHAR PORT)))
+        (IF (TRUEP PENDING-LENGTH)
+            (PROGN
+              (SET!-AUX 'SCHEME::PENDING-LENGTH FALSE 'PENDING-LENGTH)
+              (SETQ BOUNDS (CONS (CONS 0 (READ-INTEGER)) BOUNDS))
+              (GO LOOP))
+            (IF (EQL C #\@)
+                (PROGN
+                  (.READ-CHAR PORT)
+                  (LET ((LOWER (READ-INTEGER)))
+                    (IF (EQL (.PEEK-CHAR PORT) #\:)
+                        (PROGN
+                          (.READ-CHAR PORT)
+                          (SETQ BOUNDS
+                                (CONS (CONS LOWER (READ-INTEGER)) BOUNDS))
+                          (GO LOOP))
+                        (PROGN
+                          (SETQ BOUNDS (CONS (CONS LOWER FALSE) BOUNDS))
+                          (GO LOOP)))))
+                (IF (EQL C #\:)
+                    (PROGN
+                      (.READ-CHAR PORT)
+                      (SETQ BOUNDS (CONS (CONS 0 (READ-INTEGER)) BOUNDS))
+                      (GO LOOP))
+                    (RETURN (REVERSE BOUNDS)))))))))
+(SET-VALUE-FROM-FUNCTION 'READ-ARRAY-BOUNDS 'SCHEME::READ-ARRAY-BOUNDS)
 (AT-TOP-LEVEL
   (LOCALLY
     (DECLARE (SPECIAL SUB-READ-DATUM-LABEL))

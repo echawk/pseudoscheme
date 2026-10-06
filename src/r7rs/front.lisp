@@ -658,6 +658,9 @@ once per host."
   (eval-forms (list (read-scheme (format nil "(import (only ~A ~A))" library name))
 		    (ssym name))))
 
+(setf ps:*array-literal-loader*
+      (lambda () (library-procedure "(srfi 163)" "array-literal")))
+
 (setf ps:*reader-directives*
       (loop for (directive library name) in *alternative-readers*
 	    collect (let ((library library) (name name))
