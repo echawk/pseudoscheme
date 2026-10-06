@@ -93,7 +93,7 @@
   (defhost "pretty-print" (x &optional (port *standard-output*))
     (funcall ps:*scheme-write* x port) (terpri port) ps:unspecific))
 
-(defparameter *closed-primitives* '("assv" "memv" "map" "for-each")
+(defparameter *closed-primitives* '("assv" "map" "for-each")
   "Primitives whose host binding is one of the translator's integrated
 built-ins but whose value the R6RS/R7RS layers replaced: OPEN-PRIMITIVES
 must leave them as (primitive x), or the translator would open-code the

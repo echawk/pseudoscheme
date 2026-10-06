@@ -86,12 +86,12 @@
 (defprim "memp" (proc list) (mem-tail (lambda (x) (truthy (funcall proc x))) list))
 (defprim "member" (obj list &optional compare)
   ;; R7RS's optional third argument; R6RS has two.
-  (mem-tail (if compare
-		(lambda (x) (truthy (funcall compare obj x)))
-		(lambda (x) (ps:scheme-equal-p obj x)))
-	    list))
-(defprim "memv" (obj list) (mem-tail (lambda (x) (eql obj x)) list))
-(defprim "memq" (obj list) (mem-tail (lambda (x) (eq obj x)) list))
+  (if compare
+      (mem-tail (lambda (x) (truthy (funcall compare obj x))) list)
+      (loop for tail on list
+	    when (ps:scheme-equal-p obj (car tail)) return tail
+	    finally (return ps:false))))
+;; memq and memv are the translator's, open-coded as CL's MEMBER.
 
 (defun ass (pred alist)
   (dolist (pair alist ps:false)
@@ -104,8 +104,13 @@
 	   (lambda (x) (truthy (funcall compare obj x)))
 	   (lambda (x) (ps:scheme-equal-p obj x)))
        alist))
-(defprim "assv" (obj alist) (ass (lambda (x) (eql obj x)) alist))
-(defprim "assq" (obj alist) (ass (lambda (x) (eq obj x)) alist))
+(defmacro def-ass (name test)
+  `(defprim ,name (obj alist)
+     (dolist (pair alist ps:false)
+       (unless (consp pair) (ps:scheme-error "~A: not an association list" ,name))
+       (when (,test obj (car pair)) (return pair)))))
+(def-ass "assv" eql)
+(def-ass "assq" eq)
 
 (defprim "cons*" (obj &rest objs)
   (if objs (apply #'list* obj objs) obj))
