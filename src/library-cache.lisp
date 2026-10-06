@@ -248,7 +248,11 @@ NIL if that didn't work."
 		    (print code out))))
 	      (handler-bind ((warning #'muffle-warning))
 		(with-standard-io-syntax
-		  (let ((*package* (find-package "SCHEME")))
+		  (let ((*package* (find-package "SCHEME"))
+			;; the compiler's notes on generated code are noise;
+			;; a failure still shows as FAILURE-P
+			(*error-output* (make-broadcast-stream))
+			(*standard-output* (make-broadcast-stream)))
 		    (multiple-value-bind (output warnings-p failure-p)
 			(if *full-continuations*
 			    (call-with-full-policy (lambda () (compile-file lisp :output-file temp-fasl :verbose nil :print nil)))
