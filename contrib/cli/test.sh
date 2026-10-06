@@ -59,8 +59,11 @@ cat > $tmp/prog6.sps <<'S'
 S
 check "r6rs program + library from -L" "(2 1)" $PS --r6rs -L $tmp/lib $tmp/prog6.sps
 
-check "--continuations=full re-enters" "(2 3 5)" $PS --continuations=full -p "(let ((k #f) (n 0)) (let ((v (call/cc (lambda (c) (set! k c) 0)))) (set! n (+ n 1)) (if (< n 3) (k n) (list v n (+ v n)))))"
-check "--r5rs --continuations=full" "3" $PS --r5rs --continuations=full -p "(let ((k #f) (n 0)) (call-with-current-continuation (lambda (c) (set! k c))) (set! n (+ n 1)) (if (< n 3) (k #f) n))"
+reenter="(let ((k #f) (n 0)) (let ((v (call/cc (lambda (c) (set! k c) 0)))) (set! n (+ n 1)) (if (< n 3) (k n) (list v n (+ v n)))))"
+check "continuations re-enter (full, the default)" "(2 3 5)" $PS -p "$reenter"
+check "--continuations=full" "(2 3 5)" $PS --continuations=full -p "$reenter"
+check "--continuations=escape can't re-enter" "no" sh -c "$PS --continuations=escape -p '$reenter' >/dev/null 2>&1 && echo yes || echo no"
+check "--r5rs re-enters" "3" $PS --r5rs -p "(let ((k #f) (n 0)) (call-with-current-continuation (lambda (c) (set! k c))) (set! n (+ n 1)) (if (< n 3) (k #f) n))"
 
 mkdir -p $tmp/home
 cat > $tmp/home/.sbclrc <<'S'

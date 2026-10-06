@@ -4,7 +4,7 @@
 ;;;; Pseudoscheme and reports the pass count.
 ;;;;
 ;;;; Usage:
-;;;;   sbcl --script tests/run-r5rs-tests.lisp [--classic | --continuations=full]
+;;;;   sbcl --script tests/run-r5rs-tests.lisp [--classic | --continuations=escape]
 ;;;; or, from an already-running image with :pseudoscheme loaded:
 ;;;;   (load "tests/run-r5rs-tests.lisp")
 
@@ -40,14 +40,14 @@
 ;; as the API's R5RS: functions are; --classic runs the suite on the
 ;; translator's own classic front end instead (what the translator is
 ;; bootstrapped with).
-(defparameter *full* (member "--continuations=full" *arguments* :test #'string=))
+(defparameter *full* (not (member "--continuations=escape" *arguments* :test #'string=)))
 (defparameter *psyntax* (not (member "--classic" *arguments* :test #'string=)))
 
 (when *psyntax*
   (load-system :pseudoscheme/r7rs)
   (ps:disable-float-traps)
   (uiop:symbol-call "PSEUDOSCHEME-R7RS" "BOOT")
-  (when *full* (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t)))
+  (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) (and *full* t)))
 
 (defun evaluate (form)
   (if *psyntax*

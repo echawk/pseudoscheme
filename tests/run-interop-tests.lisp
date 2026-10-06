@@ -114,6 +114,14 @@ written form of its value."
 (stest "Scheme predicate's #f reaches Lisp as NIL" "1"
        (p "(t:count-true (lambda (x) (> x 2)) '(1 2 3))"))
 (stest "Scheme procedure called from Lisp" "11" (p "(t:call-with (lambda (x) (+ x 1)) 10)"))
+;; continuations through Lisp code: escaping works; re-entering a
+;; continuation captured under Lisp code is an error, not a wrong answer
+(stest "escape from a Scheme procedure called from Lisp" "escaped"
+       (p "(call/cc (lambda (k) (cl:mapcar (lambda (x) (if (= x 2) (k 'escaped) x)) '(1 2 3))))"))
+(stest "re-entry through Lisp code is an error" "barrier"
+       (p "(let ((k #f) (n 0)) (guard (e (#t 'barrier)) (cl:mapcar (lambda (x) (call/cc (lambda (c) (if (= x 2) (set! k c)) x))) '(1 2 3)) (set! n (+ n 1)) (if (< n 2) (k 0) n)))"))
+(stest "re-entry around Lisp code works" "(2 (1 2 3))"
+       (p "(let ((k #f) (n 0)) (let ((r (call/cc (lambda (c) (set! k c) 0)))) (set! n (+ n 1)) (let ((l (cl:mapcar (lambda (x) (+ x r)) '(1 2 3)))) (if (< n 2) (k 0) (list n l)))))"))
 (stest "keyword arguments" "(6 30)" (p "(list (t:scale 3) (t:scale 3 #:by 10))"))
 (stest "keyword reads, writes, is self-evaluating" "(#:by #:by #t)" (p "(list #:by '#:by (eq? #:by (lisp-keyword \"by\")))"))
 (stest "multiple values" "(3 2)" (p "(call-with-values (lambda () (t:divide 17 5)) list)"))

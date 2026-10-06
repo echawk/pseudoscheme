@@ -1,5 +1,6 @@
 # Pseudoscheme's continuous integration: the bootstrap chain from other
-# Schemes, and every test suite (default mode and full continuations).
+# Schemes, and every test suite (full continuations, the default, and
+# escape-only).
 # See boot/README.md and ROADMAP.md.  The benchmarks are a separate
 # workflow, run by hand (bench.yml).
 
@@ -72,7 +73,7 @@ jobs:
           name: bootstrap-logs
           path: boot/build/**/*.log
 
-  # Every test suite, in the default mode and with full continuations,
+  # Every test suite, with full continuations (the default) and escape-only,
   # the command line, the shipped SRFIs as a library corpus, and the
   # R7RS export table against the report.
   test:
@@ -86,8 +87,8 @@ jobs:
       - name: Test suites
         run: make test
 
-      - name: Test suites with full continuations
-        run: make test-full
+      - name: Test suites with escape-only continuations
+        run: make test-escape
 
       - name: Command line
         run: make test-cli

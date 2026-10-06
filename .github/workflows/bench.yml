@@ -31,10 +31,11 @@ jobs:
           CPU_LIMIT: 300
           BENCH_TEMP: /tmp/r7rs-benchmarks
         run: |
-          if [ "${{ matrix.mode }}" = full ]; then
-            printf '#!/bin/sh\nexec "%s/bin/pseudoscheme" --continuations=full "$@"\n' "$PWD" > /tmp/pseudoscheme-full
-            chmod +x /tmp/pseudoscheme-full
-            export PSEUDOSCHEME=/tmp/pseudoscheme-full
+          # full continuations are the default
+          if [ "${{ matrix.mode }}" = escape ]; then
+            printf '#!/bin/sh\nexec "%s/bin/pseudoscheme" --continuations=escape "$@"\n' "$PWD" > /tmp/pseudoscheme-escape
+            chmod +x /tmp/pseudoscheme-escape
+            export PSEUDOSCHEME=/tmp/pseudoscheme-escape
           fi
           bench/run.sh pseudoscheme
 

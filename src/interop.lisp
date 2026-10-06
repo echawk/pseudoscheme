@@ -105,12 +105,17 @@ than a named function like #'evenp."
 
 (defun lisp-facing (procedure)
   "PROCEDURE (a Scheme procedure) as a Lisp function: its arguments go
-to Scheme (TO-SCHEME), its results come back with #f as NIL."
+to Scheme (TO-SCHEME), its results come back with #f as NIL.  It's
+called in a barrier frame (src/continuations.lisp): the Lisp code
+calling it isn't recorded in a captured continuation, so re-entering one
+captured in PROCEDURE would resume as if that Lisp code had returned at
+once; the barrier makes it an error instead.  Escaping works."
   (or (gethash procedure *originals*)
       (gethash procedure *lisp-facing*)
       (let ((f (lambda (&rest args)
-		 (multiple-value-call #'false-to-nil
-		   (apply procedure (mapcar #'to-scheme args))))))
+		 (psx::%barrier "Lisp code that called a Scheme procedure"
+		   (multiple-value-call #'false-to-nil
+		     (apply procedure (mapcar #'to-scheme args)))))))
 	(setf (gethash f *originals*) procedure
 	      (gethash procedure *lisp-facing*) f))))
 
@@ -741,6 +746,7 @@ prefix or rename."
   (ps-r7rs::boot)
   (unless (eq *booted-host* psx:*host*)
     (pushnew 'cl-library-hook ps-r7rs::*virtual-libraries*)
-    (install-lisp-primitives)
+    (let ((psx::*full-continuations* nil))
+      (install-lisp-primitives))
     (setq *booted-host* psx:*host*))
   t)

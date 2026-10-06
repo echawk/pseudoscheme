@@ -5,11 +5,12 @@
 SBCL ?= sbcl
 
 .PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
-	test test-full test-cli test-all
+	test test-escape test-cli test-all
 
-# Tests.  `make test` runs every suite in the default mode; `make
-# test-full` the suites that can, with full continuations
-# (src/continuations.lisp); `make test-cli` builds and tests the command
+# Tests.  `make test` runs every suite in the default mode (full
+# continuations, src/continuations.lisp); `make test-escape` the
+# standards' suites with escape-only continuations (--continuations=escape);
+# `make test-cli` builds and tests the command
 # line; `make test-all` all three.  Each suite prints its tally, and the
 # make stops at the first one that fails to finish.  The compiled-library
 # cache is off, so a stale cache can't hide anything.
@@ -27,18 +28,18 @@ test:
 	    || { echo "$$t: no result; see /tmp/pseudoscheme-test-$$t.log"; exit 1; }; \
 	done
 
-test-full:
+test-escape:
 	@for t in r5rs r7rs r6rs; do \
-	  $(SCHEME_RUN) tests/run-$$t-tests.lisp --continuations=full > /tmp/pseudoscheme-test-full-$$t.log 2>&1; \
-	  grep -hE "tests passed|of [0-9]+ tests" /tmp/pseudoscheme-test-full-$$t.log \
-	    | sed 's/^/full continuations: /' \
-	    || { echo "$$t: no result; see /tmp/pseudoscheme-test-full-$$t.log"; exit 1; }; \
+	  $(SCHEME_RUN) tests/run-$$t-tests.lisp --continuations=escape > /tmp/pseudoscheme-test-escape-$$t.log 2>&1; \
+	  grep -hE "tests passed|of [0-9]+ tests" /tmp/pseudoscheme-test-escape-$$t.log \
+	    | sed 's/^/escape-only continuations: /' \
+	    || { echo "$$t: no result; see /tmp/pseudoscheme-test-escape-$$t.log"; exit 1; }; \
 	done
 
 test-cli:
 	$(MAKE) -C contrib/cli test
 
-test-all: test test-full test-cli
+test-all: test test-escape test-cli
 
 # Everything, in order:
 #  1. the .pso files (and spack.lisp), in some other Scheme: $(SCHEME)

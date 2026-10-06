@@ -573,15 +573,19 @@ continuations (src/continuations.lisp)."
 once per host."
   (unless psx:*host* (psx::boot))
   (unless (eq *booted-host* psx:*host*)
-    (install-front-primitives)
-    (setf *port-parameters*
-	  (loop for (name . var) in '(("current-input-port" . *standard-input*)
-				      ("current-output-port" . *standard-output*)
-				      ("current-error-port" . *error-output*))
-		when (boundp (psx:location (ssym name)))
-		  collect (cons (psx:host-ref name) var)))
-    (setf psx:*library-form-hook* #'locate-library-form)
-    ;; the same ids every session, for compiled libraries
-    (psx::with-boot-gensyms (install-standard-libraries))
+    (let ((psx::*full-continuations* nil))	; re-exports, syntax, two definitions
+      (boot-libraries))
     (setq *booted-host* psx:*host*))
   t)
+
+(defun boot-libraries ()
+  (install-front-primitives)
+  (setf *port-parameters*
+	(loop for (name . var) in '(("current-input-port" . *standard-input*)
+				    ("current-output-port" . *standard-output*)
+				    ("current-error-port" . *error-output*))
+	      when (boundp (psx:location (ssym name)))
+		collect (cons (psx:host-ref name) var)))
+  (setf psx:*library-form-hook* #'locate-library-form)
+  ;; the same ids every session, for compiled libraries
+  (psx::with-boot-gensyms (install-standard-libraries)))

@@ -41,10 +41,12 @@
   --quicklisp      load Quicklisp (~/quicklisp/setup.lisp), so that
                    importing (cl <package>) can fetch missing systems
   --no-userinit    don't load the Lisp's init file (~/.sbclrc for SBCL)
-  --continuations=full
-                   compile with full, re-entrant continuations (a
-                   continuation can be called after its call/cc has
-                   returned); without it they are escape-only
+  --continuations=escape
+                   compile with escape-only continuations (a
+                   continuation can't be called after its call/cc has
+                   returned), which is a little faster in code that
+                   calls unknown procedures in loops; the default,
+                   --continuations=full, makes them re-entrant
   -i, --interactive
                    start a REPL after running the file or expressions
   --version        print the version and exit
@@ -132,6 +134,8 @@ list of (:eval text) / (:print text)."
 		((string= a "--no-userinit") (setq *userinit* nil))
 		((string= a "--continuations=full")
 		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t))
+		((string= a "--continuations=escape")
+		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) nil))
 		((member a '("-i" "--interactive") :test #'string=) (setq interactive t))
 		((member a '("-h" "--help") :test #'string=)
 		 (write-string *usage*) (uiop:quit 0))

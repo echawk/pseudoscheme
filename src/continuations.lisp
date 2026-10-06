@@ -353,7 +353,7 @@ call returns, then continue the frame."
       (:escape (catch (svref frame 2) (with-frame (frame) (funcall inner))))
       (:resume (let ((value (with-frame (frame) (funcall inner))))
 		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
-      (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A, a procedure written in Lisp"
+      (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
 				 (svref frame 2)))
       (t (let ((value (with-frame (frame) (funcall inner))))
 	   (apply head (svref frame 2) value frame (make-list (svref frame 3))))))))
@@ -438,8 +438,12 @@ restore the site's live variables and continue after it."
   '(optimize #+sbcl (sb-c::insert-debug-catch 0)))
 
 (defun call-with-full-policy (thunk)
-  "Call THUNK, which compiles full-continuation code, under *FULL-POLICY*."
-  #+sbcl (with-compilation-unit (:policy *full-policy*) (funcall thunk))
+  "Call THUNK, which compiles full-continuation code, under *FULL-POLICY*.
+The global policy is bound, rather than a compilation unit made: THUNK
+may also run the code it compiles, and leave by a non-local exit (a
+program's exit), which a compilation unit would report as aborted."
+  #+sbcl (let ((sb-c::*policy* (sb-c::process-optimize-decl *full-policy* sb-c::*policy*)))
+	   (funcall thunk))
   #-sbcl (funcall thunk))
 
 (defmacro %lifted (lambda)
@@ -450,8 +454,11 @@ restore the site's live variables and continue after it."
 ;;; ------------------------------------------------------------------
 ;;; Which calls may capture
 
-(defvar *full-continuations* nil
-  "True to compile with full, re-entrant continuations.")
+(defvar *full-continuations* t
+  "True (the default) to compile with full, re-entrant continuations;
+false for escape-only ones (call/cc as a catch, a continuation usable
+only during the extent of its call), which compile a little faster and
+run a little faster in code that calls unknown procedures in loops.")
 
 (defparameter *full-replacements*
   '(("call-with-current-continuation" . "%full-call/cc")
@@ -1377,7 +1384,12 @@ its own, of the chunk's free variables."
     (cc-transform-1 form)))
 
 (defun cc-transform-1 (form)
-  (cond ((and (consp form) (keyword-p (car form) "BEGIN") (cdr form))
+  (cond ((and (consp form) (keyword-p (car form) "DEFINE") (consp (cadr form)))
+	 ;; (define (f . formals) body ...), from the runtime's own sources
+	 (cc-transform-1 `(,(car form) ,(car (cadr form))
+			   (,(sym "lambda") ,(cdr (cadr form))
+			    ,(if (cdddr form) `(,(sym "begin") ,@(cddr form)) (caddr form))))))
+	((and (consp form) (keyword-p (car form) "BEGIN") (cdr form))
 	 `(,(car form) ,@(mapcar #'cc-transform-1 (cdr form))))
 	((and (consp form) (keyword-p (car form) "DEFINE"))
 	 (if (simple-p (caddr form))

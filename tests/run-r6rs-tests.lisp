@@ -7,7 +7,7 @@
 ;;;; tests failed" line it prints is tallied.
 ;;;;
 ;;;; Usage:  sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
-;;;;              --script tests/run-r6rs-tests.lisp [-v] [--continuations=full] [name ...]
+;;;;              --script tests/run-r6rs-tests.lisp [-v] [--continuations=escape] [name ...]
 ;;;; e.g. ... --script tests/run-r6rs-tests.lisp lists sorting
 
 (require :asdf)
@@ -38,9 +38,9 @@
 (ps:disable-float-traps)
 
 (defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
-;; --continuations=full: compile the programs and the libraries they load
-;; with full continuations (src/continuations.lisp).
-(defparameter *full* (member "--continuations=full" (uiop:command-line-arguments) :test #'string=))
+;; --continuations=escape: compile the programs and the libraries they load
+;; with escape-only continuations (src/continuations.lisp).
+(defparameter *full* (not (member "--continuations=escape" (uiop:command-line-arguments) :test #'string=)))
 (defparameter *only* (remove-if (lambda (a) (char= (char a 0) #\-))
 				(uiop:command-line-arguments)))
 

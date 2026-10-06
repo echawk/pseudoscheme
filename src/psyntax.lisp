@@ -571,6 +571,10 @@ is one (compiled, if ASDF has compiled it), else the original Scheme48
 one (which lacks our entry points; see REBUILD).  SEED: T for the
 Scheme48 image regardless, or the pathname of an image built from our
 sources elsewhere (boot/ builds one with Chez Scheme)."
+  (let ((*full-continuations* nil))	; booting: no Scheme procedures to speak of
+    (boot-1 seed)))
+
+(defun boot-1 (seed)
   (prepare-host)
   (let ((own (vendor-file "psyntax-pseudoscheme.pp")))
     (cond ((and seed (not (eq seed t)))
@@ -725,7 +729,12 @@ installed, and what follows them, if anything, is run as a program."
   "Run psyntax-buildscript.ss -- the expander expanding its own sources --
 writing psyntax-pseudoscheme.pp.  SEED is as for BOOT.  DIRECTORY holds
 the build script and psyntax/ and receives the image; by default
-vendor/psyntax/, else (as for boot/) a copy of it."
+vendor/psyntax/, else (as for boot/) a copy of it.  Escape-only: the
+build is a program of no continuations to speak of, and big."
+  (let ((*full-continuations* nil))
+    (rebuild-1 seed directory)))
+
+(defun rebuild-1 (seed directory)
   (boot :seed seed)
   (let* ((directory (truename directory))
 	 (*default-pathname-defaults* directory)
