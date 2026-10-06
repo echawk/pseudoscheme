@@ -593,15 +593,22 @@ continuations (src/continuations.lisp)."
 			     (mapcar #'ssym '("pseudoscheme" "r5rs")))
       (psx:eval-top-level form))))
 
+(defun translate-repl-imports (form)
+  "FORM's import sets, R7RS's library names made psyntax's, it being an
+import or a begin of forms that may be."
+  (cond ((head-is form "import")
+	 (cons (car form) (mapcar #'translate-import-set (cdr form))))
+	((head-is form "begin")
+	 (cons (car form) (mapcar #'translate-repl-imports (cdr form))))
+	(t form)))
+
 (defun eval-at-repl (form)
   "Evaluate FORM in the R7RS REPL's environment.  (import ...) works."
   (with-psyntax-parameter ("psyntax:interaction-library-name"
 			   (mapcar #'ssym '("pseudoscheme" "r7rs" "interaction")))
     (with-psyntax-parameter ("psyntax:interaction-source-name"
 			     (mapcar #'ssym '("pseudoscheme" "r7rs")))
-      (let ((form (if (head-is form "import")
-		      (cons (car form) (mapcar #'translate-import-set (cdr form)))
-		      form)))
+      (let ((form (translate-repl-imports form)))
 	(if (head-is form "define-library")
 	    (psx:eval-library (library-form form))
 	    (psx:eval-top-level form))))))

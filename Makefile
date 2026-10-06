@@ -5,13 +5,15 @@
 SBCL ?= sbcl
 
 .PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
-	test test-escape test-cli test-all
+	test test-escape test-cli test-srfi test-all
 
 # Tests.  `make test` runs every suite in the default mode (full
 # continuations, src/continuations.lisp); `make test-escape` the
 # standards' suites with escape-only continuations (--continuations=escape);
 # `make test-cli` builds and tests the command
-# line; `make test-all` all three.  Each suite prints its tally, and the
+# line; `make test-srfi` builds it and runs the bundled SRFIs' tests
+# (src/srfi/tests/, tests/run-srfi-tests.sh; SRFIS="1 13" for some);
+# `make test-all` all four.  Each suite prints its tally, and the
 # make stops at the first one that fails to finish.  The compiled-library
 # cache is off, so a stale cache can't hide anything.
 SCHEME_RUN = PSEUDOSCHEME_LIBRARY_CACHE=0 $(SBCL) --dynamic-space-size 4GB \
@@ -39,7 +41,13 @@ test-escape:
 test-cli:
 	$(MAKE) -C contrib/cli test
 
-test-all: test test-escape test-cli
+test-srfi:
+	@echo "Building bin/pseudoscheme (log: /tmp/pseudoscheme-cli-build.log) ..."
+	@$(MAKE) -C contrib/cli > /tmp/pseudoscheme-cli-build.log 2>&1 \
+	  || { tail -20 /tmp/pseudoscheme-cli-build.log; exit 1; }
+	@sh tests/run-srfi-tests.sh bin/pseudoscheme $(SRFIS)
+
+test-all: test test-escape test-cli test-srfi
 
 # Everything, in order:
 #  1. the .pso files (and spack.lisp), in some other Scheme: $(SCHEME)
