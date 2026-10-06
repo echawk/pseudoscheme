@@ -229,3 +229,20 @@
                                  (map (lambda (f) (%read-file-forms f #t))
                                       (syntax->datum #'(file ...)))))))
            #'(begin form ...)))))))
+
+;;; environment, interaction-environment and eval, defined once for the
+;;; generated (scheme ...) libraries that export them: (scheme eval),
+;;; (scheme repl) and (scheme r5rs) export the same bindings.  The
+;;; interaction environment is the REPL's: eval of a definition or an
+;;; import there works as at the REPL.
+(library (pseudoscheme r7rs environments)
+  (export r7rs-environment r7rs-interaction-environment r7rs-eval)
+  (import (rnrs) (rnrs eval) (prefix (pseudoscheme host) %))
+  (define (r7rs-environment . specs)
+    (apply environment (map %r7rs:translate-import-set specs)))
+  (define (r7rs-interaction-environment)
+    (%r7rs:interaction-environment))
+  (define (r7rs-eval form env)
+    (if (eq? env (%r7rs:interaction-environment))
+        (%r7rs:eval-at-repl form)
+        (eval form env))))

@@ -77,9 +77,11 @@ name first (see -l and --quicklisp; docs/interop.md).
 (defvar *script* nil "Running as one of SRFI 22's script interpreters?")
 
 (defun evaluate-string (text)
+  "-e and -p: TEXT's forms, one by one, as at the REPL (so an import or a
+definition holds for the next -e too); the last one's values."
   (ecase *standard*
-    (:r7rs (r7rs:eval text))
-    (:r6rs (r6rs:eval text))
+    (:r7rs (pseudoscheme-api::r7rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
+    (:r6rs (pseudoscheme-api::r6rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
     (:r5rs (r5rs:eval text))))
 
 (defun run-file (path)

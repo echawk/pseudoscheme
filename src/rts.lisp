@@ -188,10 +188,12 @@
 ; It seems sensible to respect *print-pretty*, in any case.
 
 (defune write (obj &optional (port *standard-output*))
-  (funcall ps:*scheme-write* obj port))
+  (funcall ps:*scheme-write* obj port)
+  ps:unspecific)
 
 (defune display (obj &optional (port *standard-output*))
-  (funcall ps:*scheme-display* obj port))
+  (funcall ps:*scheme-display* obj port)
+  ps:unspecific)
 
 ; String ports (not required by R5RS itself, but widely provided as an
 ; extension, and relied on by chibi's R5RS/R7RS test suites).

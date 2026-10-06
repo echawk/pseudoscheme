@@ -44,6 +44,7 @@
 (defparameter *host-extras*
   '("%parameterize" "$delay-force" "cond-expand-satisfied?" "read-file-forms"
     "r7rs:error" "r7rs:bytevector-copy!" "r7rs:load" "r7rs:translate-import-set"
+    "r7rs:interaction-environment" "r7rs:eval-at-repl"
     "make-parameter" "make-list" "gensym" "open-input-string" "open-output-string" "get-output-string"
     "chez:system" "chez:with-input-from-string" "chez:with-output-to-string"
     "chez:current-directory" "chez:file-directory?" "chez:file-regular?"
@@ -320,14 +321,16 @@ names of *LIBRARY-ALIASES*."
   "R7RS names whose host global of the same name means something else.")
 
 (defparameter *from-rnrs*
-  '("eval" "null-environment" "scheme-report-environment")
+  '("null-environment" "scheme-report-environment")
   "Procedures taken from psyntax's own libraries: they deal in psyntax
 environments.")
 
 (defparameter *defined-locally*
   '(("environment" . "r7rs-environment")
-    ("interaction-environment" . "r7rs-interaction-environment"))
-  "Procedures each generated library defines in its body.")
+    ("interaction-environment" . "r7rs-interaction-environment")
+    ("eval" . "r7rs-eval"))
+  "Procedures the generated libraries take from (pseudoscheme r7rs
+environments) (src/r7rs/syntax.sls), under these names.")
 
 (defun host-bound-p (name)
   (boundp (psx::location (ssym name))))
@@ -355,11 +358,8 @@ the host has no such procedure.")
                             (only (rnrs r5rs) delay null-environment scheme-report-environment)
                             (only (rnrs eval) eval environment)
                             (pseudoscheme r7rs syntax)
-                            (prefix (pseudoscheme host) %))
-                    (define (r7rs-environment . specs)
-                      (apply environment (map %r7rs:translate-import-set specs)))
-                    (define (r7rs-interaction-environment)
-                      (environment '(pseudoscheme r7rs))))"
+                            (pseudoscheme r7rs environments)
+                            (prefix (pseudoscheme host) %)))"
 	     (mapcar #'sname* name) (nreverse exports)))))
 
 (defun write-scheme-to-string (x)
@@ -503,10 +503,14 @@ cond-expand.")
   (psx:defhost "read-file-forms" (file fold-case)
     (read-forms (include-path file) :fold-case (ps:truep fold-case)))
   (psx:defhost "r7rs:translate-import-set" (spec) (translate-import-set spec))
+  ;; R7RS's load: the file's forms, one by one, at the REPL (in the
+  ;; interaction environment), whatever the environment
   (psx:defhost "r7rs:load" (file &optional env)
     (declare (ignore env))
-    (load-file file)
+    (load-file-at-repl file)
     ps:unspecific)
+  (psx:defhost "r7rs:interaction-environment" () *interaction-environment*)
+  (psx:defhost "r7rs:eval-at-repl" (form) (eval-at-repl form))
   ;; Promises: R7RS's, built natively in the host (delay-force is the
   ;; R7RS layer's own macro there).
   (psx::host-eval (read-scheme "(define ($delay-force thunk) (delay-force (thunk)))")))
@@ -552,6 +556,16 @@ then the rest."
 	(psx:eval-program (cons (cons (ssym "import") (mapcar #'translate-import-set imports))
 				body))
 	ps:unspecific)))
+
+(defvar *interaction-environment* (list 'interaction-environment)
+  "What R7RS's interaction-environment returns: eval evaluates in the
+REPL's environment for it.")
+
+(defun load-file-at-repl (path)
+  (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
+	(value ps:unspecific))
+    (dolist (form (read-forms path) value)
+      (setq value (eval-at-repl form)))))
 
 (defun load-file (path)
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path))))
