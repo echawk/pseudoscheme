@@ -10,6 +10,9 @@
 # (8GB, reserved, not allocated): SBCL's copying collector needs room
 # beyond the live data, and allocation-heavy programs (the paraffins and
 # mperm benchmarks) exhaust 2GB.
+#
+# SRFI 22's script interpreters, bin/scheme-r5rs and the rest, are links
+# to bin/pseudoscheme, which looks at the name it's run as.
 
 LISP ?= sbcl
 ROOT := $(abspath ../..)
@@ -26,6 +29,8 @@ else
   $(error unknown LISP=$(LISP): use sbcl, ccl, ecl or clisp)
 endif
 
+SCRIPT_INTERPRETERS = scheme-r4rs scheme-r5rs scheme-ieee-1178-1990 scheme-srfi-0 scheme-r6rs scheme-r7rs
+
 all: $(ROOT)/bin/pseudoscheme
 
 $(ROOT)/bin/pseudoscheme: FORCE
@@ -33,6 +38,7 @@ $(ROOT)/bin/pseudoscheme: FORCE
 	rm -f $(ROOT)/bin/pseudoscheme.new  # else ASDF thinks it's up to date after a Makefile-only change
 	$(RUN) build.lisp
 	mv -f $(ROOT)/bin/pseudoscheme.new $(ROOT)/bin/pseudoscheme  # atomically, for programs running the old one
+	for name in $(SCRIPT_INTERPRETERS); do ln -sf pseudoscheme $(ROOT)/bin/$$name; done
 
 test: $(ROOT)/bin/pseudoscheme
 	sh ./test.sh $(ROOT)/bin/pseudoscheme

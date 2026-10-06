@@ -184,6 +184,7 @@ names for SRFI libraries)."
 
 (defun read-forms-from-file (name)
   (with-open-file (in name)
+    (ps:skip-script-header in)
     (loop for form = (funcall ps:*scheme-read* in)
 	  until (eq form ps:eof-object)
 	  collect form)))

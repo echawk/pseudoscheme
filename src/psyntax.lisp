@@ -459,6 +459,7 @@ it (bindings, say, from a REBUILD's seed) carries over."
 
 (defun read-file-forms (path)
   (with-open-file (in path)
+    (ps:skip-script-header in)
     (loop for form = (funcall ps:*scheme-read* in)
 	  until (eq form ps:eof-object)
 	  collect form)))

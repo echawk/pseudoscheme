@@ -114,6 +114,7 @@
 	   "*READ-BASE*" ;rts.lisp
 	   "*SHARP-SHARP*" ;rts.lisp
 	   "*SCHEME-READ*"
+	   "SKIP-SCRIPT-HEADER" ;readwrite.lisp
 	   "*SCHEME-WRITE*"
 	   "*SCHEME-DISPLAY*"
 	   "*STANDARD-INPUT*"

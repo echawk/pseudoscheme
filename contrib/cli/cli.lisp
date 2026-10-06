@@ -74,6 +74,7 @@ name first (see -l and --quicklisp; docs/interop.md).
 ")
 
 (defvar *standard* :r7rs)
+(defvar *script* nil "Running as one of SRFI 22's script interpreters?")
 
 (defun evaluate-string (text)
   (ecase *standard*
@@ -86,6 +87,60 @@ name first (see -l and --quicklisp; docs/interop.md).
     (:r7rs (r7rs:load path))
     (:r6rs (r6rs:load path))
     (:r5rs (r5rs:load path))))
+
+(defun program-with-main (forms args)
+  "FORMS, an R6RS or R7RS program after any libraries, with (main ARGS)
+after its body, and what that needs imported, under a prefix."
+  (let* ((libraries (loop while (or (psl:keyword-head-p (car forms) "library")
+				    (psl:keyword-head-p (car forms) "define-library"))
+			  collect (pop forms)))
+	 (s (lambda (name) (ps:intern-scheme-symbol name)))
+	 (q (funcall s "%srfi-22:quote")))
+    (unless (psl:keyword-head-p (car forms) "import")
+      (die "~A: not a program" (car ps-r7rs:*command-line*)))
+    (append libraries
+	    (list (append (car forms)
+			  (list (list (funcall s "prefix")
+				      (list (funcall s "only") (list (funcall s "rnrs") (funcall s "base"))
+					    (funcall s "quote"))
+				      (funcall s "%srfi-22:")))))
+	    (cdr forms)
+	    (list (list (funcall s "main") (list q args))))))
+
+(defun run-script (file)
+  "SRFI 22: run FILE, then call its main with the command line; main's
+value, if an exit status, is the process's.  Its script prelude is
+skipped when FILE is read."
+  (let* ((args (copy-list ps-r7rs:*command-line*))
+	 (status
+	   (ecase *standard*
+	     (:r5rs (r5rs:load file)
+		    (r5rs:eval (format nil "(main '~A)" (pseudoscheme-api:write-to-string args))))
+	     (:r7rs (pseudoscheme-api::ensure-psyntax)
+		    (let ((ps-r7rs::*include-directory*
+			    (make-pathname :name nil :type nil :defaults (pathname file))))
+		      (ps-r7rs::eval-forms (program-with-main (ps-r7rs::read-forms file) args))))
+	     (:r6rs (pseudoscheme-api::ensure-psyntax)
+		    (psx:eval-forms (program-with-main (psx::read-file-forms file) args))))))
+    (finish-output)
+    (if (and (integerp status) (<= 0 status 255))
+	(uiop:quit status)
+	(progn
+	  (format *error-output* "~&pseudoscheme: main returned ~A, not an exit status~%"
+		  (pseudoscheme-api:write-to-string status))
+	  (finish-output *error-output*)
+	  (uiop:quit 70)))))
+
+;;; SRFI 22's script interpreters: this program, run as one of these
+;;; names (a link to it, say), is FILE ARG ... and calls FILE's main.
+(defparameter *script-interpreters*
+  '(("scheme-r4rs" . :r5rs) ("scheme-r5rs" . :r5rs) ("scheme-ieee-1178-1990" . :r5rs)
+    ("scheme-srfi-0" . :r5rs) ("scheme-r6rs" . :r6rs) ("scheme-r7rs" . :r7rs)))
+
+(defun script-interpreter-standard ()
+  (let ((argv0 (car (uiop:raw-command-line-arguments))))
+    (and argv0
+	 (cdr (assoc (file-namestring argv0) *script-interpreters* :test #'string=)))))
 
 (defun repl ()
   (format t "Pseudoscheme ~A (~(~A~)) on ~A ~A~%" *version* *standard*
@@ -219,7 +274,13 @@ is reported, and the program runs anyway."
   (dolist (dir (uiop:split-string (or (uiop:getenv "PSEUDOSCHEME_LIBRARY_PATH") "") :separator ":"))
     (when (plusp (length dir)) (add-library-path dir)))
   (multiple-value-bind (actions file file-args interactive)
-      (parse-arguments (uiop:command-line-arguments))
+      (let ((standard (script-interpreter-standard))
+	    (args (uiop:command-line-arguments)))
+	(cond ((null standard) (parse-arguments args))
+	      ((null args) (die "usage: ~A FILE [ARGUMENT ...]"
+				(file-namestring (car (uiop:raw-command-line-arguments)))))
+	      (t (setq *standard* standard *script* t)
+		 (values '() (car args) (cdr args) nil))))
     (when *userinit* (load-user-init-file))
     ;; With no program, SRFI 193's ("") as in Chez.  A script's name is
     ;; made absolute before it runs, in case it changes directory.
@@ -246,7 +307,7 @@ is reported, and the program runs anyway."
 		   (terpri))))))))
       (when file
 	(unless (probe-file file) (die "no such file: ~A" file))
-	(run-file file)))
+	(if *script* (run-script file) (run-file file))))
     (finish-output)
     (when (or interactive (and (null file) (null actions)))
       (repl))

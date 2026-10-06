@@ -99,6 +99,7 @@ of the library or program being processed.")
 (defun read-forms (path &key fold-case)
   (let ((ps:*fold-case* fold-case))
     (with-open-file (in path)
+      (ps:skip-script-header in)
       (loop for form = (funcall ps:*scheme-read* in)
 	    until (eq form ps:eof-object)
 	    collect form))))
@@ -372,9 +373,10 @@ the host has no such procedure.")
   (format nil "(library (pseudoscheme r5rs)
      (export ~A
              open-output-string open-input-string get-output-string
-             call-with-output-string with-output-to-string flush-output)
+             call-with-output-string with-output-to-string flush-output
+             cond-expand)
      (import (scheme r5rs)
-             (only (scheme base) open-output-string open-input-string get-output-string
+             (only (scheme base) cond-expand open-output-string open-input-string get-output-string
                    parameterize current-output-port flush-output-port))
      (define (call-with-output-string proc)
        (let ((port (open-output-string)))
@@ -387,8 +389,9 @@ the host has no such procedure.")
      (define (flush-output . port)
        (apply flush-output-port port)))"
 	  (second (assoc '(scheme r5rs) *standard-libraries* :test #'equal)))
-  "What R5RS on psyntax starts with: (scheme r5rs), and the string ports
-R5RS mode's classic environment has as an extension.")
+  "What R5RS on psyntax starts with: (scheme r5rs), and as extensions the
+string ports R5RS mode's classic environment has and SRFI 0's
+cond-expand.")
 
 (defun install-standard-libraries ()
   (install-host-library '("pseudoscheme" "host") (host-library-exports))

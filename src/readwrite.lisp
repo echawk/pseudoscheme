@@ -16,6 +16,17 @@
 
 (setq ps:*scheme-read* #'scheme-read-using-commonlisp-reader)  ;Yow
 
+(defun skip-script-header (stream)
+  "Skip a first line #! /... or #!/... -- SRFI 22's script prelude, R6RS's
+script header -- which isn't Scheme.  STREAM, a file stream, is at its
+start."
+  (let ((start (file-position stream))
+	(chars (loop repeat 3 collect (read-char stream nil nil))))
+    (if (and (eql (first chars) #\#) (eql (second chars) #\!)
+	     (member (third chars) '(#\Space #\/)))
+	(read-line stream nil)
+	(file-position stream start))))
+
 (defun scheme-write-using-commonlisp-printer (obj port)
   (write-internal obj port t))
 

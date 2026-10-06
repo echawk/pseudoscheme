@@ -81,5 +81,18 @@ check "(cl common-lisp) from Scheme" "(1 2 3)" $PS -p "(begin (import (prefix (c
 check "#:keyword arguments" "((a . 1) (b . 2))" $PS -p "(begin (import (prefix (cl common-lisp) cl:)) (cl:sort (list '(b . 2) '(a . 1)) cl:< #:key cl:cdr))"
 check "-l loads a Lisp system" "#t" $PS -l uiop -p "(begin (import (pseudoscheme lisp)) (procedure? (lisp-function \"getenv\" \"uiop\")))"
 
+check "-V: SRFI 176" '(command "pseudoscheme")' sh -c "$PS -V | head -1"
+check "(command-line) without a program: SRFI 193" '("")' $PS -p '(command-line)'
+
+# SRFI 22: links named for the script interpreters run FILE's main
+mkdir -p $tmp/ib
+for i in scheme-r5rs scheme-r6rs scheme-r7rs; do ln -s "$(cd "$(dirname "$PS")" && pwd)/$(basename "$PS")" $tmp/ib/$i; done
+printf '#! /usr/bin/env scheme-r5rs\n(define (main args) (display args) 3)\n' > $tmp/s5
+printf '#! /usr/bin/env scheme-r6rs\n(import (rnrs))\n(define (main args) (display (cdr args)) 0)\n' > $tmp/s6
+printf '#! /usr/bin/env scheme-r7rs\n(import (scheme base))\n(define (main args) "no")\n' > $tmp/s7
+check "SRFI 22: scheme-r5rs" "($tmp/s5 a b) 3" sh -c "$tmp/ib/scheme-r5rs $tmp/s5 a b; echo ' '\$?"
+check "SRFI 22: scheme-r6rs" "(x) 0" sh -c "$tmp/ib/scheme-r6rs $tmp/s6 x; echo ' '\$?"
+check "SRFI 22: main's value isn't a status" "70" sh -c "$tmp/ib/scheme-r7rs $tmp/s7 2>/dev/null; echo \$?"
+
 echo "$((n-fail)) of $n CLI tests passed"
 [ $fail = 0 ]
