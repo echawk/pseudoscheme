@@ -81,6 +81,14 @@
   (SETQ DOT (MAKE-READER-TOKEN "unexpected \" . \"")))
 (SET-FUNCTION-FROM-VALUE 'DOT 'SCHEME::DOT)
 (DEFUN SUB-READ (PORT)
+  (LET ((FORM (SUB-READ-1 PORT)))
+    (IF (AND (TRUEP (NEOTERIC-P))
+             (NOT (EQ FORM EOF-OBJECT))
+             (NOT (TRUEP (READER-TOKEN? FORM))))
+        (NEOTERIC-SUFFIXES FORM PORT)
+        FORM)))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ 'SCHEME::SUB-READ)
+(DEFUN SUB-READ-1 (PORT)
   (DECLARE (SPECIAL READ-DISPATCH-VECTOR ASCII-LIMIT))
   (LET ((C (.READ-CHAR PORT)))
     (IF (EQ C EOF-OBJECT)
@@ -90,7 +98,7 @@
                 (SUB-READ PORT)
                 (PARSE-TOKEN (SUB-READ-SYMBOL-TOKEN C PORT) PORT))
             (FUNCALL (SVREF READ-DISPATCH-VECTOR (CHAR->ASCII C)) C PORT)))))
-(SET-VALUE-FROM-FUNCTION 'SUB-READ 'SCHEME::SUB-READ)
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-1 'SCHEME::SUB-READ-1)
 (DEFUN TERMINATING? (C)
   (DECLARE (SPECIAL READ-TERMINATING?-VECTOR ASCII-LIMIT))
   (IF (SCHEME< (CHAR->ASCII C) ASCII-LIMIT)
@@ -181,6 +189,98 @@
   (LOCALLY
     (DECLARE (SPECIAL CLOSE-PAREN))
     (SET-STANDARD-READ-MACRO! #\] TRUE #'(LAMBDA (C PORT) C PORT CLOSE-PAREN))))
+(AT-TOP-LEVEL
+  (SET-STANDARD-READ-MACRO!
+   #\{
+   TRUE
+   #'(LAMBDA (C PORT) (SUB-READ-CURLY C PORT))))
+(AT-TOP-LEVEL
+  (LOCALLY
+    (DECLARE (SPECIAL CLOSE-PAREN))
+    (SET-STANDARD-READ-MACRO! #\} TRUE #'(LAMBDA (C PORT) C PORT CLOSE-PAREN))))
+(DEFUN SUB-READ-CURLY (C PORT)
+  (CURLY-INFIX (CALL-NEOTERICALLY #'(LAMBDA NIL (SUB-READ-LIST C PORT)))))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-CURLY 'SCHEME::SUB-READ-CURLY)
+(DEFUN CURLY-INFIX (ES)
+  (IF (NOT (TRUEP (LIST? ES)))
+      (CONS 'SCHEME::$NFX$ ES)
+      (IF (NULL ES)
+          'NIL
+          (IF (NULL (CDR (THE CONS ES)))
+              (CAR (THE CONS ES))
+              (IF (NULL (CDR (THE CONS (CDR (THE CONS ES)))))
+                  ES
+                  (IF (TRUEP (SIMPLE-INFIX? ES))
+                      (CONS (CAR (THE CONS (CDR (THE CONS ES))))
+                            (EVERY-OTHER ES))
+                      (CONS 'SCHEME::$NFX$ ES)))))))
+(SET-VALUE-FROM-FUNCTION 'CURLY-INFIX 'SCHEME::CURLY-INFIX)
+(DEFUN SIMPLE-INFIX? (ES)
+  (LET ((OP (CAR (THE CONS (CDR (THE CONS ES))))))
+    (PROG (REST)
+      (SETQ REST (CDR (THE CONS ES)))
+      (GO LOOP)
+      LOOP
+      (IF (NULL REST)
+          (RETURN FALSE)
+          (IF (NOT (SCHEME-EQUAL-P (CAR (THE CONS REST)) OP))
+              (RETURN FALSE)
+              (IF (NULL (CDR (THE CONS REST)))
+                  (RETURN FALSE)
+                  (IF (NULL (CDR (THE CONS (CDR (THE CONS REST)))))
+                      (RETURN TRUE)
+                      (PROGN
+                        (SETQ REST (CDR (THE CONS (CDR (THE CONS REST)))))
+                        (GO LOOP)))))))))
+(SET-VALUE-FROM-FUNCTION 'SIMPLE-INFIX? 'SCHEME::SIMPLE-INFIX?)
+(DEFUN EVERY-OTHER (ES)
+  (IF (NULL ES)
+      'NIL
+      (CONS (CAR (THE CONS ES))
+            (IF (NULL (CDR (THE CONS ES)))
+                'NIL
+                (EVERY-OTHER (CDR (THE CONS (CDR (THE CONS ES)))))))))
+(SET-VALUE-FROM-FUNCTION 'EVERY-OTHER 'SCHEME::EVERY-OTHER)
+(DEFUN SUB-READ-ARGUMENTS (C PORT)
+  (DECLARE (SPECIAL CLOSE-PAREN DOT))
+  (LET ((FORM (SUB-READ PORT)))
+    (IF (EQ FORM DOT)
+        (LET ((TAIL (SUB-READ-CAREFULLY PORT)))
+          (LET ((.CLOSE (SUB-READ PORT)))
+            (LET NIL
+              (IF (EQ .CLOSE CLOSE-PAREN)
+                  TAIL
+                  (READING-ERROR PORT "randomness after form after dot" .CLOSE)))))
+        (IF (EQ FORM EOF-OBJECT)
+            (READING-ERROR
+             PORT
+             "end of file inside list -- unbalanced parentheses")
+            (IF (EQ FORM CLOSE-PAREN)
+                'NIL
+                (CONS FORM (SUB-READ-LIST-TAIL C PORT)))))))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-ARGUMENTS 'SCHEME::SUB-READ-ARGUMENTS)
+(DEFUN NEOTERIC-SUFFIXES (FORM PORT)
+  (LET ((C (.PEEK-CHAR PORT)))
+    (IF (EQL C #\()
+        (PROGN
+          (.READ-CHAR PORT)
+          (NEOTERIC-SUFFIXES (CONS FORM (SUB-READ-ARGUMENTS C PORT)) PORT))
+        (IF (EQL C #\[)
+            (PROGN
+              (.READ-CHAR PORT)
+              (NEOTERIC-SUFFIXES
+               (CONS 'SCHEME::$BRACKET-APPLY$
+                     (CONS FORM (SUB-READ-LIST C PORT)))
+               PORT))
+            (IF (EQL C #\{)
+                (PROGN
+                  (.READ-CHAR PORT)
+                  (LET ((CURLY (SUB-READ-CURLY C PORT)))
+                    (NEOTERIC-SUFFIXES
+                     (IF (NULL CURLY) (LIST FORM) (LIST FORM CURLY))
+                     PORT)))
+                FORM)))))
+(SET-VALUE-FROM-FUNCTION 'NEOTERIC-SUFFIXES 'SCHEME::NEOTERIC-SUFFIXES)
 (AT-TOP-LEVEL
   (SET-STANDARD-READ-MACRO!
    #\|
@@ -394,6 +494,8 @@
                     (CAR (THE CONS (SUB-READ-TOKEN (.READ-CHAR PORT) PORT))))))
          (IF (OR (STRING= NAME "fold-case") (STRING= NAME "no-fold-case"))
              (SET-PORT-FOLD-CASE PORT (STRING= NAME "fold-case")))
+         (IF (OR (STRING= NAME "srfi-88") (STRING= NAME "no-srfi-88"))
+             (SET-PORT-KEYWORDS PORT (STRING= NAME "srfi-88")))
          (SUB-READ PORT)))))
 (DEFUN SUB-READ-DATUM-LABEL (C PORT)
   C
@@ -654,7 +756,13 @@
   (SETQ STRANGE-SYMBOL-NAMES '("+" "-" "..." "1+" "-1+")))
 (SET-FUNCTION-FROM-VALUE 'STRANGE-SYMBOL-NAMES 'SCHEME::STRANGE-SYMBOL-NAMES)
 (DEFUN INTERN-TOKEN (.STRING)
-  (INTERN-SCHEME-SYMBOL (IF *FOLD-CASE* (STRING-DOWNCASE .STRING) .STRING)))
+  (LET ((.STRING.0 (IF *FOLD-CASE* (STRING-DOWNCASE .STRING) .STRING))
+        (N (LENGTH (THE SIMPLE-STRING .STRING))))
+    (IF (AND (TRUEP (KEYWORDS-P))
+             (SCHEME> N 1)
+             (CHAR= (CHAR (THE SIMPLE-STRING .STRING.0) (SCHEME- N 1)) #\:))
+        (INTERN-KEYWORD-OBJECT (SUBSEQ .STRING.0 0 (SCHEME- N 1)))
+        (INTERN-SCHEME-SYMBOL .STRING.0))))
 (SET-VALUE-FROM-FUNCTION 'INTERN-TOKEN 'SCHEME::INTERN-TOKEN)
 (DEFUN READING-ERROR (PORT MESSAGE &REST IRRITANTS)
   (MAYBE-FIX-&REST-PARAMETER IRRITANTS)
@@ -679,14 +787,45 @@
             (LET ((TAG (STRING-APPEND
                         LETTER
                         (COERCE (THE LIST (REVERSE DIGITS)) 'SIMPLE-STRING))))
-              (IF (NOT (EQL (.READ-CHAR PORT) #\())
-                  (READING-ERROR PORT "bad homogeneous vector syntax" TAG))
-              (IF (STRING= TAG "u8")
-                  (RETURN (LIST->BYTEVECTOR (SUB-READ-LIST C PORT)))
-                  (RETURN (LIST->NUMERIC-VECTOR TAG (SUB-READ-LIST C PORT))))))))))
+              (IF (AND (STRING= TAG "u8") (EQL D #\"))
+                  (PROGN
+                    (.READ-CHAR PORT)
+                    (RETURN (STRING-NOTATED-BYTEVECTOR PORT)))
+                  (RETURN (SHARP-NUMERIC-VECTOR-LIST TAG C PORT)))))))))
 (SET-VALUE-FROM-FUNCTION
  'SHARP-NUMERIC-VECTOR-AFTER
  'SCHEME::SHARP-NUMERIC-VECTOR-AFTER)
+(DEFUN STRING-NOTATED-BYTEVECTOR (PORT)
+  (DECLARE (SPECIAL READ-DISPATCH-VECTOR CHAR->ASCII))
+  (LET ((CODES (MAPCAR CHAR->ASCII
+                       (COERCE (THE SIMPLE-STRING
+                                    (FUNCALL (SVREF READ-DISPATCH-VECTOR
+                                                    (CHAR->ASCII #\"))
+                                             #\"
+                                             PORT))
+                               'LIST))))
+    (IF (NOT (NULL (FILTER-OUT-BYTES CODES)))
+        (READING-ERROR PORT "a character in #u8\"...\" isn't a byte"))
+    (LIST->BYTEVECTOR CODES)))
+(SET-VALUE-FROM-FUNCTION
+ 'STRING-NOTATED-BYTEVECTOR
+ 'SCHEME::STRING-NOTATED-BYTEVECTOR)
+(DEFUN FILTER-OUT-BYTES (CODES)
+  (IF (NULL CODES)
+      'NIL
+      (IF (SCHEME< (CAR (THE CONS CODES)) 256)
+          (FILTER-OUT-BYTES (CDR (THE CONS CODES)))
+          CODES)))
+(SET-VALUE-FROM-FUNCTION 'FILTER-OUT-BYTES 'SCHEME::FILTER-OUT-BYTES)
+(DEFUN SHARP-NUMERIC-VECTOR-LIST (TAG C PORT)
+  (IF (NOT (EQL (.READ-CHAR PORT) #\())
+      (READING-ERROR PORT "bad homogeneous vector syntax" TAG))
+  (IF (STRING= TAG "u8")
+      (LIST->BYTEVECTOR (SUB-READ-LIST C PORT))
+      (LIST->NUMERIC-VECTOR TAG (SUB-READ-LIST C PORT))))
+(SET-VALUE-FROM-FUNCTION
+ 'SHARP-NUMERIC-VECTOR-LIST
+ 'SCHEME::SHARP-NUMERIC-VECTOR-LIST)
 (LOCALLY
   (DECLARE (SPECIAL SHARP-NUMERIC-VECTOR))
   (DEFINE-SHARP-MACRO #\u SHARP-NUMERIC-VECTOR))
@@ -730,4 +869,13 @@
            (PROGN
              (.READ-CHAR PORT)
              (LIST 'SCHEME::UNSYNTAX-SPLICING (SUB-READ-CAREFULLY PORT)))
-           (LIST 'SCHEME::UNSYNTAX (SUB-READ-CAREFULLY PORT))))))
+           (LET ((DATUM (SUB-READ-CAREFULLY PORT)))
+             (LET ((CTOR (IF (CONSP DATUM)
+                             (IF (SCHEME-SYMBOL-P (CAR (THE CONS DATUM)))
+                                 (READER-CTOR (CAR (THE CONS DATUM)))
+                                 FALSE)
+                             FALSE)))
+               (LET NIL
+                 (IF (TRUEP CTOR)
+                     (APPLY CTOR (CDR (THE CONS DATUM)))
+                     (LIST 'SCHEME::UNSYNTAX DATUM)))))))))

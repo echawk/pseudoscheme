@@ -1,0 +1,27 @@
+#!srfi-88
+;;; Tests for SRFI 88, from the SRFI's examples.
+(import (scheme base) (scheme write) (scheme process-context) (srfi 64) (srfi 88))
+(define (written x) (let ((p (open-output-string))) (write x p) (get-output-string p)))
+(test-begin "srfi-88")
+
+(test-assert (keyword? 'foo:))
+(test-assert (keyword? foo:))
+(test-assert (not (keyword? 'foo)))
+(test-assert (not (keyword? ':)))
+(test-assert (not (keyword? '|foo:|)))
+(test-assert (symbol? '|foo:|))
+(test-assert (not (keyword? "foo:")))
+(test-assert (not (symbol? foo:)))
+(test-equal "foo" (keyword->string 'foo:))
+(test-equal "" (keyword->string (string->keyword "")))
+(test-eq 'abc: (string->keyword "abc"))
+(test-eq foo: foo:)
+(test-assert (eq? (string->keyword "x y") (string->keyword "x y")))
+(test-equal "foo:" (written foo:))
+(test-equal '(1 a: 2) (list 1 a: 2))
+(define (f . args) args)
+(test-equal (list 'x b: 3) (f 'x b: 3))
+
+(let ((failures (test-runner-fail-count (test-runner-current))))
+  (test-end "srfi-88")
+  (exit (if (zero? failures) 0 1)))

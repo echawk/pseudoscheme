@@ -452,17 +452,74 @@ an alist from label numbers to placeholders.")
 (defstruct (label-placeholder (:constructor make-label-placeholder ()))
   (datum nil) (defined nil))
 
+(defvar *port-keywords*
+  (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq)
+  "Ports from which a #!srfi-88 directive was read: foo: is a keyword.")
+
+(defvar *keywords* nil "Is foo: a keyword (SRFI 88) here?")
+
+(defvar *neoteric* nil
+  "Are neoteric expressions read here (SRFI 105: within curly braces)?")
+
 (defun call-with-reader-state (port thunk)
-  "Read one datum from PORT by calling THUNK: case folding as PORT's
-directives left it, and no datum labels yet."
+  "Read one datum from PORT by calling THUNK: case folding and keywords as
+PORT's directives left them, no datum labels yet, and outside curly
+braces."
   (let ((*fold-case* (multiple-value-bind (fold found) (gethash port *port-fold-case*)
 		       (if found fold *fold-case*)))
+	(*keywords* (values (gethash port *port-keywords*)))
+	(*neoteric* nil)
 	(*datum-labels* '()))
     (funcall thunk)))
 
 (defun set-port-fold-case (port fold)
   (setf (gethash port *port-fold-case*) fold
 	*fold-case* fold))
+
+(defun set-port-keywords (port keywords)
+  (setf (gethash port *port-keywords*) keywords
+	*keywords* keywords))
+
+(defun keywords-p () (if *keywords* t false))
+
+(defun neoteric-p () (if *neoteric* t false))
+
+(defun call-neoterically (thunk)
+  (let ((*neoteric* t)) (funcall thunk)))
+
+;;; SRFI 88's keyword objects: interned by name, distinct from symbols
+;;; (and from the Lisp keywords #:name reads as).  A compiled constant
+;;; is the same object when loaded.
+
+(defstruct (keyword-object (:constructor %make-keyword-object (name)))
+  (name "" :type string :read-only t))
+
+(defvar *keyword-objects* (trivial-garbage:make-weak-hash-table :weakness :value :test 'equal))
+
+(defun intern-keyword-object (name)
+  (or (gethash name *keyword-objects*)
+      (setf (gethash name *keyword-objects*) (%make-keyword-object (copy-seq name)))))
+
+(defmethod make-load-form ((k keyword-object) &optional environment)
+  (declare (ignore environment))
+  `(intern-keyword-object ,(keyword-object-name k)))
+
+(defmethod print-object ((k keyword-object) stream)
+  (if *print-escape*
+      (format stream "~A:" (keyword-object-name k))
+      (write-string (keyword-object-name k) stream)))
+
+;;; SRFI 10's #,(tag datum ...): the constructors define-reader-ctor
+;;; registers, by tag.  A #,(tag ...) whose tag has none is R6RS's
+;;; unsyntax.
+
+(defvar *reader-ctors* (make-hash-table :test 'eq))
+
+(defun reader-ctor (tag) (gethash tag *reader-ctors* false))
+
+(defun define-reader-ctor (tag procedure)
+  (setf (gethash tag *reader-ctors*) procedure)
+  unspecific)
 
 (defun read-labelled-datum (port n thunk)
   "#N=<datum>: the datum THUNK reads, in which #N# refers to itself."

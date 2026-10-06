@@ -78,6 +78,12 @@
 ; R6RS and R7RS allow for most of Unicode.
 
 (define (sub-read port)
+  (let ((form (sub-read-1 port)))
+    (if (and (ps:neoteric-p) (not (eof-object? form)) (not (reader-token? form)))
+	(neoteric-suffixes form port)
+	form)))
+
+(define (sub-read-1 port)
   (let ((c (read-char port)))
     (cond ((eof-object? c) c)
 	  ((>= (char->ascii c) ascii-limit)
@@ -164,6 +170,74 @@
   (lambda (c port)
     c port
     close-paren))
+
+; SRFI 105: {a + b} is (+ a b), and within curly braces f(x) is (f x),
+; x[i] is ($bracket-apply$ x i) and f{a + b} is (f (+ a b)).  (Braces
+; and brackets aren't checked for matching either.)
+
+(set-standard-read-macro! #\{ #t
+  (lambda (c port)
+    (sub-read-curly c port)))
+
+(set-standard-read-macro! #\} #t
+  (lambda (c port)
+    c port
+    close-paren))
+
+(define (sub-read-curly c port)
+  (curly-infix (ps:call-neoterically (lambda () (sub-read-list c port)))))
+
+(define (curly-infix es)
+  (cond ((not (list? es)) (cons '$nfx$ es))
+	((null? es) '())
+	((null? (cdr es)) (car es))
+	((null? (cddr es)) es)
+	((simple-infix? es) (cons (cadr es) (every-other es)))
+	(else (cons '$nfx$ es))))
+
+; An odd number of elements, at least three, with the same operator
+; between each pair.
+(define (simple-infix? es)
+  (let ((op (cadr es)))
+    (let loop ((rest (cdr es)))		;at an operator
+      (cond ((null? rest) #f)
+	    ((not (equal? (car rest) op)) #f)
+	    ((null? (cdr rest)) #f)
+	    ((null? (cddr rest)) #t)
+	    (else (loop (cddr rest)))))))
+
+(define (every-other es)
+  (if (null? es)
+      '()
+      (cons (car es) (if (null? (cdr es)) '() (every-other (cddr es))))))
+
+; The arguments of f(...), which may be f(. args): (f . args).
+(define (sub-read-arguments c port)
+  (let ((form (sub-read port)))
+    (cond ((eq? form dot)
+	   (let* ((tail (sub-read-carefully port))
+		  (close (sub-read port)))
+	     (if (eq? close close-paren)
+		 tail
+		 (reading-error port "randomness after form after dot" close))))
+	  ((eof-object? form)
+	   (reading-error port "end of file inside list -- unbalanced parentheses"))
+	  ((eq? form close-paren) '())
+	  (else (cons form (sub-read-list-tail c port))))))
+
+(define (neoteric-suffixes form port)
+  (let ((c (peek-char port)))
+    (cond ((eqv? c #\()
+	   (read-char port)
+	   (neoteric-suffixes (cons form (sub-read-arguments c port)) port))
+	  ((eqv? c #\[)
+	   (read-char port)
+	   (neoteric-suffixes (cons '$bracket-apply$ (cons form (sub-read-list c port))) port))
+	  ((eqv? c #\{)
+	   (read-char port)
+	   (let ((curly (sub-read-curly c port)))
+	     (neoteric-suffixes (if (null? curly) (list form) (list form curly)) port)))
+	  (else form))))
 
 ; |symbol| with any characters (R7RS 2.1): \| \\ and \x<hex>; escapes.
 ; The name is taken exactly as written, with no case folding.
@@ -338,8 +412,9 @@
 (define-sharp-macro #\t (sharp-boolean #t "true"))
 
 ; Directives: #!fold-case and #!no-fold-case (R7RS 2.1), #!r6rs (R6RS
-; 4.2.4, a flag with no effect here), and any other #!<identifier>,
-; which is ignored the same way.  Each is a comment, so read on.
+; 4.2.4, a flag with no effect here), #!srfi-88 and #!no-srfi-88 (SRFI
+; 88's keywords, foo:, on or off), and any other #!<identifier>, which
+; is ignored the same way.  Each is a comment, so read on.
 
 (define-sharp-macro #\!
   (lambda (c port)
@@ -349,6 +424,9 @@
       ;; from this port after the directive.
       (if (or (string=? name "fold-case") (string=? name "no-fold-case"))
 	  (ps:set-port-fold-case port (ps-lisp:string= name "fold-case")))
+      ;; SRFI 88: after #!srfi-88, foo: is a keyword
+      (if (or (string=? name "srfi-88") (string=? name "no-srfi-88"))
+	  (ps:set-port-keywords port (ps-lisp:string= name "srfi-88")))
       (sub-read port))))
 
 ; Datum labels, #<n>=<datum> and #<n># (R7RS 2.4).
@@ -552,8 +630,11 @@
 ; at the top of this file do.
 
 (define (intern-token string)
-  (ps:intern-scheme-symbol
-   (ps-lisp:if ps:*fold-case* (common-lisp:string-downcase string) string)))
+  (let ((string (ps-lisp:if ps:*fold-case* (common-lisp:string-downcase string) string))
+	(n (string-length string)))
+    (if (and (ps:keywords-p) (> n 1) (char=? (string-ref string (- n 1)) #\:))
+	(ps:intern-keyword-object (substring string 0 (- n 1)))
+	(ps:intern-scheme-symbol string))))
 
 ; Reader errors
 
@@ -579,11 +660,31 @@
       (if (and (char? d) (char-numeric? d))
 	  (loop (cons (read-char port) digits))
 	  (let ((tag (string-append letter (list->string (reverse digits)))))
-	    (if (not (eqv? (read-char port) #\())
-		(reading-error port "bad homogeneous vector syntax" tag))
-	    (if (string=? tag "u8")
-		(ps:list->bytevector (sub-read-list c port))
-		(ps:list->numeric-vector tag (sub-read-list c port))))))))
+	    (if (and (string=? tag "u8") (eqv? d #\"))
+		(begin (read-char port) (string-notated-bytevector port))
+		(sharp-numeric-vector-list tag c port)))))))
+
+;; SRFI 207: #u8"text", read as a string is, its characters' codes the
+;; bytes.  (Characters past U+00FF are an error; the SRFI asks for
+;; printable ASCII and escapes.)
+(define (string-notated-bytevector port)
+  (let ((codes (map char->ascii
+		    (string->list ((vector-ref read-dispatch-vector (char->ascii #\")) #\" port)))))
+    (if (not (null? (filter-out-bytes codes)))
+	(reading-error port "a character in #u8\"...\" isn't a byte"))
+    (ps:list->bytevector codes)))
+
+(define (filter-out-bytes codes)
+  (cond ((null? codes) '())
+	((< (car codes) 256) (filter-out-bytes (cdr codes)))
+	(else codes)))
+
+(define (sharp-numeric-vector-list tag c port)
+  (if (not (eqv? (read-char port) #\())
+      (reading-error port "bad homogeneous vector syntax" tag))
+  (if (string=? tag "u8")
+      (ps:list->bytevector (sub-read-list c port))
+      (ps:list->numeric-vector tag (sub-read-list c port))))
 
 (define-sharp-macro #\u sharp-numeric-vector)
 (define-sharp-macro #\s sharp-numeric-vector)
@@ -620,4 +721,10 @@
     (if (eqv? (peek-char port) #\@)
 	(begin (read-char port)
 	       (list 'unsyntax-splicing (sub-read-carefully port)))
-	(list 'unsyntax (sub-read-carefully port)))))
+	;; SRFI 10: #,(tag datum ...) is the datum tag's reader
+	;; constructor makes, if define-reader-ctor gave it one
+	(let* ((datum (sub-read-carefully port))
+	       (ctor (and (pair? datum) (symbol? (car datum)) (ps:reader-ctor (car datum)))))
+	  (if ctor
+	      (apply ctor (cdr datum))
+	      (list 'unsyntax datum))))))
