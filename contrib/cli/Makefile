@@ -11,8 +11,9 @@
 # beyond the live data, and allocation-heavy programs (the paraffins and
 # mperm benchmarks) exhaust 2GB.
 #
-# SRFI 22's script interpreters, bin/scheme-r5rs and the rest, are links
-# to bin/pseudoscheme, which looks at the name it's run as.
+# SRFI 22's script interpreters, bin/scheme-r5rs and the rest, and SRFI
+# 138's bin/compile-r7rs are links to bin/pseudoscheme, which looks at
+# the name it's run as.
 
 LISP ?= sbcl
 ROOT := $(abspath ../..)
@@ -38,7 +39,7 @@ $(ROOT)/bin/pseudoscheme: FORCE
 	rm -f $(ROOT)/bin/pseudoscheme.new  # else ASDF thinks it's up to date after a Makefile-only change
 	$(RUN) build.lisp
 	mv -f $(ROOT)/bin/pseudoscheme.new $(ROOT)/bin/pseudoscheme  # atomically, for programs running the old one
-	for name in $(SCRIPT_INTERPRETERS); do ln -sf pseudoscheme $(ROOT)/bin/$$name; done
+	for name in $(SCRIPT_INTERPRETERS) compile-r7rs; do ln -sf pseudoscheme $(ROOT)/bin/$$name; done
 
 test: $(ROOT)/bin/pseudoscheme
 	sh ./test.sh $(ROOT)/bin/pseudoscheme

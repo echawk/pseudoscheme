@@ -142,6 +142,64 @@ skipped when FILE is read."
     (and argv0
 	 (cdr (assoc (file-namestring argv0) *script-interpreters* :test #'string=)))))
 
+;;; SRFI 138: run as compile-r7rs (a link to this program), it compiles
+;;; an R7RS program to an executable, an image of this program with the
+;;; program's libraries installed -- expanded and compiled, not yet run --
+;;; and the program itself read, to be expanded and run when the
+;;; executable starts.  Libraries' bodies run then too, as they would
+;;; from source.
+
+(defvar *compiled-program* nil
+  "The program forms (import declarations first) a compiled executable runs.")
+
+(defun compile-r7rs (args)
+  (let ((output nil) (file nil))
+    (loop while args do
+      (let ((a (pop args)))
+	(flet ((value () (or (pop args) (die "~A needs an argument" a))))
+	  (cond ((string= a "-I")
+		 (setf psx:*library-path*
+		       (cons (namestring (uiop:ensure-directory-pathname
+					  (uiop:parse-native-namestring (value))))
+			     psx:*library-path*)))
+		((string= a "-A") (add-library-path (value)))
+		((string= a "-D") (push (value) psl:*scheme-features*))
+		((string= a "-o") (setq output (value)))
+		((string= a "-V") (print-version-alist) (uiop:quit 0))
+		((or file (and (plusp (length a)) (char= (char a 0) #\-)))
+		 (die "usage: compile-r7rs [-I dir] [-A dir] [-D feature] [-o output] file"))
+		(t (setq file a))))))
+    (unless file
+      (die "usage: compile-r7rs [-I dir] [-A dir] [-D feature] [-o output] file"))
+    (unless (probe-file file) (die "no such file: ~A" file))
+    (pseudoscheme-api::ensure-psyntax)
+    (handler-bind ((serious-condition #'report-and-exit))
+      (let ((ps-r7rs::*include-directory*
+	      (make-pathname :name nil :type nil :defaults (truename file))))
+	(multiple-value-bind (libraries imports body)
+	    (ps-r7rs::split-program (ps-r7rs::read-forms file))
+	  (dolist (l libraries) (psx:eval-library (ps-r7rs::library-form l)))
+	  (let ((imports (mapcar #'ps-r7rs::translate-import-set imports)))
+	    ;; installs the libraries
+	    (apply (psx:host-ref "psyntax:environment") imports)
+	    (setq *compiled-program* (cons (cons (ps:intern-scheme-symbol "import") imports) body))))))
+    ;; for include in the body, when it runs
+    (setf ps-r7rs::*include-directory*
+	  (make-pathname :name nil :type nil :defaults (truename file)))
+    (setq uiop:*image-entry-point* #'run-compiled-program)
+    (uiop:dump-image (or output (namestring (make-pathname :type nil :defaults file)))
+		     :executable t)))
+
+(defun run-compiled-program ()
+  (ps:disable-float-traps)
+  (setf ps-r7rs:*command-line*
+	(cons (car (uiop:raw-command-line-arguments)) (uiop:command-line-arguments)))
+  (handler-bind ((serious-condition
+		   (lambda (e) (if (interrupt-p e) (uiop:quit 130) (report-and-exit e)))))
+    (ps-r7rs::eval-forms *compiled-program*))
+  (finish-output)
+  (uiop:quit 0))
+
 (defun repl ()
   (format t "Pseudoscheme ~A (~(~A~)) on ~A ~A~%" *version* *standard*
 	  (lisp-implementation-type) (lisp-implementation-version))
@@ -273,6 +331,8 @@ is reported, and the program runs anyway."
   (find-sbcl-contribs)
   (dolist (dir (uiop:split-string (or (uiop:getenv "PSEUDOSCHEME_LIBRARY_PATH") "") :separator ":"))
     (when (plusp (length dir)) (add-library-path dir)))
+  (when (equal (file-namestring (car (uiop:raw-command-line-arguments))) "compile-r7rs")
+    (compile-r7rs (uiop:command-line-arguments)))
   (multiple-value-bind (actions file file-args interactive)
       (let ((standard (script-interpreter-standard))
 	    (args (uiop:command-line-arguments)))

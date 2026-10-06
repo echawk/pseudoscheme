@@ -94,5 +94,10 @@ check "SRFI 22: scheme-r5rs" "($tmp/s5 a b) 3" sh -c "$tmp/ib/scheme-r5rs $tmp/s
 check "SRFI 22: scheme-r6rs" "(x) 0" sh -c "$tmp/ib/scheme-r6rs $tmp/s6 x; echo ' '\$?"
 check "SRFI 22: main's value isn't a status" "70" sh -c "$tmp/ib/scheme-r7rs $tmp/s7 2>/dev/null; echo \$?"
 
+# SRFI 138: compile-r7rs writes an executable
+ln -s "$(cd "$(dirname "$PS")" && pwd)/$(basename "$PS")" $tmp/ib/compile-r7rs
+printf '(import (scheme base) (scheme write) (my lib))\n(cond-expand (shout (display (twice 21))))\n' > $tmp/c.scm
+check "SRFI 138: compile-r7rs" "42" sh -c "$tmp/ib/compile-r7rs -A $tmp/lib -D shout -o $tmp/c $tmp/c.scm >/dev/null && $tmp/c"
+
 echo "$((n-fail)) of $n CLI tests passed"
 [ $fail = 0 ]
