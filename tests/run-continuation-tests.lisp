@@ -93,6 +93,14 @@
 ("(let ((g (car (list (lambda (m) m)))) (s 0)) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) s)" . "30")
 ))
 
+;; a program big enough to be evaluated as many top-level forms: a
+;; continuation re-entered in one goes on to the rest
+(setq *tests*
+      (append *tests*
+	      (list (cons (format nil "(import (scheme base)) (define (f) (call/cc (lambda (return) (lambda () (return (lambda () 'escaped)))))) (define (g) (let ((thunk (f))) (thunk))) (define count 0) (define r (g)) ~{~A ~}(list r count)"
+				  (loop repeat 1000 collect "(set! count (+ count 1))"))
+			  "(escaped 1000)"))))
+
 (let ((pass 0))
   (dolist (tc *tests*)
     (let ((got (handler-case (r7rs:write-to-string (r7rs:eval (car tc)))

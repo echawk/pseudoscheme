@@ -363,7 +363,15 @@ about psyntax's output, not the user's program, so they're muffled."
     (if *full-continuations*
 	(let ((form (cc-transform (open-top-level form))))
 	  (call-with-full-policy
-	   (lambda () (call-with-continuation-base (lambda () (eval (translate-core form t)))))))
+	   (lambda ()
+	     (call-with-continuation-base
+	      (lambda ()
+		;; a big form is many (open-top-level): evaluated one by one,
+		;; so that a continuation captured in one goes on to the rest
+		(if (and (consp form) (symbolp (car form))
+			 (string= (symbol-name (car form)) "BEGIN") (cdr form))
+		    (eval-top-level-forms (cdr form))
+		    (eval (translate-core form t))))))))
 	(eval (translate-core (open-top-level form) t)))))
 
 (defparameter *inline-arithmetic-limit* 50000

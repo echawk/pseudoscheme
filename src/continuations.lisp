@@ -192,6 +192,22 @@ ESTABLISH again when rebuilt."
      (declare (dynamic-extent ,frame))
      (with-frame (,frame) ,@body)))
 
+;;; A top-level form's forms (HOST-EVAL), each evaluated in a :RESUME
+;;; frame holding the rest, so that a continuation captured in one goes
+;;; on to them.
+
+(defun eval-top-level-forms (forms)
+  (let ((values '()))
+    (loop for (form . rest) on forms
+	  do (setq values
+		   (multiple-value-list
+		    (with-resume-frame (frame 'continue-top-level-forms rest)
+		      (eval (translate-core form t))))))
+    (values-list values)))
+
+(defun continue-top-level-forms (value rest)
+  (if rest (eval-top-level-forms rest) value))
+
 (defun list-cars (lists) (mapcar #'car lists))
 (defun list-cdrs (lists) (mapcar #'cdr lists))
 
