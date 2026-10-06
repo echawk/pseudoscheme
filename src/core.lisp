@@ -19,7 +19,7 @@
 (defparameter false 'false)  ;You can set this to 'nil if you want
 (defparameter true  't)
 
-(proclaim '(inline truep true? scheme-symbol-p))
+(declaim (inline truep true? scheme-symbol-p))
 
 ; Convert Scheme boolean to Lisp boolean.
 ;  E.g. (cl:if (truep foo) ...)
@@ -172,7 +172,7 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 
 ; A letrec variable's value where its init expressions refer to it,
 ; before it may have been assigned.
-(proclaim '(inline letrec-value))
+(declaim (inline letrec-value))
 (defun letrec-value (value name)
   (if (eq value unassigned) (letrec-unassigned name) value))
 (defun letrec-unassigned (name)
@@ -198,7 +198,7 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 
 ; Mumble
 
-(proclaim '(inline booleanp char-whitespace-p char-numeric-p output-port-p))
+(declaim (inline booleanp char-whitespace-p char-numeric-p output-port-p))
 
 (defun booleanp (obj)
   (or (eq obj true)

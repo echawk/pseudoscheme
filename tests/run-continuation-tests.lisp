@@ -66,6 +66,9 @@
 ("(let () (define (addc x y k) (if (zero? y) (k x) (addc (+ x 1) (- y 1) k))) (define (fibc x c) (if (zero? x) (c 0) (if (zero? (- x 1)) (c 1) (addc (call/cc (lambda (c) (fibc (- x 1) c))) (call/cc (lambda (c) (fibc (- x 2) c))) c)))) (fibc 15 (lambda (n) n)))" . "610")
 ;; an assigned letrec-bound variable in a procedure with sites is boxed
 ("(let () (define (g h) (letrec ((x 1) (bump (lambda () (set! x (+ x 1)) x))) (h) (bump) (bump))) (g (lambda () 0)))" . "3")
+;; a loop calling an unknown procedure, re-entered mid-loop (its tail
+;; calls to itself are jumps)
+("(let () (define k #f) (define n 0) (define (count-up i stop f acc) (if (= i stop) (reverse acc) (count-up (+ i 1) stop f (cons (f i) acc)))) (define r (count-up 0 5 (lambda (i) (if (= i 2) (call/cc (lambda (c) (set! k c) i)) i)) '())) (set! n (+ n 1)) (if (< n 3) (k (* n 100)) (list n r)))" . "(3 (0 1 200 3 4))")
 ;; a generator walking a tree: resumed from different depths, so captures
 ;; share frames promoted by earlier ones
 ;; re-entering within a dynamic-wind runs neither its after nor its before

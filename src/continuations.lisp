@@ -964,7 +964,8 @@ primitives in *FULL-REPLACEMENTS* replaced."
 	((atom e) e)
 	((lambda-form-p e) (transform-lambda e))
 	((keyword-p (car e) "LETREC")
-	 `(,(car e) ,(mapcan (lambda (b) (letrec-bindings (car b) (simple (cadr b)))) (cadr e))
+	 `(,(car e) ,(mapcan (lambda (b) (letrec-bindings (car b) (transform-bound-lambda (car b) (cadr b))))
+			     (cadr e))
 	   ,(simple (caddr e))))
 	((or (keyword-p (car e) "SET!") (keyword-p (car e) "DEFINE"))
 	 `(,(car e) ,(cadr e) ,(simple (caddr e))))
@@ -989,16 +990,38 @@ procedure with such a body needs no machine."
 		   ((or (keyword-p head "SET!") (keyword-p head "DEFINE")) nil)
 		   (t (every #'simple-p e)))))))
 
-(defun transform-lambda (e)
+(defun transform-lambda (e &optional self)
+  "Lambda E transformed.  SELF: the variable a letrec or definition binds
+to E, if E is a known procedure."
   (let ((formals (cadr e)) (body (caddr e)))
     (if (tail-simple-p body)
 	`(,(car e) ,formals ,(simple body))
-	(build-machine formals body))))
+	(build-machine formals body
+		       (and self (listp formals) (null (cdr (last formals)))
+			    (not (makes-closures-p body))
+			    self)))))
+
+(defun makes-closures-p (e)
+  "Whether evaluating E can make a closure (a lambda not called on the
+spot)."
+  (cond ((atom e) nil)
+	((quote-form-p e) nil)
+	((lambda-form-p e) t)
+	((lambda-form-p (car e)) (or (makes-closures-p (caddr (car e))) (some #'makes-closures-p (cdr e))))
+	(t (loop for x on e thereis (makes-closures-p (car x)) while (consp (cdr x))))))
+
+(defun transform-bound-lambda (variable value)
+  "VALUE, bound to VARIABLE by a letrec or definition, transformed."
+  (if (lambda-form-p value)
+      (transform-lambda value (and *known-procedures* (gethash variable *known-procedures*) variable))
+      (simple value)))
 
 ;;; ------------------------------------------------------------------
 ;;; Machines
 
 (defstruct (machine (:conc-name m-))
+  (self nil)				; the procedure's variable, for self tail calls
+  (params '())
   (statements '())			; reversed
   (locals '())
   (letrecs '())				; (variable procedure), reversed
@@ -1049,7 +1072,7 @@ procedure with such a body needs no machine."
 	       ;; hoisted), so that the translator makes them LABELS
 	       ;; functions rather than assigned locals
 	       (dolist (b (cadr e))
-		 (dolist (binding (letrec-bindings (car b) (simple (cadr b))))
+		 (dolist (binding (letrec-bindings (car b) (transform-bound-lambda (car b) (cadr b))))
 		   (push binding (m-letrecs *m*))))
 	       (flat (caddr e) k))
 	      ((keyword-p head "LETREC")
@@ -1087,6 +1110,17 @@ procedure with such a body needs no machine."
 		  (t (wrap-barrier (operands e))))))
     (cond ((not (capturing-call-p e))
 	   (finish xs k))
+	  ((and (eq k :return) (m-self *m*) (eq (car xs) (m-self *m*))
+		(= (length (cdr xs)) (length (m-params *m*))))
+	   ;; a tail call to itself: assign the parameters and start over
+	   (let ((temps (mapcar (lambda (a)
+				  (let ((v (new-local)))
+				    (emit `(,(sym "set!") ,v ,a))
+				    v))
+				(cdr xs))))
+	     (loop for p in (m-params *m*) for v in temps
+		   do (emit `(,(sym "set!") ,p ,v)))
+	     (emit `(%go ',(new-label-named "%ENTRY")))))
 	  ((eq k :return) (emit `(%return ,xs)))
 	  (t (let ((site (incf (m-count *m*)))
 		   (label (new-label))
@@ -1129,9 +1163,13 @@ bound to a variable first if one after it may capture, to keep order."
       (walk e))
     found))
 
-(defun build-machine (formals body)
+(defun build-machine (formals body &optional self)
+  "The machine for a procedure with FORMALS and BODY.  SELF: its
+variable, if its tail calls to itself can be jumps back to its start
+(its parameters are a proper list, and its body makes no closures,
+which would capture bindings the jump reuses)."
   (let* ((params (formal-variables formals))
-	 (*m* (make-machine)))
+	 (*m* (make-machine :self self :params params)))
     (flat body :return)
     (let* ((statements (coerce (reverse (m-statements *m*)) 'vector))
 	   (locals (remove-duplicates (set-difference (m-locals *m*) params)))
@@ -1186,9 +1224,9 @@ bound to a variable first if one after it may capture, to keep order."
 	  ((,m (,(sym "lambda") (,entry ,value ,frame ,@params)
 		((,(sym "lambda") ,locals
 		  ,(let ((body `(%machine ,entry (,(sym "quote") ,dispatch)
-					   ,@(when resumes `((%go ',(new-label-named "%ENTRY"))))
+					   ,@(when (or resumes self) `((%go ',(new-label-named "%ENTRY"))))
 					   ,@resumes
-					   ,@(when resumes `(',(new-label-named "%ENTRY")))
+					   ,@(when (or resumes self) `(',(new-label-named "%ENTRY")))
 					   ,@(coerce statements 'list))))
 		     (if (m-letrecs *m*)
 			 `(,(sym "letrec") ,(reverse (m-letrecs *m*)) ,body)
@@ -1343,7 +1381,7 @@ its own, of the chunk's free variables."
 	 `(,(car form) ,@(mapcar #'cc-transform-1 (cdr form))))
 	((and (consp form) (keyword-p (car form) "DEFINE"))
 	 (if (simple-p (caddr form))
-	     `(,(car form) ,(cadr form) ,(simple (prepare (caddr form))))
+	     `(,(car form) ,(cadr form) ,(transform-bound-lambda (cadr form) (prepare (caddr form))))
 	     ;; defined first, so that the assignment can be in a frame
 	     `(,(sym "begin")
 	       (,(car form) ,(cadr form) (,(sym "quote") ,ps:false))
