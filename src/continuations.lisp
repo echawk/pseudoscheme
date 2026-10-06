@@ -57,6 +57,10 @@ it to (:BASE).")
   "The catch tag of the innermost base, to which a re-entered
 continuation throws.")
 
+(defvar *shared-winders* '()
+  "While a re-entered continuation throws to the base: the winders it
+shares with the current continuation, whose afters don't run.")
+
 (defmacro with-frame ((frame) &body body)
   "Run BODY with FRAME (a vector, already allocated) pushed on *FSTACK*."
   (let ((cell (gensym "CELL")))
@@ -75,13 +79,19 @@ continuation throws.")
   "Call THUNK as the outermost frame continuations can capture.  A
 continuation re-entered inside throws back here with a thunk that
 rebuilds it."
+  (when *base-tag*
+    ;; Already inside one (eval, or load, called from a program): the
+    ;; continuations captured inside must reach the frames outside too.
+    (return-from call-with-continuation-base (funcall thunk)))
   (let* ((tag (list 'base))
 	 (*base-tag* tag)
 	 (*fstack* (list :base))
-	 (*winders* '()))
+	 (*winders* '())
+	 (*shared-winders* '()))
     (loop
       (setq thunk (catch tag
-		    (return-from call-with-continuation-base (funcall thunk)))))))
+		    (return-from call-with-continuation-base (funcall thunk))))
+      (setq *shared-winders* '()))))
 
 (defun winder-extent (winder thunk)
   "Call THUNK inside dynamic-wind WINDER (whose before has run): its
@@ -95,7 +105,8 @@ after runs however THUNK is left."
 		 (let ((*winders* (cons winder *winders*)))
 		   (with-frame (frame) (funcall thunk)))
 	       (setq normal t))
-	  (unless normal (funcall (cdr winder))))
+	  (unless (or normal (member winder *shared-winders* :test #'eq))
+	    (funcall (cdr winder))))
       (funcall (cdr winder)))))
 
 (defun full-dynamic-wind (before thunk after)
@@ -116,7 +127,8 @@ after runs however THUNK is left."
 ;;; them.
 
 (defun handler-extent (handler outer thunk)
-  (let ((frame (vector :handler nil (cons handler outer))))
+  (let* ((handlers (cons handler outer))	; on the heap: a copy of the frame keeps it
+	 (frame (vector :handler nil handlers)))
     (declare (dynamic-extent frame))
     (ps-r7rs::call-with-handler handler outer (lambda () (with-frame (frame) (funcall thunk))))))
 
@@ -140,6 +152,145 @@ after runs however THUNK is left."
 
 (setq ps-r7rs::*call-handler* 'full-call-handler
       ps-r7rs::*call-with-handler* 'handler-extent)
+
+;;; Other dynamic contexts a Lisp primitive sets up around a call of a
+;;; Scheme procedure (parameterize's) go in an :EXTENT frame holding the
+;;; function that sets the context up, which rebuilding calls again.
+
+(defun call-in-extent (establish thunk)
+  "Call ESTABLISH with a thunk that calls THUNK, in a frame that calls
+ESTABLISH again when rebuilt."
+  (let ((frame (vector :extent nil establish)))
+    (declare (dynamic-extent frame))
+    (funcall establish (lambda () (with-frame (frame) (funcall thunk))))))
+
+(setq ps-r7rs::*call-in-extent* 'call-in-extent)
+
+;;; Loops written in Lisp that call Scheme procedures (map, for-each,
+;;; vector-map, ...): each call is made in a :RESUME frame holding a
+;;; function and the loop's state, #(:resume promoted function arg ...),
+;;; which rebuilding calls as (function value arg ...) to go on with the
+;;; loop.  A frame is pushed per call, and the frames are on the stack,
+;;; so the loops allocate nothing more than escape-only ones.  Results
+;;; are accumulated in reverse and reversed at the end, destructively
+;;; unless a continuation was captured in the loop (the frame was
+;;; promoted), whose re-entry must not change what an earlier return
+;;; returned (R7RS 6.10, map).
+
+(defmacro with-resume-frame ((frame function &rest args) &body body)
+  ;; ARGS must be existing objects, not made here: DYNAMIC-EXTENT puts
+  ;; what the initial value form allocates on the stack too.
+  `(let ((,frame (vector :resume nil ,function ,@args)))
+     (declare (dynamic-extent ,frame))
+     (with-frame (,frame) ,@body)))
+
+(defun list-cars (lists) (mapcar #'car lists))
+(defun list-cdrs (lists) (mapcar #'cdr lists))
+
+(defun map1-loop (f list acc captured)
+  (loop
+    (when (atom list) (return (if captured (reverse acc) (nreverse acc))))
+    (let ((x (car list)) (promoted nil))
+      (push (let ((frame (vector :resume nil 'map1-continue f list acc)))
+	      (declare (dynamic-extent frame))
+	      (multiple-value-prog1 (with-frame (frame) (funcall f x))
+		(setq promoted (svref frame 1))))
+	    acc)
+      (when promoted (setq captured t)))
+    (setq list (cdr list))))
+
+(defun map1-continue (value f list acc)
+  (map1-loop f (cdr list) (cons value acc) t))
+
+(defun mapn-loop (f lists acc captured)
+  (loop
+    (when (some #'atom lists) (return (if captured (reverse acc) (nreverse acc))))
+    (let ((xs (list-cars lists)) (promoted nil))
+      (push (let ((frame (vector :resume nil 'mapn-continue f lists acc)))
+	      (declare (dynamic-extent frame))
+	      (multiple-value-prog1 (with-frame (frame) (apply f xs))
+		(setq promoted (svref frame 1))))
+	    acc)
+      (when promoted (setq captured t)))
+    (setq lists (list-cdrs lists))))
+
+(defun mapn-continue (value f lists acc)
+  (mapn-loop f (list-cdrs lists) (cons value acc) t))
+
+(defun full-map (f list &rest lists)
+  (if lists (mapn-loop f (cons list lists) '() nil) (map1-loop f list '() nil)))
+
+(defun for-each-loop (f lists)
+  ;; LISTS: a list of lists
+  (loop
+    (when (some #'atom lists) (return ps:unspecific))
+    (let ((xs (list-cars lists)))
+      (with-resume-frame (frame 'for-each-continue f lists)
+	(if (cdr xs) (apply f xs) (funcall f (car xs)))))
+    (setq lists (list-cdrs lists))))
+
+(defun for-each-continue (value f lists)
+  (declare (ignore value))
+  (for-each-loop f (list-cdrs lists)))
+
+(defun for-each1-loop (f list)
+  (loop for l on list
+	do (let ((x (car l)))
+	     (with-resume-frame (frame 'for-each1-continue f l)
+	       (funcall f x)))
+	finally (return ps:unspecific)))
+
+(defun for-each1-continue (value f list)
+  (declare (ignore value))
+  (for-each1-loop f (cdr list)))
+
+(defun full-for-each (f list &rest lists)
+  (if lists (for-each-loop f (cons list lists)) (for-each1-loop f list)))
+
+;;; vector-map, vector-for-each, string-map, string-for-each: KIND says
+;;; which; SEQUENCES are walked in step, to the shortest's length N.
+
+(defun index-loop (kind f sequences i n acc captured)
+  (loop
+    (when (>= i n)
+      (return (let ((acc (if captured (reverse acc) (nreverse acc))))
+		(case kind
+		  (:vector-map (coerce acc 'simple-vector))
+		  (:string-map (coerce acc 'simple-string))
+		  (t ps:unspecific)))))
+    (let ((promoted nil) (j i))
+      (let ((value (let ((frame (vector :resume nil 'index-continue kind f sequences i n acc)))
+		     (declare (dynamic-extent frame))
+		     (multiple-value-prog1
+			 (with-frame (frame)
+			   (if (cdr sequences)
+			       (apply f (mapcar (lambda (s) (aref s j)) sequences))
+			       (funcall f (aref (car sequences) j))))
+		       (setq promoted (svref frame 1))))))
+	(when (member kind '(:vector-map :string-map)) (push value acc))
+	(when promoted (setq captured t))))
+    (incf i)))
+
+(defun index-continue (value kind f sequences i n acc)
+  (index-loop kind f sequences (1+ i) n
+	      (if (member kind '(:vector-map :string-map)) (cons value acc) acc)
+	      t))
+
+(defun full-index-loop (kind f sequence more)
+  (let ((sequences (cons sequence more)))
+    (index-loop kind f sequences 0 (reduce #'min sequences :key #'length) '() nil)))
+
+;;; Calls to the other primitives that call procedures (*BARRIER-PRIMITIVES*)
+;;; are made in a :BARRIER frame: re-entering a continuation captured in
+;;; the procedure such a primitive called would resume as if the
+;;; primitive had returned at once, so rebuilding the frame raises an
+;;; error instead.  (Escaping through one is fine.)
+
+(defmacro %barrier (name call)
+  (let ((frame (gensym "FRAME")))
+    `(let ((,frame (vector :barrier nil ',name)))
+       (declare (dynamic-extent ,frame))
+       (with-frame (,frame) ,call))))
 
 (define-condition continuation-not-reentrant (control-error) ()
   (:report "continuation invoked after its extent ended, and not re-entrant (no base around its capture)"))
@@ -187,6 +338,11 @@ call returns, then continue the frame."
       (:winder (winder-extent (svref frame 2) inner))
       (:handler (handler-extent (car (svref frame 2)) (cdr (svref frame 2)) inner))
       (:handlers (handlers-extent (svref frame 2) inner))
+      (:extent (call-in-extent (svref frame 2) inner))
+      (:resume (let ((value (with-frame (frame) (funcall inner))))
+		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
+      (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A, a procedure written in Lisp"
+				 (svref frame 2)))
       (t (let ((value (with-frame (frame) (funcall inner))))
 	   (apply head (svref frame 2) value frame (make-list (svref frame 3))))))))
 
@@ -197,11 +353,21 @@ innermost."
       (values-list values)
       (resume-frame (car frames) (lambda () (rebuild-frames (cdr frames) values)))))
 
-(defun reenter (frames winders values)
-  ;; The base has no dynamic-winds active: run the befores of the
-  ;; continuation's, outermost first.
-  (let ((outer '()))
-    (dolist (w (reverse winders))
+(defun shared-winders (a b)
+  "The winders lists A and B (innermost first) have in common at their
+outer ends, innermost first."
+  (let ((ra (reverse a)) (rb (reverse b)) (shared '()))
+    (loop while (and ra rb (eq (car ra) (car rb)))
+	  do (push (pop ra) shared) (pop rb))
+    shared))
+
+(defun reenter (frames winders values shared)
+  ;; Throwing to the base ran the afters of the winders that were active
+  ;; but for SHARED, which the continuation's WINDERS end with: run the
+  ;; befores of the others, outermost first.  Rebuilding the frames
+  ;; re-establishes them all.
+  (let ((outer shared))
+    (dolist (w (reverse (butlast winders (length shared))))
       (let ((*winders* outer)) (funcall (car w)))
       (push w outer)))
   (rebuild-frames (reverse frames) values))
@@ -212,9 +378,12 @@ innermost."
 	  (live (list t))
 	  (tag (list 'continuation)))
       (flet ((k (&rest values)
+	       (setq *shared-winders* '())
 	       (cond ((car live) (throw tag (values-list values)))
 		     ((and rebuildable *base-tag*)
-		      (throw *base-tag* (lambda () (reenter frames winders values))))
+		      (let ((shared (shared-winders *winders* winders)))
+			(setq *shared-winders* shared)
+			(throw *base-tag* (lambda () (reenter frames winders values shared)))))
 		     (t (error 'continuation-not-reentrant)))))
 	(unwind-protect (catch tag (funcall f #'k))
 	  (setf (car live) nil))))))
@@ -278,22 +447,43 @@ restore the site's live variables and continue after it."
     ("dynamic-wind" . "%full-dynamic-wind")
     ("call-with-values" . "%full-call-with-values")
     ("map" . "%full-map")
-    ("for-each" . "%full-for-each"))
+    ("for-each" . "%full-for-each")
+    ("vector-map" . "%full-vector-map")
+    ("vector-for-each" . "%full-vector-for-each")
+    ("string-map" . "%full-string-map")
+    ("string-for-each" . "%full-string-for-each"))
   "Primitives that call procedures, and their frame-aware versions.")
 
 (defparameter *calling-primitives*
   '("apply" "call-with-current-continuation" "call/cc" "dynamic-wind"
     "call-with-values" "map" "for-each" "%full-call/cc" "%full-dynamic-wind" "%full-call-with-values"
     "%full-map" "%full-for-each" "%call-with-frame"
+    "%full-vector-map" "%full-vector-for-each" "%full-string-map" "%full-string-for-each"
     "vector-map" "vector-for-each" "string-map" "string-for-each"
     "with-exception-handler" "raise" "raise-continuable" "force"
     "call-with-port" "call-with-input-file" "call-with-output-file"
     "with-input-from-file" "with-output-to-file" "eval" "load"
     "list-sort" "vector-sort" "vector-sort!" "find" "filter" "partition"
     "fold-left" "fold-right" "remp" "memp" "assp" "exists" "for-all"
-    "member" "assoc" "hashtable-update!" "make-parameter")
+    "member" "assoc" "hashtable-update!" "make-parameter" "%parameterize")
   "Primitives that may call a procedure, so that a call to one is a
 call site like any other.  Calls to every other primitive are not.")
+
+(defparameter *barrier-primitives*
+  '("force" "call-with-port" "call-with-input-file" "call-with-output-file"
+    "with-input-from-file" "with-output-to-file"
+    "list-sort" "vector-sort" "vector-sort!" "find" "filter" "partition"
+    "fold-left" "fold-right" "remp" "memp" "assp" "exists" "for-all"
+    "member" "assoc" "hashtable-update!" "make-parameter")
+  "Calling primitives with no frame-aware version, which do something
+after the procedure they call returns: calls to them are made in a
+barrier frame (%BARRIER).  member and assoc only with a predicate.")
+
+(defparameter *adapter-primitives*
+  '("void" "gensym" "symbol-value" "set-symbol-value!" "lisp-keyword?"
+    "host-literal?" "pretty-print")
+  "Host primitives of psyntax's adapter (src/psyntax.lisp), which call
+no procedure.")
 
 (defvar *primitive-names* nil)
 
@@ -311,6 +501,7 @@ call site like any other.  Calls to every other primitive are not.")
 	(dolist (p *full-replacements*)
 	  (setf (gethash (car p) table) t (gethash (cdr p) table) t))
 	(setf (gethash "%call-with-frame" table) t)
+	(dolist (name *adapter-primitives*) (setf (gethash name table) t))
 	(setq *primitive-names* table))))
 
 (defun primitive-name (x)
@@ -321,12 +512,108 @@ primitive's name (psyntax renames everything else), or (primitive x)."
 	 (let ((name (ps:scheme-symbol-name x)))
 	   (and (gethash name (primitive-names)) name)))))
 
+(defvar *safe-procedures* nil
+  "A hash table of the lexical variables, in the top-level form being
+transformed, that are bound to procedures that can't capture a
+continuation (see FIND-SAFE-PROCEDURES); or NIL.")
+
 (defun calling-call-p (operator)
   "Whether a call with OPERATOR (normalized) may capture.  Operators that
 are Lisp symbols are the transformation's own, or the translator's."
   (cond ((and (symbolp operator) (not (scheme-symbol-p operator))) nil)
+	((and *safe-procedures* (symbolp operator) (gethash operator *safe-procedures*)) nil)
 	(t (let ((name (primitive-name operator)))
 	     (or (null name) (member name *calling-primitives* :test #'string=))))))
+
+;;; Procedures that can't capture.  A call is a site only because the
+;;; callee might, through some chain of calls, reach call/cc, so a call
+;;; to a procedure known never to needs no frame.  Within one top-level form
+;;; (a program's or a library's body is one: psyntax makes its
+;;; definitions a letrec*), a variable bound to a lambda and never
+;;; assigned otherwise is known.  Its procedure is safe if nothing it
+;;; calls, in any position, can capture: primitives that don't call
+;;; procedures, and other safe procedures.  Assuming every known
+;;; procedure safe and striking out those that call something unsafe,
+;;; until none changes, gives the largest consistent set, which is
+;;; right: a cycle of calls among procedures that call nothing else
+;;; never reaches call/cc.  So (define (fib n) ... (fib (- n 1)) ...)
+;;; makes no frames and needs no machine.
+;;;
+;;; Raising an error isn't a site: the handler of a non-continuable
+;;; raise can't return to the raiser, so a continuation captured in it
+;;; never needs the raiser's frame.  (raise-continuable is a site.)
+
+(defun find-safe-procedures (form)
+  "A hash table of the variables bound in FORM to safe procedures."
+  (let ((assignments (make-hash-table :test 'eq))	; variable -> number of set!s
+	(lambdas (make-hash-table :test 'eq))		; variable -> its lambda, if known
+	(placeholders (make-hash-table :test 'eq)))	; variable -> bound to '#f
+    (labels ((false-p (x) (equal x `(,(sym "quote") ,ps:false)))
+	     (scan (e)
+	       (cond ((atom e))
+		     ((quote-form-p e))
+		     ((lambda-form-p e) (scan (caddr e)))
+		     ((keyword-p (car e) "SET!")
+		      (incf (gethash (cadr e) assignments 0))
+		      (when (lambda-form-p (caddr e))
+			(push (caddr e) (gethash (cadr e) lambdas)))
+		      (scan (caddr e)))
+		     ((keyword-p (car e) "LETREC")
+		      (dolist (b (cadr e))
+			(when (lambda-form-p (cadr b)) (push (cadr b) (gethash (car b) lambdas)))
+			(scan (cadr b)))
+		      (scan (caddr e)))
+		     ((let-form-p e)
+		      (loop for v in (cadr (car e)) for a in (cdr e)
+			    do (cond ((lambda-form-p a) (push a (gethash v lambdas)))
+				     ((false-p a) (setf (gethash v placeholders) t))))
+		      (dolist (a (cdr e)) (scan a))
+		      (scan (caddr (car e))))
+		     (t (loop for x on e
+			      do (scan (car x))
+				 (unless (listp (cdr x)) (scan (cdr x)))))))
+	     (known-lambda (v)
+	       ;; A lambda bound to V once and for all: by its binding with
+	       ;; no assignment, or by one assignment of a '#f placeholder.
+	       (let ((ls (gethash v lambdas)) (n (gethash v assignments 0)))
+		 (and ls (null (cdr ls))
+		      (or (zerop n) (and (= n 1) (gethash v placeholders)))
+		      (car ls)))))
+      (scan form)
+      (let ((safe (make-hash-table :test 'eq))
+	    (bodies '()))
+	(maphash (lambda (v ls)
+		   (declare (ignore ls))
+		   (let ((l (known-lambda v)))
+		     (when l (setf (gethash v safe) t) (push (cons v (caddr l)) bodies))))
+		 lambdas)
+	(let ((*safe-procedures* safe))
+	  (loop while (loop with changed = nil
+			    for (v . body) in bodies
+			    when (and (gethash v safe) (may-capture-p body))
+			      do (remhash v safe) (setq changed t)
+			    finally (return changed))))
+	safe))))
+
+(defun may-capture-p (e)
+  "Whether evaluating E (not the bodies of the lambdas in it, unless
+called on the spot) may make a call that captures, in any position."
+  (cond ((atom e) nil)
+	((quote-form-p e) nil)
+	((lambda-form-p e) nil)
+	((keyword-p (car e) "PRIMITIVE") nil)
+	((or (keyword-p (car e) "IF") (keyword-p (car e) "BEGIN"))
+	 (some #'may-capture-p (cdr e)))
+	((or (keyword-p (car e) "SET!") (keyword-p (car e) "DEFINE"))
+	 (may-capture-p (caddr e)))
+	((keyword-p (car e) "LETREC")
+	 (or (some (lambda (b) (may-capture-p (cadr b))) (cadr e))
+	     (may-capture-p (caddr e))))
+	((lambda-form-p (car e))
+	 (or (may-capture-p (caddr (car e))) (some #'may-capture-p (cdr e))))
+	(t (or (calling-call-p (car e))
+	       (may-capture-p (car e))
+	       (some #'may-capture-p (cdr e))))))
 
 (defun lambda-form-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
 (defun quote-form-p (x) (and (consp x) (keyword-p (car x) "QUOTE")))
@@ -355,6 +642,15 @@ are Lisp symbols are the transformation's own, or the translator's."
 		   ((lambda-form-p head)
 		    (and (simple-p (caddr head)) (every #'simple-p (cdr e))))
 		   (t (and (not (calling-call-p head)) (every #'simple-p (cdr e)))))))))
+
+(defun wrap-barrier (call)
+  "CALL, in a barrier frame if its operator is one of *BARRIER-PRIMITIVES*."
+  (let ((name (and (consp call) (primitive-name (car call)))))
+    (if (and name (member name *barrier-primitives* :test #'string=)
+	     (not (and (member name '("member" "assoc") :test #'string=)
+		       (< (length call) 4))))
+	`(%barrier ,name ,call)
+	call)))
 
 (defun replacement (x)
   (let ((name (primitive-name x)))
@@ -466,7 +762,7 @@ primitives in *FULL-REPLACEMENTS* replaced."
 	   ,(simple (caddr e))))
 	((or (keyword-p (car e) "SET!") (keyword-p (car e) "DEFINE"))
 	 `(,(car e) ,(cadr e) ,(simple (caddr e))))
-	(t (mapcar #'simple e))))
+	(t (wrap-barrier (mapcar #'simple e)))))
 
 (defun tail-simple-p (e)
   "Whether E makes no call that may capture except in tail position: a
@@ -566,8 +862,9 @@ procedure with such a body needs no machine."
 	  (emit `',end)))))
 
 (defun flat-call (e k)
-  (let ((xs (operands e)))
-    (cond ((not (calling-call-p (car xs))) (finish xs k))
+  (let ((xs (wrap-barrier (operands e))))
+    (cond ((not (calling-call-p (if (eq (car xs) '%barrier) (car (third xs)) (car xs))))
+	   (finish xs k))
 	  ((eq k :return) (emit `(%return ,xs)))
 	  (t (let ((site (incf (m-count *m*)))
 		   (label (new-label))
@@ -804,7 +1101,9 @@ its own, of the chunk's free variables."
 
 (defun cc-transform (form)
   "Top-level FORM for full continuations."
-  (let ((*chunk-markers* (make-hash-table :test 'eq)))
+  (let* ((*chunk-markers* (make-hash-table :test 'eq))
+	 (*safe-procedures* nil)
+	 (*safe-procedures* (find-safe-procedures form)))
     (cc-transform-1 form)))
 
 (defun cc-transform-1 (form)
@@ -825,37 +1124,15 @@ its own, of the chunk's free variables."
 ;;; ------------------------------------------------------------------
 ;;; The host's side
 
-(defparameter *full-scheme-definitions*
-  "(define %full-map
-     (lambda (f l . ls)
-       (if (null? ls)
-           (letrec ((loop (lambda (l)
-                            (if (pair? l)
-                                ((lambda (v) (cons v (loop (cdr l)))) (f (car l)))
-                                '()))))
-             (loop l))
-           (letrec ((cars (lambda (ls) (if (null? ls) '() (cons (car (car ls)) (cars (cdr ls))))))
-                    (cdrs (lambda (ls) (if (null? ls) '() (cons (cdr (car ls)) (cdrs (cdr ls))))))
-                    (all-pairs? (lambda (ls) (if (null? ls) #t (if (pair? (car ls)) (all-pairs? (cdr ls)) #f))))
-                    (loop (lambda (ls)
-                            (if (all-pairs? ls)
-                                ((lambda (v) (cons v (loop (cdrs ls)))) (apply f (cars ls)))
-                                '()))))
-             (loop (cons l ls))))))
-   (define %full-for-each
-     (lambda (f l . ls)
-       (if (null? ls)
-           (letrec ((loop (lambda (l) (if (pair? l) (begin (f (car l)) (loop (cdr l))) (if #f #f)))))
-             (loop l))
-           (begin (apply %full-map f l ls) (if #f #f)))))"
-  "Frame-aware map and for-each, compiled with full continuations.")
-
 (defun install-continuation-primitives ()
   (defhost "%call-with-frame" (thunk k) (call-with-frame thunk k))
   (defhost "%full-call/cc" (f) (full-call/cc f))
   (defhost "%full-dynamic-wind" (before thunk after) (full-dynamic-wind before thunk after))
   (defhost "%full-call-with-values" (producer consumer) (full-call-with-values producer consumer))
   (defhost "%guard-reraise" (k thunk) (guard-reraise k thunk))
-  (let ((*full-continuations* t))
-    (dolist (form (read-scheme-text *full-scheme-definitions*))
-      (host-eval form))))
+  (defhost "%full-map" (f list &rest lists) (apply #'full-map f list lists))
+  (defhost "%full-for-each" (f list &rest lists) (apply #'full-for-each f list lists))
+  (defhost "%full-vector-map" (f v &rest more) (full-index-loop :vector-map f v more))
+  (defhost "%full-vector-for-each" (f v &rest more) (full-index-loop :vector-for-each f v more))
+  (defhost "%full-string-map" (f s &rest more) (full-index-loop :string-map f s more))
+  (defhost "%full-string-for-each" (f s &rest more) (full-index-loop :string-for-each f s more)))

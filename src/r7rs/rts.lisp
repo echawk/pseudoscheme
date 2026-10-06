@@ -419,30 +419,36 @@ parameters: current-input-port and friends, which are host procedures
 returning a CL stream variable.  Filled in at boot, when the procedure
 objects are known.")
 
+(defvar *call-in-extent* (lambda (establish thunk) (funcall establish thunk))
+  "A function of ESTABLISH and THUNK that calls ESTABLISH with a thunk
+that calls THUNK; ESTABLISH sets up a dynamic context around the call of
+the thunk it's given.  src/continuations.lisp makes this re-establish
+the context when a continuation captured in THUNK is re-entered.")
+
 (defun parameterize* (params values thunk)
-  ;; current-input-port and friends: rebind their CL stream variables.
-  (let ((port (position-if (lambda (p) (assoc p *port-parameters*)) params)))
-    (when port
-      (return-from parameterize*
-	(progv (list (cdr (assoc (nth port params) *port-parameters*))) (list (nth port values))
-	  (parameterize* (append (subseq params 0 port) (nthcdr (1+ port) params))
-			 (append (subseq values 0 port) (nthcdr (1+ port) values))
-			 thunk)))))
-  ;; Converters run before any parameter is rebound (R7RS 4.2.6).
-  (let* ((states (mapcar (lambda (p)
-			   (or (gethash p *parameter-states*)
-			       (scheme-error "parameterize: not a parameter object: ~S" p)))
-			 params))
-	 (new (mapcar (lambda (s v)
-			(if (parameter-state-converter s)
-			    (funcall (parameter-state-converter s) v)
-			    v))
-		      states values))
-	 (old (mapcar #'parameter-state-value states)))
-    (unwind-protect
-	 (progn (mapc (lambda (s v) (setf (parameter-state-value s) v)) states new)
-		(funcall thunk))
-      (mapc (lambda (s v) (setf (parameter-state-value s) v)) states old))))
+  ;; current-input-port and friends rebind their CL stream variables;
+  ;; other parameters set their values, converted first (R7RS 4.2.6).
+  (let ((specials '()) (special-values '()) (states '()) (new '()))
+    (loop for p in params for v in values
+	  do (let ((port (assoc p *port-parameters*)))
+	       (if port
+		   (progn (push (cdr port) specials) (push v special-values))
+		   (let ((s (or (gethash p *parameter-states*)
+				(scheme-error "parameterize: not a parameter object: ~S" p))))
+		     (push s states)
+		     (push (if (parameter-state-converter s)
+			       (funcall (parameter-state-converter s) v)
+			       v)
+			   new)))))
+    (funcall *call-in-extent*
+	     (lambda (inner)
+	       (progv specials special-values
+		 (let ((old (mapcar #'parameter-state-value states)))
+		   (unwind-protect
+			(progn (mapc (lambda (s v) (setf (parameter-state-value s) v)) states new)
+			       (funcall inner))
+		     (mapc (lambda (s v) (setf (parameter-state-value s) v)) states old)))))
+	     thunk)))
 
 (defprim "%parameterize" (params values thunk)
   (parameterize* params values thunk))

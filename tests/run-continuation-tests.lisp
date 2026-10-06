@@ -50,8 +50,30 @@
 ("(let ((k #f) (n 0)) (let ((l (map (lambda (x) (call/cc (lambda (c) (if (= x 2) (set! k c)) x))) '(1 2 3)))) (set! n (+ n 1)) (if (= n 1) (k 20) (list n l))))" . "(2 (1 20 3))")
 ("(let ((x 1) (k #f)) (let ((v (call/cc (lambda (c) (set! k c) 0)))) (set! x (+ x 1)) (if (< v 2) (k (+ v 1)) x)))" . "4")
 ("(let ((acc '()) (k #f)) (dynamic-wind (lambda () (set! acc (cons 'in acc))) (lambda () (call/cc (lambda (c) (set! k c))) (set! acc (cons 'body acc))) (lambda () (set! acc (cons 'out acc)))) (if (< (length acc) 6) (k #f) (reverse acc)))" . "(in body out in body out)")
+;; re-entry through vector-map, string-for-each and map over two lists
+("(let ((k #f) (n 0)) (let ((v (vector-map (lambda (x) (call/cc (lambda (c) (if (= x 2) (set! k c)) x))) #(1 2 3)))) (set! n (+ n 1)) (if (= n 1) (k 20) (list n v))))" . "(2 #(1 20 3))")
+("(let ((k #f) (acc '())) (string-for-each (lambda (c) (call/cc (lambda (r) (if (char=? c #\\b) (set! k r)))) (set! acc (cons c acc))) \"abc\") (if (< (length acc) 5) (k #f) (list->string (reverse acc))))" . "\"abcbc\"")
+("(let ((k #f) (n 0)) (let ((l (map (lambda (x y) (call/cc (lambda (c) (if (= x 2) (set! k c)) (+ x y)))) '(1 2 3) '(10 20 30)))) (set! n (+ n 1)) (if (= n 1) (k 0) (list n l))))" . "(2 (11 0 33))")
+;; re-entering through a Lisp procedure without a frame-aware version is an error
+("(let ((k #f) (n 0)) (guard (e (#t 'barrier)) (let ((r (list-sort (lambda (a b) (call/cc (lambda (c) (if (not k) (set! k c)))) (< a b)) '(3 1 2)))) (set! n (+ n 1)) (if (< n 2) (k #t) r))))" . "barrier")
+;; a continuation captured inside eval includes the frames outside it
+("(let ((n 0)) (let ((r (eval '(call/cc (lambda (c) (cons 1 c))) (environment '(scheme base))))) (set! n (+ n 1)) (if (= n 1) ((cdr r) (cons 10 #f)) (list n (car r)))))" . "(2 10)")
 ;; a generator walking a tree: resumed from different depths, so captures
 ;; share frames promoted by earlier ones
+;; re-entering within a dynamic-wind runs neither its after nor its before
+("(let ((acc '()) (k #f) (n 0)) (dynamic-wind (lambda () (set! acc (cons 'in acc))) (lambda () (call/cc (lambda (c) (set! k c))) (set! n (+ n 1)) (if (< n 3) (k #f))) (lambda () (set! acc (cons 'out acc)))) (list n (reverse acc)))" . "(3 (in out))")
+;; ... and runs only the before of the one it enters
+("(let ((acc '()) (k #f) (n 0)) (dynamic-wind (lambda () (set! acc (cons 'a acc))) (lambda () (dynamic-wind (lambda () (set! acc (cons 'b acc))) (lambda () (call/cc (lambda (c) (set! k c)))) (lambda () (set! acc (cons 'c acc)))) (set! n (+ n 1)) (if (< n 2) (k #f))) (lambda () (set! acc (cons 'd acc)))) (reverse acc))" . "(a b c b c d)")
+;; parameterize is re-established on re-entry
+("(let ((p (make-parameter 1)) (k #f) (log '())) (parameterize ((p 2)) (call/cc (lambda (c) (set! k c))) (set! log (cons (p) log))) (set! log (cons (p) log)) (if (< (length log) 4) (k #f) (reverse log)))" . "(2 1 2 1)")
+;; guard re-raises in the dynamic environment of the raise
+("(let ((v '())) (guard (e ((eq? e 5) (list 'five (reverse v)))) (guard (e ((eq? e 6) 'six)) (dynamic-wind (lambda () (set! v (cons 'in v))) (lambda () (raise 5)) (lambda () (set! v (cons 'out v)))))))" . "(five (in out in out))")
+;; a known procedure calling an unknown one: its calls are sites
+("(let () (define (twice f) (+ (f) (f))) (define k #f) (define n 0) (define r (twice (lambda () (call/cc (lambda (c) (if (not k) (set! k c)) 1))))) (set! n (+ n 1)) (if (< n 3) (k 10) (list n r)))" . "(3 11)")
+;; mutually recursive known procedures, one of which captures
+("(let () (define k #f) (define (a n) (if (= n 0) (call/cc (lambda (c) (set! k c) 0)) (+ 1 (b (- n 1))))) (define (b n) (+ 1 (a n))) (define count 0) (define r (a 2)) (set! count (+ count 1)) (if (< count 2) (k 100) (list count r)))" . "(2 104)")
+;; a procedure assigned after its definition isn't known
+("(let () (define (f) 1) (define k (begin (set! f (lambda () (call/cc (lambda (c) (set! k c) 1)))) #f)) (define n 0) (define r (+ 1 (f))) (set! n (+ n 1)) (if (< n 2) (k 5) (list n r)))" . "(2 6)")
 ("(let () (define (walk tree yield) (cond ((null? tree) #f) ((pair? tree) (walk (car tree) yield) (walk (cdr tree) yield)) (else (yield tree)))) (define (make-gen tree) (define return #f) (define resume #f) (define (yield v) (call/cc (lambda (r) (set! resume r) (return v)))) (lambda () (call/cc (lambda (ret) (set! return ret) (if resume (resume #f) (begin (walk tree yield) (return 'done))))))) (let ((g (make-gen '((1 2) (3 (4 5)) 6)))) (let loop ((acc '())) (let ((v (g))) (if (eq? v 'done) (reverse acc) (loop (cons v acc)))))))" . "(1 2 3 4 5 6)")
 ))
 
