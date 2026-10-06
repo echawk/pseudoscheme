@@ -1,6 +1,7 @@
 # Full continuations
 
-Status: implemented and opt-in (src/continuations.lisp;
+Status: implemented and opt-in, costing 7.7% over escape-only as a
+geometric mean of the benchmarks (src/continuations.lisp;
 `--continuations=full` on the command line, `psx::*full-continuations*`
 from Lisp). "Implementation" describes how it works; "Further work"
 lists what is left before it can be the default, with the techniques
@@ -307,7 +308,14 @@ What failed first, and why:
   disagreement is the one left), Racket's R6RS suite all 8902 (two more
   than escape-only), tests/run-continuation-tests.lisp 33 of 33. `make
   test-full` runs them.
-- Cost on bench/ against escape-only: BENCH_RESULTS
+- Cost on bench/ against escape-only: 7.7% as a geometric mean of all
+  57 benchmarks (bench/RESULTS.md). Most run at the same speed (`fib`,
+  `tak`, `earley`, `deriv`, `nqueens`, `browse`, ...). The cost is in
+  programs that call unknown procedures (closures, procedure parameters)
+  in tight loops: `lattice` and `graphs` 1.8×, `quicksort` and `conform`
+  1.7×, `matrix` 1.65×, `scheme` 1.5×. Capture-heavy code: `ctak` 1.35×,
+  `fibc` 1.2× (they were 2.3× and 2.1×, before escape-only `call/cc`).
+  A site costs about 4 ns.
 
 ## Further work
 
@@ -412,7 +420,12 @@ The frames make both straightforward:
 
 The conditions set earlier (re-entry through Lisp frames an error rather
 than silent, the dynamic state captured, ordinary code within about
-10–15%) are met for code compiled in full mode: BENCH_DEFAULT_NOTE.
+10–15%) are met for code compiled in full mode: 7.7% as a geometric
+mean, with a handful of closure-heavy programs at 1.5–1.8×. What remains
+is a decision: make full continuations the default, with
+`--continuations=escape` to opt out, and the remaining gaps (Lisp
+functions through the bridge, code compiled without the transformation)
+documented as such.
 
 ## The earlier recommendation
 

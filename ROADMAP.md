@@ -13,10 +13,10 @@ this file.
 | `tests/run-library-tests.lisp` | 55/55 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
-| `tests/run-continuation-tests.lisp` | 16/16 |
+| `tests/run-continuation-tests.lisp` | 34/34 |
 | `make -C contrib/cli test` | 20/20 |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
-| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 3.0× Chez's time (Guile 2.8×, Gauche 9.2×) |
+| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.44× Chez's time, 1.55× with full continuations (Guile 2.8×, Gauche 9.2×) |
 
 ## Architecture now
 
@@ -61,25 +61,30 @@ that; escape-only, it re-raises from the guard's own context).
 ## 2. Speed
 
 `bench/` vendors ecraven's r7rs-benchmarks. In the last run
-(bench/RESULTS.md) Pseudoscheme was 3.0× Chez's time as a geometric
-mean, beside Guile (2.8×), with all 57 benchmarks completing.
-Open-coding psyntax's primitives made it 2.4–7.8× faster than the
-previous build. The worst ratios point at what to do next:
+(bench/RESULTS.md) Pseudoscheme was 1.44× Chez's time as a geometric
+mean (Guile: 2.8×), 1.55× with full continuations, with all 57
+benchmarks completing; bench/RESULTS.md, "What made the difference",
+lists the changes that took it from 3.0×. What's left:
 
-- **`lattice` (13.5×), `conform` (7.9×), `peval` (5.8×).** These are
-  heavy on closures and on `apply`/`map`. Profile them; `map` and
-  `for-each` are still called out of line (`*closed-primitives*` in
-  src/psyntax.lisp), because the R6RS/R7RS versions replaced the
-  integrated ones.
-- **`gcbench` (10.2×).** Allocation of record instances and vectors.
-  Check how R6RS record constructors compile.
-- **`wc` (8.7×).** Character I/O, one `read-char` at a time through
-  generic port code.
-- **`ack` (8.6×), `takl` (6.9×), `cpstak` (5.9×).** Calls and
-  arithmetic: `+`/`-` are CL's generic versions. Fixnum fast paths like
-  the comparisons' (src/numbers.lisp) might help, and so might SBCL
-  declarations in the translator's output.
-- **`mbrotZ` (7.5×).** Complex arithmetic.
+- **`ack` (3.9×), `divrec` (3.6×), `browse` (3.5×), `fibc` (3.7×).**
+  The translation is what one would write by hand (`labels` functions,
+  inline arithmetic); the rest is SBCL's call and allocation costs.
+  `(debug 0)` gains about 8%, not worth the backtraces.
+- **Records** are a struct and a vector of fields, two allocations
+  (`gcbench` 2.1×). One object per record (an SBCL instance of the
+  right length) would halve that.
+- **String comparisons** (`string=?` and friends) go through an n-ary
+  wrapper in src/r7rs/base.scm, since CL's take two strings and
+  keywords; a two-argument fast path would do.
+- **R6RS overrides of open-coded primitives**: the R6RS layer redefines
+  some procedures the translator would open-code (`list-tail`,
+  `integer->char` with its check, `assq`/`assv`, the character case
+  procedures), which makes them calls. Each is deliberate, but a
+  compiler macro could keep the common case inline.
+- **Big programs**: a top-level form bigger than
+  `psx::*inline-arithmetic-limit*` is compiled without inline
+  arithmetic, since SBCL compiles it as one code object; hoisting its
+  definitions makes that rare.
 - **Compiled libraries.** Done for libraries loaded from files
   (src/library-cache.lisp). Importing a library spends about 90% of
   its time in SBCL's `compile` of the translated code, and only about
@@ -151,8 +156,10 @@ after the call. Assigned variables held across calls are boxed; long
 sequences are cut into chunks so no machine is huge. (A first version
 made two closures per call site; SBCL can't compile that at scale:
 a thousand closures over one variable take 162 s.)
-- tests/run-continuation-tests.lisp: 16 of 16 (re-entry, multi-shot,
-  `dynamic-wind`, re-entry into `map`).
+- tests/run-continuation-tests.lisp: 34 of 34 (re-entry, multi-shot,
+  `dynamic-wind` and its shared winders, `parameterize`, `guard`,
+  re-entry into `map` and the other loops, barriers, escape-only
+  `call/cc`, the analysis's edge cases).
 - R7RS with full continuations: 977 of 978 (only the `sqrt`
   disagreement is left).
 - R5RS with full continuations: 189 of 189, on psyntax (below).
@@ -165,36 +172,19 @@ a thousand closures over one variable take 162 s.)
   is compiled with `(sb-c::insert-debug-catch 0)`. And each chunk of a
   long sequence is closure-converted and compiled as a component of its
   own (`%lifted`).
-- Cost (bench/, `--continuations=full` vs escape-only): ordinary code
-  1.36× slower as a geometric mean of 11 benchmarks (cpstak 0.98×,
-  mazefun 1.17×, fib 1.74×, earley 2.86×); call/cc-heavy code ctak
-  2.3×, fibc 2.1×, after captures began sharing the frames earlier
-  captures copied (they were 15.6× and 5.6×).
+- Cost (bench/, `--continuations=full` vs escape-only): 7.7% as a
+  geometric mean of all 57 benchmarks, most at the same speed; it was
+  1.36× over 11 before the analysis of calls that can't capture.
 
-Left before full continuations can be the default:
-- **Re-entry through Lisp frames is silently wrong.** A Lisp function
-  that calls a Scheme procedure (vector-map, string-for-each, the sorts,
-  R6RS's find, filter and folds, hashtable-update!, call-with-port,
-  the bridge's Lisp functions) isn't a frame: a
-  continuation captured in the callback and re-entered later resumes as
-  if the Lisp function had returned at once. Make the common ones
-  frame-aware, as map and for-each are (Scheme compiled with the
-  transformation), and push a barrier frame around calls to the rest,
-  so that re-entering through one is an error (escaping still works).
-  The same goes for procedures of src/r7rs/base.scm, compiled at boot
-  without the transformation.
-- **Dynamic state**: parameterizations aren't re-established on
-  re-entry, and re-entry unwinds and rewinds every `dynamic-wind`, even
-  those the current and target continuations share. (Exception
-  handlers are: `with-exception-handler`'s thunk and a raised-to
-  handler run in frames that rebind the handler stack.)
-- **Cost**: a "may capture" analysis would let calls to procedures that
-  can't reach call/cc or an unknown procedure (fib calling fib) skip the
-  frame, which is most calls in most code; and the special binding per
-  call could become an index into a per-thread stack.
-- Then: make it the default, with `--continuations=escape` to opt out;
-  SRFI 158's generators as real coroutines; SRFI 226 (delimited control),
-  which the frames make straightforward (capture up to a prompt).
+Since then (docs/continuations.md, "Calls that can't capture" and
+"Frames for the runtime's own calls"): an analysis of the calls that
+can't capture (safe procedures, safe calls of `map` and the like,
+escape-only `call/cc`), frames for exception handlers, `parameterize`
+and the loops written in Lisp, barrier frames for the rest, and
+re-entry that runs only the unshared winders. Full continuations cost
+7.7% as a geometric mean of the benchmarks, 1.5–1.8× on a few
+closure-heavy programs. The open question is making them the default;
+docs/continuations.md, "Further work", lists the remaining gaps.
 
 **R5RS.** R5RS mode's classic translator expands macros itself, so the
 transformation can't reach it. R5RS can now also run on psyntax

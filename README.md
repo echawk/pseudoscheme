@@ -71,8 +71,9 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 | R7RS-small | psyntax | chibi's R7RS suite: 976 of 978 (977 with full continuations) |
 | R5RS | psyntax | chibi's R5RS suite: 188 of 189 (189 with full continuations) |
 
-Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 3.0× Chez's
-time as a geometric mean, close to Guile's 2.8×. See bench/RESULTS.md.
+Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 1.44× Chez's
+time as a geometric mean (Guile: 2.8×), and 1.55× with full
+continuations. See bench/RESULTS.md.
 
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
 libraries and 91 of 130 snow-fort libraries load.
