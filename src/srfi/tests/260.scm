@@ -1,0 +1,12 @@
+;;; Tests for SRFI 260, from the examples in the SRFI document.
+(import (scheme base) (scheme process-context) (srfi 64) (srfi 260))
+(test-begin "srfi-260")
+(test-assert (let ((s (generate-symbol))) (symbol=? s s)))
+(test-assert (let ((s1 (generate-symbol)) (s2 (generate-symbol))) (not (symbol=? s1 s2))))
+(test-assert (let ((s1 (generate-symbol "g1")) (s2 (generate-symbol "g1"))) (not (symbol=? s1 s2))))
+(test-assert (let ((s1 (generate-symbol "g1")) (s2 'g1)) (not (symbol=? s1 s2))))
+(test-assert (let ((s (generate-symbol "g1"))) (not (string=? (symbol->string s) "g1"))))
+(test-assert (let ((s (generate-symbol))) (symbol=? (string->symbol (symbol->string s)) s)))
+(let ((failures (test-runner-fail-count (test-runner-current))))
+  (test-end "srfi-260")
+  (exit (if (zero? failures) 0 1)))
