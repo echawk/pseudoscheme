@@ -2289,7 +2289,7 @@
                    (if (eq? (binding-type b) 'syntax)
                        (let-values (((var maps)
                                      (let ((var.lev (binding-value b)))
-                                       (gen-ref src (car var.lev) (cdr var.lev) maps))))
+                                       (gen-ref/excess src (car var.lev) (cdr var.lev) maps))))
                          (values (list 'ref var) maps))
                        (values (list 'quote e) maps))))
               ((dots e) (ellipsis? dots)
@@ -2303,8 +2303,7 @@
                                           (gen-syntax src x r
                                             (cons '() maps) ellipsis? #f)))
                               (if (null? (car maps))
-                                  (stx-error src
-                                    "extra ellipsis in syntax form")
+                                  (extra-ellipsis src)
                                   (values (gen-map x (car maps)) (cdr maps)))))))
                  (syntax-match y ()
                    (() (k maps))
@@ -2313,7 +2312,7 @@
                        (lambda (maps)
                          (let-values (((x maps) (k (cons '() maps))))
                            (if (null? (car maps))
-                               (stx-error src "extra ellipsis in syntax form")
+                               (extra-ellipsis src)
                                (values (gen-mappend x (car maps)) (cdr maps)))))))
                    (_
                     (let-values (((y maps)
@@ -2332,6 +2331,21 @@
                              (gen-syntax src ls r maps ellipsis? #t)))
                  (values (gen-vector e ls lsnew) maps)))
               (_ (values `(quote ,e) maps)))))
+        ;; PSEUDOSCHEME: SRFI 149: a pattern variable under more
+        ;; ellipses than in its pattern is repeated for the innermost
+        ;; excess ones, so it iterates in the outermost maps.  Other
+        ;; expanders (and code written for them) iterate it in the
+        ;; innermost; a template that has no meaning SRFI 149's way gets
+        ;; that one (see the syntax transformer below).
+        (define gen-ref/excess
+          (lambda (src var level maps)
+            (let ((excess (- (length maps) level)))
+              (if (and (> excess 0) srfi-149-escape)
+                  (let-values (((var outer) (gen-ref src var level (list-tail maps excess))))
+                    (values var
+                            (let f ((maps maps) (n excess))
+                              (if (= n 0) outer (cons (car maps) (f (cdr maps) (- n 1)))))))
+                  (gen-ref src var level maps)))))
         (define gen-ref
           (lambda (src var level maps)
             (if (= level 0)
@@ -2420,8 +2434,25 @@
         (lambda (e r mr)
           (syntax-match e ()
             ((_ x)
-             (let-values (((e maps) (gen-syntax e x r '() ellipsis? #f)))
-               (regen e)))))))
+             ;; PSEUDOSCHEME: SRFI 149's way, else the other (above)
+             (let ((first (call/cc
+                           (lambda (k)
+                             (set! srfi-149-escape k)
+                             (let-values (((e maps) (gen-syntax e x r '() ellipsis? #f)))
+                               (list e))))))
+               (set! srfi-149-escape #f)
+               (if first
+                   (regen (car first))
+                   (let-values (((e maps) (gen-syntax e x r '() ellipsis? #f)))
+                     (regen e)))))))))
+
+  ;;; PSEUDOSCHEME: while a template is expanded SRFI 149's way, the
+  ;;; continuation to give up with; else #f.
+  (define srfi-149-escape #f)
+  (define (extra-ellipsis src)
+    (if srfi-149-escape
+        (srfi-149-escape #f)
+        (stx-error src "extra ellipsis in syntax form")))
   
   ;;; PSEUDOSCHEME: (syntax-parameterize ((keyword transformer) ...)
   ;;; body ...), SRFI 139: the body, with each keyword bound to its new
