@@ -341,27 +341,41 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 
 ;; EQUAL? must terminate even on circular structure (R6RS 11.5, R7RS
 ;; 6.1).  Plain recursion handles the usual case; once it has looked at
-;; *EQUAL-BUDGET* nodes it starts again in a mode that remembers which
-;; pairs of objects it is already comparing and assumes those equal -- a
-;; bisimulation check, which is what EQUAL? means for graphs.
+;; *EQUAL-BUDGET* nodes it starts again with union-find (Adams and
+;; Dybvig, "Efficient nondestructive equality checking for trees and
+;; graphs", ICFP 2008): two pairs or vectors already in the same class
+;; are taken to be equal, and comparing two others first merges their
+;; classes.  That is a bisimulation check, which is what EQUAL? means for
+;; graphs, in time linear in their size, shared substructure included.
 
 (defvar *equal-budget* 100000)
 
 (defun scheme-equal-p (obj1 obj2)
   (let ((budget *equal-budget*))
+    (declare (fixnum budget))
     (block bounded
       (labels ((walk (a b)
 		 (when (minusp (decf budget)) (return-from bounded nil))
-		 (equal-step a b #'walk)))
+		 (cond ((eq a b) t)
+		       ((consp a)
+			(and (consp b) (walk (car a) (car b)) (walk (cdr a) (cdr b))))
+		       (t (equal-step a b #'walk)))))
 	(return-from scheme-equal-p (walk obj1 obj2))))
-    (let ((seen (make-hash-table :test 'eq)))
-      (labels ((walk (a b)
-		 (if (and (or (consp a) (simple-vector-p a))
-			  (member b (gethash a seen) :test #'eq))
-		     t
-		     (progn
-		       (when (or (consp a) (simple-vector-p a)) (push b (gethash a seen)))
-		       (equal-step a b #'walk)))))
+    (let ((parents (make-hash-table :test 'eq)))
+      (labels ((class-root (x)
+		 (let ((p (gethash x parents)))
+		   (if (null p)
+		       x
+		       (let ((root (class-root p)))
+			 (setf (gethash x parents) root)
+			 root))))
+	       (walk (a b)
+		 (if (and (or (consp a) (simple-vector-p a)) (or (consp b) (simple-vector-p b)))
+		     (let ((ra (class-root a)) (rb (class-root b)))
+		       (or (eq ra rb)
+			   (progn (setf (gethash ra parents) rb)
+				  (equal-step a b #'walk))))
+		     (equal-step a b #'walk))))
 	(walk obj1 obj2)))))
 
 (defun equal-step (obj1 obj2 recur)
