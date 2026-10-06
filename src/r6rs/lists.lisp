@@ -122,10 +122,14 @@
 (defprim "map" (proc list &rest lists)
   ;; R6RS requires equal lengths; R7RS stops at the shortest.  Accept
   ;; R7RS behavior here (a superset) so shared code keeps working.
-  (apply #'mapcar proc list lists))
+  (if lists
+      (apply #'mapcar proc list lists)
+      (mapcar proc list)))
 
 (defprim "for-each" (proc list &rest lists)
-  (apply #'mapc proc list lists)
+  (if lists
+      (apply #'mapc proc list lists)
+      (mapc proc list))
   ps:unspecific)
 
 ;;; 7.  Sorting (rnrs sorting)
