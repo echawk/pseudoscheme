@@ -6,17 +6,17 @@ this file.
 
 | runner | result |
 |---|---|
-| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 976 of 978 (977 with full continuations) |
-| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8900 pass, 2 fail (all 8902 with full continuations); all 25 programs run to completion |
-| `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 188 of 189 (189 with full continuations; 183 of 188 with `--classic`) |
-| `tests/run-interop-tests.lisp` | 104/104 |
+| `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 978 of 978 (977 with `--continuations=escape`) |
+| `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8902 of 8902 (8900 escape-only); all 25 programs run to completion |
+| `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 189 of 189 (188 escape-only; 183 of 188 with `--classic`) |
+| `tests/run-interop-tests.lisp` | 107/107 |
 | `tests/run-library-tests.lisp` | 55/55 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
 | `tests/run-continuation-tests.lisp` | 34/34 |
-| `make -C contrib/cli test` | 20/20 |
+| `make -C contrib/cli test` | 22/22 |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
-| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.44× Chez's time, 1.55× with full continuations (Guile 2.8×, Gauche 9.2×) |
+| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.55× Chez's time, 1.44× escape-only (Guile 2.8×, Gauche 9.2×) |
 
 ## Architecture now
 
@@ -26,7 +26,7 @@ this file.
          psyntax  (vendor/psyntax; library system, syntax-case,
          |         syntax-rules, (cl <package>) libraries)
          v
-   core Scheme --[src/continuations.lisp, opt-in]--> translator (src/*.scm) ---> Common Lisp
+   core Scheme --[src/continuations.lisp]--> translator (src/*.scm) ---> Common Lisp
          |
    host globals: src/r6rs/, src/r7rs/, src/numbers.lisp, src/compat/,
                  src/interop.lisp; SRFIs as Scheme in src/srfi/
@@ -38,25 +38,18 @@ classifier and `syntax-rules` remain only as its own bootstrap
 expander (and `tests/run-r5rs-tests.lisp --classic`). The Lisp/Scheme
 bridge is described in docs/interop.md.
 
-## 1. Conformance: the remaining failures
+## 1. Conformance
 
-Every remaining failure but one re-enters a continuation, and passes
-with full continuations (section 3).
+Every test of the three suites passes. With `--continuations=escape`,
+the tests that re-enter continuations fail, as they must: R7RS's and
+R5RS's `dynamic-wind` re-entry tests, R6RS's in `base`, and R6RS's
+`guard` that re-raises in the dynamic environment of the `raise`.
 
-**R7RS (2).**
-
-- `(sqrt -1.0-0.0i)`: chibi's test expects `+i`, but R7RS 6.2.4 puts
-  the branch cut so that `(imag-part (log -1.0-0.0i))` is −π, which
-  makes the answer `-i`, as here. Chibi doesn't distinguish `-0.0` in
-  that position. Not a bug.
-- One `dynamic-wind` test re-enters a continuation.
-
-**R6RS (2).** `base`'s `dynamic-wind` re-entry test, and the
-`exceptions` test of a `guard` that re-raises in the dynamic
-environment of the `raise` (R6RS's `guard` re-enters the handler for
-that; escape-only, it re-raises from the guard's own context).
-
-**R5RS (1).** The continuation re-entry test.
+chibi's R7RS suite expected `(sqrt -1.0-0.0i)` to be `+i`; the
+imaginary part `-0.0` puts the argument just below the branch cut,
+where IEEE 754 / C99's `csqrt` gives `-i`, as do Chez, Guile, Racket
+and Chicken (Gauche and Chibi lose the sign of the zero). The test now
+expects `-i` (tests/chibi/r7rs-tests.scm, marked `PSEUDOSCHEME:`).
 
 ## 2. Speed
 
@@ -130,76 +123,37 @@ lists the changes that took it from 3.0×. What's left:
 
 ## 3. Continuations
 
-Decided: full continuations from generalized stack inspection
-(Pettyjohn et al., ICFP 2005); docs/continuations.md, "Decision", has
-the design. In order:
-- a pass framework between psyntax's output and the translator;
-- A-normal form, and a handler around each non-tail call that records
-  its frame when a capture unwinds the stack; re-entry rebuilds the
-  frames from the records;
-- continuation marks and `dynamic-wind` on the same mechanism (Racket
-  needs the marks too, section 7);
-- barrier errors at Lisp frames;
-- opt-in at first (`--continuations=full`), then measure;
-- one-shot continuations from threads for code compiled without it.
+Full, re-entrant continuations are the default, from generalized
+stack inspection (Pettyjohn et al., ICFP 2005); `--continuations=escape`
+(or `psx::*full-continuations*` false) makes them escape-only, a Lisp
+`catch`. docs/continuations.md describes the design, the analyses that
+keep most calls free of it, the frames the runtime pushes, and what's
+left.
 
-**Implementation** (src/continuations.lisp, opt-in with
-`psx::*full-continuations*`, or `--continuations=full` in the R5RS,
-R7RS and R6RS test runners). A procedure that makes a non-tail call
-that may capture becomes a state machine: one Lisp function, a flat
-`tagbody` with a label after each such call and its locals hoisted.
-Each such call pushes a stack-allocated frame
-`#(machine site parameter-count live-variable ...)` on a special
-variable; capturing copies the frames, and re-entry calls each frame's
-machine with its site, which restores the live variables and jumps
-after the call. Assigned variables held across calls are boxed; long
-sequences are cut into chunks so no machine is huge. (A first version
-made two closures per call site; SBCL can't compile that at scale:
-a thousand closures over one variable take 162 s.)
-- tests/run-continuation-tests.lisp: 34 of 34 (re-entry, multi-shot,
-  `dynamic-wind` and its shared winders, `parameterize`, `guard`,
-  re-entry into `map` and the other loops, barriers, escape-only
-  `call/cc`, the analysis's edge cases).
-- R7RS with full continuations: 977 of 978 (only the `sqrt`
-  disagreement is left).
-- R5RS with full continuations: 189 of 189, on psyntax (below).
-- R6RS with full continuations: all 8902. Two things made
-  the big test libraries compilable. SBCL compiles a top-level form,
-  closures included, as one component; with `debug` ≥ 1 and ≥ `speed`,
-  each function that binds specials keeps its binding stack pointer in
-  a slot live across the whole component (`insert-debug-catch`), so the
-  register allocator's tables grow as functions × blocks. Full-mode code
-  is compiled with `(sb-c::insert-debug-catch 0)`. And each chunk of a
-  long sequence is closure-converted and compiled as a component of its
-  own (`%lifted`).
-- Cost (bench/, `--continuations=full` vs escape-only): 7.7% as a
-  geometric mean of all 57 benchmarks, most at the same speed; it was
-  1.36× over 11 before the analysis of calls that can't capture.
+- A procedure that makes a non-tail call that may capture becomes a
+  state machine; each such call pushes a stack-allocated frame, which a
+  capture copies and a re-entry rebuilds.
+- Most calls can't capture (calls to safe procedures, safe calls of
+  `map` and the like, escape-only `call/cc`) and compile as they would
+  escape-only.
+- `dynamic-wind`, exception handlers, `parameterize`, and the loops
+  written in Lisp (`map`, `vector-map`, ...) push frames of their own;
+  other Lisp code that calls Scheme procedures (the sorts, R6RS's folds,
+  the bridge) pushes a barrier, which makes re-entering through it an
+  error.
+- tests/run-continuation-tests.lisp: 34 of 34. Cost: 7.7% over
+  escape-only as a geometric mean of bench/, most benchmarks at the same
+  speed, 1.5–1.8× on a few closure-heavy programs.
 
-Since then (docs/continuations.md, "Calls that can't capture" and
-"Frames for the runtime's own calls"): an analysis of the calls that
-can't capture (safe procedures, safe calls of `map` and the like,
-escape-only `call/cc`), frames for exception handlers, `parameterize`
-and the loops written in Lisp, barrier frames for the rest, and
-re-entry that runs only the unshared winders. Full continuations cost
-7.7% as a geometric mean of the benchmarks, 1.5–1.8× on a few
-closure-heavy programs. The open question is making them the default;
-docs/continuations.md, "Further work", lists the remaining gaps.
+Next (docs/continuations.md, "Further work"): frame-aware versions of
+the barriers' primitives; safety information across libraries; SRFI 226
+(delimited control) and continuation marks on the same frames; SRFI
+158's generators as real coroutines (src/srfi/README.md).
 
-**R5RS.** R5RS mode's classic translator expands macros itself, so the
-transformation can't reach it. R5RS can now also run on psyntax
-(`ps-r7rs::eval-at-r5rs-repl`, a top level whose bindings are
-`(pseudoscheme r5rs)`: `(scheme r5rs)` plus string ports), which is what
-full continuations use. chibi's R5RS suite there: 188 of 189, and 189
-of 189 with full continuations, against 183 of 188 on the classic
-translator. Next: make psyntax R5RS's default front end (the API's
-`r5rs:` functions, the command line's `--r5rs`), keeping the classic
-translator for the translator's own bootstrap.
-
-Without it, `call/cc` is escape-only (Lisp `catch`), and re-entering a
-continuation signals an error. SRFI 158's coroutine generators are
-buffered as a result (src/srfi/README.md). All but one of the
-remaining test failures (section 1) need this.
+**R5RS** runs on psyntax (`ps-r7rs::eval-at-r5rs-repl`, a top level whose
+bindings are `(pseudoscheme r5rs)`), so it gets full continuations too;
+the classic translator remains for the translator's own bootstrap and
+`tests/run-r5rs-tests.lisp --classic` (183 of 188).
 
 ## 4. The Lisp bridge, next
 

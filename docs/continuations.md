@@ -1,16 +1,17 @@
 # Full continuations
 
-Status: implemented and opt-in, costing 7.7% over escape-only as a
-geometric mean of the benchmarks (src/continuations.lisp;
-`--continuations=full` on the command line, `psx::*full-continuations*`
-from Lisp). "Implementation" describes how it works; "Further work"
-lists what is left before it can be the default, with the techniques
-to try. The sections before them are the original analysis.
+Status: the default (src/continuations.lisp), costing 7.7% over
+escape-only as a geometric mean of the benchmarks.
+`--continuations=escape` on the command line, or
+`psx::*full-continuations*` false from Lisp, makes continuations
+escape-only. "Implementation" describes how full ones work; "Further
+work" lists what is left, with the techniques to try. The sections
+before them are the original analysis.
 
-## Escape-only continuations (the default), and why
+## Escape-only continuations, and why not
 
-`call-with-current-continuation` compiles to a Lisp `block` and a closure
-that does `return-from` it (`builtin.scm`). That gives **escaping**
+Escape-only, `call-with-current-continuation` compiles to a Lisp
+`catch` and a closure that throws to it (`builtin.scm`, `ps:call-with-escape`). That gives **escaping**
 continuations, used while the `call/cc` is still on the stack: early
 exits, `guard`, generators that never resume. It cannot give
 **re-entry**, calling a continuation after its `call/cc` has returned,
@@ -21,8 +22,8 @@ What escape-only continuations cost in the test suites:
 
 * **R5RS (chibi):** one test, re-entering a `dynamic-wind` through a
   saved continuation (188 of 189; 189 with full continuations).
-* **R7RS (chibi):** the same `dynamic-wind` test (976 of 978; 977 with
-  full continuations, the other failure being the `sqrt` branch cut).
+* **R7RS (chibi):** the same `dynamic-wind` test (977 of 978; 978 with
+  full continuations).
 * **R6RS (Racket's suite):** two tests (8900 of 8902; all with full
   continuations): one in `base` re-enters a `dynamic-wind`, and one in
   `exceptions` has a `guard` re-raise in the dynamic environment of the
@@ -304,10 +305,10 @@ What failed first, and why:
 
 ### Results
 
-- chibi's R5RS suite 189 of 189, R7RS 977 of 978 (the `sqrt` branch-cut
-  disagreement is the one left), Racket's R6RS suite all 8902 (two more
-  than escape-only), tests/run-continuation-tests.lisp 33 of 33. `make
-  test-full` runs them.
+- chibi's R5RS suite 189 of 189, R7RS 978 of 978, Racket's R6RS suite
+  all 8902 (two more than escape-only), tests/run-continuation-tests.lisp
+  34 of 34, tests/run-interop-tests.lisp 107 of 107. `make test` runs
+  them; `make test-escape` the standards' suites escape-only.
 - Cost on bench/ against escape-only: 7.7% as a geometric mean of all
   57 benchmarks (bench/RESULTS.md). Most run at the same speed (`fib`,
   `tak`, `earley`, `deriv`, `nqueens`, `browse`, ...). The cost is in
@@ -332,10 +333,11 @@ it works or says it can't. What remains:
    internals aren't host globals yet); `call-with-port` and the
    string-port procedures (an `:extent`-like frame that runs the
    after-part on return).
-2. **Procedures from Lisp aren't barriers yet**: the bridge's Lisp
-   functions (docs/interop.md) and a record type's protocol procedures,
-   called from Lisp constructors. The bridge's wrapper for Scheme
-   procedures handed to Lisp (`lisp-facing`) could push a barrier.
+2. **The bridge** (docs/interop.md): a Scheme procedure handed to Lisp
+   (`lisp-facing`: arguments of `(cl ...)` functions, `use-library`'s
+   functions) runs in a barrier frame, so re-entering through Lisp code
+   is an error (done). Not yet barriers: a record type's protocol
+   procedures, called from Lisp constructors.
 3. **Code compiled without the transformation**: libraries loaded before
    full continuations were turned on, the command line's precompiled
    libraries. Calls into them are sites, but their own frames aren't
@@ -416,16 +418,14 @@ The frames make both straightforward:
   continuation in a thread other than its own would rebuild its frames
   there, under that thread's dynamic state; leave it undefined.
 
-### Making it the default
+### Making it the default (done)
 
 The conditions set earlier (re-entry through Lisp frames an error rather
 than silent, the dynamic state captured, ordinary code within about
-10–15%) are met for code compiled in full mode: 7.7% as a geometric
-mean, with a handful of closure-heavy programs at 1.5–1.8×. What remains
-is a decision: make full continuations the default, with
-`--continuations=escape` to opt out, and the remaining gaps (Lisp
-functions through the bridge, code compiled without the transformation)
-documented as such.
+10–15%) were met: 7.7% as a geometric mean, with a handful of
+closure-heavy programs at 1.5–1.8×. Full continuations are the default;
+`--continuations=escape` opts out. Booting (psyntax's image, the
+standard libraries) and rebuilding psyntax stay escape-only.
 
 ## The earlier recommendation
 

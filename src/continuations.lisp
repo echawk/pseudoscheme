@@ -38,8 +38,9 @@
 ;;;; procedures pushes frames of its own (dynamic-wind, exception
 ;;;; handlers, parameterize, map and the other loops), or, where it has
 ;;;; no frame-aware version, a barrier that makes re-entering through it
-;;;; an error.  Known gaps: Lisp functions called through the bridge, and
-;;;; Scheme code compiled without the transformation, aren't barriers.
+;;;; an error; so do Scheme procedures handed to Lisp through the bridge
+;;;; (src/interop.lisp, LISP-FACING).  Known gap: Scheme code compiled
+;;;; without the transformation (escape-only) isn't a barrier.
 
 (in-package "PSEUDOSCHEME-PSYNTAX")
 

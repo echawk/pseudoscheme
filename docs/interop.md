@@ -347,8 +347,11 @@ measures how many load.
   bodies as Scheme) could follow.
 - **Compiled libraries** (ROADMAP). These would also make code that uses
   Scheme macros from Lisp loadable from fasls into a fresh image.
-- **Continuations** captured in Scheme called from Lisp can't re-enter
-  through the Lisp frames above them. Continuations are escape-only
-  everywhere today (docs/continuations.md).
+- **Continuations** captured in Scheme called from Lisp can escape
+  through the Lisp frames above them but not be re-entered through
+  them: a Scheme procedure handed to Lisp (`lisp-facing`, so any
+  procedure passed to a `(cl ...)` function and `use-library`'s
+  functions) runs in a barrier frame, and re-entering a continuation
+  captured under one is an error (docs/continuations.md).
 - **Threads.** psyntax's state is global and unlocked: one expanding
   thread at a time.

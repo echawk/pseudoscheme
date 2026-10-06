@@ -67,9 +67,13 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 
 | | front end | tests |
 |---|---|---|
-| R6RS | psyntax | Racket's R6RS suite: 8900 of 8902 (all with full continuations); all 25 library test programs run |
-| R7RS-small | psyntax | chibi's R7RS suite: 976 of 978 (977 with full continuations) |
-| R5RS | psyntax | chibi's R5RS suite: 188 of 189 (189 with full continuations) |
+| R6RS | psyntax | Racket's R6RS suite: all 8902; all 25 library test programs run |
+| R7RS-small | psyntax | chibi's R7RS suite: all 978 |
+| R5RS | psyntax | chibi's R5RS suite: all 189 |
+
+Continuations are full and re-entrant (docs/continuations.md);
+`--continuations=escape` makes them escape-only, a little faster in code
+that calls unknown procedures in loops.
 
 Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 1.44× Chez's
 time as a geometric mean (Guile: 2.8×), and 1.55× with full
@@ -291,10 +295,10 @@ installing anything. See boot/README.md.
 ## Tests
 
 ```sh
-sbcl --script tests/run-r5rs-tests.lisp [--classic | --continuations=full]
+sbcl --script tests/run-r5rs-tests.lisp [--classic | --continuations=escape]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-continuation-tests.lisp
-sbcl --script tests/run-r7rs-tests.lisp [-v] [--continuations=full]
-sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r6rs-tests.lisp [-v] [--continuations=full] [name ...]
+sbcl --script tests/run-r7rs-tests.lisp [-v] [--continuations=escape]
+sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r6rs-tests.lisp [-v] [--continuations=escape] [name ...]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-syntax-case-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-corpus.lisp DIR
@@ -303,8 +307,8 @@ make -C contrib/cli test
 python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 ```
 
-`make test` runs the suites, `make test-full` them with full
-continuations, `make test-cli` the command line's. GitHub Actions
+`make test` runs the suites, `make test-escape` the standards' suites
+with escape-only continuations, `make test-cli` the command line's. GitHub Actions
 (`.github/workflows/ci.yml`) runs all of them, plus the bootstrap chain
 from other Schemes (both kinds of generated file must come out as
 checked in). The benchmarks, in both modes, are a workflow of their own
@@ -319,15 +323,12 @@ suites.
 
 The big ones; `ROADMAP.md` has the rest.
 
-- **Continuations are escape-only by default.** `call/cc` is a Lisp
-  `catch`, so a continuation can't be re-entered after its `call/cc`
-  returns; trying signals an error. Full, re-entrant continuations are
-  opt-in (src/continuations.lisp, `psx::*full-continuations*`;
-  `--continuations=full` in the R5RS, R7RS and R6RS test runners),
-  built on generalized stack inspection as docs/continuations.md
-  describes. With them every suite passes as many tests as without, and
-  the re-entry tests besides. Not yet: a command-line option, a
-  measurement on `bench/`, and detecting re-entry through Lisp frames.
+- **Continuations through Lisp code.** A continuation captured in a
+  Scheme procedure that Lisp code called (through the bridge, or a Lisp
+  primitive with no frame-aware version such as the sorts) can escape
+  but not be re-entered: re-entering it is an error. Code compiled
+  escape-only (`--continuations=escape`) isn't recorded in captured
+  continuations at all (docs/continuations.md, "Further work").
 - **Only libraries from files are cached.** Libraries defined at the
   REPL or in a program, and `(cl <package>)` libraries, are expanded
   and compiled again in every session, and so is whatever depends on

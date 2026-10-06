@@ -33,8 +33,9 @@ published results, graphs and HTML are not.
 ## Running
 
 On GitHub, the Benchmarks workflow (`.github/workflows/bench.yml`,
-started by hand from the Actions tab) runs every benchmark escape-only
-and with full continuations, and tables both in its summary. Locally:
+started by hand from the Actions tab) runs every benchmark with full
+continuations (the default) and escape-only, and tables both in its
+summary. Locally:
 
 ```sh
 make -C contrib/cli                               # build bin/pseudoscheme
