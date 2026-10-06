@@ -155,8 +155,9 @@ spellings R7RS appendix B suggests."
 built in rather than libraries: 0 (cond-expand), 22 (scheme-r5rs and
 the other script interpreters), 30 (#| |# comments), 46 (syntax-rules
 with a custom ellipsis), 62 (#; comments), 97 (R6RS names for SRFI
-libraries), 138 (compile-r7rs) and 169 (underscores in numbers)."
-  (let ((numbers (append '(0 22 30 46 62 97 138 169)
+libraries), 105 (curly infix), 138 (compile-r7rs) and 169 (underscores
+in numbers)."
+  (let ((numbers (append '(0 22 30 46 62 97 105 138 169)
 			 (loop for path in (directory (merge-pathnames
 						       (make-pathname :name :wild :type "sld")
 						       (asdf:system-relative-pathname :pseudoscheme "src/srfi/")))

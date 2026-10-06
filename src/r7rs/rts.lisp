@@ -537,6 +537,8 @@ for SRFI 193's script-file.")
 (defprim "current-jiffy" () (get-internal-real-time))
 (defprim "jiffies-per-second" () internal-time-units-per-second)
 (defprim "current-second" ()
-  ;; Seconds since the Unix epoch, as an inexact rational (TAI is
-  ;; what R7RS asks for; UTC is close enough for a skeleton).
-  (float (- (get-universal-time) 2208988800) 1d0))
+  ;; Seconds since the Unix epoch, to the microsecond, as an inexact
+  ;; number (R7RS asks for TAI; this is POSIX time, as elsewhere)
+  #+sbcl (multiple-value-bind (seconds microseconds) (sb-ext:get-time-of-day)
+	   (+ seconds (/ microseconds 1d6)))
+  #-sbcl (float (- (get-universal-time) 2208988800) 1d0))
