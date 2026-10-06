@@ -1,0 +1,47 @@
+;;; Tests for SRFI 174: the sample implementation's chibi-tests.scm, as
+;;; SRFI 64 tests, with more after the SRFI document.
+(import (scheme base) (scheme process-context) (srfi 64) (srfi 174))
+
+(test-begin "srfi-174")
+
+(define ts1 (timespec 1 2))
+(define ts2 (timespec 1 2))
+(define ts3 (timespec 1 3))
+(define ts4 (timespec 2 2))
+(define ts-neg1 (timespec -1 2))
+(define ts-neg2 (timespec -1 5))
+(define ts-neg3 (timespec -2 0))
+
+(test-assert "timespec?" (timespec? ts1))
+(test-assert "not timespec?" (not (timespec? #f)))
+(test-equal "seconds" 1 (timespec-seconds ts1))
+(test-equal "nanos" 2 (timespec-nanoseconds ts1))
+(test-assert "equal" (timespec=? ts1 ts2))
+(test-assert "less nanos" (timespec<? ts1 ts3))
+(test-assert "less seconds" (timespec<? ts1 ts4))
+(test-assert "less -nanos" (timespec<? ts-neg2 ts-neg1))
+(test-assert "less -seconds" (timespec<? ts-neg3 ts-neg2))
+(test-assert "positive hash" (positive? (timespec-hash ts-neg1)))
+(test-equal "to inexact" #i1.1 (timespec->inexact (timespec 1 #e1e8)))
+(let ((t (timespec 1 1))
+      (u (inexact->timespec #i1.000000001)))
+  (test-assert "from inexact" (timespec=? t u)))
+
+;; More
+(test-assert (not (timespec=? ts1 ts3)))
+(test-assert (not (timespec<? ts3 ts1)))
+(test-assert (not (timespec<? ts1 ts2)))
+(test-assert (timespec<? ts-neg1 ts1))
+(test-eqv (timespec-hash ts1) (timespec-hash ts2))
+(test-assert (exact-integer? (timespec-hash ts1)))
+(test-eqv -1.5 (timespec->inexact (timespec -1 500000000)))
+(let ((t (inexact->timespec -1.5)))
+  (test-eqv -1 (timespec-seconds t))
+  (test-eqv 500000000 (timespec-nanoseconds t)))
+(let ((t (inexact->timespec 2.25)))
+  (test-eqv 2 (timespec-seconds t))
+  (test-eqv 250000000 (timespec-nanoseconds t)))
+
+(let ((failures (test-runner-fail-count (test-runner-current))))
+  (test-end "srfi-174")
+  (exit (if (zero? failures) 0 1)))
