@@ -299,6 +299,39 @@ the same side of every finite OTHER."
     (when (= i end)
       (* mantissa (expt 10 scale)))))
 
+(defun parse-hex-float (s start end)
+  "SRFI 270: hex digits with an optional point, then an optional p and a
+decimal exponent of 2 (p may be followed by an R6RS exponent marker),
+as an exact rational."
+  (let ((i start) (mantissa 0) (scale 0) (digits 0))
+    (flet ((hex-digits (fractional)
+	     (loop while (and (< i end) (digit-char-p (char s i) 16))
+		   do (setq mantissa (+ (* mantissa 16) (digit-char-p (char s i) 16)))
+		      (incf digits) (incf i)
+		      (when fractional (decf scale 4)))))
+      (hex-digits nil)
+      (when (and (< i end) (char= (char s i) #\.))
+	(incf i)
+	(hex-digits t))
+      (when (zerop digits) (return-from parse-hex-float nil))
+      (when (and (< i end) (char-equal (char s i) #\p))
+	(incf i)
+	(when (and (< i end) (member (char-downcase (char s i)) '(#\s #\f #\d #\l)))
+	  (incf i))
+	(let ((sign 1))
+	  (when (and (< i end) (member (char s i) '(#\+ #\-)))
+	    (when (char= (char s i) #\-) (setq sign -1))
+	    (incf i))
+	  (let ((e (parse-uinteger s i end 10)))
+	    (unless e (return-from parse-hex-float nil))
+	    (incf scale (* sign e))
+	    (setq i end))))
+      (when (and (< i end) (char= (char s i) #\|))
+	(unless (parse-uinteger s (1+ i) end 10) (return-from parse-hex-float nil))
+	(setq i end))
+      (when (= i end)
+	(* mantissa (expt 2 scale))))))
+
 (defun parse-ureal (s start end radix)
   "Returns the value and whether it is inexact by default."
   (let ((slash (position #\/ s :start start :end end)))
@@ -311,6 +344,10 @@ the same side of every finite OTHER."
 	  ((and (= radix 10)
 		(find-if (lambda (c) (or (char= c #\.) (exponent-marker-p c))) s :start start :end end))
 	   (let ((v (parse-decimal s start end)))
+	     (and v (values v t))))
+	  ((and (= radix 16)
+		(find-if (lambda (c) (or (char= c #\.) (char-equal c #\p))) s :start start :end end))
+	   (let ((v (parse-hex-float s start end)))
 	     (and v (values v t)))))))
 
 (defun parse-real (s start end radix)
@@ -341,6 +378,17 @@ the same side of every finite OTHER."
     (:inexact (inexact value))
     (t (if inexact-default (inexact value) value))))
 
+(defun exponent-sign-p (s start i)
+  "Does the sign at I follow an exponent marker: a decimal one after a
+digit, or SRFI 270's p (perhaps then an R6RS marker) after a hex digit
+or point?"
+  (flet ((at (j) (and (>= j start) (char s j))))
+    (let ((a (at (- i 1))) (b (at (- i 2))) (c (at (- i 3))))
+      (or (and a b (exponent-marker-p a) (digit-char-p b))
+	  (and a b (char-equal a #\p) (or (digit-char-p b 16) (char= b #\.)))
+	  (and a b c (member (char-downcase a) '(#\s #\f #\d #\l)) (char-equal b #\p)
+	       (or (digit-char-p c 16) (char= c #\.)))))))
+
 (defun imaginary-split (s start end)
   "For text ending in i: the index of the sign starting the imaginary
 part, or NIL.  The sign can't be the first character of a real part or
@@ -349,9 +397,7 @@ follow an exponent marker."
 	for c = (char s i)
 	when (and (member c '(#\+ #\-))
 		  (or (= i start)
-		      (not (and (exponent-marker-p (char s (1- i)))
-				(> (1- i) start)
-				(digit-char-p (char s (- i 2)))))))
+		      (not (exponent-sign-p s start i))))
 	  return i))
 
 (defun parse-complex (s start end radix exactness)
@@ -391,7 +437,22 @@ follow an exponent marker."
 	       (#\i (if exactness (return-from parse-scheme-number nil) (setq exactness :inexact)))
 	       (t (return-from parse-scheme-number nil)))
 	     (incf start 2))
+    (when (find #\_ string :start start)
+      (setq string (remove-digit-underscores string start radix))
+      (unless string (return-from parse-scheme-number nil))
+      (setq end (length string)))
     (ignore-errors (parse-complex string start end radix exactness))))
+
+(defun remove-digit-underscores (string start radix)
+  "SRFI 169: STRING without its underscores, each of which must be
+between two digits of RADIX; else NIL."
+  (loop for i from start below (length string)
+	when (and (char= (char string i) #\_)
+		  (not (and (> i start) (< (1+ i) (length string))
+			    (digit-char-p (char string (1- i)) radix)
+			    (digit-char-p (char string (1+ i)) radix))))
+	  do (return-from remove-digit-underscores nil))
+  (remove #\_ string :start start))
 
 ;;; ------------------------------------------------------------------
 ;;; Printing (NUMBER->STRING and the writer)
