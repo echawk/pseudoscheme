@@ -53,6 +53,7 @@
      (pso-file "closed" :depends-on ("spack" "core" "numbers"))
      (:file "rts" :depends-on ("pack" "spack" "core" "numbers"))
      (:file "readwrite" :depends-on ("pack" "core"))
+     (:file "quasi" :depends-on ("pack" "core"))	; SRFIs 107, 108, 109
      #+(or) (pso-file "read" :depends-on ("spack" "core"))
      #+(or) (pso-file "write" :depends-on ("spack" "core"))
      ))

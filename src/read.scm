@@ -121,7 +121,13 @@
 
 (let ((sub-read-constituent
        (lambda (c port)
-	 (parse-token (sub-read-symbol-token c port) port))))
+	 (let ((token (sub-read-symbol-token c port)))
+	   ;; SRFIs 108 and 109: &{...} and &name{...}, &name[...]{...}
+	   (if (and (char=? c #\&) (null? (cdr token))
+		    (let ((next (peek-char port)))
+		      (and (char? next) (or (char=? next #\{) (char=? next #\[)))))
+	       (ps:read-quasi-literal (substring (car token) 1 (string-length (car token))) port)
+	       (parse-token token port))))))
   (for-each (lambda (c)
               (set-standard-syntax! c #f sub-read-constituent))
             (string->list
@@ -598,6 +604,13 @@
       (if (or (eof-object? p) (terminating? p))
           (reading-error port "missing keyword name after #:")
           (ps:intern-lisp-keyword (car (sub-read-token (read-char port) port)))))))
+
+;; SRFI 107: #<tag ...>...</tag> (src/quasi.lisp)
+(define-sharp-macro #\<
+  (lambda (c port)
+    c
+    (read-char port)
+    (ps:read-xml-literal port)))
 
 (define-sharp-macro #\;
   (lambda (c port)

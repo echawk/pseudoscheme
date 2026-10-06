@@ -137,7 +137,18 @@
 (AT-TOP-LEVEL
   (FLET ((SUB-READ-CONSTITUENT
           (C PORT)
-          (PARSE-TOKEN (SUB-READ-SYMBOL-TOKEN C PORT) PORT)))
+          (LET ((TOKEN (SUB-READ-SYMBOL-TOKEN C PORT)))
+            (IF (AND (CHAR= C #\&)
+                     (NULL (CDR (THE CONS TOKEN)))
+                     (LET ((NEXT (.PEEK-CHAR PORT)))
+                       (AND (CHARACTERP NEXT)
+                            (OR (CHAR= NEXT #\{) (CHAR= NEXT #\[)))))
+                (READ-QUASI-LITERAL
+                 (SUBSEQ (CAR (THE CONS TOKEN))
+                         1
+                         (LENGTH (THE SIMPLE-STRING (CAR (THE CONS TOKEN)))))
+                 PORT)
+                (PARSE-TOKEN TOKEN PORT)))))
     (MAPC #'(LAMBDA (C) (SET-STANDARD-SYNTAX! C FALSE #'SUB-READ-CONSTITUENT))
           (COERCE (THE SIMPLE-STRING
                        (STRING-APPEND
@@ -746,6 +757,10 @@
              (READING-ERROR PORT "missing keyword name after #:")
              (INTERN-LISP-KEYWORD
               (CAR (THE CONS (SUB-READ-TOKEN (.READ-CHAR PORT) PORT)))))))))
+(AT-TOP-LEVEL
+  (DEFINE-SHARP-MACRO
+   #\<
+   #'(LAMBDA (C PORT) C (.READ-CHAR PORT) (READ-XML-LITERAL PORT))))
 (AT-TOP-LEVEL
   (DEFINE-SHARP-MACRO
    #\;
