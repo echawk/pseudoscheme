@@ -136,14 +136,15 @@
 
   ;; cond-expand (R7RS 4.2.1, SRFI 0): requirements are checked at
   ;; expansion time against the host's feature list and available
-  ;; libraries.  It is an error for no clause to apply.
+  ;; libraries.  No clause applying is an error (R7RS); here, as in
+  ;; some other Schemes and at a program's top level, it is nothing.
   (define-syntax cond-expand
     (lambda (x)
       (syntax-case x ()
         ((_ clause ...)
          (let loop ((cs #'(clause ...)))
            (if (null? cs)
-               (syntax-violation 'cond-expand "no clause applies" (syntax->datum x))
+               #'(begin)
                (syntax-case (car cs) ()
                  ((req body ...)
                   (if (if (and (identifier? #'req) (eq? (syntax->datum #'req) 'else))

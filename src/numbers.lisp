@@ -177,7 +177,10 @@ compute an exact one in single floats."
   (if (eql angle 0) magnitude (* magnitude (cis (arg angle)))))
 
 (defun scheme-expt (base power)
-  (dbl (if (and (rationalp base) (floatp power)) (expt (arg base) power) (expt base power))))
+  (dbl (cond ((and (rationalp base) (floatp power)) (expt (arg base) power))
+	     ;; CL computes an exact base to a ratio power in single floats
+	     ((typep power 'ratio) (expt (arg base) (arg power)))
+	     (t (expt base power)))))
 
 ;;; Arithmetic.  The translator integrates (+ a b) as a call to SCHEME+,
 ;;; and so on.  With two arguments, both fixnums or both double-floats,
