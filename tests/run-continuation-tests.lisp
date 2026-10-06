@@ -86,6 +86,11 @@
 ;; a procedure assigned after its definition isn't known
 ("(let () (define (f) 1) (define k (begin (set! f (lambda () (call/cc (lambda (c) (set! k c) 1)))) #f)) (define n 0) (define r (+ 1 (f))) (set! n (+ n 1)) (if (< n 2) (k 5) (list n r)))" . "(2 6)")
 ("(let () (define (walk tree yield) (cond ((null? tree) #f) ((pair? tree) (walk (car tree) yield) (walk (cdr tree) yield)) (else (yield tree)))) (define (make-gen tree) (define return #f) (define resume #f) (define (yield v) (call/cc (lambda (r) (set! resume r) (return v)))) (lambda () (call/cc (lambda (ret) (set! return ret) (if resume (resume #f) (begin (walk tree yield) (return 'done))))))) (let ((g (make-gen '((1 2) (3 (4 5)) 6)))) (let loop ((acc '())) (let ((v (g))) (if (eq? v 'done) (reverse acc) (loop (cons v acc)))))))" . "(1 2 3 4 5 6)")
+;; a continuation captured in a handler, re-entered after an escape from
+;; it, raises again there (the handler frame kept its handlers)
+("(let ((c1 #f) (n 0)) (let ((r (call/cc (lambda (out) (with-exception-handler (lambda (obj) (call/cc (lambda (c) (set! c1 c) (out (list 'aborted obj))))) (lambda () (let* ((a (raise-continuable 'one)) (b (raise-continuable 'two))) (list a b)))))))) (set! n (+ n 1)) (if (< n 4) (c1 n) (list n r))))" . "(4 (1 3))")
+;; thirty sites in one body compile in linear time
+("(let ((g (car (list (lambda (m) m)))) (s 0)) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) (set! s (+ s (g 1))) s)" . "30")
 ))
 
 (let ((pass 0))

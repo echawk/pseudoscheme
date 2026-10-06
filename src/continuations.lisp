@@ -127,8 +127,15 @@ after runs however THUNK is left."
 ;;; These frames are pushed in escape mode too, where nothing captures
 ;;; them.
 
+;;; What goes in a DYNAMIC-EXTENT frame that a captured copy keeps must be
+;;; on the heap; but SBCL also stack-allocates what a LET variable used
+;;; only in the frame's initializer is bound to.  Made by this function,
+;;; it isn't.
+(declaim (notinline heap-cons))
+(defun heap-cons (a b) (cons a b))
+
 (defun handler-extent (handler outer thunk)
-  (let* ((handlers (cons handler outer))	; on the heap: a copy of the frame keeps it
+  (let* ((handlers (heap-cons handler outer))	; on the heap: a copy of the frame keeps it
 	 (frame (vector :handler nil handlers)))
     (declare (dynamic-extent frame))
     (ps-r7rs::call-with-handler handler outer (lambda () (with-frame (frame) (funcall thunk))))))
@@ -300,7 +307,7 @@ ESTABLISH again when rebuilt."
   "call/cc for a continuation only invoked during its extent: a catch,
 in a frame that re-establishes the catch if a continuation captured
 inside is re-entered (and so the continuation still works there)."
-  (let* ((tag (list 'continuation))
+  (let* ((tag (heap-cons 'continuation nil))
 	 (frame (vector :escape nil tag)))
     (declare (dynamic-extent frame))
     (catch tag
@@ -451,6 +458,13 @@ program's exit), which a compilation unit would report as aborted."
   "LAMBDA, a closed procedure, compiled on its own (its own component)."
   `(load-time-value (locally (declare ,*full-policy*) ,lambda) t))
 (defmacro %go (label) `(go ,(second label)))
+
+;;; A resumed site's live variables are restored with this, not SVREF:
+;;; SBCL's compile time grows exponentially with the number of sites
+;;; when they're restored with an inline SVREF of the frame (a body of
+;;; 20 calls took 16 s), and only resuming runs it.
+(declaim (notinline %frame-ref))
+(defun %frame-ref (frame i) (svref frame i))
 
 ;;; ------------------------------------------------------------------
 ;;; Which calls may capture
@@ -1225,7 +1239,7 @@ which would capture bindings the jump reuses)."
 			       (append resumes
 				       `(',resume
 					 ,@(loop for v in live for j from 4
-						 collect `(,(sym "set!") ,v (svref ,frame ,j)))
+						 collect `(,(sym "set!") ,v (%frame-ref ,frame ,j)))
 					 ,@(when var `((,(sym "set!") ,var ,value)))
 					 (%go ',(second info))))))))))
 	`(,(sym "letrec")
