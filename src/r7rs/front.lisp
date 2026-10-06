@@ -607,3 +607,29 @@ once per host."
   (setf psx:*library-form-hook* #'locate-library-form)
   ;; the same ids every session, for compiled libraries
   (psx::with-boot-gensyms (install-standard-libraries)))
+
+;;; SRFI 176
+
+(defun srfi-feature-number (feature)
+  "N, for a feature srfi-N."
+  (and (> (length feature) 5) (string= "srfi-" feature :end2 5)
+       (every #'digit-char-p (subseq feature 5))
+       (parse-integer feature :start 5)))
+
+(defun version-alist ()
+  "SRFI 176's version properties, as Scheme data."
+  (let ((translator (uiop:symbol-call "SCHEME-TRANSLATOR" "TRANSLATOR-VERSION")))
+    `((,(sym "command") "pseudoscheme")
+      (,(sym "scheme.id") ,(sym "pseudoscheme"))
+      (,(sym "languages") ,@(mapcar #'sym '("scheme" "r5rs" "r6rs" "r7rs")))
+      (,(sym "encodings") ,(sym "utf-8"))
+      (,(sym "version") ,(subseq translator (1+ (position #\Space translator :from-end t))))
+      (,(sym "install-dir") ,(namestring (asdf:system-source-directory :pseudoscheme)))
+      (,(sym "scheme.srfi")
+       ,@(sort (remove nil (mapcar #'srfi-feature-number psl:*scheme-features*)) #'<))
+      (,(sym "scheme.features")
+       ,@(mapcar #'sym (remove-if #'srfi-feature-number psl:*scheme-features*)))
+      (,(sym "scheme.path") ,@(copy-list psx:*library-path*))
+      (,(sym "build.platform")
+       ,(format nil "~A ~A ~A ~A" (lisp-implementation-type) (lisp-implementation-version)
+		(machine-type) (software-type))))))

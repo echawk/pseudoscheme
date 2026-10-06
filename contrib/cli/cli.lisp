@@ -50,6 +50,7 @@
   -i, --interactive
                    start a REPL after running the file or expressions
   --version        print the version and exit
+  -V               print the version and more as SRFI 176's alist
   -h, --help       print this and exit
   --               end of options: the next argument is the file
 
@@ -93,6 +94,13 @@ name first (see -l and --quicklisp; docs/interop.md).
     (:r7rs (r7rs:repl))
     (:r6rs (r6rs:repl))
     (:r5rs (r5rs:repl))))
+
+(defun print-version-alist ()
+  "SRFI 176's version output: one property to a line."
+  (dolist (property (ps-r7rs:version-alist))
+    (funcall ps:*scheme-write* property *standard-output*)
+    (terpri))
+  (finish-output))
 
 (defun die (control &rest args)
   (format *error-output* "~&pseudoscheme: ~?~%" control args)
@@ -141,6 +149,8 @@ list of (:eval text) / (:print text)."
 		 (write-string *usage*) (uiop:quit 0))
 		((string= a "--version")
 		 (format t "Pseudoscheme ~A~%" *version*) (uiop:quit 0))
+		((string= a "-V")
+		 (print-version-alist) (uiop:quit 0))
 		((and (> (length a) 1) (char= (char a 0) #\-))
 		 (die "unknown option ~A (try --help)" a))
 		(t (push a args) (return))))))
