@@ -474,6 +474,10 @@ program's exit), which a compilation unit would report as aborted."
   "LAMBDA, a closed procedure, compiled on its own (its own component)."
   `(load-time-value (locally (declare ,*full-policy*) ,lambda) t))
 (defmacro %go (label) `(go ,(second label)))
+(defmacro %ignorable (&rest variables)
+  "Refer to VARIABLES, which a machine may not otherwise (its value and
+frame parameters): no unused-variable style warnings."
+  `(progn ,@variables nil))
 
 ;;; A resumed site's live variables are restored with this, not SVREF:
 ;;; SBCL's compile time grows exponentially with the number of sites
@@ -1262,6 +1266,7 @@ which would capture bindings the jump reuses)."
 	  ((,m (,(sym "lambda") (,entry ,value ,frame ,@params)
 		((,(sym "lambda") ,locals
 		  ,(let ((body `(%machine ,entry (,(sym "quote") ,dispatch)
+					   (%ignorable ,value ,frame)
 					   ,@(when (or resumes self) `((%go ',(new-label-named "%ENTRY"))))
 					   ,@resumes
 					   ,@(when (or resumes self) `(',(new-label-named "%ENTRY")))

@@ -245,7 +245,11 @@ form, translated to an R6RS library, or NIL."
       (dolist (path (psx:candidate-files stem))
 	(when (probe-file path)
 	  (let ((form (find-if (lambda (f) (equal (library-name-of f) name))
-			       (ignore-errors (read-forms path)))))
+			       (handler-case (read-forms path)
+				 ;; reported, not taken for a missing library
+				 (error (e)
+				   (ps:scheme-error (format nil "~A: ~A" (namestring path)
+							    (remove #\Newline (princ-to-string e)))))))))
 	    (when form
 	      (return-from locate-library-form
 		(let ((*include-directory* (make-pathname :name nil :type nil :defaults path)))

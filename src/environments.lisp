@@ -173,7 +173,7 @@ libraries), 138 (compile-r7rs) and 169 (underscores in numbers)."
 
 (defparameter *scheme-features*
   (remove-duplicates
-   (append '("r7rs" "r6rs" "exact-closed" "exact-complex" "ieee-float" "ratios"
+   (append '("r7rs" "r6rs" "exact-closed" "exact-complex" "complex" "ieee-float" "ratios"
 	     "pseudoscheme" "common-lisp")
 	   (when (> char-code-limit 255) '("full-unicode"))
 	   (platform-features)

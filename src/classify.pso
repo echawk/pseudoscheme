@@ -353,36 +353,49 @@
      #'(LAMBDA (G)
          (LIST 'SCHEME::GENERATED (GENERATED-NAME G) (GENERATED-GENERATION G))))))
 (DEFUN STRIP (THING)
+  (IF (OR (CONSP THING) (TRUEP (VECTOR? THING)))
+      (STRIP-DATUM THING (MAKE-TABLE))
+      (STRIP-DATUM THING FALSE)))
+(SET-VALUE-FROM-FUNCTION 'STRIP 'SCHEME::STRIP)
+(DEFUN STRIP-DATUM (THING SEEN)
   (IF (TRUEP (GENERATED? THING))
       (STRIP (GENERATED-NAME THING))
-      (IF (CONSP THING)
-          (LET ((X (STRIP (CAR (THE CONS THING))))
-                (Y (STRIP (CDR (THE CONS THING)))))
-            (IF (AND (EQ X (CAR (THE CONS THING)))
-                     (EQ Y (CDR (THE CONS THING))))
-                THING
-                (CONS X Y)))
-          (IF (TRUEP (VECTOR? THING))
-              (LET ((NEW (MAKE-VECTOR (LENGTH (THE SIMPLE-VECTOR THING)))))
-                (PROG (.I.0 .SAME?.1)
-                  (PSETQ .I.0 0 .SAME?.1 TRUE)
-                  (GO LOOP)
-                  LOOP
-                  (LET ((I .I.0) (SAME? .SAME?.1))
-                    (IF (SCHEME>= I (LENGTH (THE SIMPLE-VECTOR THING)))
-                        (IF (TRUEP SAME?) (RETURN THING) (RETURN NEW))
-                        (LET ((X (STRIP (SVREF THING I))))
-                          (SETF (SVREF NEW I) X)
-                          UNSPECIFIC
-                          (PSETQ .I.0
-                                 (SCHEME+ I 1)
-                                 .SAME?.1
-                                 (IF (TRUEP SAME?)
-                                     (TRUE? (EQ X (SVREF THING I)))
-                                     FALSE))
-                          (GO LOOP))))))
-              THING))))
-(SET-VALUE-FROM-FUNCTION 'STRIP 'SCHEME::STRIP)
+      (IF (AND (TRUEP SEEN)
+               (OR (CONSP THING) (TRUEP (VECTOR? THING)))
+               (TRUEP (TABLE-REF SEEN THING)))
+          THING
+          (IF (CONSP THING)
+              (PROGN
+                (TABLE-SET! SEEN THING TRUE)
+                (LET ((X (STRIP-DATUM (CAR (THE CONS THING)) SEEN))
+                      (Y (STRIP-DATUM (CDR (THE CONS THING)) SEEN)))
+                  (IF (AND (EQ X (CAR (THE CONS THING)))
+                           (EQ Y (CDR (THE CONS THING))))
+                      THING
+                      (CONS X Y))))
+              (IF (TRUEP (VECTOR? THING))
+                  (PROGN
+                    (TABLE-SET! SEEN THING TRUE)
+                    (LET ((NEW (MAKE-VECTOR (LENGTH (THE SIMPLE-VECTOR THING)))))
+                      (PROG (.I.0 .SAME?.1)
+                        (PSETQ .I.0 0 .SAME?.1 TRUE)
+                        (GO LOOP)
+                        LOOP
+                        (LET ((I .I.0) (SAME? .SAME?.1))
+                          (IF (SCHEME>= I (LENGTH (THE SIMPLE-VECTOR THING)))
+                              (IF (TRUEP SAME?) (RETURN THING) (RETURN NEW))
+                              (LET ((X (STRIP-DATUM (SVREF THING I) SEEN)))
+                                (SETF (SVREF NEW I) X)
+                                UNSPECIFIC
+                                (PSETQ .I.0
+                                       (SCHEME+ I 1)
+                                       .SAME?.1
+                                       (IF (TRUEP SAME?)
+                                           (TRUE? (EQ X (SVREF THING I)))
+                                           FALSE))
+                                (GO LOOP)))))))
+                  THING)))))
+(SET-VALUE-FROM-FUNCTION 'STRIP-DATUM 'SCHEME::STRIP-DATUM)
 (LOCALLY (DECLARE (SPECIAL *GENERATION*)) (SETQ *GENERATION* 1))
 (SET-FORWARDING-FUNCTION '*GENERATION* 'SCHEME::*GENERATION*)
 (DEFUN NEW-GENERATION NIL

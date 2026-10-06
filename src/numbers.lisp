@@ -300,7 +300,14 @@ the same side of every finite OTHER."
       (unless (parse-uinteger s (1+ i) end 10) (return-from parse-decimal nil))
       (setq i end))
     (when (= i end)
-      (* mantissa (expt 10 scale)))))
+      ;; An exponent of millions would take minutes to compute exactly:
+      ;; far beyond a double's range, the value is taken as infinite or
+      ;; 0.0 (so #e1e200000 is not a number here).
+      (let ((magnitude (+ scale (floor (* (integer-length mantissa) 0.30103)))))
+	(cond ((zerop mantissa) 0)
+	      ((> magnitude 100000) +inf+)
+	      ((< magnitude -100000) 0d0)
+	      (t (* mantissa (expt 10 scale))))))))
 
 (defun parse-hex-float (s start end)
   "SRFI 270: hex digits with an optional point, then an optional p and a

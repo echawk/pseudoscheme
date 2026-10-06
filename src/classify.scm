@@ -303,20 +303,32 @@
 ; processing the QUOTE special form.
 
 (define (strip thing)
+  (if (or (pair? thing) (vector? thing))
+      (strip-datum thing (make-table))
+      (strip-datum thing #f)))
+
+; SEEN, a table of the pairs and vectors being stripped, is for circular
+; data (datum labels, R7RS 2.4), which are left as they are.
+
+(define (strip-datum thing seen)
   (cond ((generated? thing) (strip (generated-name thing)))
+	((and seen (or (pair? thing) (vector? thing)) (table-ref seen thing))
+	 thing)
 	((pair? thing)
-	 (let ((x (strip (car thing)))
-	       (y (strip (cdr thing))))
+	 (table-set! seen thing #t)
+	 (let ((x (strip-datum (car thing) seen))
+	       (y (strip-datum (cdr thing) seen)))
 	   (if (and (eq? x (car thing))
 		    (eq? y (cdr thing)))
 	       thing
 	       (cons x y))))
 	((vector? thing)
+	 (table-set! seen thing #t)
 	 (let ((new (make-vector (vector-length thing))))
 	   (let loop ((i 0) (same? #t))
 	     (if (>= i (vector-length thing))
 		 (if same? thing new)
-		 (let ((x (strip (vector-ref thing i))))
+		 (let ((x (strip-datum (vector-ref thing i) seen)))
 		   (vector-set! new i x)
 		   (loop (+ i 1)
 			 (and same? (eq? x (vector-ref thing i)))))))))

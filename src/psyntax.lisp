@@ -186,7 +186,15 @@ so that eqv? on them is eq?."
   "The largest body of definitions, in conses, made a letrec.")
 
 (defun tree-size (x)
-  (if (consp x) (+ 1 (tree-size (car x)) (tree-size (cdr x))) 0))
+  "The conses of code X, a quoted datum counting as one (it may be
+circular, R7RS 2.4)."
+  (let ((n 0))
+    (loop while (consp x)
+	  do (if (and (symbolp (car x)) (string= (symbol-name (car x)) "QUOTE"))
+		 (return (incf n 2))
+		 (incf n (1+ (tree-size (car x)))))
+	     (setq x (cdr x)))
+    n))
 
 (defvar *primitive-symbols* nil)
 
