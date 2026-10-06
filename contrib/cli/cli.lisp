@@ -211,7 +211,12 @@ is reported, and the program runs anyway."
   (multiple-value-bind (actions file file-args interactive)
       (parse-arguments (uiop:command-line-arguments))
     (when *userinit* (load-user-init-file))
-    (setf ps-r7rs:*command-line* (cons (or file "pseudoscheme") file-args))
+    ;; With no program, SRFI 193's ("") as in Chez.  A script's name is
+    ;; made absolute before it runs, in case it changes directory.
+    (setf ps-r7rs:*command-line* (cons (or file "") file-args))
+    (when file
+      (setf ps-r7rs:*script-file*
+            (namestring (merge-pathnames (uiop:parse-native-namestring file) (uiop:getcwd)))))
     (when (eq *standard* :r5rs) (setf ps:*fold-case* t))
     (handler-bind ((serious-condition
 		     (lambda (e)

@@ -510,6 +510,10 @@ the context when a continuation captured in THUNK is re-entered.")
   "What COMMAND-LINE returns, when set (the command-line program sets it
 to the script name and its arguments); else the process's arguments.")
 
+(defvar *script-file* nil
+  "The absolute name of the program the command-line program is running,
+for SRFI 193's script-file.")
+
 (defprim "command-line" ()
   (or *command-line*
       (cons "pseudoscheme" (copy-list (uiop:command-line-arguments)))))
