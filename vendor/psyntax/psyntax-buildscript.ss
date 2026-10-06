@@ -51,6 +51,10 @@
     (set!                (set!))
     (let-syntax          (let-syntax))
     (letrec-syntax       (letrec-syntax))
+    ;; PSEUDOSCHEME: SRFIs 212, 213 and 139
+    (alias               (alias))
+    (define-property     (define-property))
+    (syntax-parameterize (core-macro . syntax-parameterize))
     (foreign-call        (core-macro . foreign-call))
     (quote               (core-macro . quote))
     (syntax-case         (core-macro . syntax-case))
@@ -164,6 +168,8 @@
     (ne          (psyntax null-environment-5)          #t    #f)
     (se          (psyntax scheme-report-environment-5) #t    #f)
     (cm          (psyntax modules)                     #t    #f)
+    ;; PSEUDOSCHEME: alias, define-property and syntax-parameterize
+    (ext         (psyntax extensions)                  #t    #f)
     (parameters  (chez parameters)                     #t    #f)
     (r           (rnrs)                                #t    #t)
     (r5          (rnrs r5rs)                           #t    #t)
@@ -956,6 +962,9 @@
     ;; PSEUDOSCHEME: so (import ...) is available at the REPL (it was in
     ;; no library), via (psyntax modules) and so (pseudoscheme)
     (import                   cm)
+    (alias                    ext)  ; PSEUDOSCHEME: SRFI 212
+    (define-property          ext)  ; PSEUDOSCHEME: SRFI 213
+    (syntax-parameterize      ext)  ; PSEUDOSCHEME: SRFI 139
     (syntax-dispatch ) ; only goes to $all
     (%guard-reraise ) ; PSEUDOSCHEME: guard's expansion, so only $all
     ;; PSEUDOSCHEME: the run-time values behind the $core-rtd bindings

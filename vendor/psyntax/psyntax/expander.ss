@@ -132,10 +132,38 @@
           ;;; definition then shadows the import, as R7RS systems
           ;;; (chibi, Gauche, ...) allow and libraries rely on.
           (when (and old (not (imported-label->binding old)))
-            (stx-error id "cannot redefine")))
-        (set-rib-sym*! rib (cons sym sym*))
-        (set-rib-mark**! rib (cons mark* (rib-mark** rib)))
-        (set-rib-label*! rib (cons label (rib-label* rib))))))
+            (stx-error id "cannot redefine"))
+          ;;; PSEUDOSCHEME: the definition replaces the import's entry.
+          ;;; (A second entry could be found first once the rib is
+          ;;; sealed, which orders entries by how often they're used.)
+          (if old
+              (rib-replace-label! rib sym mark* label)
+              (begin
+                (set-rib-sym*! rib (cons sym sym*))
+                (set-rib-mark**! rib (cons mark* (rib-mark** rib)))
+                (set-rib-label*! rib (cons label (rib-label* rib)))))))))
+
+  ;;; PSEUDOSCHEME: give the entry for SYM and MARK* in the (unsealed)
+  ;;; RIB the label LABEL instead.
+  (define (rib-replace-label! rib sym mark* label)
+    (set-rib-label*! rib
+      (let f ((sym* (rib-sym* rib)) (mark** (rib-mark** rib)) (label* (rib-label* rib)))
+        (cond
+          ((null? sym*) '())
+          ((and (eq? (car sym*) sym) (same-marks? (car mark**) mark*))
+           (cons label (cdr label*)))
+          (else (cons (car label*) (f (cdr sym*) (cdr mark**) (cdr label*))))))))
+
+  ;;; PSEUDOSCHEME: bind ID to LABEL in RIB, replacing any entry for it
+  ;;; there (define-property, SRFI 213).
+  (define (rib-rebind! rib id label)
+    (let ((sym (id->sym id)) (mark* (stx-mark* id)))
+      (if (let f ((sym* (rib-sym* rib)) (mark** (rib-mark** rib)))
+            (and (pair? sym*)
+                 (or (and (eq? (car sym*) sym) (same-marks? (car mark**) mark*))
+                     (f (cdr sym*) (cdr mark**)))))
+          (rib-replace-label! rib sym mark* label)
+          (extend-rib! rib id label))))
 
   ;;; A rib can be sealed once all bindings are inserted.  To seal
   ;;; a rib, we convert the lists sym*, mark**, and label* to vectors 
@@ -416,10 +444,40 @@
   ;;; same label or if both are unbound and they have the same name.
   (define free-id=?
     (lambda (i j)
-      (let ((t0 (id->label i)) (t1 (id->label j)))
+      ;; PSEUDOSCHEME: the labels of bindings, not of identifier
+      ;; properties (SRFI 213), which name the same bindings
+      (let ((t0 (base-label (id->label i))) (t1 (base-label (id->label j))))
         (if (or t0 t1)
             (eq? t0 t1)
             (eq? (id->sym i) (id->sym j))))))
+
+  ;;; PSEUDOSCHEME: identifier properties (SRFI 213).  define-property
+  ;;; gives the identifier a new label, bound as its old one is, whose
+  ;;; entry here is (old-label . ((key-label . value) ...)): its
+  ;;; properties, keyed by the key's base label, and its old label's.
+  (define property-table (make-eq-hashtable))
+
+  (define (base-label label)
+    (let ((entry (and label (hashtable-ref property-table label #f))))
+      (if entry (base-label (car entry)) label)))
+
+  (define (property-lookup id key)
+    (unless (and (id? id) (id? key))
+      (assertion-violation 'lookup "not an identifier" (if (id? id) key id)))
+    (let ((label (id->label id)) (key-label (base-label (id->label key))))
+      (unless label (error 'lookup "unbound identifier" (strip id '())))
+      (unless key-label (error 'lookup "unbound identifier" (strip key '())))
+      (let loop ((label label))
+        (let ((entry (hashtable-ref property-table label #f)))
+          (cond
+            ((not entry) #f)
+            ((assq key-label (cdr entry)) => cdr)
+            (else (loop (car entry))))))))
+
+  ;;; PSEUDOSCHEME: syntax parameters (SRFI 139).  syntax-parameterize
+  ;;; binds a keyword's label in the environment R, which label->binding
+  ;;; then consults first for the labels in this table.
+  (define parameterized-labels (make-eq-hashtable))
 
   ;;; valid-bound-ids? takes checks if a list is made of identifers
   ;;; none of which is bound-id=? to another.
@@ -548,6 +606,7 @@
   (define label->binding
     (lambda (x r)
       (cond
+        ((and (hashtable-ref parameterized-labels x #f) (assq x r)) => cdr)
         ((imported-label->binding x) =>
          (lambda (b) 
            (if (and (pair? b) (eq? (car b) '$core-rtd)) 
@@ -592,7 +651,9 @@
                    ((define define-syntax core-macro begin macro
                       macro! local-macro local-macro! global-macro
                       global-macro! module set! let-syntax 
-                      letrec-syntax import $core-rtd)
+                      letrec-syntax import $core-rtd
+                      alias define-property)          ; PSEUDOSCHEME
+
                     (values type (binding-value b) id))
                    (else
                     (values 'call #f #f))))
@@ -2323,7 +2384,9 @@
                      (if (and (eq? xnew x) (eq? ynew y))
                          `(quote ,e)
                          `(quote ,(cons xnew ynew))))
-                   (if (null? (cadr ynew))
+                   ;; PSEUDOSCHEME: and a wrapped (), so that #'(a b)
+                   ;; is a list, as other expanders make it
+                   (if (or (null? (cadr ynew)) (syntax-null? (cadr ynew)))
                        `(list ,xnew)
                        `(cons ,xnew ,ynew))))
               ((list) `(list ,xnew . ,(cdr ynew)))
@@ -2360,9 +2423,30 @@
              (let-values (((e maps) (gen-syntax e x r '() ellipsis? #f)))
                (regen e)))))))
   
+  ;;; PSEUDOSCHEME: (syntax-parameterize ((keyword transformer) ...)
+  ;;; body ...), SRFI 139: the body, with each keyword bound to its new
+  ;;; transformer wherever its binding is referred to.
+  (define syntax-parameterize-transformer
+    (lambda (e r mr)
+      (syntax-match e ()
+        ((_ ((id* rhs*) ...) b b* ...)
+         (begin
+           (unless (for-all id? id*)
+             (stx-error e "invalid identifiers"))
+           (let ((lab* (map (lambda (id)
+                              (or (id->label id) (stx-error id "unbound identifier")))
+                            id*))
+                 (binding* (map (lambda (x) (make-eval-transformer (expand-transformer x mr)))
+                                rhs*)))
+             (for-each (lambda (lab) (hashtable-set! parameterized-labels lab #t)) lab*)
+             (chi-internal (cons b b*)
+                           (append (map cons lab* binding*) r)
+                           (append (map cons lab* binding*) mr))))))))
+
   (define core-macro-transformer
     (lambda (name)
       (case name
+        ((syntax-parameterize)    syntax-parameterize-transformer) ; PSEUDOSCHEME
         ((quote)                  quote-transformer)
         ((lambda)                 lambda-transformer)
         ((case-lambda)            case-lambda-transformer)
@@ -2450,15 +2534,20 @@
     (car x))
 
   ;;; chi procedures
+  ;;; PSEUDOSCHEME: a transformer may return a procedure, which is
+  ;;; called with a lookup procedure for identifier properties, and
+  ;;; returns the output (SRFI 213).
+  (define (call-transformer transformer e)
+    (let ((s (transformer (add-mark anti-mark e))))
+      (add-mark (gen-mark) (if (procedure? s) (s property-lookup) s))))
+
   (define chi-macro
     (lambda (p e)
-      (let ((s ((macro-transformer p) (add-mark anti-mark e))))
-        (add-mark (gen-mark) s))))
+      (call-transformer (macro-transformer p) e)))
   
   (define chi-local-macro
     (lambda (p e)
-      (let ((s ((local-macro-transformer p) (add-mark anti-mark e))))
-        (add-mark (gen-mark) s))))
+      (call-transformer (local-macro-transformer p) e)))
   
   (define (chi-global-macro p e)
     ;;; FIXME: does not handle macro!?
@@ -2470,8 +2559,7 @@
                (cond
                  ((procedure? x) x)
                  (else (error 'chi-global-macro "not a procedure")))))
-          (let ((s (transformer (add-mark anti-mark e))))
-            (add-mark (gen-mark) s))))))
+          (call-transformer transformer e)))))
   
   (define chi-expr*
     (lambda (e* r mr)
@@ -2675,11 +2763,46 @@
                          r mr '() '() '() '() rib #f)))
            (when (null? e*)
              (stx-error e* "no expression in body"))
-           (let ((rhs* (chi-rhs* rhs* r mr))
-                 (init* (chi-expr* (append (apply append (reverse mod**)) e*) r mr)))
-             (build-letrec* no-source
-                (reverse lex*) (reverse rhs*)
-                (build-sequence no-source init*)))))))
+           ;; PSEUDOSCHEME: SRFI 251: definitions after the first
+           ;; expression begin a body of their own, in the scope of
+           ;; this one's definitions.
+           (let-values (((e* rest) (split-commands e* r rib)))
+             (let ((rhs* (chi-rhs* rhs* r mr))
+                   (init* (chi-expr* (append (apply append (reverse mod**)) e*) r mr)))
+               (build-letrec* no-source
+                  (reverse lex*) (reverse rhs*)
+                  (build-sequence no-source
+                    (if (null? rest)
+                        init*
+                        (append init* (list (chi-internal rest r mr))))))))))))
+
+  ;;; PSEUDOSCHEME: E*, a body's forms from its first expression on, as
+  ;;; the expressions before any definition and the forms from that
+  ;;; definition on.  Macro uses are expanded to tell (in RIB, as
+  ;;; chi-body* expands them), and begins spliced.
+  (define split-commands
+    (lambda (e* r rib)
+      (let loop ((e* e*) (cmd* '()))
+        (if (null? e*)
+            (values (reverse cmd*) '())
+            (let ((e (car e*)))
+              (let-values (((type value kwd) (syntax-type e r)))
+                (case type
+                  ((define define-syntax module import alias define-property
+                    let-syntax letrec-syntax)
+                   (if (null? cmd*)
+                       (values '() e*)
+                       (values (reverse cmd*) e*)))
+                  ((begin)
+                   (syntax-match e ()
+                     ((_ x* ...) (loop (append x* (cdr e*)) cmd*))))
+                  ((global-macro global-macro!)
+                   (loop (cons (add-subst rib (chi-global-macro value e)) (cdr e*)) cmd*))
+                  ((local-macro local-macro!)
+                   (loop (cons (add-subst rib (chi-local-macro value e)) (cdr e*)) cmd*))
+                  ((macro macro!)
+                   (loop (cons (add-subst rib (chi-macro value e)) (cdr e*)) cmd*))
+                  (else (loop (cdr e*) (cons e cmd*))))))))))
 
   (define parse-module
     (lambda (e)
@@ -2787,7 +2910,11 @@
                                          lex* rhs* mod** kwd* irib top?)))
                            (for-each
                              (lambda (sym mark* label)
-                               (extend-rib! rib (make-stx sym mark* '()) label))
+                               ;; PSEUDOSCHEME: a property's label
+                               ;; replaces the identifier's (SRFI 213)
+                               (if (hashtable-ref property-table label #f)
+                                   (rib-rebind! rib (make-stx sym mark* '()) label)
+                                   (extend-rib! rib (make-stx sym mark* '()) label)))
                              (reverse (rib-sym* irib))
                              (reverse (rib-mark** irib))
                              (reverse (rib-label* irib)))
@@ -2800,6 +2927,36 @@
                     ((_ x* ...)
                      (chi-body* (append x* (cdr e*))
                         r mr lex* rhs* mod** kwd* rib top?))))
+                 ;; PSEUDOSCHEME: (alias new old), SRFI 212: NEW is bound
+                 ;; to OLD's binding (an unbound OLD's too).  OLD can't
+                 ;; then be defined in this body, like a keyword used.
+                 ((alias)
+                  (syntax-match e ()
+                    ((_ new old) (and (id? new) (id? old))
+                     (begin
+                       (when (bound-id-member? new kwd*)
+                         (stx-error e "cannot redefine keyword"))
+                       (extend-rib! rib new (or (base-label (id->label old)) (gen-label old)))
+                       (chi-body* (cdr e*) r mr lex* rhs* mod** (cons old (cons new kwd*))
+                                  rib top?)))))
+                 ;; PSEUDOSCHEME: (define-property id key expr), SRFI 213:
+                 ;; ID gets a new label, bound as its old one is, with
+                 ;; the property; EXPR is evaluated now, as a
+                 ;; transformer is.
+                 ((define-property)
+                  (syntax-match e ()
+                    ((_ id key expr) (and (id? id) (id? key))
+                     (let ((old (id->label id)) (key-label (base-label (id->label key))))
+                       (unless old (stx-error id "unbound identifier"))
+                       (unless key-label (stx-error key "unbound identifier"))
+                       (let ((b (label->binding old r))
+                             (value (eval-core (expanded->core (expand-transformer expr mr))))
+                             (new (gen-label id)))
+                         (hashtable-set! property-table new
+                           (cons old (list (cons key-label value))))
+                         (rib-rebind! rib id new)
+                         (chi-body* (cdr e*) (cons (cons new b) r) (cons (cons new b) mr)
+                                    lex* rhs* mod** kwd* rib top?))))))
                  ((global-macro global-macro!)
                   (chi-body*
                      (cons (add-subst rib (chi-global-macro value e)) (cdr e*))

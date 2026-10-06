@@ -527,8 +527,10 @@ then the rest."
 	    ;; among the imports, as R7RS programs may: the chosen
 	    ;; clause's import declarations
 	    ((and (head-is (car forms) "cond-expand")
-		  (every (lambda (f) (or (head-is f "import") (head-is f "cond-expand")))
-			 (cond-expand-chosen (car forms))))
+		  (let ((chosen (cond-expand-chosen (car forms))))
+		    (and chosen
+			 (every (lambda (f) (or (head-is f "import") (head-is f "cond-expand")))
+				chosen))))
 	     (setq forms (append (cond-expand-chosen (car forms)) (cdr forms))))
 	    (t (return))))
     (values (nreverse libraries) imports forms)))
