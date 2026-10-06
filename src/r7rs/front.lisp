@@ -645,6 +645,24 @@ once per host."
   ;; the same ids every session, for compiled libraries
   (psx::with-boot-gensyms (install-standard-libraries)))
 
+;;; Alternative readers (ps:reader-directive): the directive, the
+;;; library and its procedure of a port that reads a datum.
+
+(defparameter *alternative-readers*
+  '(("sweet" "(srfi 110)" "sweet-read")		; sweet-expressions
+    ("wisp" "(srfi 119)" "wisp-read")		; wisp
+    ("srfi-49" "(srfi 49)" "i-expression-read"))) ; I-expressions
+
+(defun library-procedure (library name)
+  "The value of NAME in LIBRARY (R7RS names, as text)."
+  (eval-forms (list (read-scheme (format nil "(import (only ~A ~A))" library name))
+		    (ssym name))))
+
+(setf ps:*reader-directives*
+      (loop for (directive library name) in *alternative-readers*
+	    collect (let ((library library) (name name))
+		      (cons directive (lambda () (library-procedure library name))))))
+
 ;;; SRFI 176
 
 (defun srfi-feature-number (feature)

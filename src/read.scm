@@ -413,8 +413,9 @@
 
 ; Directives: #!fold-case and #!no-fold-case (R7RS 2.1), #!r6rs (R6RS
 ; 4.2.4, a flag with no effect here), #!srfi-88 and #!no-srfi-88 (SRFI
-; 88's keywords, foo:, on or off), and any other #!<identifier>, which
-; is ignored the same way.  Each is a comment, so read on.
+; 88's keywords, foo:, on or off), those that select an alternative
+; reader for the rest of the port (ps:*reader-directives*: #!sweet,
+; ...), and any other #!<identifier>, which is ignored the same way.  Each is a comment, so read on.
 
 (define-sharp-macro #\!
   (lambda (c port)
@@ -427,7 +428,11 @@
       ;; SRFI 88: after #!srfi-88, foo: is a keyword
       (if (or (string=? name "srfi-88") (string=? name "no-srfi-88"))
 	  (ps:set-port-keywords port (ps-lisp:string= name "srfi-88")))
-      (sub-read port))))
+      ;; #!sweet and the like: the port's alternative reader reads on
+      (let ((reader (ps:reader-directive port name)))
+	(if reader
+	    (ps:call-alternative-reader reader port)
+	    (sub-read port))))))
 
 ; Datum labels, #<n>=<datum> and #<n># (R7RS 2.4).
 

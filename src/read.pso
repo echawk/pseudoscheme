@@ -496,7 +496,10 @@
              (SET-PORT-FOLD-CASE PORT (STRING= NAME "fold-case")))
          (IF (OR (STRING= NAME "srfi-88") (STRING= NAME "no-srfi-88"))
              (SET-PORT-KEYWORDS PORT (STRING= NAME "srfi-88")))
-         (SUB-READ PORT)))))
+         (LET ((READER (READER-DIRECTIVE PORT NAME)))
+           (IF (TRUEP READER)
+               (CALL-ALTERNATIVE-READER READER PORT)
+               (SUB-READ PORT)))))))
 (DEFUN SUB-READ-DATUM-LABEL (C PORT)
   C
   (PROG (.N.0)

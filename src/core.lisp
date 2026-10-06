@@ -461,10 +461,43 @@ an alist from label numbers to placeholders.")
 (defvar *neoteric* nil
   "Are neoteric expressions read here (SRFI 105: within curly braces)?")
 
+;;; Alternative readers (SRFIs 49, 110, 119): after a directive such as
+;;; #!sweet, a port is read by a Scheme procedure of the port, which
+;;; *READER-DIRECTIVES* gives for the directive's name.  It reads with
+;;; the ordinary reader itself, which then reads as usual.
+
+(defvar *port-readers*
+  (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq)
+  "Ports read by an alternative reader, and the reader.")
+
+(defvar *reader-directives* '()
+  "(name . function): FUNCTION, of no arguments, returns the reader
+directive #!name gives a port.  (src/r7rs/front.lisp)")
+
+(defvar *in-alternative-reader* nil)
+
+(defun reader-directive (port name)
+  "For #!NAME read from PORT: the alternative reader it selects, made
+PORT's; else #f."
+  (let ((entry (assoc name *reader-directives* :test #'string-equal)))
+    (if entry
+	(setf (gethash port *port-readers*) (funcall (cdr entry)))
+	false)))
+
+(defun call-alternative-reader (reader port)
+  (let ((*in-alternative-reader* t))
+    (funcall reader port)))
+
 (defun call-with-reader-state (port thunk)
   "Read one datum from PORT by calling THUNK: case folding and keywords as
 PORT's directives left them, no datum labels yet, and outside curly
-braces."
+braces; or with PORT's alternative reader, if it has one."
+  (let ((reader (and (not *in-alternative-reader*) (gethash port *port-readers*))))
+    (if reader
+	(call-alternative-reader reader port)
+	(call-with-reader-state-1 port thunk))))
+
+(defun call-with-reader-state-1 (port thunk)
   (let ((*fold-case* (multiple-value-bind (fold found) (gethash port *port-fold-case*)
 		       (if found fold *fold-case*)))
 	(*keywords* (values (gethash port *port-keywords*)))
