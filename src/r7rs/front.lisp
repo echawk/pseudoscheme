@@ -298,8 +298,8 @@ found."
 
 (defun srfi-alias-form (name)
   "Libraries known by another name: (srfi :n id ...), the R6RS SRFI
-naming (SRFI 97), for a library found only as (srfi :n); and the R7RS-large
-names of *LIBRARY-ALIASES*."
+naming (SRFI 97), for a library found only as (srfi :n); (srfi srfi-n),
+SRFI 261's; and the R7RS-large names of *LIBRARY-ALIASES*."
   (let ((alias (cdr (assoc name *library-aliases*
 			   :test (lambda (n s) (equal n (parse-library-name s)))))))
     (cond (alias (alias-form name (parse-library-name alias)))
@@ -308,7 +308,14 @@ names of *LIBRARY-ALIASES*."
 		(let ((s (sname* (second name))))
 		  (and (> (length s) 1) (char= (char s 0) #\:)
 		       (every #'digit-char-p (subseq s 1)))))
-	   (alias-form name (list (first name) (second name)))))))
+	   (alias-form name (list (first name) (second name))))
+	  ;; SRFI 261's portable (srfi srfi-n)
+	  ((and (= (length name) 2) (head-is name "srfi") (symbolp (second name))
+		(let ((s (sname* (second name))))
+		  (and (> (length s) 5) (string= "srfi-" s :end2 5)
+		       (every #'digit-char-p (subseq s 5)))))
+	   (alias-form name (list (first name)
+				  (ssym (concatenate 'string ":" (subseq (sname* (second name)) 5)))))))))
 
 ;;; ------------------------------------------------------------------
 ;;; The standard libraries

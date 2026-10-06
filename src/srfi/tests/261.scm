@@ -1,0 +1,13 @@
+;;; Tests for SRFI 261: the library names it specifies.
+(import (scheme base) (scheme process-context) (srfi 64)
+        (prefix (srfi srfi-1) s1:) (prefix (srfi :1) c1:) (prefix (srfi :1 lists) l1:)
+        (prefix (srfi 1) n1:) (only (srfi srfi-151) bit-count))
+(test-begin "srfi-261")
+(test-eq s1:iota n1:iota)
+(test-eq c1:iota n1:iota)
+(test-eq l1:iota n1:iota)
+(test-equal '(0 1 2) (s1:iota 3))
+(test-equal 3 (bit-count 7))
+(let ((failures (test-runner-fail-count (test-runner-current))))
+  (test-end "srfi-261")
+  (exit (if (zero? failures) 0 1)))
