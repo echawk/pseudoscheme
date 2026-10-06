@@ -118,6 +118,12 @@ host global."
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
 	      (not (member (ps:scheme-symbol-name (cadr form)) *closed-primitives* :test #'string=)))
 	 (cadr form))
+	;; ((primitive void)), psyntax's unspecified value: the value itself
+	((and (consp (car form)) (null (cdr form))
+	      (symbolp (caar form)) (string= (symbol-name (caar form)) "PRIMITIVE")
+	      (consp (cdar form)) (symbolp (cadar form))
+	      (string= (ps:scheme-symbol-name (cadar form)) "void"))
+	 (list (sym "quote") ps:unspecific))
 	((eq-membership-p form)
 	 ;; (memv x '(datum ...)), as case expands: memq when eqv? is eq?
 	 ;; on every datum, which the translator open-codes
