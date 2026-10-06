@@ -249,7 +249,9 @@
     #'(LAMBDA (VAR)
         (FUNCALL .MOD
                  VAR
-                 (+ (LET ((TEMP (FUNCALL REF VAR))) (IF (TRUEP TEMP) TEMP 0)) 1)))))
+                 (SCHEME+ (LET ((TEMP (FUNCALL REF VAR)))
+                            (IF (TRUEP TEMP) TEMP 0))
+                          1)))))
 (SET-VALUE-FROM-FUNCTION
  'VARIABLE-INCREMENTATOR
  'SCHEME::VARIABLE-INCREMENTATOR)

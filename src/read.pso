@@ -19,7 +19,7 @@
 (DEFUN REVERSE-LIST->STRING (L N)
   (LET ((S (.MAKE-STRING N #\x)))
     (PROG (I .L.0)
-      (PSETQ I (- N 1) .L.0 L)
+      (PSETQ I (SCHEME- N 1) .L.0 L)
       (GO LOOP)
       LOOP
       (IF (SCHEME< I 0)
@@ -27,7 +27,7 @@
           (PROGN
             (SETF (CHAR (THE SIMPLE-STRING S) I) (CAR (THE CONS .L.0)))
             UNSPECIFIC
-            (PSETQ I (- I 1) .L.0 (CDR (THE CONS .L.0)))
+            (PSETQ I (SCHEME- I 1) .L.0 (CDR (THE CONS .L.0)))
             (GO LOOP))))))
 (SET-VALUE-FROM-FUNCTION 'REVERSE-LIST->STRING 'SCHEME::REVERSE-LIST->STRING)
 (DEFUN INPUT-PORT-OPTION (PORT-OPTION)
@@ -198,9 +198,9 @@
                    (RETURN (INTERN-SCHEME-SYMBOL (REVERSE-LIST->STRING L I)))
                    (IF (CHAR= .C.0 #\\)
                        (PROGN
-                         (PSETQ L (CONS (READ-ESCAPE PORT) L) I (+ I 1))
+                         (PSETQ L (CONS (READ-ESCAPE PORT) L) I (SCHEME+ I 1))
                          (GO LOOP))
-                       (PROGN (PSETQ L (CONS .C.0 L) I (+ I 1)) (GO LOOP))))))))))
+                       (PROGN (PSETQ L (CONS .C.0 L) I (SCHEME+ I 1)) (GO LOOP))))))))))
 (AT-TOP-LEVEL
   (LOCALLY
     (DECLARE (SPECIAL CLOSE-PAREN))
@@ -317,12 +317,12 @@
                                  (PSETQ .L.0
                                         (CONS (READ-ESCAPE PORT) L)
                                         .I.1
-                                        (+ I 1))
+                                        (SCHEME+ I 1))
                                  (GO LOOP)))))
                      (IF (CHAR= .C.2 #\")
                          (RETURN (REVERSE-LIST->STRING L I))
                          (PROGN
-                           (PSETQ .L.0 (CONS .C.2 L) .I.1 (+ I 1))
+                           (PSETQ .L.0 (CONS .C.2 L) .I.1 (SCHEME+ I 1))
                            (GO LOOP)))))))))))
 (AT-TOP-LEVEL
   (SET-STANDARD-READ-MACRO!
@@ -407,7 +407,9 @@
             (RETURN (READING-ERROR PORT "end of file in a datum label"))
             (IF (CHAR-NUMERIC-P D)
                 (PROGN
-                  (SETQ .N.0 (+ (* N 10) (- (CHAR->ASCII D) (CHAR->ASCII #\0))))
+                  (SETQ .N.0
+                        (SCHEME+ (SCHEME* N 10)
+                                 (SCHEME- (CHAR->ASCII D) (CHAR->ASCII #\0))))
                   (GO LOOP))
                 (IF (CHAR= D #\=)
                     (RETURN (READ-LABELLED-DATUM
@@ -512,11 +514,13 @@
         (IF (EQ C EOF-OBJECT)
             (READING-ERROR PORT "end of file within a block comment")
             (IF (AND (CHAR= C #\#) (EQL (.PEEK-CHAR PORT) #\|))
-                (PROGN (.READ-CHAR PORT) (SKIP-BLOCK-COMMENT PORT (+ DEPTH 1)))
+                (PROGN
+                  (.READ-CHAR PORT)
+                  (SKIP-BLOCK-COMMENT PORT (SCHEME+ DEPTH 1)))
                 (IF (AND (CHAR= C #\|) (EQL (.PEEK-CHAR PORT) #\#))
                     (PROGN
                       (.READ-CHAR PORT)
-                      (SKIP-BLOCK-COMMENT PORT (- DEPTH 1)))
+                      (SKIP-BLOCK-COMMENT PORT (SCHEME- DEPTH 1)))
                     (SKIP-BLOCK-COMMENT PORT DEPTH)))))))
 (SET-VALUE-FROM-FUNCTION 'SKIP-BLOCK-COMMENT 'SCHEME::SKIP-BLOCK-COMMENT)
 (AT-TOP-LEVEL
@@ -564,7 +568,7 @@
         (IF (OR (EQ P EOF-OBJECT) (TRUEP (TERMINATING? P)))
             (RETURN (LIST (REVERSE-LIST->STRING L N)))
             (LET ((.C.2 (.READ-CHAR PORT)))
-              (PSETQ .L.0 (CONS .C.2 L) .N.1 (+ N 1))
+              (PSETQ .L.0 (CONS .C.2 L) .N.1 (SCHEME+ N 1))
               (GO LOOP)))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-TOKEN 'SCHEME::SUB-READ-TOKEN)
 (DEFUN SUB-READ-SYMBOL-TOKEN (C PORT)
@@ -588,7 +592,7 @@
                       (PSETQ .L.0
                              .L.5
                              .N.1
-                             (+ N 1)
+                             (SCHEME+ N 1)
                              .C.2
                              (.READ-CHAR PORT)
                              .ESCAPED?.3

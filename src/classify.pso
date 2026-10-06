@@ -375,7 +375,7 @@
                           (SETF (SVREF NEW I) X)
                           UNSPECIFIC
                           (PSETQ .I.0
-                                 (+ I 1)
+                                 (SCHEME+ I 1)
                                  .SAME?.1
                                  (IF (TRUEP SAME?)
                                      (TRUE? (EQ X (SVREF THING I)))
@@ -387,7 +387,7 @@
 (SET-FORWARDING-FUNCTION '*GENERATION* 'SCHEME::*GENERATION*)
 (DEFUN NEW-GENERATION NIL
   (DECLARE (SPECIAL *GENERATION*))
-  (SETQ *GENERATION* (+ *GENERATION* 1))
+  (SETQ *GENERATION* (SCHEME+ *GENERATION* 1))
   *GENERATION*)
 (SET-VALUE-FROM-FUNCTION 'NEW-GENERATION 'SCHEME::NEW-GENERATION)
 (LOCALLY (DECLARE (SPECIAL SAME-GENERATION? .=)) (SETQ SAME-GENERATION? .=))

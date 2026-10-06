@@ -83,7 +83,8 @@
             (LET NIL
               (IF (SCHEME>= N 3)
                   (IF (CHAR= (CHAR (THE SIMPLE-STRING S) 0) #\*)
-                      (TRUE? (CHAR= (CHAR (THE SIMPLE-STRING S) (- N 1)) #\*))
+                      (TRUE? (CHAR= (CHAR (THE SIMPLE-STRING S) (SCHEME- N 1))
+                                    #\*))
                       FALSE)
                   FALSE))))
         FALSE)))

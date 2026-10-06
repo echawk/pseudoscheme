@@ -179,6 +179,33 @@ compute an exact one in single floats."
 (defun scheme-expt (base power)
   (dbl (if (and (rationalp base) (floatp power)) (expt (arg base) power) (expt base power))))
 
+;;; Arithmetic.  The translator integrates (+ a b) as a call to SCHEME+,
+;;; and so on.  With two arguments, both fixnums or both double-floats,
+;;; it's CL's own operation inline (fixnums overflowing into bignums as
+;;; usual); otherwise CL's generic one, which the operation was before.
+;;; More arguments associate to the left, as in CL.
+
+(defun arith2-form (op a b)
+  (let ((x (gensym "A")) (y (gensym "B")))
+    `(let ((,x ,a) (,y ,b))
+       (cond ((and (typep ,x 'fixnum) (typep ,y 'fixnum)) (,op ,x ,y))
+	     ((and (typep ,x 'double-float) (typep ,y 'double-float)) (,op ,x ,y))
+	     (t (,op ,x ,y))))))
+
+(defmacro def-arith (name op)
+  `(progn
+     (defun ,name (&rest numbers) (apply #',op numbers))
+     (define-compiler-macro ,name (&rest args)
+       (case (length args)
+	 (0 (list ',op))
+	 (1 (list ',op (first args)))
+	 (2 (arith2-form ',op (first args) (second args)))
+	 (t (list* ',name (list ',name (first args) (second args)) (cddr args)))))))
+
+(def-arith scheme+ +)
+(def-arith scheme- -)
+(def-arith scheme* *)
+
 ;;; Comparisons.  CL compares a rational with a float by converting the
 ;;; float to a rational, which fails for infinities and NaNs; Scheme
 ;;; says NaN compares false with everything and infinities are beyond

@@ -83,7 +83,7 @@
                   (IF (TRUEP (SEGMENT-PATTERN? PATTERN))
                       (FUNCALL META-VARIABLES
                                (CAR (THE CONS PATTERN))
-                               (+ RANK 1)
+                               (SCHEME+ RANK 1)
                                VARS)
                       (IF (CONSP PATTERN)
                           (FUNCALL META-VARIABLES
@@ -108,14 +108,14 @@
                   (IF (TRUEP (SEGMENT-TEMPLATE? TEMPLATE))
                       (LET ((VARS (FUNCALL FREE-META-VARIABLES
                                            (CAR (THE CONS TEMPLATE))
-                                           (+ RANK 1)
+                                           (SCHEME+ RANK 1)
                                            ENV
                                            'NIL)))
                         (IF (NULL VARS)
                             (SYNTAX-ERROR "too many ...'s" TEMPLATE)
                             (LET ((X (FUNCALL PROCESS-TEMPLATE
                                               (CAR (THE CONS TEMPLATE))
-                                              (+ RANK 1)
+                                              (SCHEME+ RANK 1)
                                               ENV)))
                               (LET ((GEN (IF (SCHEME-EQUAL-P (LIST X) VARS)
                                              X

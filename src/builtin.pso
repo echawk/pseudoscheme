@@ -21,9 +21,9 @@
               (DEFINE-INTEGRATION!
                (PROGRAM-ENV-LOOKUP REVISED^4-SCHEME-ENV (CAR (THE CONS Z)))
                (CAR (THE CONS (CDR (THE CONS Z))))))
-          '((SCHEME::* (SCHEME::FUN *))
-            (SCHEME::+ (SCHEME::FUN +))
-            (SCHEME::- (SCHEME::FUN -))
+          '((SCHEME::* (SCHEME::FUN SCHEME*))
+            (SCHEME::+ (SCHEME::FUN SCHEME+))
+            (SCHEME::- (SCHEME::FUN SCHEME-))
             (SCHEME::/ (SCHEME::FUN /))
             (SCHEME::<= (SCHEME::PRED SCHEME<=))
             (SCHEME::< (SCHEME::PRED SCHEME<))

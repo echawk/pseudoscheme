@@ -27,9 +27,9 @@
       ;; car, cdr and the cXr compositions check for a pair inline:
       ;; (the cons x) is a type check at SBCL's default safety, so
       ;; (car '()) is an error, as R6RS requires, not CL's NIL.
-      (*                              (fun ps-lisp:*))
-      (+                              (fun ps-lisp:+))
-      (-                              (fun ps-lisp:-))
+      (*                              (fun ps:scheme*))
+      (+                              (fun ps:scheme+))
+      (-                              (fun ps:scheme-))
       (/                              (fun ps-lisp:/))
       (<=                             (pred ps:scheme<=))
       (<                              (pred ps:scheme<))

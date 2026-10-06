@@ -31,7 +31,7 @@
                                                       ".RECORD-"
                                                       (NUMBER->STRING N))))
                                            (IF (FIND-PACKAGE NAME)
-                                               (LOOP (+ N 1))
+                                               (LOOP (SCHEME+ N 1))
                                                NAME))))
                             (LOOP 0))
                           ".RECORD")
@@ -91,7 +91,8 @@
                                                             '((:COPIER NIL)
                                                               (:CONC-NAME NIL))))))
                                     ACCESSOR-FUNCTIONS))))
-                (SETQ *RECORD-TYPE-UNIQUE-ID* (+ *RECORD-TYPE-UNIQUE-ID* 1))
+                (SETQ *RECORD-TYPE-UNIQUE-ID*
+                      (SCHEME+ *RECORD-TYPE-UNIQUE-ID* 1))
                 RTD))))))))
 (SET-VALUE-FROM-FUNCTION
  'REALLY-MAKE-RECORD-TYPE
