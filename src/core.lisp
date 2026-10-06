@@ -727,4 +727,7 @@ what is on a cycle; 2, whatever is shared."
 (defun call-with-escape (proc)
   (let ((tag (list 'continuation)))
     (catch tag
-      (funcall proc (lambda (&rest vals) (throw tag (values-list vals)))))))
+      (funcall proc (lambda (&rest vals)
+		      (if (and vals (eq (car vals) :pseudoscheme-continuation-query))
+			  (cons tag nil)	; its identity (src/continuations.lisp)
+			  (throw tag (values-list vals))))))))

@@ -328,7 +328,10 @@ inside is re-entered (and so the continuation still works there)."
     (declare (dynamic-extent frame))
     (catch tag
       (with-frame (frame)
-	(funcall f (lambda (&rest values) (throw tag (values-list values))))))))
+	(funcall f (lambda (&rest values)
+		     (if (and values (eq (car values) :pseudoscheme-continuation-query))
+			 (cons tag nil)	; its identity (CONTINUATION=)
+			 (throw tag (values-list values)))))))))
 
 (defun guard-reraise (k thunk)
   "GUARD's re-raise when no clause matches: re-enter the handler's
@@ -414,6 +417,9 @@ outer ends, innermost first."
 	  (live (list t))
 	  (tag (list 'continuation)))
       (flet ((k (&rest values)
+	       ;; asked its identity (CONTINUATION=)
+	       (when (and values (eq (car values) :pseudoscheme-continuation-query))
+		 (return-from k (cons frames winders)))
 	       (setq *shared-winders* '())
 	       (cond ((car live) (throw tag (values-list values)))
 		     ((and rebuildable *base-tag*)
@@ -423,6 +429,17 @@ outer ends, innermost first."
 		     (t (error 'continuation-not-reentrant)))))
 	(unwind-protect (catch tag (funcall f #'k))
 	  (setf (car live) nil))))))
+
+(defun continuation= (a b)
+  "Whether continuations A and B are the same continuation: captured with
+nothing pushed or wound between (as a call in tail position is).
+SRFI 226's sample implementation tells tail calls so."
+  (or (eq a b)
+      (and (functionp a) (functionp b)
+	   (let ((ia (ignore-errors (funcall a :pseudoscheme-continuation-query)))
+		 (ib (ignore-errors (funcall b :pseudoscheme-continuation-query))))
+	     (and (consp ia) (consp ib)
+		  (eq (car ia) (car ib)) (eq (cdr ia) (cdr ib)))))))
 
 ;;; What the transformation's output uses.  Each takes Scheme
 ;;; expressions, translated in place by the translator, and quoted data.
