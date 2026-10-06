@@ -58,6 +58,12 @@
 ("(let ((k #f) (n 0)) (guard (e (#t 'barrier)) (let ((r (list-sort (lambda (a b) (call/cc (lambda (c) (if (not k) (set! k c)))) (< a b)) '(3 1 2)))) (set! n (+ n 1)) (if (< n 2) (k #t) r))))" . "barrier")
 ;; a continuation captured inside eval includes the frames outside it
 ("(let ((n 0)) (let ((r (eval '(call/cc (lambda (c) (cons 1 c))) (environment '(scheme base))))) (set! n (+ n 1)) (if (= n 1) ((cdr r) (cons 10 #f)) (list n (car r)))))" . "(2 10)")
+;; continuations only called during their extent (escape-only catches),
+;; also after re-entering a continuation captured inside one
+("(call/cc (lambda (return) (for-each (lambda (x) (if (> x 2) (return x))) '(1 2 3 4)) 'none))" . "3")
+("(let loop ((i 0)) (if (= i 3) (call/cc (lambda (k) (let inner ((j 0)) (if (= j 5) (k j) (inner (+ j 1)))))) (loop (+ i 1))))" . "5")
+("(let ((k #f) (n 0)) (let ((r (call/cc (lambda (return) (for-each (lambda (x) (call/cc (lambda (c) (if (= x 2) (set! k c)))) (if (= x 3) (return (list 'early x)))) '(1 2 3 4)) 'done)))) (set! n (+ n 1)) (if (< n 3) (k #f) (list n r))))" . "(3 (early 3))")
+("(let () (define (addc x y k) (if (zero? y) (k x) (addc (+ x 1) (- y 1) k))) (define (fibc x c) (if (zero? x) (c 0) (if (zero? (- x 1)) (c 1) (addc (call/cc (lambda (c) (fibc (- x 1) c))) (call/cc (lambda (c) (fibc (- x 2) c))) c)))) (fibc 15 (lambda (n) n)))" . "610")
 ;; a generator walking a tree: resumed from different depths, so captures
 ;; share frames promoted by earlier ones
 ;; re-entering within a dynamic-wind runs neither its after nor its before

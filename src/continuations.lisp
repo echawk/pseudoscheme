@@ -295,6 +295,17 @@ ESTABLISH again when rebuilt."
 (define-condition continuation-not-reentrant (control-error) ()
   (:report "continuation invoked after its extent ended, and not re-entrant (no base around its capture)"))
 
+(defun escape-call/cc (f)
+  "call/cc for a continuation only invoked during its extent: a catch,
+in a frame that re-establishes the catch if a continuation captured
+inside is re-entered (and so the continuation still works there)."
+  (let* ((tag (list 'continuation))
+	 (frame (vector :escape nil tag)))
+    (declare (dynamic-extent frame))
+    (catch tag
+      (with-frame (frame)
+	(funcall f (lambda (&rest values) (throw tag (values-list values))))))))
+
 (defun guard-reraise (k thunk)
   "GUARD's re-raise when no clause matches: re-enter the handler's
 continuation K with THUNK, which re-raises there; or, where K can't be
@@ -339,6 +350,7 @@ call returns, then continue the frame."
       (:handler (handler-extent (car (svref frame 2)) (cdr (svref frame 2)) inner))
       (:handlers (handlers-extent (svref frame 2) inner))
       (:extent (call-in-extent (svref frame 2) inner))
+      (:escape (catch (svref frame 2) (with-frame (frame) (funcall inner))))
       (:resume (let ((value (with-frame (frame) (funcall inner))))
 		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
       (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A, a procedure written in Lisp"
@@ -459,6 +471,7 @@ restore the site's live variables and continue after it."
     "call-with-values" "map" "for-each" "%full-call/cc" "%full-dynamic-wind" "%full-call-with-values"
     "%full-map" "%full-for-each" "%call-with-frame"
     "%full-vector-map" "%full-vector-for-each" "%full-string-map" "%full-string-for-each"
+    "%escape-call/cc"
     "vector-map" "vector-for-each" "string-map" "string-for-each"
     "with-exception-handler" "raise" "raise-continuable" "force"
     "call-with-port" "call-with-input-file" "call-with-output-file"
@@ -500,7 +513,7 @@ no procedure.")
 	(dolist (p ps-r6rs:*primitives*) (setf (gethash (car p) table) t))
 	(dolist (p *full-replacements*)
 	  (setf (gethash (car p) table) t (gethash (cdr p) table) t))
-	(setf (gethash "%call-with-frame" table) t)
+	(setf (gethash "%call-with-frame" table) t (gethash "%escape-call/cc" table) t)
 	(dolist (name *adapter-primitives*) (setf (gethash name table) t))
 	(setq *primitive-names* table))))
 
@@ -511,6 +524,15 @@ primitive's name (psyntax renames everything else), or (primitive x)."
 	((scheme-symbol-p x)
 	 (let ((name (ps:scheme-symbol-name x)))
 	   (and (gethash name (primitive-names)) name)))))
+
+(defvar *known-procedures* nil
+  "A hash table of the lexical variables, in the top-level form being
+transformed, bound once and for all to a lambda, to the lambda; or NIL.")
+
+(defvar *downward-parameters* nil
+  "A hash table of the known procedures' variables to a list saying, for
+each parameter, whether the procedure only calls it or passes it on to
+such a parameter (see FIND-DOWNWARD-PARAMETERS); or NIL.")
 
 (defvar *safe-procedures* nil
   "A hash table of the lexical variables, in the top-level form being
@@ -581,12 +603,16 @@ are Lisp symbols are the transformation's own, or the translator's."
 		      (car ls)))))
       (scan form)
       (let ((safe (make-hash-table :test 'eq))
+	    (known (make-hash-table :test 'eq))
 	    (bodies '()))
 	(maphash (lambda (v ls)
 		   (declare (ignore ls))
 		   (let ((l (known-lambda v)))
-		     (when l (setf (gethash v safe) t) (push (cons v (caddr l)) bodies))))
+		     (when l
+		       (setf (gethash v safe) t (gethash v known) l)
+		       (push (cons v (caddr l)) bodies))))
 		 lambdas)
+	(setq *known-procedures* known)
 	(let ((*safe-procedures* safe))
 	  (loop while (loop with changed = nil
 			    for (v . body) in bodies
@@ -594,6 +620,163 @@ are Lisp symbols are the transformation's own, or the translator's."
 			      do (remhash v safe) (setq changed t)
 			    finally (return changed))))
 	safe))))
+
+;;; Continuations that are only ever invoked during the extent of their
+;;; call/cc.  In (call/cc (lambda (k) body)), if BODY only calls K, or
+;;; passes it to a parameter of a known procedure that only calls it or
+;;; passes it on in the same way, K can't outlive the call/cc: it isn't
+;;; stored, returned, closed over or handed to unknown code.  Such a
+;;; call/cc (ctak's and fibc's, early exits) needs no capture of the
+;;; frames, only a catch (%ESCAPE-CALL/CC).
+
+(defvar *assumed-only-called* '()
+  "Local procedures' variables taken to be only called while checking
+that they are.")
+
+(defun only-called-p (x body)
+  "Whether BODY refers to variable X only to call it, or to pass it to a
+downward parameter of a known procedure.  A reference inside a lambda
+counts only where the lambda can't outlive BODY's evaluation either: a
+procedure argument of one of *PROCEDURE-ARGUMENTS*, or a letrec-bound
+procedure that is itself only called."
+  (labels ((ok (e)
+	     (cond ((eq e x) nil)	; a reference that isn't a call
+		   ((atom e) t)
+		   ((quote-form-p e) t)
+		   ((lambda-form-p e) (not (occurs-p x e)))
+		   ((keyword-p (car e) "SET!") (and (not (eq (cadr e) x)) (ok (caddr e))))
+		   ((or (keyword-p (car e) "IF") (keyword-p (car e) "BEGIN"))
+		    (every #'ok (cdr e)))
+		   ((keyword-p (car e) "LETREC") (ok-letrec e nil))
+		   ((lambda-form-p (car e))
+		    (and (ok (caddr (car e))) (every #'ok (cdr e))))
+		   ;; a named let: ((letrec ((loop (lambda ...))) loop) arg ...)
+		   ((and (consp (car e)) (keyword-p (caar e) "LETREC") (symbolp (caddr (car e))))
+		    (and (ok-letrec (car e) (caddr (car e))) (every #'ok (cdr e))))
+		   ((eq (car e) x) (every #'ok (cdr e)))
+		   ((and (symbolp (car e)) *downward-parameters* (gethash (car e) *downward-parameters*))
+		    (let ((flags (gethash (car e) *downward-parameters*)))
+		      (loop for a in (cdr e) for i from 0
+			    always (if (eq a x) (nth i flags) (ok a)))))
+		   ((procedure-positions e)
+		    (let ((positions (procedure-positions e)))
+		      (and (ok (car e))
+			   (loop for a in (cdr e) for i from 0
+				 always (if (and (member i positions) (lambda-form-p a))
+					    (ok (caddr a))
+					    (ok a))))))
+		   (t (every #'ok e))))
+	   (ok-letrec (e called)
+	     ;; CALLED: E's body, a bound variable that the caller calls
+	     (let ((*assumed-only-called* (append (mapcar #'car (cadr e)) *assumed-only-called*)))
+	       (and (every (lambda (b)
+			     (if (and (lambda-form-p (cadr b))
+				      (or (member (car b) *assumed-only-called*)))
+				 (and (local-only-called-p (car b) e called)
+				      (ok (caddr (cadr b))))
+				 (ok (cadr b))))
+			   (cadr e))
+		    (or (eq (caddr e) called) (ok (caddr e)))))))
+    (ok body)))
+
+(defun local-only-called-p (v letrec called)
+  "Whether LETREC's bound variable V is only called in it (counting its
+body being V, when the letrec is called, as a call)."
+  (and (every (lambda (b)
+		(if (lambda-form-p (cadr b))
+		    (only-called-p v (caddr (cadr b)))
+		    (only-called-p v (cadr b))))
+	      (cadr letrec))
+       (or (and called (eq (caddr letrec) v))
+	   (only-called-p v (caddr letrec)))))
+
+(defun procedure-positions (call)
+  "If CALL is to one of *PROCEDURE-ARGUMENTS*, the positions of its
+procedure arguments."
+  (let ((name (and (consp call) (primitive-name (car call)))))
+    (and name (cdr (assoc name *procedure-arguments* :test #'string=)))))
+
+(defun occurs-p (x e)
+  (cond ((eq x e) t)
+	((atom e) nil)
+	((quote-form-p e) nil)
+	(t (loop for y on e
+		 thereis (or (occurs-p x (car y))
+			     (and (not (listp (cdr y))) (eq x (cdr y))))))))
+
+(defun find-downward-parameters ()
+  "Fill *DOWNWARD-PARAMETERS* for *KNOWN-PROCEDURES*: assume every
+parameter downward, and strike out those whose procedure lets them
+escape, until none changes."
+  (let ((table (make-hash-table :test 'eq)))
+    (when *known-procedures*
+      (maphash (lambda (v l)
+		 (let ((formals (cadr l)))
+		   (when (and (listp formals) (null (cdr (last formals))))
+		     (setf (gethash v table) (make-list (length formals) :initial-element t)))))
+	       *known-procedures*)
+      (let ((*downward-parameters* table))
+	(loop while (let ((changed nil))
+		      (maphash (lambda (v flags)
+				 (let ((l (gethash v *known-procedures*)))
+				   (loop for cell on flags for x in (cadr l)
+					 when (and (car cell) (not (only-called-p x (caddr l))))
+					   do (setf (car cell) nil changed t))))
+			       table)
+		      changed))))
+    table))
+
+(defun escape-call/cc-p (call)
+  "Whether CALL is (call/cc (lambda (k) body)) with K only called."
+  (and (member (primitive-name (car call)) '("call-with-current-continuation" "call/cc")
+	       :test #'equal)
+       (= (length call) 2)
+       (lambda-form-p (cadr call))
+       (let ((formals (cadr (cadr call))))
+	 (and (consp formals) (null (cdr formals)) (symbolp (car formals))
+	      (only-called-p (car formals) (caddr (cadr call)))))))
+
+(defparameter *procedure-arguments*
+  '(("map" 0) ("for-each" 0) ("vector-map" 0) ("vector-for-each" 0)
+    ("string-map" 0) ("string-for-each" 0) ("apply" 0) ("call-with-values" 0 1)
+    ("find" 0) ("filter" 0) ("partition" 0) ("fold-left" 0) ("fold-right" 0)
+    ("remp" 0) ("memp" 0) ("assp" 0) ("exists" 0) ("for-all" 0)
+    ("list-sort" 0) ("vector-sort" 0) ("vector-sort!" 0)
+    ("member" 2) ("assoc" 2) ("hashtable-update!" 2))
+  "Calling primitives that call only the procedures passed to them, and
+which arguments those are (counting from 0).  A call to one passing only
+safe procedures can't capture.")
+
+(defun safe-procedure-p (e)
+  "Whether E evaluates to a procedure whose calls can't capture: a safe
+procedure's variable, a primitive that calls no procedure, or a lambda
+whose body can't capture."
+  (cond ((lambda-form-p e) (not (may-capture-p (caddr e))))
+	((and *safe-procedures* (symbolp e) (gethash e *safe-procedures*)) t)
+	((or (scheme-symbol-p e) (and (consp e) (keyword-p (car e) "PRIMITIVE")))
+	 (let ((name (primitive-name e)))
+	   (and name (not (member name *calling-primitives* :test #'string=)))))))
+
+(defun safe-primitive-call-p (call)
+  "Whether CALL is to one of *PROCEDURE-ARGUMENTS* with safe procedures."
+  (let* ((name (primitive-name (car call)))
+	 (positions (and name (cdr (assoc name *procedure-arguments* :test #'string=)))))
+    (and positions
+	 (every (lambda (i) (let ((arg (nthcdr (1+ i) call))) (or (null arg) (safe-procedure-p (car arg)))))
+		positions))))
+
+(defun plain-primitive-call-p (call)
+  "Whether CALL, to a primitive with a frame-aware version, can use the
+primitive itself: no procedure passed to it can capture, or for
+call-with-values, the producer can't (the consumer is called in tail
+position)."
+  (or (safe-primitive-call-p call)
+      (and (equal (primitive-name (car call)) "call-with-values")
+	   (cdr call) (safe-procedure-p (cadr call)))))
+
+(defun capturing-call-p (call)
+  "Whether CALL, a combination, may capture."
+  (and (calling-call-p (car call)) (not (safe-primitive-call-p call))))
 
 (defun may-capture-p (e)
   "Whether evaluating E (not the bodies of the lambdas in it, unless
@@ -611,7 +794,7 @@ called on the spot) may make a call that captures, in any position."
 	     (may-capture-p (caddr e))))
 	((lambda-form-p (car e))
 	 (or (may-capture-p (caddr (car e))) (some #'may-capture-p (cdr e))))
-	(t (or (calling-call-p (car e))
+	(t (or (capturing-call-p e)
 	       (may-capture-p (car e))
 	       (some #'may-capture-p (cdr e))))))
 
@@ -641,7 +824,7 @@ called on the spot) may make a call that captures, in any position."
 			 (simple-p (caddr e))))
 		   ((lambda-form-p head)
 		    (and (simple-p (caddr head)) (every #'simple-p (cdr e))))
-		   (t (and (not (calling-call-p head)) (every #'simple-p (cdr e)))))))))
+		   (t (and (not (capturing-call-p e)) (every #'simple-p (cdr e)))))))))
 
 (defun wrap-barrier (call)
   "CALL, in a barrier frame if its operator is one of *BARRIER-PRIMITIVES*."
@@ -762,6 +945,8 @@ primitives in *FULL-REPLACEMENTS* replaced."
 	   ,(simple (caddr e))))
 	((or (keyword-p (car e) "SET!") (keyword-p (car e) "DEFINE"))
 	 `(,(car e) ,(cadr e) ,(simple (caddr e))))
+	((plain-primitive-call-p e) (cons (car e) (mapcar #'simple (cdr e))))
+	((escape-call/cc-p e) (cons (sym "%escape-call/cc") (mapcar #'simple (cdr e))))
 	(t (wrap-barrier (mapcar #'simple e)))))
 
 (defun tail-simple-p (e)
@@ -862,8 +1047,12 @@ procedure with such a body needs no machine."
 	  (emit `',end)))))
 
 (defun flat-call (e k)
-  (let ((xs (wrap-barrier (operands e))))
-    (cond ((not (calling-call-p (if (eq (car xs) '%barrier) (car (third xs)) (car xs))))
+  (let ((xs (cond ((plain-primitive-call-p e)
+		   ;; the primitive itself, not its frame-aware version
+		   (cons (car e) (cdr (operands e))))
+		  ((escape-call/cc-p e) (cons (sym "%escape-call/cc") (cdr (operands e))))
+		  (t (wrap-barrier (operands e))))))
+    (cond ((not (capturing-call-p e))
 	   (finish xs k))
 	  ((eq k :return) (emit `(%return ,xs)))
 	  (t (let ((site (incf (m-count *m*)))
@@ -1060,7 +1249,7 @@ its own, of the chunk's free variables."
 	 (loop for x in (cdr e) sum (count-sites x)))
 	((lambda-form-p (car e))
 	 (+ (count-sites (caddr (car e))) (loop for x in (cdr e) sum (count-sites x))))
-	(t (+ (if (calling-call-p (car e)) 1 0) (loop for x in (cdr e) sum (count-sites x))))))
+	(t (+ (if (capturing-call-p e) 1 0) (loop for x in (cdr e) sum (count-sites x))))))
 
 (defun chunk-sequences (e)
   (cond ((atomic-p e)
@@ -1103,7 +1292,10 @@ its own, of the chunk's free variables."
   "Top-level FORM for full continuations."
   (let* ((*chunk-markers* (make-hash-table :test 'eq))
 	 (*safe-procedures* nil)
-	 (*safe-procedures* (find-safe-procedures form)))
+	 (*known-procedures* nil)
+	 (*downward-parameters* nil)
+	 (*safe-procedures* (find-safe-procedures form))
+	 (*downward-parameters* (find-downward-parameters)))
     (cc-transform-1 form)))
 
 (defun cc-transform-1 (form)
@@ -1130,6 +1322,7 @@ its own, of the chunk's free variables."
   (defhost "%full-dynamic-wind" (before thunk after) (full-dynamic-wind before thunk after))
   (defhost "%full-call-with-values" (producer consumer) (full-call-with-values producer consumer))
   (defhost "%guard-reraise" (k thunk) (guard-reraise k thunk))
+  (defhost "%escape-call/cc" (f) (escape-call/cc f))
   (defhost "%full-map" (f list &rest lists) (apply #'full-map f list lists))
   (defhost "%full-for-each" (f list &rest lists) (apply #'full-for-each f list lists))
   (defhost "%full-vector-map" (f v &rest more) (full-index-loop :vector-map f v more))
