@@ -100,6 +100,12 @@ must leave them as (primitive x), or the translator would open-code the
 old built-in.")
 
 (defun open-primitives (form)
+  "FORM with each (primitive x) replaced by a reference to x (see
+OPEN-PRIMITIVES-1), and its internal definitions made letrecs (see
+DEFINITIONS-AS-LETREC)."
+  (definitions-as-letrec (open-primitives-1 form)))
+
+(defun open-primitives-1 (form)
   "FORM with each (primitive x) -- psyntax's reference to host global
 x -- replaced by the plain variable reference x, so the translator
 integrates x as it does in R5RS code ((primitive +) becomes CL's +
@@ -112,8 +118,161 @@ host global."
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
 	      (not (member (ps:scheme-symbol-name (cadr form)) *closed-primitives* :test #'string=)))
 	 (cadr form))
-	(t (let ((a (open-primitives (car form))) (d (open-primitives (cdr form))))
+	(t (let ((a (open-primitives-1 (car form))) (d (open-primitives-1 (cdr form))))
 	     (if (and (eq a (car form)) (eq d (cdr form))) form (cons a d))))))
+
+;;; psyntax expands a body's definitions (a lambda's, a library's, a
+;;; program's) as letrec*:
+;;;
+;;;    ((lambda (f x g) (begin (set! f (lambda ...)) (set! x ...) (set! g (lambda ...)) body ...))
+;;;     '#f '#f '#f)
+;;;
+;;; The translator makes each such variable a Lisp variable that is
+;;; assigned and closed over, so SBCL boxes it, and a call to f is a
+;;; FUNCALL through the box.  A variable assigned only there, to a
+;;; lambda, can be bound by a letrec instead, which the translator makes
+;;; a LABELS function, called directly:
+;;;
+;;;    ((lambda (x) (letrec ((f (lambda ...)) (g (lambda ...))) (begin (set! x ...) body ...)))
+;;;     '#f)
+;;;
+;;; This makes f and g procedures from the start rather than when their
+;;; definitions are reached, which only a body that uses a variable
+;;; before its definition, an error, can tell.
+;;;
+;;; Procedures calling each other directly are compiled together, as one
+;;; Lisp code object, where through variables each is compiled on its
+;;; own; past a megabyte or so of code SBCL can't compile the object
+;;; (arm64's conditional branches reach 1 MB).  So the definitions of a
+;;; body bigger than *LETREC-DEFINITIONS-LIMIT* conses are left as they
+;;; are: a big program's top level, but not the bodies inside it.
+
+(defparameter *letrec-definitions-limit* 20000
+  "The largest body of definitions, in conses, made a letrec.")
+
+(defun tree-size (x)
+  (if (consp x) (+ 1 (tree-size (car x)) (tree-size (cdr x))) 0))
+
+(defun definitions-as-letrec (form)
+  (let ((assignments (make-hash-table :test 'eq)))
+    (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
+	     (quote-p (x) (and (consp x) (keyword-p (car x) "QUOTE")))
+	     (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
+	     (false-p (x) (and (quote-p x) (eq (cadr x) ps:false)))
+	     (count-assignments (e)
+	       (cond ((atom e))
+		     ((quote-p e))
+		     (t (when (and (keyword-p (car e) "SET!") (consp (cdr e)))
+			  (incf (gethash (cadr e) assignments 0)))
+			(loop for x on e
+			      do (count-assignments (car x))
+			      while (consp (cdr x))))))
+	     (definition-p (s vars)
+	       ;; (set! v (lambda ...)), V one of VARS assigned only here
+	       (and (consp s) (keyword-p (car s) "SET!")
+		    (member (cadr s) vars) (lambda-p (caddr s))
+		    (= (gethash (cadr s) assignments 0) 1)))
+	     (convert (e)
+	       (cond ((atom e) e)
+		     ((quote-p e) e)
+		     (t (let ((e (map-tree e)))
+			  (or (convert-body e) e)))))
+	     (map-tree (e)
+	       (let ((a (convert (car e)))
+		     (d (if (consp (cdr e)) (map-tree (cdr e)) (cdr e))))
+		 (if (and (eq a (car e)) (eq d (cdr e))) e (cons a d))))
+	     (convert-body (e)
+	       ;; E, the letrec* form above, converted; or NIL
+	       (when (and (lambda-p (car e)) (consp (cdr (car e))) (consp (cddr (car e)))
+			  (null (cdddr (car e))))
+		 (let* ((vars (cadr (car e))) (body (caddr (car e))) (args (cdr e))
+			(statements (if (and (consp body) (keyword-p (car body) "BEGIN"))
+					(cdr body)
+					(list body))))
+		   (when (and (listp vars) (null (cdr (last vars)))
+			      (= (length vars) (length args))
+			      (every #'false-p args))
+		     (let ((definitions (remove-if-not (lambda (s) (definition-p s vars)) statements)))
+		       (when (and definitions
+				  (<= (tree-size definitions) *letrec-definitions-limit*))
+			 (let* ((defined (mapcar #'cadr definitions))
+				(rest (remove-if (lambda (s) (member s definitions)) statements))
+				(others (remove-if (lambda (v) (member v defined)) vars))
+				(inner `(,(sym "letrec")
+					 ,(mapcar (lambda (s) (list (cadr s) (caddr s))) definitions)
+					 ,(cond ((null rest) `(,(sym "quote") ,ps:unspecific))
+						((null (cdr rest)) (car rest))
+						(t `(,(sym "begin") ,@rest))))))
+			   (if others
+			       `((,(caar e) ,others ,inner) ,@(mapcar (lambda (v) (declare (ignore v)) `(,(sym "quote") ,ps:false)) others))
+			       inner)))))))))
+      (count-assignments form)
+      (convert form))))
+
+;;; A big top-level form's own definitions go further: they become
+;;; top-level definitions, of the (unique) names psyntax gave them,
+;;;
+;;;    (begin (define x '#f) (define f (lambda ...)) (set! x ...) (define g (lambda ...)) body ...)
+;;;
+;;; so that SBCL compiles each procedure on its own, where as closures
+;;; over one another's variables they'd be one code object, too big to
+;;; compile (see above), or to compile in reasonable time and space with
+;;; full continuations.  A call to one is a call through its global
+;;; function cell.
+
+(defvar *hoisted-procedures* '()
+  "The variables HOIST-DEFINITIONS last made global procedures, each
+defined once and never assigned (for src/continuations.lisp).")
+
+(defun hoist-definitions (form)
+  "FORM, a top-level core form, with the definitions of its outermost
+body made top-level definitions; or FORM if it has no such body."
+  (setq *hoisted-procedures* '())
+  (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
+	   (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
+	   (false-p (x) (and (consp x) (keyword-p (car x) "QUOTE") (eq (cadr x) ps:false)))
+	   (body-form-p (e)
+	     ;; ((lambda (v ...) body) '#f ...)
+	     (and (consp e) (lambda-p (car e)) (consp (cdr (car e))) (consp (cddr (car e)))
+		  (null (cdddr (car e)))
+		  (listp (cadr (car e))) (null (cdr (last (cadr (car e)))))
+		  (= (length (cadr (car e))) (length (cdr e)))
+		  (every #'false-p (cdr e))))
+	   (count-assignments (e table)
+	     (cond ((atom e))
+		   ((keyword-p (car e) "QUOTE"))
+		   (t (when (and (keyword-p (car e) "SET!") (consp (cdr e)))
+			(incf (gethash (cadr e) table 0)))
+		      (loop for x on e do (count-assignments (car x) table) while (consp (cdr x))))))
+	   (hoist (e)
+	     (let* ((vars (cadr (car e))) (body (caddr (car e)))
+		    (statements (if (and (consp body) (keyword-p (car body) "BEGIN")) (cdr body) (list body)))
+		    (counts (make-hash-table :test 'eq)))
+	       (count-assignments e counts)
+	       (let ((defined (loop for s in statements
+				    when (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) vars)
+					      (lambda-p (caddr s)) (= (gethash (cadr s) counts 0) 1))
+				      collect (cadr s))))
+		 (setq *hoisted-procedures* defined)
+		 `(,@(loop for v in vars unless (member v defined)
+			   collect `(,(sym "define") ,v (,(sym "quote") ,ps:false)))
+		   ,@(loop for s in statements
+			   collect (if (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) defined))
+				       `(,(sym "define") ,(cadr s) ,(caddr s))
+				       s)))))))
+    (cond ((body-form-p form) `(,(sym "begin") ,@(hoist form)))
+	  ((and (consp form) (keyword-p (car form) "BEGIN") (body-form-p (car (last form))))
+	   `(,@(butlast form) ,@(hoist (car (last form)))))
+	  (t form))))
+
+(defun open-top-level (form)
+  "OPEN-PRIMITIVES for a form evaluated at top level, whose definitions
+are hoisted if it's big."
+  (let ((form (open-primitives-1 form)))
+    (definitions-as-letrec
+     (if (> (tree-size form) *letrec-definitions-limit*)
+	 (hoist-definitions form)
+	 (progn (setq *hoisted-procedures* '()) form)))))
 
 (defvar *full-continuations*)		; src/continuations.lisp
 
@@ -123,9 +282,29 @@ style warnings about the generated code (an unknown arity, say) are
 about psyntax's output, not the user's program, so they're muffled."
   (handler-bind ((warning #'muffle-warning))
     (if *full-continuations*
-	(let ((form (cc-transform (open-primitives form))))
-	  (call-with-full-policy (lambda () (call-with-continuation-base (lambda () (ps:scheme-eval form *host*))))))
-	(ps:scheme-eval (open-primitives form) *host*))))
+	(let ((form (cc-transform (open-top-level form))))
+	  (call-with-full-policy
+	   (lambda () (call-with-continuation-base (lambda () (eval (translate-core form t)))))))
+	(eval (translate-core (open-top-level form) t)))))
+
+(defparameter *inline-arithmetic-limit* 50000
+  "The largest core form, in conses, compiled with +, - and * inline.")
+
+(defun translate-core (form &optional top-level)
+  "Core FORM translated to Lisp.  SBCL compiles a top-level form and the
+closures in it as one code object, which it can't compile past a
+megabyte or so (arm64's conditional branches reach 1 MB); inline
+arithmetic (SCHEME+ and so on, src/numbers.lisp) makes code bigger, so
+a form bigger than *INLINE-ARITHMETIC-LIMIT* is compiled without it.  A
+TOP-LEVEL begin's forms are compiled one by one: its biggest counts."
+  (let ((lisp (psl:tr "TRANSLATE" form *host*))
+	(size (if (and top-level (consp form) (symbolp (car form))
+		       (string= (symbol-name (car form)) "BEGIN"))
+		  (reduce #'max (cdr form) :key #'tree-size :initial-value 0)
+		  (tree-size form))))
+    (if (> size *inline-arithmetic-limit*)
+	`(locally (declare (notinline ps:scheme+ ps:scheme- ps:scheme*)) ,lisp)
+	lisp)))
 
 ;;; ------------------------------------------------------------------
 ;;; Building the host environment

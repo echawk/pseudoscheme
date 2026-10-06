@@ -580,6 +580,11 @@ are Lisp symbols are the transformation's own, or the translator's."
 		      (when (lambda-form-p (caddr e))
 			(push (caddr e) (gethash (cadr e) lambdas)))
 		      (scan (caddr e)))
+		     ;; a definition HOIST-DEFINITIONS made of a body's
+		     ((keyword-p (car e) "DEFINE")
+		      (when (and (member (cadr e) *hoisted-procedures*) (lambda-form-p (caddr e)))
+			(push (caddr e) (gethash (cadr e) lambdas)))
+		      (scan (caddr e)))
 		     ((keyword-p (car e) "LETREC")
 		      (dolist (b (cadr e))
 			(when (lambda-form-p (cadr b)) (push (cadr b) (gethash (car b) lambdas)))
@@ -914,7 +919,12 @@ called on the spot) may make a call that captures, in any position."
 		     ((keyword-p (car e) "SET!")
 		      `(,(car e) ,(cadr e) ,(rewrite (caddr e))))
 		     ((keyword-p (car e) "LETREC")
-		      `(,(car e) ,(mapcar (lambda (b) (list (car b) (rewrite (cadr b)))) (cadr e))
+		      `(,(car e) ,(mapcar (lambda (b)
+					    (list (car b)
+						  (if (gethash (car b) boxed)
+						      `(list ,(rewrite (cadr b)))
+						      (rewrite (cadr b)))))
+					  (cadr e))
 			,(rewrite (caddr e))))
 		     (t (mapcar #'rewrite e)))))
       (scan form (not (tail-simple-p form)))
@@ -925,8 +935,7 @@ called on the spot) may make a call that captures, in any position."
 				     (not (and (= n 1) (gethash v exempt))))))
 		   (setf (gethash v boxed) t)))
 	       counts)
-      ;; letrec-bound variables are bound by LETREC, not a lambda: box them
-      ;; where they're bound only if they're assigned (psyntax doesn't).
+      ;; A boxed letrec-bound variable is bound to a box of its value.
       (if (zerop (hash-table-count boxed)) form (rewrite form)))))
 
 ;;; ------------------------------------------------------------------

@@ -221,7 +221,7 @@ undefined variables."
   "A Lisp lambda expression running CORE, a psyntax core form."
   (let* ((form (open-primitives core))
 	 (body (handler-bind ((warning #'muffle-warning))
-		 (psl:tr "TRANSLATE" (if *full-continuations* (cc-transform form) form) *host*))))
+		 (translate-core (if *full-continuations* (cc-transform form) form)))))
     (if *full-continuations*
 	`(lambda () (call-with-continuation-base (lambda () ,body)))
 	`(lambda () ,body))))
