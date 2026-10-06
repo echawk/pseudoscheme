@@ -517,9 +517,27 @@ then the rest."
   (let ((libraries '()) (imports '()))
     (loop while (or (head-is (car forms) "define-library") (head-is (car forms) "library"))
 	  do (push (pop forms) libraries))
-    (loop while (head-is (car forms) "import")
-	  do (setq imports (append imports (cdr (pop forms)))))
+    (loop
+      (cond ((head-is (car forms) "import")
+	     (setq imports (append imports (cdr (pop forms)))))
+	    ;; (cond-expand ((library (srfi 18)) (import (srfi 18))) ...)
+	    ;; among the imports, as R7RS programs may: the chosen
+	    ;; clause's import declarations
+	    ((and (head-is (car forms) "cond-expand")
+		  (every (lambda (f) (or (head-is f "import") (head-is f "cond-expand")))
+			 (cond-expand-chosen (car forms))))
+	     (setq forms (append (cond-expand-chosen (car forms)) (cdr forms))))
+	    (t (return))))
     (values (nreverse libraries) imports forms)))
+
+(defun cond-expand-chosen (form)
+  "The forms of the clause of cond-expand FORM whose requirement holds."
+  (loop for (clause . more) on (cdr form)
+	when (if (and (symbolp (car clause))
+		      (string= (ps:scheme-symbol-name (car clause)) "else"))
+		 (or (null more) (error "cond-expand: else clause is not last"))
+		 (feature-satisfied-p (car clause)))
+	  return (cdr clause)))
 
 (defun eval-forms (forms)
   "Install any libraries in FORMS, then run the program after them."

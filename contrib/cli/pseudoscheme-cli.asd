@@ -2,8 +2,9 @@
 
 ;;;; The `pseudoscheme' command-line program.  Build it with
 ;;;;   make -C contrib/cli            (or: make -C contrib/cli LISP=ccl)
-;;;; which runs (asdf:make :pseudoscheme-cli) and leaves bin/pseudoscheme
-;;;; at the top of the repository.
+;;;; which runs (asdf:make :pseudoscheme-cli), writing bin/pseudoscheme.new,
+;;;; and renames that bin/pseudoscheme (so a program running the old one
+;;;; never finds it missing or half written).
 
 (defsystem :pseudoscheme-cli
   :version "3.0"
@@ -11,5 +12,5 @@
   :depends-on (:pseudoscheme/api)
   :components ((:file "cli"))
   :build-operation "program-op"
-  :build-pathname "../../bin/pseudoscheme"
+  :build-pathname "../../bin/pseudoscheme.new"
   :entry-point "pseudoscheme-cli:main")

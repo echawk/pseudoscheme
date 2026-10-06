@@ -30,8 +30,9 @@ all: $(ROOT)/bin/pseudoscheme
 
 $(ROOT)/bin/pseudoscheme: FORCE
 	mkdir -p $(ROOT)/bin
-	rm -f $(ROOT)/bin/pseudoscheme  # else ASDF thinks it's up to date after a Makefile-only change
+	rm -f $(ROOT)/bin/pseudoscheme.new  # else ASDF thinks it's up to date after a Makefile-only change
 	$(RUN) build.lisp
+	mv -f $(ROOT)/bin/pseudoscheme.new $(ROOT)/bin/pseudoscheme  # atomically, for programs running the old one
 
 test: $(ROOT)/bin/pseudoscheme
 	sh ./test.sh $(ROOT)/bin/pseudoscheme
