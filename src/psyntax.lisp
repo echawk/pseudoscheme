@@ -136,6 +136,10 @@ host global."
 ;;;    ((lambda (x) (letrec ((f (lambda ...)) (g (lambda ...))) (begin (set! x ...) body ...)))
 ;;;     '#f)
 ;;;
+;;; A variable assigned only once, to one of these procedures or to a
+;;; primitive, (define graph-nodes internal-graph-nodes), is replaced by
+;;; it, so its calls are direct too, or open-coded.
+;;;
 ;;; This makes f and g procedures from the start rather than when their
 ;;; definitions are reached, which only a body that uses a variable
 ;;; before its definition, an error, can tell.
@@ -152,6 +156,15 @@ host global."
 
 (defun tree-size (x)
   (if (consp x) (+ 1 (tree-size (car x)) (tree-size (cdr x))) 0))
+
+(defvar *primitive-symbols* nil)
+
+(defun primitive-symbol-p (x)
+  "Whether X names a host primitive (not a variable psyntax made)."
+  (unless *primitive-symbols*
+    (setq *primitive-symbols* (make-hash-table :test 'eq))
+    (dolist (name (all-primitive-names)) (setf (gethash name *primitive-symbols*) t)))
+  (gethash x *primitive-symbols*))
 
 (defun definitions-as-letrec (form)
   (let ((assignments (make-hash-table :test 'eq)))
@@ -192,20 +205,55 @@ host global."
 		   (when (and (listp vars) (null (cdr (last vars)))
 			      (= (length vars) (length args))
 			      (every #'false-p args))
-		     (let ((definitions (remove-if-not (lambda (s) (definition-p s vars)) statements)))
-		       (when (and definitions
-				  (<= (tree-size definitions) *letrec-definitions-limit*))
-			 (let* ((defined (mapcar #'cadr definitions))
+		     (let* ((definitions (remove-if-not (lambda (s) (definition-p s vars)) statements))
+			    (definitions (and (<= (tree-size definitions) *letrec-definitions-limit*)
+					      definitions))
+			    (defined (mapcar #'cadr definitions))
+			    (aliases (find-aliases statements vars defined)))
+		       (when (or definitions aliases)
+			 (let* ((statements (substitute-aliases
+					     (remove-if (lambda (s) (and (consp s) (assoc (cadr s) aliases)
+									 (keyword-p (car s) "SET!")
+									 (symbolp (caddr s))))
+							statements)
+					     aliases))
+				(definitions (remove-if-not (lambda (s) (and (consp s) (keyword-p (car s) "SET!")
+									     (member (cadr s) defined)
+									     (lambda-p (caddr s))))
+							    statements))
 				(rest (remove-if (lambda (s) (member s definitions)) statements))
-				(others (remove-if (lambda (v) (member v defined)) vars))
-				(inner `(,(sym "letrec")
-					 ,(mapcar (lambda (s) (list (cadr s) (caddr s))) definitions)
-					 ,(cond ((null rest) `(,(sym "quote") ,ps:unspecific))
-						((null (cdr rest)) (car rest))
-						(t `(,(sym "begin") ,@rest))))))
+				(others (remove-if (lambda (v) (or (member v defined) (assoc v aliases))) vars))
+				(inner (let ((body (cond ((null rest) `(,(sym "quote") ,ps:unspecific))
+							 ((null (cdr rest)) (car rest))
+							 (t `(,(sym "begin") ,@rest)))))
+					 (if definitions
+					     `(,(sym "letrec")
+					       ,(mapcar (lambda (s) (list (cadr s) (caddr s))) definitions)
+					       ,body)
+					     body))))
 			   (if others
 			       `((,(caar e) ,others ,inner) ,@(mapcar (lambda (v) (declare (ignore v)) `(,(sym "quote") ,ps:false)) others))
-			       inner)))))))))
+			       inner))))))))
+	     (find-aliases (statements vars defined)
+	       ;; ((v . w) ...) for each (set! v w), V one of VARS assigned
+	       ;; only there and W one of DEFINED, a primitive, or another
+	       ;; such V (resolved)
+	       (let ((aliases '()))
+		 (dolist (s statements)
+		   (when (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) vars)
+			      (symbolp (caddr s)) (not (eq (cadr s) (caddr s)))
+			      (= (gethash (cadr s) assignments 0) 1))
+		     (let ((w (or (cdr (assoc (caddr s) aliases)) (caddr s))))
+		       (when (or (member w defined) (primitive-symbol-p w))
+			 (push (cons (cadr s) w) aliases)))))
+		 aliases))
+	     (substitute-aliases (x aliases)
+	       (cond ((symbolp x) (let ((a (assoc x aliases))) (if a (cdr a) x)))
+		     ((atom x) x)
+		     ((quote-p x) x)
+		     (t (let ((a (substitute-aliases (car x) aliases))
+			      (d (substitute-aliases (cdr x) aliases)))
+			  (if (and (eq a (car x)) (eq d (cdr x))) x (cons a d)))))))
       (count-assignments form)
       (convert form))))
 
