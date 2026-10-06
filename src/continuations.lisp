@@ -32,14 +32,14 @@
 ;;;; each top-level evaluation, which runs the befores of the
 ;;;; continuation's dynamic-winds and rebuilds its frames.
 ;;;;
-;;;; Known gaps:
-;;;;  - Lisp frames between Scheme frames (a Scheme procedure passed to a
-;;;;    Lisp function that calls it, other than the ones redefined here)
-;;;;    aren't recorded, and re-entering through one is not detected.
-;;;;  - Re-entry unwinds every active dynamic-wind and runs the befores
-;;;;    of all of the continuation's, even those the two share.
-;;;;  - Exception handlers (with-exception-handler) and parameterize
-;;;;    aren't re-established on re-entry.
+;;;; Most calls can't capture, and aren't sites: see "Procedures that
+;;;; can't capture" and "Continuations that are only ever invoked during
+;;;; the extent of their call/cc" below.  Lisp code that calls Scheme
+;;;; procedures pushes frames of its own (dynamic-wind, exception
+;;;; handlers, parameterize, map and the other loops), or, where it has
+;;;; no frame-aware version, a barrier that makes re-entering through it
+;;;; an error.  Known gaps: Lisp functions called through the bridge, and
+;;;; Scheme code compiled without the transformation, aren't barriers.
 
 (in-package "PSEUDOSCHEME-PSYNTAX")
 
@@ -478,7 +478,9 @@ restore the site's live variables and continue after it."
     "with-input-from-file" "with-output-to-file" "eval" "load"
     "list-sort" "vector-sort" "vector-sort!" "find" "filter" "partition"
     "fold-left" "fold-right" "remp" "memp" "assp" "exists" "for-all"
-    "member" "assoc" "hashtable-update!" "make-parameter" "%parameterize")
+    "member" "assoc" "hashtable-update!" "make-parameter" "%parameterize"
+    "call-with-string-output-port" "call-with-bytevector-output-port"
+    "call-with-output-string" "with-output-to-string" "with-input-from-string")
   "Primitives that may call a procedure, so that a call to one is a
 call site like any other.  Calls to every other primitive are not.")
 
@@ -487,7 +489,9 @@ call site like any other.  Calls to every other primitive are not.")
     "with-input-from-file" "with-output-to-file"
     "list-sort" "vector-sort" "vector-sort!" "find" "filter" "partition"
     "fold-left" "fold-right" "remp" "memp" "assp" "exists" "for-all"
-    "member" "assoc" "hashtable-update!" "make-parameter")
+    "member" "assoc" "hashtable-update!" "make-parameter"
+    "call-with-string-output-port" "call-with-bytevector-output-port"
+    "call-with-output-string" "with-output-to-string" "with-input-from-string")
   "Calling primitives with no frame-aware version, which do something
 after the procedure they call returns: calls to them are made in a
 barrier frame (%BARRIER).  member and assoc only with a predicate.")
@@ -941,6 +945,16 @@ called on the spot) may make a call that captures, in any position."
 ;;; ------------------------------------------------------------------
 ;;; Simple expressions, and procedures
 
+(defun letrec-bindings (variable value)
+  "Bindings for a letrec that binds VARIABLE to VALUE, transformed: a
+machine, (letrec ((m (lambda ...))) (lambda ...)), contributes its own
+binding too, so that a letrec of procedures stays one of lambdas, which
+the translator makes LABELS functions."
+  (if (and (consp value) (keyword-p (car value) "LETREC") (lambda-form-p (caddr value))
+	   (every (lambda (b) (lambda-form-p (cadr b))) (cadr value)))
+      (append (cadr value) (list (list variable (caddr value))))
+      (list (list variable value))))
+
 (defun simple (e)
   "Simple E with its lambdas transformed and its references to the
 primitives in *FULL-REPLACEMENTS* replaced."
@@ -950,7 +964,7 @@ primitives in *FULL-REPLACEMENTS* replaced."
 	((atom e) e)
 	((lambda-form-p e) (transform-lambda e))
 	((keyword-p (car e) "LETREC")
-	 `(,(car e) ,(mapcar (lambda (b) (list (car b) (simple (cadr b)))) (cadr e))
+	 `(,(car e) ,(mapcan (lambda (b) (letrec-bindings (car b) (simple (cadr b)))) (cadr e))
 	   ,(simple (caddr e))))
 	((or (keyword-p (car e) "SET!") (keyword-p (car e) "DEFINE"))
 	 `(,(car e) ,(cadr e) ,(simple (caddr e))))
@@ -987,6 +1001,7 @@ procedure with such a body needs no machine."
 (defstruct (machine (:conc-name m-))
   (statements '())			; reversed
   (locals '())
+  (letrecs '())				; (variable procedure), reversed
   (sites '())				; (site label variable)
   (count 0)
   (labels 0))
@@ -1028,6 +1043,15 @@ procedure with such a body needs no machine."
 	       (loop for (x . more) on (cdr e) do (flat x (if more :drop k))))
 	      ((keyword-p head "SET!")
 	       (finish `(,head ,(cadr e) ,(value-of (caddr e))) k))
+	      ((and (keyword-p head "LETREC") (every (lambda (b) (lambda-form-p (cadr b))) (cadr e)))
+	       ;; procedures: bound around the machine's statements, where
+	       ;; everything they can refer to is in scope (the locals are
+	       ;; hoisted), so that the translator makes them LABELS
+	       ;; functions rather than assigned locals
+	       (dolist (b (cadr e))
+		 (dolist (binding (letrec-bindings (car b) (simple (cadr b))))
+		   (push binding (m-letrecs *m*))))
+	       (flat (caddr e) k))
 	      ((keyword-p head "LETREC")
 	       (dolist (b (cadr e))
 		 (push (car b) (m-locals *m*))
@@ -1126,6 +1150,10 @@ bound to a variable first if one after it may capture, to keep order."
 		   (setf (gethash assigned first-def) i))
 		 (dolist (v (variables-in (if assigned (caddr s) s) vars))
 		   (setf (gethash v last-use) i))))
+      ;; The procedures bound around the statements may be called after
+      ;; any site: what they refer to is live to the end.
+      (dolist (v (variables-in (mapcar #'cadr (m-letrecs *m*)) vars))
+	(setf (gethash v last-use) (length statements)))
       (let ((dispatch '()) (resumes '()))
 	(loop for s across statements for i from 0
 	      do (let* ((site-form (cond ((and (consp s) (eq (car s) '%site)) s)
@@ -1157,11 +1185,14 @@ bound to a variable first if one after it may capture, to keep order."
 	`(,(sym "letrec")
 	  ((,m (,(sym "lambda") (,entry ,value ,frame ,@params)
 		((,(sym "lambda") ,locals
-		  (%machine ,entry (,(sym "quote") ,dispatch)
-			    ,@(when resumes `((%go ',(new-label-named "%ENTRY"))))
-			    ,@resumes
-			    ,@(when resumes `(',(new-label-named "%ENTRY")))
-			    ,@(coerce statements 'list)))
+		  ,(let ((body `(%machine ,entry (,(sym "quote") ,dispatch)
+					   ,@(when resumes `((%go ',(new-label-named "%ENTRY"))))
+					   ,@resumes
+					   ,@(when resumes `(',(new-label-named "%ENTRY")))
+					   ,@(coerce statements 'list))))
+		     (if (m-letrecs *m*)
+			 `(,(sym "letrec") ,(reverse (m-letrecs *m*)) ,body)
+			 body)))
 		 ,@(mapcar (lambda (v) (declare (ignore v)) `(,(sym "quote") ,ps:false)) locals)))))
 	  (,(sym "lambda") ,formals
 	   (,m 0 (,(sym "quote") ,ps:false) (,(sym "quote") ,ps:false) ,@params)))))))

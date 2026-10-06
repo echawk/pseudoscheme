@@ -198,10 +198,74 @@ variables are those assigned before the site and referred to after it
   run between the binding and the assignment.
 - **Tail calls** aren't sites, and a procedure whose capturing calls are
   all tail calls needs no machine.
-- **Runtime frames** for Lisp code that calls procedures:
-  `#(:k promoted k)` for a Lisp continuation (`call-with-values`),
-  `#(:winder promoted (before . after))` for `dynamic-wind`. `map` and
-  `for-each` are written in Scheme and compiled with the transformation.
+
+### Calls that can't capture
+
+Most calls can't reach `call/cc`, and the transformation finds them, so
+most code compiles as it would escape-only. Within a top-level form (a
+program's or a library's body is one, its definitions a letrec):
+
+- **Safe procedures.** A variable bound once and for all to a lambda is
+  *known*. A known procedure is *safe* if nothing it calls, in any
+  position, can capture: primitives that call no procedure, and other
+  safe procedures. Assuming every known procedure safe and striking out
+  those that call something unsafe, until nothing changes, gives the
+  largest consistent set, which is right: a cycle of calls among
+  procedures that call nothing else never reaches `call/cc`. Calls to a
+  safe procedure aren't sites, and one that calls only safe procedures
+  needs no machine. `fib` calling `fib` is the typical case.
+- **Safe calls of calling primitives.** `map`, `for-each`, `apply`, the
+  folds, sorts and searches call only the procedures passed to them, so a
+  call passing only safe procedures (safe variables, primitives, lambdas
+  with safe bodies) can't capture: it isn't a site, and it calls the
+  primitive itself rather than its frame-aware version.
+  `call-with-values` needs the frame-aware version only if its producer
+  may capture; its consumer is a tail call.
+- **Escape-only `call/cc`.** In `(call/cc (lambda (k) body))`, if BODY
+  only calls `k`, or passes it to a parameter of a known procedure that
+  does the same, or calls it from a lambda that can't outlive the call (a
+  procedure argument of `map` and the like, a local loop that is itself
+  only called), then `k` can only be invoked during the extent of the
+  `call/cc`, and nothing need be captured: it's a `catch`
+  (`%escape-call/cc`), in an `#(:escape promoted tag)` frame that
+  re-establishes the catch if a continuation captured inside is
+  re-entered. ctak and fibc are all such escapes.
+- Raising an error isn't a site: the handler of a non-continuable raise
+  can't return to the raiser, so a continuation captured in it never
+  needs the raiser's frame. (`raise-continuable` is a site.)
+
+### Frames for the runtime's own calls
+
+Lisp code that calls Scheme procedures pushes frames of its own, which
+rebuilding re-establishes:
+
+- `#(:winder promoted (before . after))`: `dynamic-wind`.
+- `#(:handler promoted (handler . outer))`: `with-exception-handler`'s
+  thunk, with the handler and `handler-bind` around it; `#(:handlers
+  promoted handlers)` and a `:k` frame around a handler `raise` calls.
+  Hooks in the R7RS layer (`*call-handler*`, `*call-with-handler*`)
+  route every raise through them. R6RS's `guard` re-enters its handler to
+  re-raise in the dynamic environment of the `raise`.
+- `#(:extent promoted establish)`: a dynamic context a primitive sets up
+  around a call, re-established by calling ESTABLISH again:
+  `parameterize`'s.
+- `#(:resume promoted function state ...)`: one per call made by a loop
+  written in Lisp (`map`, `for-each`, `vector-map`, `vector-for-each`,
+  `string-map`, `string-for-each`); rebuilding calls `(function value
+  state ...)` to go on with the loop. `map` and `vector-map` reverse their
+  results destructively only if nothing was captured in the loop, since
+  re-entry must not change what an earlier return returned.
+- `#(:k promoted k)`: a Lisp continuation (`call-with-values`).
+- `#(:barrier promoted name)`: around a call to a primitive that calls a
+  procedure and then does more but has no frame-aware version (the sorts,
+  R6RS's folds and searches, `force`, `call-with-port`, the string-port
+  procedures, ...). Rebuilding one is an error: re-entering through it
+  would resume as if the primitive had returned at once.
+
+Re-entry runs the afters and befores only of the `dynamic-wind`s the
+current and target continuations don't share. `eval` and `load` inside a
+running program don't start a base of their own, so continuations
+captured in the evaluated code include the frames outside it.
 
 ### Keeping SBCL fast
 
@@ -229,141 +293,80 @@ What failed first, and why:
   closure-converted and compiled as a component of its own (`%lifted`,
   a `load-time-value` lambda). The base test library now compiles in
   0.84 s (1.05 s without the transformation).
+- A big program (bench/'s `compiler`, 11,000 lines) still exhausted an
+  8 GB heap: its body, all its procedures closing over one another, was
+  one component. A top-level form bigger than
+  `psx::*letrec-definitions-limit*` now has its own definitions made
+  top-level definitions of their unique names (`hoist-definitions`,
+  src/psyntax.lisp), compiled one by one; the analyses above know them
+  as defined once.
 
 ### Results
 
 - chibi's R5RS suite 189 of 189, R7RS 977 of 978 (the `sqrt` branch-cut
   disagreement is the one left), Racket's R6RS suite all 8902 (two more
-  than escape-only), tests/run-continuation-tests.lisp 16 of 16. `make
+  than escape-only), tests/run-continuation-tests.lisp 33 of 33. `make
   test-full` runs them.
-- Cost on bench/ against escape-only: ordinary code 1.36× slower as a
-  geometric mean of 11 benchmarks (cpstak 0.98×, mazefun 1.17×, fib
-  1.74×, earley 2.86×); call/cc-heavy code 2.1–2.3× (ctak, fibc).
+- Cost on bench/ against escape-only: BENCH_RESULTS
 
 ## Further work
 
-What is left before full continuations can be the default, and the
-techniques to investigate for each.
-
 ### Re-entry through Lisp frames
 
-**The problem.** A procedure written in Lisp that calls a Scheme
-procedure isn't a frame. Examples: the R7RS and R6RS higher-order
-procedures that aren't redefined yet (`vector-map`, `vector-for-each`,
-`string-map`, `string-for-each`, `list-sort`, `vector-sort`, R6RS's
-`find`, `filter`, `partition`, `fold-left`, `fold-right`, `exists`,
-`for-all`, `member`/`assoc` with a predicate, `hashtable-update!`),
-`call-with-port` and the file procedures that take a procedure,
-the procedures of src/r7rs/base.scm (Scheme,
-but compiled at boot without the transformation), and Lisp functions
-called through the bridge (docs/interop.md). Escaping through one works.
-But a continuation captured inside the callback and re-entered after the
-Lisp function has returned resumes as if it had returned at once: the
-loop's remaining iterations are lost, silently.
+Lisp code that calls a Scheme procedure is now either frame-aware (the
+loops and dynamic contexts above) or a barrier, so re-entering through
+it works or says it can't. What remains:
 
-Techniques, roughly in order:
-
-1. **Frame-aware versions written in Scheme**, compiled with the
-   transformation, as `map` and `for-each` are (`*full-replacements*`,
-   `*full-scheme-definitions*`). Easiest for the list and vector
-   procedures. Move them into a library of their own so they're compiled
-   once and cached, and check each against its standard's semantics
-   (order of calls, what `vector-map` returns when re-entered: R7RS says
-   earlier returns must not be mutated, as for `map`).
-2. **Frame-aware versions written in Lisp with `:k` frames**: a loop
-   written as recursion whose "rest of the loop" is a Lisp closure passed
-   to `call-with-frame`. For procedures awkward to write in Scheme, such
-   as sorting with a Scheme predicate, or hashtable traversal.
-3. **Barrier frames for everything else.** At a site calling a calling
-   primitive that has no frame-aware version, push `#(:barrier promoted
-   name)`; the bridge's wrapper for Scheme procedures handed to Lisp
-   (`lisp-facing`) can push one too. A capture records the barrier, and
-   rebuilding one raises a clear error ("continuation passes through
-   vector-sort, a Lisp procedure"). That makes the failure loud, which
-   is the precondition for making full continuations the default.
-4. **Code compiled without the transformation** (libraries loaded
-   before full continuations were turned on, the command line's
-   precompiled libraries, src/r7rs/base.scm) is a barrier too. Compile
-   the standard libraries' Scheme parts in both modes (the library cache
-   already keys on the mode), or mark machines' frames so that a capture
-   can tell when a Lisp frame lies between two of them.
-5. **Detecting a Lisp frame at capture time**, as a debugging aid: each
-   frame could record SBCL's control stack pointer, and a capture
-   compares consecutive frames with the stack (`sb-di`) to find foreign
-   frames between them. SBCL-only.
+1. **More frame-aware versions** in place of barriers, as `:resume`
+   loops: R6RS's `fold-left`, `fold-right`, `find`, `filter`,
+   `partition`, `exists`, `for-all`, `remp`, `memp`, `assp`; the sorts (a
+   merge sort can keep its state in frames); `force` (the promise
+   internals aren't host globals yet); `call-with-port` and the
+   string-port procedures (an `:extent`-like frame that runs the
+   after-part on return).
+2. **Procedures from Lisp aren't barriers yet**: the bridge's Lisp
+   functions (docs/interop.md) and a record type's protocol procedures,
+   called from Lisp constructors. The bridge's wrapper for Scheme
+   procedures handed to Lisp (`lisp-facing`) could push a barrier.
+3. **Code compiled without the transformation**: libraries loaded before
+   full continuations were turned on, the command line's precompiled
+   libraries. Calls into them are sites, but their own frames aren't
+   recorded. Compile the standard libraries in both modes (the library
+   cache already keys on the mode), or mark machine frames so a capture
+   can tell when untransformed code lies between two.
 
 ### Dynamic state
 
-Today a continuation captures the `dynamic-wind` winders and the
-exception handlers, and re-entry is coarse.
-
-1. **Shared winders.** Re-entry throws to the base, which unwinds the
-   whole Lisp stack and runs the after of every active `dynamic-wind`;
-   then the befores of all of the continuation's run. R7RS (and R6RS)
-   say only those not shared should: the classic algorithm finds the
-   common tail of the current and target winder lists (`eq` conses) and
-   runs afters down to it and befores up from it. Here: bind the target's
-   winders in a special around the throw, and have `winder-extent`'s
-   unwind-protect skip the after of a winder the target shares; then run
-   befores only for the target's winders outside the common tail.
-2. **Exception handlers** (done). `with-exception-handler` binds
-   `*handlers*` and a `handler-bind` (for Lisp errors) around its thunk,
-   in a `#(:handler promoted (handler . outer))` frame that rebuilding
-   re-establishes, as `:winder` frames re-establish a `dynamic-wind`;
-   `raise` calls the handler in a `:handlers` frame (the outer handlers)
-   under a `:k` frame (what `raise` does if the handler returns). The R7RS
-   layer's `raise-object` and `with-exception-handler` reach these
-   through hooks (`*call-handler*`, `*call-with-handler*`), so every
-   raise is re-enterable, `error`'s and the R6RS layer's included. R6RS's
-   `guard` relies on it: with no clause matching, it re-enters the
-   handler to re-raise in the dynamic environment of the `raise`.
-3. **Parameterizations.** `parameterize` assigns each parameter's one
-   global value for the extent of its body (`parameterize*`), which is
-   also wrong across threads (ROADMAP.md, 4). Bind parameters with
-   specials, or keep a parameterization (an immutable map) in a special,
-   and give `parameterize` a `#(:parameterize promoted bindings)` frame.
-4. **One dynamic environment.** Racket and SRFI 226 keep winders,
-   handlers, parameterization and continuation marks in one dynamic
-   environment that a continuation captures as a value. Capturing it is
-   then O(1), and each frame kind above becomes "set this part of the
-   dynamic environment for the extent of the call".
+Winders, exception handlers and parameterizations are re-established on
+re-entry, and only the winders the two continuations don't share are
+run. **One dynamic environment**, as Racket and SRFI 226 keep (winders,
+handlers, parameterization and continuation marks in one value a
+continuation captures), would make capturing it O(1) and each frame kind
+"set this part of the dynamic environment for the extent of the call".
+`parameterize` still assigns each parameter's one global value, which
+is wrong across threads (ROADMAP.md, 4).
 
 ### Speed
 
-Where the cost is: a special binding and a stack-allocated vector per
-site, the machine's hoisted (and setq'd) locals, boxes for assigned
-variables, and SBCL value cells for hoisted locals that closures
-capture.
+The analyses leave sites only where a call can reach `call/cc` or an
+unknown procedure. What's left:
 
-1. **"May capture" analysis.** A call needs a site only if its callee
-   can reach `call/cc`, or a procedure the analysis doesn't know. Compute
-   a fixpoint over the procedures visible in a top-level form (letrec
-   bindings, library-internal definitions): a procedure is capture-free
-   if it calls only primitives that don't call procedures and other
-   capture-free procedures. Calls to it aren't sites, and a capture-free
-   procedure needs no machine. `fib` calling `fib` is the typical case;
-   most calls in most code are like it. Across libraries, record each
-   exported procedure's flag with the library (the compiled-library
-   cache stores its export environment already) and trust it only for
-   bindings that can't be assigned (R6RS forbids assigning imports;
-   REPL redefinitions can't be trusted). Calling a procedure parameter
-   is an unknown call, so higher-order code stays correct.
-2. **Cheaper frame pushes.** Replace the special binding per site with
-   a per-thread frame stack (a vector and a fill pointer, bound once per
-   base): a site stores its frame and increments the pointer, and
-   decrements it on return. Non-local exits leave the pointer stale, so
-   every place that catches one inside Scheme (a base, an escape's
-   `catch`, `guard`) saves and restores it; Lisp code that catches
-   errors itself wouldn't, so each entry could also record SBCL's
-   control stack pointer and a capture discard entries above the
-   current one. Keep the special binding as the portable fallback.
-3. **Fewer hoisted locals.** Only variables live across a label need to
-   be hoisted; others can stay `let`-bound around the statements that use
-   them, which avoids SBCL's value cells for those that closures capture.
-4. **No vector for sites with no live variables**: a constant frame
-   per (machine, site) would do, if the machine's closure is constant.
-5. **Measure with SBCL's statistical profiler** on fib, earley and
-   deriv before and after each of these.
+1. **Across libraries**: calls to procedures imported from another
+   library (or the standard libraries written in Scheme) are unknown.
+   Record each exported procedure's safety with the library (the
+   compiled-library cache stores its export environment already) and
+   trust it for bindings that can't be assigned (R6RS forbids assigning
+   imports; REPL redefinitions can't be trusted).
+2. **Calls of procedure parameters** (`(f x)` with `f` a parameter) are
+   unknown even when every caller passes a safe procedure. Specializing,
+   or a runtime flag on safe closures, could help higher-order code.
+3. **Cheaper frame pushes**: a per-thread frame stack (a vector and a
+   fill pointer) in place of a special binding per site; non-local exits
+   inside Scheme (a base, an escape's `catch`, `guard`) restore the
+   pointer. A site already costs only about 4 ns.
+4. **Fewer hoisted locals**: only variables live across a label need to
+   be hoisted; others can stay `let`-bound, avoiding SBCL's value cells
+   for those that closures capture.
 
 ### Capture and re-entry
 
@@ -375,9 +378,8 @@ capture.
    That bounds the work per re-entry and makes rebuilding iterative.
    Generators, which re-enter the same few frames repeatedly, benefit
    most.
-2. **Escapes** are already a `catch`, and repeated captures share
-   frames (the `promoted` slot), so the remaining capture cost is
-   copying new frames.
+2. Repeated captures share frames (the `promoted` slot), so the
+   remaining capture cost is copying new frames.
 
 ### Delimited control and continuation marks
 
@@ -395,8 +397,7 @@ The frames make both straightforward:
   position on a frame of its own; `current-continuation-marks` walks
   `*fstack*`.
 - **SRFI 158**'s generators can then be real coroutines rather than
-  buffered (src/srfi/README.md), and one-shot continuations from
-  threads (option 3 above) are no longer needed.
+  buffered (src/srfi/README.md).
 
 ### Interop and threads
 
@@ -406,16 +407,12 @@ The frames make both straightforward:
 - Frames are per thread (`*fstack*` is bound per base). Invoking a
   continuation in a thread other than its own would rebuild its frames
   there, under that thread's dynamic state; leave it undefined.
-- Mixing code compiled with and without the transformation: calls into
-  untransformed Scheme are barriers (see above).
 
 ### Making it the default
 
-When re-entry through Lisp frames is an error rather than silent, the
-dynamic state is captured, and the cost on ordinary code is within
-about 10–15% (the "may capture" analysis is the likely way there), make
-full continuations the default, with `--continuations=escape` to opt
-out.
+The conditions set earlier (re-entry through Lisp frames an error rather
+than silent, the dynamic state captured, ordinary code within about
+10–15%) are met for code compiled in full mode: BENCH_DEFAULT_NOTE.
 
 ## The earlier recommendation
 

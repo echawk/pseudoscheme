@@ -118,8 +118,32 @@ host global."
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
 	      (not (member (ps:scheme-symbol-name (cadr form)) *closed-primitives* :test #'string=)))
 	 (cadr form))
+	((eq-membership-p form)
+	 ;; (memv x '(datum ...)), as case expands: memq when eqv? is eq?
+	 ;; on every datum, which the translator open-codes
+	 (list (sym (if (string= (ps:scheme-symbol-name (cadr (car form))) "memv") "memq" "assq"))
+	       (open-primitives-1 (cadr form))
+	       (caddr form)))
 	(t (let ((a (open-primitives-1 (car form))) (d (open-primitives-1 (cdr form))))
 	     (if (and (eq a (car form)) (eq d (cdr form))) form (cons a d))))))
+
+(defun eq-membership-p (form)
+  "Whether FORM is ((primitive memv) x '(datum ...)) or ((primitive assv)
+x '((key . value) ...)) where no datum or key is a number but a fixnum,
+so that eqv? on them is eq?."
+  (and (consp form) (consp (car form))
+       (symbolp (caar form)) (string= (symbol-name (caar form)) "PRIMITIVE")
+       (consp (cdar form)) (symbolp (cadar form))
+       (member (ps:scheme-symbol-name (cadar form)) '("memv" "assv") :test #'string=)
+       (= (length form) 3)
+       (let ((list (caddr form)))
+	 (and (consp list) (symbolp (car list)) (string= (symbol-name (car list)) "QUOTE")
+	      (listp (cadr list))
+	      (let ((assv (string= (ps:scheme-symbol-name (cadar form)) "assv")))
+		(every (lambda (d)
+			 (let ((key (if assv (if (consp d) (car d) 0) d)))
+			   (not (and (numberp key) (not (typep key 'fixnum))))))
+		       (cadr list)))))))
 
 ;;; psyntax expands a body's definitions (a lambda's, a library's, a
 ;;; program's) as letrec*:
