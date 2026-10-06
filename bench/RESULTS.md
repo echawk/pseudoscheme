@@ -8,8 +8,8 @@ the figure in parentheses is the ratio to Chez Scheme. Lower is better.
 | implementation | version | geometric mean vs Chez | benchmarks completed |
 |---|---|---|---|
 | Chez Scheme (with akku-r7rs; `--optimize-level 2`) | 10.4.1 | 1.0× | 57/57 |
-| **Pseudoscheme** (SBCL 2.6.9) | 3.0 | **1.44×** | **57/57** |
-| Pseudoscheme, `--continuations=full` | 3.0 | 1.55× | 57/57 |
+| **Pseudoscheme** (SBCL 2.6.9; full continuations, the default) | 3.0 | **1.55×** | **57/57** |
+| Pseudoscheme, `--continuations=escape` | 3.0 | 1.44× | 57/57 |
 | Guile | 3.0.11 | 2.8× | 56/57 |
 | Gauche | 0.9.15 | 9.2× | 57/57 |
 | Chibi (a bytecode interpreter) | 0.12.0 | 35.7× | 49/57 |
@@ -81,9 +81,9 @@ Biggest gains: `lattice` 23.2 → 2.9 s, `parsing` 11.2 → 1.4 s, `takl`
 ## All benchmarks
 
 Times in seconds; in parentheses, the ratio to Chez. "pseudoscheme" is
-escape-only continuations (the default), "full" the same build with
-`--continuations=full`, both from the run of the summary above; the other
-columns are from the earlier run.
+escape-only continuations (`--continuations=escape`), "full" full
+continuations (now the default), both from the run of the summary above;
+the other columns are from the earlier run.
 
 | benchmark | chez | pseudoscheme | full | chibi | gauche | guile |
 |---|---|---|---|---|---|---|

@@ -75,8 +75,8 @@ Continuations are full and re-entrant (docs/continuations.md);
 `--continuations=escape` makes them escape-only, a little faster in code
 that calls unknown procedures in loops.
 
-Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 1.44× Chez's
-time as a geometric mean (Guile: 2.8×), and 1.55× with full
+Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 1.55× Chez's
+time as a geometric mean (Guile: 2.8×), 1.44× with escape-only
 continuations. See bench/RESULTS.md.
 
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
