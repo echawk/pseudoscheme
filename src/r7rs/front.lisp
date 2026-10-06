@@ -650,7 +650,7 @@ once per host."
 
 (defparameter *alternative-readers*
   '(("sweet" "(srfi 110)" "sweet-read")		; sweet-expressions
-    ("wisp" "(srfi 119)" "wisp-read")		; wisp
+    ("wisp" "(srfi 119)" "wisp-read-form")		; wisp
     ("srfi-49" "(srfi 49)" "i-expression-read"))) ; I-expressions
 
 (defun library-procedure (library name)
