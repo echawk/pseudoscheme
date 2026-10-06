@@ -377,16 +377,7 @@
 (define string-ci>? (%chain string-ci>?))
 (define string-ci<=? (%chain string-ci<=?))
 (define string-ci>=? (%chain string-ci>=?))
-(define char=? (%chain char=?))
-(define char<? (%chain char<?))
-(define char>? (%chain char>?))
-(define char<=? (%chain char<=?))
-(define char>=? (%chain char>=?))
-(define char-ci=? (%chain char-ci=?))
-(define char-ci<? (%chain char-ci<?))
-(define char-ci>? (%chain char-ci>?))
-(define char-ci<=? (%chain char-ci<=?))
-(define char-ci>=? (%chain char-ci>=?))
+;; The character comparisons are already n-ary: CL's char= and so on.
 
 ;;; ------------------------------------------------------------------
 ;;; Integral inexact numbers are integers too (R7RS 6.2.6): lift the
