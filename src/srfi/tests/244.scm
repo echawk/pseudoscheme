@@ -1,0 +1,38 @@
+;;; Tests for SRFI 244: the sample implementation's test suite
+;;; (tests.sps in the SRFI repository) and the SRFI's examples, as
+;;; SRFI 64 tests, plus internal definitions.
+(import (scheme base) (scheme process-context) (srfi 64)
+        (srfi 244) (prefix (srfi :244 define-values) r6:))
+
+(define-values (a) 1)
+(define-values b (values 2 3))
+(define-values (x y) (values 4 5))
+(define-values (u . v) (values 6 7))
+(define-values () (values))
+(r6:define-values (s t) (values 's 't))
+
+(define (tests)
+  (test-equal 1 a)
+  (test-equal '(2 3) b)
+  (test-equal 4 x)
+  (test-equal 5 y)
+  (test-equal 6 u)
+  (test-equal '(7) v)
+  (set! u 8)
+  (set! v 9)
+  (test-equal 8 u)
+  (test-equal 9 v)
+  (test-equal '(s t) (list s t))
+  (test-equal 3 (let () (define-values (x y) (values 1 2)) (+ x y)))
+  (test-equal '(1 2) (let () (define-values (a . b) (values 1 2)) (cons a b)))
+  (test-equal '(1 2 (3 4) ())
+    (let ()
+      (define-values (p q . r) (values 1 2 3 4))
+      (define-values all (values))
+      (list p q r all))))
+
+(test-begin "srfi-244")
+(tests)
+(let ((failures (test-runner-fail-count (test-runner-current))))
+  (test-end "srfi-244")
+  (exit (if (zero? failures) 0 1)))
