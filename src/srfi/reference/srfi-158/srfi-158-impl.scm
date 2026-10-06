@@ -75,33 +75,37 @@
 
 
 ;; make-coroutine-generator
-;; PSEUDOSCHEME: Pseudoscheme's continuations are escape-only, and the
-;; original definition (below, commented out) resumes a continuation
-;; captured in an earlier, already-returned call.  This version runs PROC
-;; to completion on the first call and buffers the yielded values: right
-;; for finite producers, but an infinite one hangs.
-(define (make-coroutine-generator proc)
-  (let ((items #f))
-    (lambda ()
-      (if (not items)
-          (let ((acc '()))
-            (proc (lambda (v) (set! acc (cons v acc)) (if #f #f)))
-            (set! items (reverse acc))))
-      (if (null? items)
-          (eof-object)
-          (let ((v (car items)))
-            (set! items (cdr items))
-            v)))))
-;(define (make-coroutine-generator proc)
-;  (define return #f)
-;  (define resume #f)
-;  (define yield (lambda (v) (call/cc (lambda (r) (set! resume r) (return v)))))
-;  (lambda () (call/cc (lambda (cc) (set! return cc)
-;                        (if resume
-;                          (resume (if #f #f))  ; void? or yield again?
-;                          (begin (proc yield)
-;                                 (set! resume (lambda (v) (return (eof-object))))
-;                                 (return (eof-object))))))))
+;; PSEUDOSCHEME: the original definition (the full-continuations clause)
+;; resumes a continuation captured in an earlier, already-returned call,
+;; which needs re-entrant continuations.  With escape-only ones
+;; (--continuations=escape), PROC runs to completion on the first call
+;; and the yielded values are buffered: right for finite producers, but
+;; an infinite one hangs.
+(cond-expand
+  (full-continuations
+   (define (make-coroutine-generator proc)
+     (define return #f)
+     (define resume #f)
+     (define yield (lambda (v) (call/cc (lambda (r) (set! resume r) (return v)))))
+     (lambda () (call/cc (lambda (cc) (set! return cc)
+                           (if resume
+                             (resume (if #f #f))  ; void? or yield again?
+                             (begin (proc yield)
+                                    (set! resume (lambda (v) (return (eof-object))))
+                                    (return (eof-object)))))))))
+  (else
+   (define (make-coroutine-generator proc)
+     (let ((items #f))
+       (lambda ()
+         (if (not items)
+             (let ((acc '()))
+               (proc (lambda (v) (set! acc (cons v acc)) (if #f #f)))
+               (set! items (reverse acc))))
+         (if (null? items)
+             (eof-object)
+             (let ((v (car items)))
+               (set! items (cdr items))
+               v)))))))
 
 
 ;; list->generator

@@ -110,7 +110,10 @@ of the library or program being processed.")
 
 (defun feature-satisfied-p (req)
   (cond ((symbolp req)
-	 (member (ps:scheme-symbol-name req) psl:*scheme-features* :test #'string=))
+	 (or (member (ps:scheme-symbol-name req) psl:*scheme-features* :test #'string=)
+	     ;; re-entrant continuations: as code is compiled now
+	     (and (string= (ps:scheme-symbol-name req) "full-continuations")
+		  psx::*full-continuations*)))
 	((head-is req "and") (every #'feature-satisfied-p (cdr req)))
 	((head-is req "or") (some #'feature-satisfied-p (cdr req)))
 	((head-is req "not") (not (feature-satisfied-p (cadr req))))

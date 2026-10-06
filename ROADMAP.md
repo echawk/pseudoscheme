@@ -13,8 +13,9 @@ this file.
 | `tests/run-library-tests.lisp` | 55/55 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
-| `tests/run-continuation-tests.lisp` | 34/34 |
-| `make -C contrib/cli test` | 22/22 |
+| `tests/run-continuation-tests.lisp` | 37/37 |
+| `make -C contrib/cli test` | 28/28 |
+| `make test-srfi` (`src/srfi/tests/`) | 121 of 121 test programs |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
 | `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.55× Chez's time, 1.44× escape-only (Guile 2.8×, Gauche 9.2×) |
 
@@ -141,14 +142,14 @@ left.
   other Lisp code that calls Scheme procedures (the sorts, R6RS's folds,
   the bridge) pushes a barrier, which makes re-entering through it an
   error.
-- tests/run-continuation-tests.lisp: 34 of 34. Cost: 7.7% over
+- tests/run-continuation-tests.lisp: 37 of 37. Cost: 7.7% over
   escape-only as a geometric mean of bench/, most benchmarks at the same
   speed, 1.5–1.8× on a few closure-heavy programs.
 
 Next (docs/continuations.md, "Further work"): frame-aware versions of
-the barriers' primitives; safety information across libraries; SRFI 226
-(delimited control) and continuation marks on the same frames; SRFI
-158's generators as real coroutines (src/srfi/README.md).
+the barriers' primitives; safety information across libraries;
+continuation marks and prompts on the same frames (SRFIs 226 and 248
+are written on call/cc and dynamic-wind, src/srfi/).
 
 **R5RS** runs on psyntax (`ps-r7rs::eval-at-r5rs-repl`, a top level whose
 bindings are `(pseudoscheme r5rs)`), so it gets full continuations too;
@@ -231,9 +232,6 @@ snow-fort trees):
   doesn't take effect) and `(xitomatl R6RS-lexer)` (an identifier made
   with `identifier-append` isn't found).
 - Chez's `meta-cond`/`meta` would let some chez-srfi variants load (15).
-- SRFIs not yet in `src/srfi/`: 38 (now possible: the reader and
-  writer handle datum labels) and 226 (needs re-entrant continuations,
-  section 3), among the commonly used ones.
 - Some libraries depend on chibi- or Gauche-specific leniency, such as
   duplicate pattern variables in `syntax-rules`, and are not counted as
   bugs here.

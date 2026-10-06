@@ -82,13 +82,11 @@ continuations. See bench/RESULTS.md.
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
 libraries and 91 of 130 snow-fort libraries load.
 
-SRFIs 0, 1, 2, 4, 6, 8, 9, 11, 13, 14, 16, 18, 19, 23, 26, 27, 28, 31,
-34, 35, 36, 37, 39, 41, 42, 43, 45, 48, 51, 54, 60, 61, 64, 69, 71, 78,
-87, 95, 98, 101, 106, 111, 113, 115, 117, 121, 125, 126, 127, 128, 130,
-132, 133, 134, 135, 141, 143, 144, 145, 146, 151, 152, 156, 158, 170,
-175, 189, 195, 196, 197, 210, 219, 223, 225, 227, 228, 229, 231, 235 and
-236 ship in `src/srfi/`. See src/srfi/README.md for where each comes
-from.
+Every final SRFI that hasn't been withdrawn, 208 of them through SRFI
+274, ships in `src/srfi/` or is built into the reader, the expander or
+the command line (`(srfi 1)`, `(srfi :1 lists)` and `(srfi srfi-1)`
+alike). `make test-srfi` runs their tests. See src/srfi/README.md for
+where each comes from and what each leaves out.
 
 All of `(rnrs ...)` is present. The R6RS libraries' namespaces and
 syntax come from psyntax; the procedures behind them are in `src/r6rs/`

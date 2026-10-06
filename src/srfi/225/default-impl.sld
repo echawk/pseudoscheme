@@ -1,7 +1,7 @@
 ;;; Part of SRFI 225 (see ../225.sld): the sample implementation's
 ;;; srfi/225/default-impl.sld, with one change, marked PSEUDOSCHEME:
-;;; default-dict->generator collects the entries up front, since the
-;;; sample's coroutine needs re-entrant continuations.
+;;; with escape-only continuations, default-dict->generator collects the
+;;; entries up front, since the sample's coroutine needs re-entrant ones.
 
 (define-library
   (srfi 225 default-impl)
@@ -282,11 +282,61 @@
       (define (accept el)
         (and (upper el) (lower el)))
 
-      ;; PSEUDOSCHEME: the sample implementation turns dict-for-each into
-      ;; a generator with continuations that it re-enters after they have
-      ;; returned (a yield/resume coroutine).  Pseudoscheme's
-      ;; continuations are escape-only, so the entries are collected by
-      ;; one dict-for-each up front and then handed out one at a time.
+      ;; PSEUDOSCHEME: the sample implementation's generator re-enters
+      ;; continuations after they have returned (a yield/resume
+      ;; coroutine), which needs re-entrant ones (the default); with
+      ;; escape-only continuations the entries are collected by one
+      ;; dict-for-each up front and then handed out one at a time.
+      (cond-expand
+        (full-continuations
+         (let ()
+      ;; proc that takes yield value and yield continuation when yield is called
+      ;; shouldn't return
+      (define yield-handler #f)
+
+      (define (yield value)
+        (when (or (eof-object? value)
+                  (accept (car value)))
+          (call/cc (lambda (yield-cont)
+                     (yield-handler value yield-cont))) ))
+
+      (define (generate)
+        (dict-for-each dto
+                       (lambda (key value)
+                         (yield (cons key value)))
+                       dict)
+        (yield (eof-object)))
+
+      ;; continuation at the point of last yield
+      (define yield-cont #f)
+
+      ;; check if eof return was seen; if yes, keep returning eof
+      ;; for further invocations
+      (define eof #f)
+
+      (define (get-next-value exit)
+        (set! yield-handler
+          (lambda (value new-yield-cont)
+            (set! yield-cont new-yield-cont)
+            (when (eof-object? value)
+              (set! eof #t)
+              ;; unset continuation reference to allow
+              ;; gc clean everything up
+              (set! yield-cont #f))
+            (exit value)))
+
+        (cond
+          ;; eof seen -- keep returning eof
+          (eof (eof-object))
+          ;; no yield called yet -- start the generator
+          ((not yield-cont) (generate))
+          ;; continue from last yield position
+          (else (yield-cont #t))))
+
+      (lambda ()
+        (call/cc get-next-value))))
+        (else
+         (let ()
       (define entries '())
       (dict-for-each dto
                      (lambda (key value)
@@ -299,7 +349,7 @@
             (eof-object)
             (let ((entry (car entries)))
               (set! entries (cdr entries))
-              entry))))
+              entry)))))))
 
     (define (default-dict-accumulator dto dict acc-proc)
       (lambda (arg)

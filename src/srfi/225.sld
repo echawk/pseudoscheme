@@ -3,9 +3,10 @@
 ;;; The library files are the shipped srfi/225.sld (this file) and
 ;;; srfi/225/*.sld (225/), with include paths pointing to the shared
 ;;; .scm files, unmodified, in reference/srfi-225/.  One change, in
-;;; 225/default-impl.sld: the default dict->generator collects the
+;;; 225/default-impl.sld: with escape-only continuations
+;;; (--continuations=escape), the default dict->generator collects the
 ;;; entries with one dict-for-each up front, because the sample's
-;;; coroutine re-enters continuations, which Pseudoscheme can't.
+;;; coroutine re-enters continuations.
 ;;;
 ;;; Every optional DTO is present here: srfi-69-dto, hash-table-dto
 ;;; (SRFI 125), srfi-126-dto, mapping-dto and hash-mapping-dto

@@ -5,16 +5,15 @@
 ;;; the shipped srfi-158.sld, renamed (srfi 158).
 ;;;
 ;;; Modifications to the reference file, each marked PSEUDOSCHEME there:
-;;; the sample make-coroutine-generator resumes a continuation captured
-;;; in an earlier, already-returned call of the generator.
-;;; Pseudoscheme's continuations are escape-only (re-entering a dead one
-;;; can crash the Lisp image), so
-;;;   gtake and make-unfold-generator are rewritten in direct style
-;;;     (same behaviour, still lazy, so infinite sources work);
-;;;   make-coroutine-generator (and so make-for-each-generator) runs its
-;;;     procedure to completion on the first call and buffers the yielded
-;;;     values.  Right for finite producers; an infinite coroutine hangs,
-;;;     and the producer's side effects all happen at the first call.
+;;;   gtake and make-unfold-generator are rewritten in direct style (same
+;;;     behaviour, still lazy), from when Pseudoscheme's continuations
+;;;     were escape-only;
+;;;   make-coroutine-generator (and so make-for-each-generator) is the
+;;;     sample's, resuming a continuation captured in an earlier call of
+;;;     the generator, when continuations are re-entrant (the default);
+;;;     with --continuations=escape, it runs its procedure to completion on
+;;;     the first call and buffers the yielded values, so an infinite
+;;;     coroutine hangs there.
 (define-library (srfi 158)
   (import (scheme base)
           (scheme case-lambda))

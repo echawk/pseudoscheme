@@ -37,7 +37,11 @@ dedicated reader, natively."
 	  do (ps:scheme-eval form env))))
 
 (defprim "features" ()
-  (mapcar #'sym psl:*scheme-features*))
+  ;; and full-continuations when code is compiled with re-entrant
+  ;; continuations (src/continuations.lisp, loaded later)
+  (mapcar #'sym (append psl:*scheme-features*
+			(let ((full (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")))
+			  (when (and full (symbol-value full)) '("full-continuations"))))))
 
 (defun stub-function (export)
   (lambda (&rest args)
