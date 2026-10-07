@@ -518,13 +518,14 @@ cond-expand.")
     (read-forms (include-path file) :fold-case (ps:truep fold-case)))
   (psx:defhost "r7rs:translate-import-set" (spec) (translate-import-set spec))
   ;; R7RS's load: the file's forms, one by one, at the REPL (in the
-  ;; interaction environment), whatever the environment
+  ;; interaction environment), whatever the environment; at R5RS's top
+  ;; level if called from there
   (psx:defhost "r7rs:load" (file &optional env)
     (declare (ignore env))
     (load-file-at-repl file)
     ps:unspecific)
   (psx:defhost "r7rs:interaction-environment" () *interaction-environment*)
-  (psx:defhost "r7rs:eval-at-repl" (form) (eval-at-repl form))
+  (psx:defhost "r7rs:eval-at-repl" (form) (eval-at-current-repl form))
   ;; Promises: R7RS's, built natively in the host (delay-force is the
   ;; R7RS layer's own macro there).
   (psx::host-eval (read-scheme "(define ($delay-force thunk) (delay-force (thunk)))")))
@@ -576,10 +577,13 @@ then the rest."
 REPL's environment for it.")
 
 (defun load-file-at-repl (path)
+  "Load PATH at the REPL we're at: R5RS's (read case-folded) if called
+from there, else R7RS's."
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
+	(r5rs (at-r5rs-repl-p))
 	(value ps:unspecific))
-    (dolist (form (read-forms path) value)
-      (setq value (eval-at-repl form)))))
+    (dolist (form (read-forms path :fold-case r5rs) value)
+      (setq value (if r5rs (eval-at-r5rs-repl form) (eval-at-repl form))))))
 
 (defun load-file (path)
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path))))
@@ -602,6 +606,18 @@ continuations (src/continuations.lisp)."
     (with-psyntax-parameter ("psyntax:interaction-source-name"
 			     (mapcar #'ssym '("pseudoscheme" "r5rs")))
       (psx:eval-top-level form))))
+
+(defun at-r5rs-repl-p ()
+  "Is what's running being evaluated at R5RS's top level (so its load
+and eval in the interaction environment should be too)?"
+  (and psx:*host*
+       (equal (mapcar #'sname* (funcall (psx:host-ref "psyntax:interaction-library-name")))
+	      '("pseudoscheme" "r5rs" "interaction"))))
+
+(defun eval-at-current-repl (form)
+  "Evaluate FORM at R5RS's top level if that's where we are, else at the
+R7RS REPL."
+  (if (at-r5rs-repl-p) (eval-at-r5rs-repl form) (eval-at-repl form)))
 
 (defun translate-repl-imports (form)
   "FORM's import sets, R7RS's library names made psyntax's, it being an

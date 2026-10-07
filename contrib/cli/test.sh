@@ -17,6 +17,22 @@ check "r6rs -p" "(1 2 3)" $PS --r6rs -p '(list-sort < (list 3 1 2))'
 check "r5rs folds case" "#t" $PS --r5rs -p "(eq? 'abc 'ABC)"
 check "r7rs is case-sensitive" "#f" $PS -p "(eq? 'abc 'ABC)"
 
+# R5RS's load and eval in the interaction environment are at R5RS's
+# top level, not the R7RS REPL's; a loaded definition can even shadow
+# a standard procedure (as J-Bob's does)
+cat > $tmp/defs5.scm <<'S'
+(define s.car car)
+(define (car x) (if (pair? x) (s.car x) 'NOPE))
+(define (foo) 'foo)
+S
+cat > $tmp/load5.scm <<'S'
+(load "TMP/defs5.scm")
+(define xx 42)
+(display (list (foo) (car 5) (eval 'xx (interaction-environment))))
+S
+sed -i.bak "s|TMP|$tmp|" $tmp/load5.scm
+check "r5rs load and eval at R5RS's top level" "(foo nope 42)" $PS --r5rs $tmp/load5.scm
+
 cat > $tmp/hello.scm <<'S'
 (import (scheme base) (scheme write) (scheme process-context))
 (display "hello ")
