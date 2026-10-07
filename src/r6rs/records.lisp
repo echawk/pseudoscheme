@@ -161,9 +161,17 @@ type FINAL whose fields after RCD's type's are TAIL."
 	while r
 	thereis (eq r ancestor)))
 
+;;; Is X a record of type RTD or a subtype?  Inline, with the common case
+;;; -- exactly RTD -- first: psyntax's own records (syntax objects, ribs)
+;;; are tested this way all through every expansion.
+(declaim (inline record-of-type-p))
+(defun record-of-type-p (x rtd)
+  (and (record-p x)
+       (let ((r (record-rtd x))) (or (eq r rtd) (rtd-descends-p r rtd)))))
+
 (defprim "record-predicate" (rtd)
   (check-rtd "record-predicate" rtd)
-  (lambda (x) (bool (and (record-p x) (rtd-descends-p (record-rtd x) rtd)))))
+  (lambda (x) (bool (record-of-type-p x rtd))))
 
 (defun field-index (who rtd k)
   (unless (and (integerp k) (< -1 k (length (rtd-fields rtd))))
@@ -174,11 +182,6 @@ type FINAL whose fields after RCD's type's are TAIL."
 ;;; procedures with, so that they are procedures of the program's own,
 ;;; called directly, rather than closures made by record-accessor and
 ;;; friends.  WHO names the procedure for errors.
-
-(declaim (inline record-of-type-p))
-(defun record-of-type-p (x rtd)
-  (and (record-p x)
-       (let ((r (record-rtd x))) (or (eq r rtd) (rtd-descends-p r rtd)))))
 
 (defprim "r7rs:record-ref" (x rtd i who)
   (unless (record-of-type-p x rtd)
@@ -200,7 +203,7 @@ type FINAL whose fields after RCD's type's are TAIL."
   (let ((i (field-index "record-accessor" rtd k))
 	(name (cdr (svref (rtd-fields rtd) k))))
     (lambda (x)
-      (unless (and (record-p x) (rtd-descends-p (record-rtd x) rtd))
+      (unless (record-of-type-p x rtd)
 	(r6rs-assertion-violation name "not a record of the right type" x))
       (svref (record-values x) i))))
 
@@ -212,7 +215,7 @@ type FINAL whose fields after RCD's type's are TAIL."
       (ps:scheme-error "record-mutator: field ~A of ~A is immutable"
 		       (ps:scheme-symbol-name (cdr field)) (rtd-name rtd)))
     (lambda (x v)
-      (unless (and (record-p x) (rtd-descends-p (record-rtd x) rtd))
+      (unless (record-of-type-p x rtd)
 	(r6rs-assertion-violation (cdr field) "not a record of the right type" x))
       (setf (svref (record-values x) i) v)
       ps:unspecific)))

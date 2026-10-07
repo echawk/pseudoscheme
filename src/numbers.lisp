@@ -44,6 +44,22 @@ around a body, so this is per implementation."
 			  :invalid nil :inexact nil)
   t)
 
+(defun limit-thread-stack-size (bytes)
+  "Give the threads created from now on control stacks of BYTES, if
+that's less than they'd get.  SBCL gives every thread a stack the size
+of the main thread's, and making one takes time in proportion (2.6 ms
+for 256 MB on an M4, the command line's size, against 0.3 ms for
+32 MB), so a program making many threads waits on it.  Only ever
+lowers the size: SBCL reuses a finished thread's memory for a new
+thread without checking its size, so raising it again could give a
+thread a stack longer than its memory.  So it's for the start of a
+program, as the command line calls it, not for a library."
+  #+sbcl (let ((current (sb-alien:extern-alien "thread_control_stack_size" sb-alien:unsigned)))
+	   (when (< 0 bytes current)
+	     (setf (sb-alien:extern-alien "thread_control_stack_size" sb-alien:unsigned) bytes)))
+  #-sbcl (progn bytes)
+  (values))
+
 ;;; ------------------------------------------------------------------
 ;;; Exactness and the numeric predicates
 
@@ -185,29 +201,60 @@ compute an exact one in single floats."
 ;;; Arithmetic.  The translator integrates (+ a b) as a call to SCHEME+,
 ;;; and so on.  With two arguments, both fixnums or both double-floats,
 ;;; it's CL's own operation inline (fixnums overflowing into bignums as
-;;; usual); otherwise CL's generic one, which the operation was before.
-;;; More arguments associate to the left, as in CL.
+;;; usual); otherwise a call of GENERIC+ and so on, out of line.  More
+;;; arguments associate to the left, as in CL.
 
-(defun arith2-form (op a b)
+(defun arith2-form (op generic a b)
   (let ((x (gensym "A")) (y (gensym "B")))
     `(let ((,x ,a) (,y ,b))
        (cond ((and (typep ,x 'fixnum) (typep ,y 'fixnum)) (,op ,x ,y))
 	     ((and (typep ,x 'double-float) (typep ,y 'double-float)) (,op ,x ,y))
-	     (t (,op ,x ,y))))))
+	     (t (,generic ,x ,y))))))
 
-(defmacro def-arith (name op)
+;;; The out-of-line cases: CL's generic operation, except for two
+;;; inexact complex numbers, where SBCL's generic one dispatches and
+;;; boxes its intermediate results (mbrotZ spent 60% of its time there).
+(macrolet ((def-generic (name op complex-form)
+	     `(defun ,name (a b)
+		(if (and (typep a '(complex double-float)) (typep b '(complex double-float)))
+		    (let ((ar (realpart a)) (ai (imagpart a)) (br (realpart b)) (bi (imagpart b)))
+		      (declare (double-float ar ai br bi))
+		      ,complex-form)
+		    (,op a b)))))
+  (def-generic generic+ + (complex (+ ar br) (+ ai bi)))
+  (def-generic generic- - (complex (- ar br) (- ai bi)))
+  (def-generic generic* * (complex (- (* ar br) (* ai bi)) (+ (* ar bi) (* ai br)))))
+
+(defmacro def-arith (name op generic)
   `(progn
      (defun ,name (&rest numbers) (apply #',op numbers))
      (define-compiler-macro ,name (&rest args)
        (case (length args)
 	 (0 (list ',op))
 	 (1 (list ',op (first args)))
-	 (2 (arith2-form ',op (first args) (second args)))
+	 (2 (arith2-form ',op ',generic (first args) (second args)))
 	 (t (list* ',name (list ',name (first args) (second args)) (cddr args)))))))
 
-(def-arith scheme+ +)
-(def-arith scheme- -)
-(def-arith scheme* *)
+(def-arith scheme+ + generic+)
+(def-arith scheme- - generic-)
+(def-arith scheme* * generic*)
+
+;;; quotient, remainder, modulo and zero?: CL's TRUNCATE, REM, MOD and
+;;; ZEROP, called out of line unless the arguments' types are known;
+;;; so inline when they are fixnums, as the operations above are.
+(macrolet ((def-integer-op (name lambda-list form)
+	     `(progn
+		(defun ,name ,lambda-list ,form)
+		(define-compiler-macro ,name ,lambda-list
+		  (let ((vars (list ,@(mapcar (lambda (v) `(gensym ,(symbol-name v))) lambda-list))))
+		    `(let ,(mapcar #'list vars (list ,@lambda-list))
+		       (if (and ,@(mapcar (lambda (v) `(typep ,v 'fixnum)) vars))
+			   ,(sublis (mapcar #'cons ',lambda-list vars) ',form)
+			   ,(sublis (mapcar #'cons ',lambda-list vars) ',form))))))))
+  (def-integer-op scheme-quotient (a b) (values (truncate a b)))
+  (def-integer-op scheme-remainder (a b) (rem a b))
+  (def-integer-op scheme-modulo (a b) (mod a b))
+  (def-integer-op scheme-zerop (a) (zerop a)))
 
 ;;; Comparisons.  CL compares a rational with a float by converting the
 ;;; float to a rational, which fails for infinities and NaNs; Scheme

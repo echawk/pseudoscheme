@@ -366,7 +366,120 @@ are hoisted if it's big."
 
 (defvar *full-continuations*)		; src/continuations.lisp
 
+;;; Shared compiled lambdas.  psyntax evaluates every macro transformer
+;;; it meets -- a syntax-rules is (lambda (x) ...) -- and a macro that
+;;; expands into local macros (let-syntax, define-syntax in a body), as
+;;; CPS-style syntax-rules macros do, has a new transformer to evaluate
+;;; at every step of every use: SRFI 257's tests evaluate 10,000, of
+;;; only 149 shapes.  Compiling each with SBCL costs a millisecond or so.
+;;; So a lambda form is compiled once per shape: with its bound
+;;; variables renamed canonically and its quoted constants (syntax
+;;; objects, mostly) taken out as parameters, it is the key to a
+;;; compiled function of those constants, which each evaluation calls.
+
+(defvar *shared-lambdas* (make-hash-table :test 'equal)
+  "Canonical lambda form -> compiled function of its constants.")
+
+(defparameter *shared-lambda-size-limit* 5000
+  "The largest lambda form, in conses, compiled for sharing.")
+
+(defparameter *shared-lambda-count-limit* 5000
+  "How many compiled lambdas to keep; past this, the table is cleared.")
+
+(defun canonical-variable (prefix n)
+  (sym (format nil "%%shared-~A~D" prefix n)))
+
+(defun canonical-lambda (form)
+  "If core FORM is a lambda expression whose free variables are all
+host primitives or psyntax's renamed globals, (key . constants): KEY the
+form with its bound variables renamed canonically and each constant
+that isn't a number, character or symbol replaced by a parameter, and
+CONSTANTS those constants in order.  Otherwise NIL: anything not
+understood is just not shared."
+  (let ((renames (make-hash-table :test 'eq))
+	(constants '())
+	(count 0))
+    (labels ((named (x name) (and (symbolp x) (string= (symbol-name x) name)))
+	     (fail () (return-from canonical-lambda nil))
+	     (bind (v)
+	       (unless (and (symbolp v) v (not (gethash v renames))) (fail))
+	       (setf (gethash v renames) (canonical-variable "v" (hash-table-count renames))))
+	     (formals (f)
+	       (cond ((null f) nil)
+		     ((symbolp f) (bind f))
+		     ((consp f) (let ((a (bind (car f)))) (cons a (formals (cdr f)))))
+		     (t (fail))))
+	     (body (forms)
+	       (unless (listp forms) (fail))
+	       (mapcar #'walk forms))
+	     (constant (datum)
+	       (if (or (numberp datum) (characterp datum) (symbolp datum))
+		   (list (sym "quote") datum)
+		   (progn (push datum constants)
+			  (canonical-variable "c" (1- (incf count))))))
+	     (walk (x)
+	       (cond ((symbolp x)
+		      (or (gethash x renames)
+			  ;; a free variable: a host primitive, or one of
+			  ;; psyntax's renamed globals (which are unique); or
+			  ;; else not shared
+			  (if (and x (or (find #\$ (symbol-name x)) (primitive-symbol-p x))) x (fail))))
+		     ((atom x) (if (or (numberp x) (characterp x)) x (fail)))
+		     ((not (symbolp (car x))) (body x)) ; an application
+		     ((named (car x) "QUOTE")
+		      (unless (and (consp (cdr x)) (null (cddr x))) (fail))
+		      (constant (cadr x)))
+		     ((named (car x) "PRIMITIVE") x)
+		     ((named (car x) "LAMBDA")
+		      (unless (consp (cdr x)) (fail))
+		      (let ((f (formals (cadr x))))
+			(list* (car x) f (body (cddr x)))))
+		     ((named (car x) "CASE-LAMBDA")
+		      (cons (car x)
+			    (mapcar (lambda (clause)
+				      (unless (consp clause) (fail))
+				      (let ((f (formals (car clause))))
+					(cons f (body (cdr clause)))))
+				    (cdr x))))
+		     ((or (named (car x) "LETREC") (named (car x) "LETREC*"))
+		      (unless (and (consp (cdr x)) (listp (cadr x))) (fail))
+		      (let ((names (mapcar (lambda (b) (if (consp b) (bind (car b)) (fail))) (cadr x))))
+			(list* (car x)
+			       (mapcar (lambda (name b) (list name (walk (cadr b)))) names (cadr x))
+			       (body (cddr x)))))
+		     ((or (named (car x) "IF") (named (car x) "BEGIN") (named (car x) "SET!"))
+		      (cons (car x) (body (cdr x))))
+		     ;; any other operator: a variable, if it's one of ours
+		     (t (body x)))))
+      (unless (and (consp form) (named (car form) "LAMBDA")
+		   (<= (tree-size form) *shared-lambda-size-limit*))
+	(fail))
+      ;; compiled code differs by host and continuations mode
+      (let ((key (list* *host* (and (boundp '*full-continuations*) *full-continuations*)
+			(walk form))))
+	(cons key (nreverse constants))))))
+
 (defun host-eval (form)
+  "Translate and evaluate core FORM in *HOST*; a lambda expression by a
+compiled function shared with the others of its shape (see
+CANONICAL-LAMBDA)."
+  (let ((shared (canonical-lambda form)))
+    (if (null shared)
+	(host-eval-1 form)
+	(destructuring-bind (key . constants) shared
+	  (let ((maker (gethash key *shared-lambdas*)))
+	    (unless maker
+	      (when (>= (hash-table-count *shared-lambdas*) *shared-lambda-count-limit*)
+		(clrhash *shared-lambdas*))
+	      (setq maker
+		    (setf (gethash key *shared-lambdas*)
+			  (host-eval-1
+			   (list (sym "lambda")
+				 (loop for i below (length constants) collect (canonical-variable "c" i))
+				 (cddr key))))))
+	    (apply maker constants))))))
+
+(defun host-eval-1 (form)
   "Translate and evaluate core FORM in *HOST*.  The CL compiler's
 style warnings about the generated code (an unknown arity, say) are
 about psyntax's output, not the user's program, so they're muffled."
@@ -510,7 +623,57 @@ the command line and exits; DROP-LAST skips it.)"
   (install-primitives ps-r6rs:*primitives*)
   (install-adapter)
   (install-continuation-primitives)
+  (install-inline-primitives)
   *host*)
+
+;;; Inline primitives.  A host primitive that isn't one of the
+;;; translator's own built-ins is called out of line, through its
+;;; checks.  For a few that programs call in their inner loops, a
+;;; compiler macro on the host global's function inlines the case where
+;;; the arguments are right, and calls the primitive (for its error)
+;;; otherwise.
+
+(defparameter *inline-primitives*
+  '(("bytevector-u8-ref" (bv k)
+     (if (and (typep bv '(simple-array (unsigned-byte 8) (*)))
+	      (typep k 'fixnum) (< -1 k (length bv)))
+	 (aref bv k)
+	 :call))
+    ("bytevector-u8-set!" (bv k byte)
+     (if (and (typep bv '(simple-array (unsigned-byte 8) (*)))
+	      (typep k 'fixnum) (< -1 k (length bv))
+	      (typep byte '(unsigned-byte 8)))
+	 (progn (setf (aref bv k) byte) ps:unspecific)
+	 :call))
+    ("bytevector-length" (bv)
+     (if (typep bv '(simple-array (unsigned-byte 8) (*)))
+	 (length bv)
+	 :call))
+    ;; two strings: CL's comparisons, which compare code points as R7RS does
+    ("string=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string= a b) t ps:false) :call))
+    ("string<?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string< a b) t ps:false) :call))
+    ("string>?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string> a b) t ps:false) :call))
+    ("string<=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string<= a b) t ps:false) :call))
+    ("string>=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string>= a b) t ps:false) :call)))
+  "(name lambda-list body): BODY, with the arguments bound to the
+variables of LAMBDA-LIST, is the inline code, in which :CALL stands for
+calling the primitive itself.")
+
+(defun install-inline-primitives ()
+  (loop for (name params body) in *inline-primitives*
+	for global = (location (sym name))
+	do (let ((global global) (params params) (body body))
+	     (setf (compiler-macro-function global)
+		   (lambda (form env)
+		     (declare (ignore env))
+		     (let ((args (if (eq (car form) 'funcall) (cddr form) (cdr form))))
+		       (if (or (eq (car form) 'funcall) (/= (length args) (length params)))
+			   form	; the call in the slow path, or another arity
+			   (let ((vars (mapcar (lambda (p) (gensym (symbol-name p))) params)))
+			     `(let ,(mapcar #'list vars args)
+				,(sublis (acons :call `(funcall #',global ,@vars)
+						(mapcar #'cons params vars))
+					 body))))))))))
 
 (defun host-signature ()
   "What compiled code depends on in a host: which primitives are R5RS's

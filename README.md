@@ -75,9 +75,9 @@ Continuations are full and re-entrant (docs/continuations.md);
 `--continuations=escape` makes them escape-only, a little faster in code
 that calls unknown procedures in loops.
 
-Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 1.55× Chez's
-time as a geometric mean (Guile: 2.8×), 1.44× with escape-only
-continuations. See bench/RESULTS.md.
+Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 1.37× Chez's
+time as a geometric mean with full continuations (Guile: 2.8×). See
+bench/RESULTS.md.
 
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
 libraries and 91 of 130 snow-fort libraries load.
@@ -132,7 +132,7 @@ bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
 docs/                -- interop (the bridge), libraries (Akku and
-                        snow), continuations and racket (designs)
+                        snow), continuations, racket and guile (designs)
 ```
 
 ## Systems
@@ -349,3 +349,6 @@ The big ones; `ROADMAP.md` has the rest.
   them. Nothing cleans stale cache entries yet.
 - **No Racket yet.** docs/racket.md plans a `--racket` mode that runs
   Racket's own expander on Pseudoscheme by compiling linklets.
+- **No Guile yet.** docs/guile.md plans a `--guile` mode that runs
+  Guile's own boot-9 and libraries on libguile's primitives written in
+  Lisp, and, much later, Guix's client side.

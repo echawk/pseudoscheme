@@ -43,6 +43,32 @@ procedures in tight loops (`lattice`, `graphs`, `quicksort`, `conform`,
 Reproduce with `bench/run.sh pseudoscheme chez-akku guile gauche-local chibi`,
 then `python3 bench/summarize.py`.
 
+## A second pass, later in October 2026
+
+With the default full continuations, after the changes ROADMAP section
+2 lists under "Done in this pass": **1.37×** Chez's time as a geometric
+mean, from 1.55×, with all 57 benchmarks completing (a single run, the
+machine otherwise idle; escape-only mode wasn't rerun). Against the
+table above:
+
+| benchmark | before | after | now vs Chez | what |
+|---|---|---|---|---|
+| mbrotZ | 11.93 | 3.38 | 1.35× | inexact complex `+`, `-`, `*` with typed parts |
+| bv2string | 2.59 | 0.81 | 1.44× | UTF-8 in two passes; inline bytevector accessors |
+| wc | 1.49 | 0.95 | 1.10× | |
+| mperm | 4.35 | 2.88 | 0.49× | |
+| string | 0.96 | 0.65 | 0.88× | inline two-argument string comparisons |
+| parsing | 1.94 | 1.36 | 0.83× | |
+| graphs | 3.43 | 2.43 | 2.04× | |
+| primes | 1.24 | 0.99 | 1.90× | inline fixnum `quotient`/`remainder`/`modulo` |
+
+Where no reason is given, the benchmark doesn't use what changed much,
+and part of the difference is from run to run. A few benchmarks that
+came out slower than in the table (`read1`, `paraffins`) were checked
+against a build from before the changes, run alternately on the same
+day: `read1` 1.72 s before and 1.55–1.62 s after, `paraffins` within
+0.2 s either way. The table above is from an earlier day.
+
 ## What made the difference
 
 From 3.0× Chez's time to 1.44× (earlier run on the same machine, then

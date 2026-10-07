@@ -177,7 +177,7 @@
 	 (ps:true? (ps-lisp:member obj list :test (ps-lisp:function ps-lisp:eq)))))
       (memv                           (pred ps-lisp:member 2))
       (min                            (fun ps:scheme-min))
-      (modulo                         (fun ps-lisp:mod))
+      (modulo                         (fun ps:scheme-modulo))
       (negative?                      (pred ps-lisp:minusp 1))
       (newline                        (fun ps-lisp:terpri))
       (not			      (special))
@@ -199,13 +199,11 @@
       (pair?                          (pred ps-lisp:consp 1))
       (positive?                      (pred ps-lisp:plusp 1))
       (procedure?		      (pred ps:procedurep 1))
-      (quotient
-       (subst (n1 n2)
-	 (ps-lisp:values (ps-lisp:truncate n1 n2))))
+      (quotient                       (fun ps:scheme-quotient))
       (rational?                      (pred ps:rational-number-p 1))
       (real?			      (pred ps:realp 1))
       (real-part                      (fun ps-lisp:realpart))
-      (remainder                      (fun ps-lisp:rem))
+      (remainder                      (fun ps:scheme-remainder))
       (reverse                        (fun ps-lisp:reverse))
       (round                          (fun ps:scheme-round))
       (set-car!
@@ -310,7 +308,7 @@
 				 :if-exists :supersede)
 	    (ps-lisp:funcall thunk))))
       (write-char                     (fun ps-lisp:write-char))
-      (zero?                          (pred ps-lisp:zerop 1))
+      (zero?                          (pred ps:scheme-zerop 1))
 
       ;; Auxiliaries
       (unassigned (subst () ps:unassigned))

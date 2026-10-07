@@ -9,15 +9,16 @@ this file.
 | `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 978 of 978 (977 with `--continuations=escape`) |
 | `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8902 of 8902 (8900 escape-only); all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 189 of 189 (188 escape-only; 183 of 188 with `--classic`) |
-| `tests/run-interop-tests.lisp` | 107/107 |
+| `tests/run-interop-tests.lisp` | 116/116 |
 | `tests/run-library-tests.lisp` | 55/55 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
 | `tests/run-continuation-tests.lisp` | 37/37 |
-| `make -C contrib/cli test` | 28/28 |
+| `make -C contrib/cli test` | 31/31 |
+| `make test-programs` (`tests/programs/`, needs Quicklisp) | 5 of 5 programs |
 | `make test-srfi` (`src/srfi/tests/`) | 121 of 121 test programs |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
-| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.55× Chez's time, 1.44× escape-only (Guile 2.8×, Gauche 9.2×) |
+| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.37× Chez's time (1.55× before the second pass, 1.44× escape-only then; Guile 2.8×, Gauche 9.2×) |
 
 ## Architecture now
 
@@ -55,10 +56,11 @@ expects `-i` (tests/chibi/r7rs-tests.scm, marked `PSEUDOSCHEME:`).
 ## 2. Speed
 
 `bench/` vendors ecraven's r7rs-benchmarks. In the last run
-(bench/RESULTS.md) Pseudoscheme was 1.44× Chez's time as a geometric
-mean (Guile: 2.8×), 1.55× with full continuations, with all 57
-benchmarks completing; bench/RESULTS.md, "What made the difference",
-lists the changes that took it from 3.0×. What's left:
+(bench/RESULTS.md, "A second pass") Pseudoscheme was 1.37× Chez's time
+as a geometric mean with full continuations, the default (Guile: 2.8×),
+with all 57 benchmarks completing; it was 1.55× before that pass (1.44×
+escape-only). bench/RESULTS.md, "What made the difference", lists the
+changes that took it from 3.0×. What's left:
 
 - **`ack` (3.9×), `divrec` (3.6×), `browse` (3.5×), `fibc` (3.7×).**
   The translation is what one would write by hand (`labels` functions,
@@ -67,14 +69,46 @@ lists the changes that took it from 3.0×. What's left:
 - **Records** are a struct and a vector of fields, two allocations
   (`gcbench` 2.1×). One object per record (an SBCL instance of the
   right length) would halve that.
-- **String comparisons** (`string=?` and friends) go through an n-ary
-  wrapper in src/r7rs/base.scm, since CL's take two strings and
-  keywords; a two-argument fast path would do.
 - **R6RS overrides of open-coded primitives**: the R6RS layer redefines
   some procedures the translator would open-code (`list-tail`,
   `integer->char` with its check, `assq`/`assv`, the character case
-  procedures), which makes them calls. Each is deliberate, but a
-  compiler macro could keep the common case inline.
+  procedures), which makes them calls; `assv` and `for-each` are even
+  looked up at each call (`*closed-primitives*`). Each is deliberate,
+  but `*inline-primitives*` (src/psyntax.lisp) can now keep the common
+  case inline, as it does for the bytevector accessors and the
+  two-argument string comparisons.
+- **psyntax's identifier lookup**: `id->label` searches an
+  identifier's ribs linearly, and `free-identifier=?` (every
+  `syntax-case` literal) does it twice; that is a third of SRFI 148's
+  expansion. Hashed ribs, as Ikarus and Chez have, would fix it, in
+  vendor/psyntax.
+- **Done in this pass** (October 2026):
+  - *Shared compiled lambdas* (`canonical-lambda`, src/psyntax.lisp):
+    every macro transformer psyntax evaluates was compiled on its own,
+    and CPS-style macros make a new one at each step (SRFI 257's tests:
+    10,174 of them, 149 shapes, 8.8 s of SBCL compiling). Lambdas are
+    now compiled once per shape, with their constants as arguments.
+    SRFI 257's tests: 12.1 s to 3.6 s.
+  - *Thread stacks*: SBCL gives each thread a stack the size of the
+    main thread's, and making one takes time in proportion: 2.6 ms at
+    the command line's 256 MB. The command line now gives threads 32 MB
+    (`PSEUDOSCHEME_THREAD_STACK_SIZE`): 500 threads in 0.19 s instead of
+    1.29 s, SRFI 230's tests 6.9 s to 2.0 s.
+  - *Inline host primitives* (`*inline-primitives*`): compiler macros
+    on the host's `bytevector-u8-ref`, `-set!`, `bytevector-length` and
+    the two-argument `string=?`, `string<?` and so on.
+  - *UTF-8* in two passes (size, then fill) instead of through a string
+    stream or an adjustable vector: with the bytevector accessors,
+    `bv2string` 2.59 s to 0.84 s.
+  - *Inexact complex arithmetic*: the out-of-line case of `+`, `-` and
+    `*` does two `(complex double-float)` arguments with typed parts;
+    SBCL's generic operation boxed every intermediate (`mbrotZ` 11.9 s
+    to 3.4 s).
+  - *`quotient`, `remainder`, `modulo`, `zero?`* are inline for fixnums,
+    like `+`; they were CL's generic `TRUNCATE`, `REM`, `MOD` and
+    `ZEROP` (src/builtin.scm; `primes` 1.24 s to 0.99 s).
+  - *R6RS record predicates and accessors* test the exact type first,
+    inline.
 - **Big programs**: a top-level form bigger than
   `psx::*inline-arithmetic-limit*` is compiled without inline
   arithmetic, since SBCL compiles it as one code object; hoisting its
@@ -190,10 +224,10 @@ Next:
     unwraps it again through `*originals*`.
   - A Lisp function treated as a predicate keeps only its first value
     (`mkstemp`, say).
-  - A Lisp condition reaching a Scheme handler has been turned into a
-    plain `&assertion` (`foreign-condition`, src/r6rs/conditions.lisp).
-    Keeping the original in a condition component would let `guard`
-    clauses test its type.
+  - A Lisp condition reaching a Scheme handler is a plain
+    `&assertion` (`foreign-condition`, src/r6rs/conditions.lisp);
+    passed back to Lisp it is the original again (`(cl:typep e ...)`
+    works), but Scheme code can't ask its type without Lisp.
   - `#f` returned through a Lisp macro's body comes back as `()`.
   - A `(cl ...)` export that is both a function and a type
     (`cl:character`) is the function; `lisp-symbol` gets the type.
@@ -276,7 +310,35 @@ system, `#lang`, macros and `racket/base` are Racket's own code.
   compiled-library cache (section 2), since `racket/base` can't be
   expanded from source on every start.
 
-## 8. Smaller items
+## 8. Guile (`--guile`), and Guix
+
+docs/guile.md has the investigation and plan. The approach is the same
+as Racket's: implement the layer Guile's own Scheme code runs on, then
+run that code unchanged. libguile is about 1,100 C primitives; boot-9
+(the module system) and psyntax-pp, both Scheme, sit on top, and psyntax
+expands to Tree-IL.
+
+- **Stages:** the reader (`#:kw`, `#!...!#`, `#{}#`,
+  `read-hash-extend`); libguile's primitives in Lisp (boot-9 refers to
+  about 210 of them, the common `ice-9` and SRFI modules about 350, all
+  of Guile's bundled Scheme about 950); a Tree-IL-to-core compiler;
+  booting Guile's own `boot-9.scm` from an installed Guile; prompts;
+  ports and POSIX; `(system foreign)` on CFFI; GOOPS, run or mapped
+  onto CLOS.
+- **Guix**, the long-term test: `(guix records)`, G-expressions, the
+  store protocol to a real `guix-daemon`, and the FFI libraries
+  (guile-gcrypt, guile-git, guile-sqlite3, guile-zlib). Milestone: the
+  same derivation as `guix build -d hello`.
+- **Depends on:** prompts on full continuations (section 3; Guile's
+  exceptions and parameters are built on them), the compiled-library
+  cache (section 2; Guix is hundreds of modules), thread safety
+  (section 4), and the bridge's CFFI experience
+  (tests/programs/c-libraries.scm).
+- **First step:** an inventory, made in Guile itself, of the C
+  primitives that Tree-IL from boot-9 and the `ice-9` modules actually
+  reaches.
+
+## 9. Smaller items
 
 - Bootstrapping without an existing Pseudoscheme is done (boot/README.md):
   the `.pso` files come from any of seven Schemes, and psyntax's image

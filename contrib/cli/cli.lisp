@@ -61,7 +61,9 @@
   --               end of options: the next argument is the file
 
 PSEUDOSCHEME_LIBRARY_PATH, a list of directories separated by colons,
-is searched before the -L directories.
+is searched before the -L directories.  PSEUDOSCHEME_THREAD_STACK_SIZE
+is the control stack of each thread a program makes, in megabytes
+(default 32; the main thread's is 256).
 
 The Lisp's init file (~/.sbclrc for SBCL) is loaded first, as the Lisp
 itself would, so it can set up Quicklisp dists such as Ultralisp, ASDF's
@@ -199,8 +201,16 @@ skipped when FILE is read."
     (uiop:dump-image (or output (namestring (make-pathname :type nil :defaults file)))
 		     :executable t)))
 
+(defun limit-thread-stacks ()
+  "Threads' control stacks: PSEUDOSCHEME_THREAD_STACK_SIZE megabytes, or
+32 (the main thread's is 256), since making a thread takes time in
+proportion (ps:limit-thread-stack-size)."
+  (let ((mb (or (ignore-errors (parse-integer (uiop:getenv "PSEUDOSCHEME_THREAD_STACK_SIZE"))) 32)))
+    (ps:limit-thread-stack-size (* mb 1024 1024))))
+
 (defun run-compiled-program ()
   (ps:disable-float-traps)
+  (limit-thread-stacks)
   (setf ps-r7rs:*command-line*
 	(cons (car (uiop:raw-command-line-arguments)) (uiop:command-line-arguments)))
   (handler-bind ((serious-condition
@@ -344,6 +354,7 @@ is reported, and the program runs anyway."
 
 (defun main ()
   (ps:disable-float-traps)
+  (limit-thread-stacks)
   (find-sbcl-contribs)
   (dolist (dir (uiop:split-string (or (uiop:getenv "PSEUDOSCHEME_LIBRARY_PATH") "") :separator ":"))
     (when (plusp (length dir)) (add-library-path dir)))
