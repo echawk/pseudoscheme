@@ -669,6 +669,69 @@ once per host."
 	    collect (let ((library library) (name name))
 		      (cons directive (lambda () (library-procedure library name))))))
 
+;;; Precompiling libraries: expanding and compiling every library in a
+;;; directory (by default the bundled SRFIs, src/srfi/) once, so that the
+;;; compiled-library cache (src/library-cache.lisp) holds them for later
+;;; sessions.  Compiled for the current continuation mode, which the
+;;; cache keeps apart.
+
+(defun library-files (directory)
+  "The .sld files under DIRECTORY, in order: by number where the name is
+one, then by name; not those in a reference/ directory (upstream
+sources kept for provenance, src/srfi/reference/)."
+  (flet ((key (path)
+	   (let ((n (ignore-errors (parse-integer (pathname-name path)))))
+	     (format nil "~{~A/~}~10,'0D~A" (cdr (pathname-directory path)) (or n 0)
+		     (if n "" (pathname-name path))))))
+    (sort (remove-if (lambda (path) (member "reference" (pathname-directory path) :test #'equal))
+		     (directory (merge-pathnames (make-pathname :directory '(:relative :wild-inferiors)
+								:name :wild :type "sld")
+						 directory)))
+	  #'string< :key #'key)))
+
+(defun precompile-libraries (&key (directory (asdf:system-relative-pathname :pseudoscheme "src/srfi/"))
+				  (output *standard-output*))
+  "Expand and compile every library in the .sld files under DIRECTORY
+into the compiled-library cache, printing a line for each to OUTPUT (or
+nothing if it is NIL).  Returns how many compiled and how many failed."
+  (boot)
+  (unless (psx::library-cache-p)
+    (error "precompile-libraries: the library cache is off"))
+  (let* ((names (loop for file in (library-files directory)
+		      append (loop for form in (ignore-errors (read-forms file))
+				   for name = (library-name-of form)
+				   when name collect name)))
+	 (total (length names))
+	 (ok 0) (failed '())
+	 ;; found there, as well as where libraries are looked for
+	 (psx:*library-path* (append psx:*library-path*
+				     (list (namestring (uiop:ensure-directory-pathname directory))))))
+    (loop for name in names
+	  for i from 1
+	  do (let ((start (get-internal-real-time))
+		   (shown (format nil "(~{~A~^ ~})" (mapcar #'sname* name))))
+	       (when output
+		 (format output "~&[~3D/~D] ~32A " i total shown)
+		 (finish-output output))
+	       (handler-case
+		   (let ((*standard-output* (make-broadcast-stream)))
+		     ;; installs it: expanded and compiled, or loaded from
+		     ;; the cache; not run
+		     (funcall (psx:host-ref "psyntax:environment") name)
+		     (incf ok)
+		     (when output
+		       (format output "ok   ~5,1Fs~%"
+			       (/ (- (get-internal-real-time) start) internal-time-units-per-second))))
+		 (serious-condition (e)
+		   (push shown failed)
+		   (when output
+		     (let ((message (remove #\Newline (princ-to-string e))))
+		       (format output "FAIL ~A~%" (subseq message 0 (min 100 (length message))))))))))
+    (when output
+      (format output "~&~%Libraries: ~D of ~D compiled into ~A~@[; failed: ~{~A~^ ~}~]~%"
+	      ok total (namestring (psx::library-cache-directory)) (reverse failed)))
+    (values ok (length failed))))
+
 ;;; SRFI 176
 
 (defun srfi-feature-number (feature)

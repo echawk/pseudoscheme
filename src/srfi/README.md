@@ -34,6 +34,10 @@ syntax of 10, 49, 58, 88, 107, 108, 109, 110, 119, 163, 207 and 270
 (`src/read.scm`, `src/quasi.lisp`), and the expander forms of 139, 149,
 212, 213 and 251 (`vendor/psyntax`).
 
+`make precompile-srfi` compiles all of them into the compiled-library
+cache ahead of time (`bin/pseudoscheme --precompile-srfi` for one
+continuation mode; `pseudoscheme-api:precompile-libraries` from Lisp).
+
 `tests/N.scm` tests SRFI N, an R7RS program that exits with 0 when its
 tests pass; `make test-srfi` runs them all, in order, a line each
 (`tests/run-srfi-tests.sh`; `make test-srfi SRFIS="1 13"` for some). The

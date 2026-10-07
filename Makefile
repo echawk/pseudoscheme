@@ -5,7 +5,7 @@
 SBCL ?= sbcl
 
 .PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
-	test test-escape test-cli test-srfi test-all
+	test test-escape test-cli test-srfi test-all precompile-srfi
 
 # Tests.  `make test` runs every suite in the default mode (full
 # continuations, src/continuations.lisp); `make test-escape` the
@@ -48,6 +48,19 @@ test-srfi:
 	@sh tests/run-srfi-tests.sh bin/pseudoscheme $(SRFIS)
 
 test-all: test test-escape test-cli test-srfi
+
+# Expand and compile every bundled SRFI library into the library cache
+# (~/.cache/pseudoscheme/libraries, or $$PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY),
+# for both continuation modes, so that programs load them compiled from
+# the start.  (bin/pseudoscheme --precompile-srfi does one mode.)
+precompile-srfi:
+	@echo "Building bin/pseudoscheme (log: /tmp/pseudoscheme-cli-build.log) ..."
+	@$(MAKE) -C contrib/cli > /tmp/pseudoscheme-cli-build.log 2>&1 \
+	  || { tail -20 /tmp/pseudoscheme-cli-build.log; exit 1; }
+	@echo "Full continuations (the default):"
+	@bin/pseudoscheme --precompile-srfi
+	@echo "Escape-only continuations (--continuations=escape):"
+	@bin/pseudoscheme --continuations=escape --precompile-srfi
 
 # Everything, in order:
 #  1. the .pso files (and spack.lisp), in some other Scheme: $(SCHEME)

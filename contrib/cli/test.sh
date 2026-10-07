@@ -99,5 +99,10 @@ ln -s "$(cd "$(dirname "$PS")" && pwd)/$(basename "$PS")" $tmp/ib/compile-r7rs
 printf '(import (scheme base) (scheme write) (my lib))\n(cond-expand (shout (display (twice 21))))\n' > $tmp/c.scm
 check "SRFI 138: compile-r7rs" "42" sh -c "$tmp/ib/compile-r7rs -A $tmp/lib -D shout -o $tmp/c $tmp/c.scm >/dev/null && $tmp/c"
 
+# --precompile DIR: its libraries compiled into the cache
+mkdir -p $tmp/cache
+check "--precompile" "1 of 1 compiled" sh -c "PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS --precompile $tmp/lib | grep -o '1 of 1 compiled'"
+check "a precompiled library loads" "42" env PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS -L $tmp/lib $tmp/uselib.scm
+
 echo "$((n-fail)) of $n CLI tests passed"
 [ $fail = 0 ]

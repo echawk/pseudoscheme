@@ -222,6 +222,16 @@ code, unless the library or something it depends on has changed.
 `PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY` puts the cache elsewhere
 (src/library-cache.lisp).
 
+To compile every bundled SRFI library into the cache ahead of time (359
+libraries, about half a minute per continuation mode), run
+`make precompile-srfi`, which does both modes, or
+`bin/pseudoscheme --precompile-srfi` for one (`--continuations=escape`
+before it for escape-only). `--precompile DIR` does the same for your own
+libraries under `DIR`, and from Lisp it is
+`(pseudoscheme-api:precompile-libraries :directory DIR)`. A library that
+takes long to compile then loads at once (SRFI 148: 1.2 s to 0.14 s);
+one that is quick to compile but large still takes the time to load.
+
 ## Symbols and case
 
 Scheme symbols are CL symbols in the `SCHEME` package named by

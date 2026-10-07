@@ -13,9 +13,12 @@
 ;;;; Usage:
 ;;;;   sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
 ;;;;        --script tests/run-library-corpus.lisp DIR [-v] [-L LIBDIR ...]
+;;;;        [--skip NAME ...]
 ;;;;
 ;;;; -L adds a directory the libraries in DIR may import from (searched
-;;;; after DIR), without testing its own libraries.
+;;;; after DIR), without testing its own libraries.  --skip leaves out the
+;;;; files in any directory named NAME (src/srfi/reference, say: upstream
+;;;; sources kept for provenance).
 
 (require :asdf)
 
@@ -46,10 +49,14 @@
 (defparameter *extra-dirs*
   (loop for (a b) on (uiop:command-line-arguments)
 	when (string= a "-L") collect b))
+(defparameter *skip*
+  (loop for (a b) on (uiop:command-line-arguments)
+	when (string= a "--skip") collect b))
 (defparameter *dir*
   (or (loop for (prev a) on (cons nil (uiop:command-line-arguments))
-	    when (and a (char/= (char a 0) #\-) (not (equal prev "-L"))) return a)
-      (error "usage: run-library-corpus.lisp DIR [-v] [-L LIBDIR ...]")))
+	    when (and a (char/= (char a 0) #\-) (not (member prev '("-L" "--skip") :test #'equal)))
+	      return a)
+      (error "usage: run-library-corpus.lisp DIR [-v] [-L LIBDIR ...] [--skip NAME ...]")))
 
 (defparameter *implementations*
   '("chezscheme" "guile" "ikarus" "mosh" "ypsilon" "larceny" "ironscheme" "vicare"
@@ -85,7 +92,10 @@
 		     (substitute #\Space #\Newline (princ-to-string e)))))))
 
 (let* ((dir (uiop:ensure-directory-pathname *dir*))
-       (files (remove-if-not #'portable-file-p (directory (merge-pathnames "**/*.*" dir))))
+       (files (remove-if (lambda (path)
+			   (some (lambda (name) (member name (pathname-directory path) :test #'equal))
+				 *skip*))
+			 (remove-if-not #'portable-file-p (directory (merge-pathnames "**/*.*" dir)))))
        (names (remove-duplicates (loop for f in files append (library-names-in f)) :test #'equal))
        (ok 0) (failures '()))
   (setf psx:*library-path* (cons (namestring dir) *extra-dirs*))

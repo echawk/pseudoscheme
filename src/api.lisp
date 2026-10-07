@@ -53,7 +53,7 @@
   (:shadow "WRITE-TO-STRING")
   (:import-from "PSEUDOSCHEME-INTEROP" "SCHEMIFY" "VERBATIM")
   (:export "SCHEMIFY" "READ-SCHEME-FORMS" "TRUE-P" "REPL-LOOP" "VERBATIM" "ERROR-MESSAGE"
-	   "WRITE-TO-STRING" "ADD-LIBRARY-DIRECTORY"))
+	   "WRITE-TO-STRING" "ADD-LIBRARY-DIRECTORY" "PRECOMPILE-LIBRARIES"))
 
 (macrolet ((dialect-package (name &rest extra)
 	     `(defpackage ,name
@@ -108,6 +108,17 @@ R7RS:DEFINE, Scheme macros), the symbol R7RS:FALSE also means #f.")
 (defun lisp-values (values)
   "VALUES (a list) as Lisp multiple values, #f as NIL."
   (values-list (mapcar #'pseudoscheme-interop:to-lisp values)))
+
+(defun precompile-libraries (&rest options &key directory output)
+  "Expand and compile every library in the .sld files under DIRECTORY
+(by default the bundled SRFIs, src/srfi/) into the compiled-library
+cache, so that later sessions load them compiled; a line for each goes
+to OUTPUT (default *STANDARD-OUTPUT*; NIL for none).  For the current
+continuation mode (psx:*full-continuations*), which the cache keeps
+apart.  Returns how many compiled and how many failed."
+  (declare (ignore directory output))
+  (ensure-psyntax)
+  (apply #'ps-r7rs::precompile-libraries options))
 
 (defun add-library-directory (directory)
   "Search DIRECTORY for Scheme libraries too, after the directories

@@ -96,7 +96,7 @@ jobs:
       - name: The shipped SRFIs as a library corpus
         run: |
           PSEUDOSCHEME_LIBRARY_CACHE=0 sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
-            --script tests/run-library-corpus.lisp src/srfi | tee /tmp/corpus.txt
+            --script tests/run-library-corpus.lisp src/srfi --skip reference | tee /tmp/corpus.txt
           # "N of M libraries load.": all of them must
           awk '/libraries load/ { found = 1; ok = ($1 == $3) } END { exit !(found && ok) }' /tmp/corpus.txt
 

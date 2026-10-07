@@ -47,6 +47,12 @@
                    returned), which is a little faster in code that
                    calls unknown procedures in loops; the default,
                    --continuations=full, makes them re-entrant
+  --precompile-srfi
+                   expand and compile every bundled SRFI library into
+                   the library cache (~/.cache/pseudoscheme/libraries),
+                   for the continuation mode given before it, so that
+                   later programs load them compiled
+  --precompile DIR likewise for the libraries (.sld files) under DIR
   -i, --interactive
                    start a REPL after running the file or expressions
   --version        print the version and exit
@@ -74,6 +80,7 @@ name first (see -l and --quicklisp; docs/interop.md).
 ")
 
 (defvar *standard* :r7rs)
+(defvar *precompile-failed* nil "Did a library fail to precompile?")
 (defvar *script* nil "Running as one of SRFI 22's script interpreters?")
 
 (defun evaluate-string (text)
@@ -211,11 +218,16 @@ skipped when FILE is read."
     (:r5rs (r5rs:repl))))
 
 (defun print-version-alist ()
-  "SRFI 176's version output: one property to a line."
-  (dolist (property (ps-r7rs:version-alist))
-    (funcall ps:*scheme-write* property *standard-output*)
-    (terpri))
-  (finish-output))
+  "SRFI 176's version output: one property to a line.  If the output goes
+away (pseudoscheme -V | head -1), exit quietly, with failure, as SRFI 176
+asks when not all of it was written."
+  (handler-case
+      (progn
+	(dolist (property (ps-r7rs:version-alist))
+	  (funcall ps:*scheme-write* property *standard-output*)
+	  (terpri))
+	(finish-output))
+    (stream-error () (uiop:quit 1 nil))))
 
 (defun die (control &rest args)
   (format *error-output* "~&pseudoscheme: ~?~%" control args)
@@ -254,6 +266,8 @@ list of (:eval text) / (:print text)."
 		((member a '("-l" "--lisp-system") :test #'string=)
 		 (push (list :lisp-system (value)) actions))
 		((string= a "--quicklisp") (push (list :quicklisp nil) actions))
+		((string= a "--precompile-srfi") (push (list :precompile nil) actions))
+		((string= a "--precompile") (push (list :precompile (value)) actions))
 		((string= a "--no-userinit") (setq *userinit* nil))
 		((string= a "--continuations=full")
 		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t))
@@ -361,6 +375,14 @@ is reported, and the program runs anyway."
 	  (case kind
 	    (:lisp-system (pseudoscheme-interop:load-lisp-system text))
 	    (:quicklisp (load-quicklisp))
+	    (:precompile
+	     (multiple-value-bind (ok failed)
+		 (if text
+		     (pseudoscheme-api:precompile-libraries
+		      :directory (uiop:ensure-directory-pathname (uiop:parse-native-namestring text)))
+		     (pseudoscheme-api:precompile-libraries))
+	       (declare (ignore ok))
+	       (when (plusp failed) (setq *precompile-failed* t))))
 	    (t
 	     (let ((values (multiple-value-list (evaluate-string text))))
 	       (when (eq kind :print)
@@ -374,7 +396,7 @@ is reported, and the program runs anyway."
     (when (or interactive (and (null file) (null actions)))
       (repl))
     (finish-output)
-    (uiop:quit 0)))
+    (uiop:quit (if *precompile-failed* 1 0))))
 
 ;;; Initialize everything now, at build time, so it's in the saved image.
 (pseudoscheme-interop:boot)

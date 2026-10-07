@@ -2435,7 +2435,7 @@
           (syntax-match e ()
             ((_ x)
              ;; PSEUDOSCHEME: SRFI 149's way, else the other (above)
-             (let ((first (call/cc
+             (let ((first (call-with-current-continuation
                            (lambda (k)
                              (set! srfi-149-escape k)
                              (let-values (((e maps) (gen-syntax e x r '() ellipsis? #f)))
@@ -3505,7 +3505,11 @@
         (let-values (((name ver) (parse-library-name name*)))
           (let-values (((imp* invoke-req* visit-req* invoke-code
                               visit-code export-subst export-env)
-                        (library-body-expander exp* imp* b*)))
+                        ;; PSEUDOSCHEME: a library expanded while the REPL
+                        ;; runs (imported there) doesn't see the REPL's
+                        ;; bindings: its unbound identifiers stay unbound
+                        (parameterize ((interaction-library #f))
+                          (library-body-expander exp* imp* b*))))
              (values name ver imp* invoke-req* visit-req* 
                      invoke-code visit-code export-subst
                      export-env))))))
