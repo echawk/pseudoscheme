@@ -1,6 +1,10 @@
 # Guile on Pseudoscheme: a `--guile` mode, and someday Guix
 
-Status: investigation and plan; nothing implemented yet.
+Status: a plan, with two pieces done. **Delimited continuations** are
+native (`call-with-prompt`, `abort-to-prompt`, composable continuations;
+docs/continuations.md, "Delimited continuations"), and **`(guile)`**, a
+library of Guile's everyday procedures on top of them, works for R6RS
+programs (see "Started" below).
 
 The goal: `pseudoscheme --guile prog.scm` runs programs written for GNU
 Guile, with `(use-modules (ice-9 match) (srfi srfi-1) ...)` and the
@@ -33,8 +37,9 @@ unchanged.**
    `define-module`, `use-modules`, its macros and its libraries would
    then be Guile's own code, not imitations of it.
 
-The hard parts are **delimited continuations**, because Guile's
-exceptions, `catch`/`throw`, parameters and REPL are built on prompts;
+The hard parts were **delimited continuations**, because Guile's
+exceptions, `catch`/`throw`, parameters and REPL are built on prompts
+(now done);
 **Guile's top-level semantics**, where each module is a mutable
 top-level environment rather than an R6RS library; and, for Guix,
 **`(system foreign)`** (the FFI) and **compile time**.
@@ -165,21 +170,27 @@ and loads it like any other module.
   library cache (src/library-cache.lisp), keyed by the module file and
   its dependencies.
 
-### Stage 4: delimited continuations
+### Stage 4: delimited continuations (done)
 
 Guile 3's exceptions, `with-exception-handler`, `catch`/`throw`,
 `raise-exception`, `false-if-exception`, the REPL's error recovery, and
 much of `(ice-9 control)` and fibers are built on `call-with-prompt` and
-`abort-to-prompt`.
-- An abort whose handler never calls the continuation it is given is
-  an escape. That covers exceptions, and it is a non-local exit in Lisp
-  (`throw` to a tag), which is cheap.
-- An abort whose continuation is resumed needs composable continuations:
-  the full-continuation machinery (docs/continuations.md, generalized
-  stack inspection) and SRFI 226's prompts, which src/srfi/226.sld
-  already provides on top of it.
-- Guile code should therefore run with full continuations, the
-  default. Escape-only mode would lose resumable aborts.
+`abort-to-prompt`. They are native now, on the frames the full
+continuations already keep (src/continuations.lisp, "Delimited
+continuations"):
+
+- A prompt is a frame with a `catch`. An abort copies the frames above
+  the prompt and throws to it, so an abort whose handler ignores the
+  continuation costs a copy of those frames and a Lisp `throw`.
+- Calling the continuation rebuilds the copied frames on top of the
+  caller's stack, the same way a re-entered full continuation is
+  rebuilt, without a throw to a base. It can be called any number of
+  times, and `dynamic-wind`s inside it run their befores again.
+- `(pseudoscheme control)` (src/control.sls) adds Guile's `%`,
+  `shift`/`reset`, `call/ec` and `let/ec`.
+- Guile code should run with full continuations, the default. With
+  `--continuations=escape`, aborts work but their continuations can't
+  be called.
 
 ### Stage 5: ports and POSIX
 
@@ -304,9 +315,37 @@ hashing all match Guile byte for byte.
   GPL-3.0-or-later. Loading their sources at run time is fine. Vendoring
   them, or shipping their compiled forms in our image, needs care.
 - **Threads.** Guix uses threads (`par-for-each`, the substitute
-  machinery) and Guile's fluids are per-thread. ROADMAP section 4's
-  thread-safety work (an expansion lock, per-thread `parameterize`) is a
-  prerequisite.
+  machinery) and Guile's fluids are per-thread. Parameters can now be
+  per thread (a thread's own table of values, which Chez's
+  `fork-thread` threads get; src/r7rs/rts.lisp); Guile's threads would
+  get the same. ROADMAP section 4's expansion lock is still needed.
+
+## Started: `(guile)`
+
+`(import (guile))` gives an R6RS program Guile's default environment as
+far as it goes so far: all of R6RS, plus
+
+- prompts: `call-with-prompt`, `abort-to-prompt`, `make-prompt-tag`,
+  `default-prompt-tag`, `%`, `call/ec`, `let/ec`;
+- `catch`, `throw`, `with-throw-handler` and `false-if-exception`, on
+  R6RS conditions. `(catch #t ...)` also catches R6RS errors, as
+  `misc-error` (Guile gives some of them other keys, such as
+  `wrong-type-arg`);
+- `define-syntax-rule`, `1+`, `1-`, `const`, `compose`, `negate`;
+- Guile's hash tables (`make-hash-table`, `hash-ref`, `hash-set!`,
+  `hash-fold`, ...), association lists (`assoc-ref`, `acons`, ...), and
+  SRFI 1's and SRFI 13's list and string procedures;
+- `format` (Chez's, i.e. Common Lisp's directives, as Guile's
+  `(ice-9 format)` mostly follows) and `simple-format`, `pk`.
+
+It is src/guile/guile.scm, made into a library by src/guile/guile.lisp
+when first imported, which is how it reuses `(chezscheme)`'s `format`
+and the SRFIs without slowing every boot. This is the *imitation* path
+the Summary argues against for the long run, since Guile's own modules
+should eventually run unchanged. But it lets Guile-flavoured R6RS code
+run now, and each procedure here maps onto a libguile primitive that
+stage 1 needs anyway. Not yet: keywords (`#:key`, which the reader
+needs), `define*`/`lambda*`, `define-module`/`use-modules`, fluids.
 
 ## First steps
 

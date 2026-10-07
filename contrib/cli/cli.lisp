@@ -28,6 +28,9 @@
   --r7rs           R7RS-small (the default)
   --r6rs           R6RS, expanded by psyntax
   --r5rs           R5RS: (scheme r5rs), with a case-folding reader
+  --chez           Chez Scheme: FILE runs as a Chez script, at a top level
+                   with (chezscheme)'s bindings (docs/chez.md); run as
+                   scheme-script, this program is --chez
   -e, --eval EXPR  evaluate EXPR (Scheme text); may be repeated
   -p, --print EXPR evaluate EXPR and write its value
   -L, --library-path DIR
@@ -91,13 +94,19 @@ definition holds for the next -e too); the last one's values."
   (ecase *standard*
     (:r7rs (pseudoscheme-api::r7rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
     (:r6rs (pseudoscheme-api::r6rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
-    (:r5rs (r5rs:eval text))))
+    (:r5rs (r5rs:eval text))
+    (:chez (pseudoscheme-api::ensure-psyntax)
+	   (let ((values (list ps:unspecific)))
+	     (dolist (form (pseudoscheme-api:read-scheme-forms text) (values-list values))
+	       (setq values (multiple-value-list (ps-r7rs::eval-at-chez-top-level form))))))))
 
 (defun run-file (path)
   (ecase *standard*
     (:r7rs (r7rs:load path))
     (:r6rs (r6rs:load path))
-    (:r5rs (r5rs:load path))))
+    (:r5rs (r5rs:load path))
+    (:chez (pseudoscheme-api::ensure-psyntax)
+	   (ps-r7rs::load-file-at-chez-top-level path))))
 
 (defun program-with-main (forms args)
   "FORMS, an R6RS or R7RS program after any libraries, with (main ARGS)
@@ -122,6 +131,11 @@ after its body, and what that needs imported, under a prefix."
   "SRFI 22: run FILE, then call its main with the command line; main's
 value, if an exit status, is the process's.  Its script prelude is
 skipped when FILE is read."
+  (when (eq *standard* :chez)
+    ;; Chez's scheme-script: the script at the top level, no main
+    (run-file file)
+    (finish-output)
+    (uiop:quit 0))
   (let* ((args (copy-list ps-r7rs:*command-line*))
 	 (status
 	   (ecase *standard*
@@ -146,7 +160,9 @@ skipped when FILE is read."
 ;;; names (a link to it, say), is FILE ARG ... and calls FILE's main.
 (defparameter *script-interpreters*
   '(("scheme-r4rs" . :r5rs) ("scheme-r5rs" . :r5rs) ("scheme-ieee-1178-1990" . :r5rs)
-    ("scheme-srfi-0" . :r5rs) ("scheme-r6rs" . :r6rs) ("scheme-r7rs" . :r7rs)))
+    ("scheme-srfi-0" . :r5rs) ("scheme-r6rs" . :r6rs) ("scheme-r7rs" . :r7rs)
+    ;; Chez Scheme's script interpreter (its scripts have no main)
+    ("scheme-script" . :chez)))
 
 (defun script-interpreter-standard ()
   (let ((argv0 (car (uiop:raw-command-line-arguments))))
@@ -225,7 +241,10 @@ proportion (ps:limit-thread-stack-size)."
   (ecase *standard*
     (:r7rs (r7rs:repl))
     (:r6rs (r6rs:repl))
-    (:r5rs (r5rs:repl))))
+    (:r5rs (r5rs:repl))
+    (:chez (pseudoscheme-api::ensure-psyntax)
+	   (pseudoscheme-api::repl-loop (lambda (form) (ps-r7rs::eval-at-chez-top-level form))
+					:prompt "> "))))
 
 (defun print-version-alist ()
   "SRFI 176's version output: one property to a line.  If the output goes
@@ -269,6 +288,7 @@ list of (:eval text) / (:print text)."
 		((string= a "--r7rs") (setq *standard* :r7rs))
 		((string= a "--r6rs") (setq *standard* :r6rs))
 		((string= a "--r5rs") (setq *standard* :r5rs))
+		((string= a "--chez") (setq *standard* :chez))
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
 		((member a '("-p" "--print") :test #'string=) (push (list :print (value)) actions))
 		((member a '("-L" "--library-path") :test #'string=) (add-library-path (value)))
@@ -342,7 +362,9 @@ is reported, and the program runs anyway."
     (load setup)))
 
 (defun report-and-exit (e)
-  (format *error-output* "~&Error: ~A~%" (pseudoscheme-api:error-message e))
+  (if (eq *standard* :chez)
+      (format *error-output* "~&~A~%" (ps-r7rs::chez-error-text e))
+      (format *error-output* "~&Error: ~A~%" (pseudoscheme-api:error-message e)))
   (finish-output *error-output*)
   (uiop:quit 70))
 

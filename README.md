@@ -21,6 +21,7 @@ From the shell:
 make -C contrib/cli                 # builds bin/pseudoscheme
 bin/pseudoscheme                    # R7RS REPL (,q quits)
 bin/pseudoscheme --r6rs prog.sps a b
+bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
 bin/pseudoscheme -p '(exact-integer-sqrt 17)'
 bin/pseudoscheme --help
 ```
@@ -75,7 +76,8 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 | R7RS-small | psyntax | chibi's R7RS suite: all 978 |
 | R5RS | psyntax | chibi's R5RS suite: all 189 |
 
-Continuations are full and re-entrant (docs/continuations.md);
+Continuations are full and re-entrant, and delimited ones (prompts) are
+native too (docs/continuations.md);
 `--continuations=escape` makes them escape-only, a little faster in code
 that calls unknown procedures in loops.
 
@@ -121,8 +123,15 @@ src/r7rs/            -- R7RS-small: its procedures, and define-library
                         on psyntax (front.lisp, syntax.sls)
 src/srfi/            -- SRFI libraries, mostly reference implementations
                         (see src/srfi/README.md)
-src/compat/          -- (chezscheme) and (ikarus), for the Chez and
-                        Ikarus variants of Akku packages
+src/chez/            -- Chez Scheme: (chezscheme), its top level
+                        (--chez), threads, the FFI on CFFI
+                        (docs/chez.md)
+src/guile/           -- (guile): Guile's everyday procedures, a first
+                        piece of docs/guile.md
+src/control.sls      -- (pseudoscheme control): delimited
+                        continuations, as Guile has them
+src/compat/          -- (ikarus), for the Ikarus variants of Akku
+                        packages
 src/environments.lisp
                      -- native environments the R5RS/R7RS layers build on
 src/api.lisp         -- the R5RS / R6RS / R7RS packages for Lisp
@@ -367,9 +376,10 @@ The big ones; `ROADMAP.md` has the rest.
   them. Nothing cleans stale cache entries yet.
 - **No Racket yet.** docs/racket.md plans a `--racket` mode that runs
   Racket's own expander on Pseudoscheme by compiling linklets.
-- **No Chez mode yet.** `(chezscheme)` has what Akku's Chez variants
-  need, 803 of Chez's 1715 names; docs/chez.md plans a `--chez` mode,
-  the nearest of the three.
-- **No Guile yet.** docs/guile.md plans a `--guile` mode that runs
-  Guile's own boot-9 and libraries on libguile's primitives written in
-  Lisp, and, much later, Guix's client side.
+- **Chez mode is partial.** `--chez` runs Chez scripts and libraries,
+  with 1118 of `(chezscheme)`'s 1715 names; engines, annotations and
+  ftypes are missing (docs/chez.md, measured against the editor e).
+- **No Guile mode yet.** Prompts and `(guile)`'s everyday procedures
+  exist; docs/guile.md plans a `--guile` mode that runs Guile's own
+  boot-9 and libraries on libguile's primitives written in Lisp, and,
+  much later, Guix's client side.

@@ -433,6 +433,50 @@ program after them, through psyntax; return the program's last value."
      (and (char=? (string-ref m 0) #\\t) (> (string-length m) 3)))"
   "#t")
 
+(deftest "(chezscheme) with (rnrs): the shared procedures take Chez's arguments" (r6)
+  "(import (rnrs) (rnrs eval) (chezscheme))
+   (let ((log '()))
+     (dynamic-wind #t (lambda () (set! log (cons 'in log))) (lambda () 'body)
+                   (lambda () (set! log (cons 'out log))))
+     (list (reverse log) (eval '(+ 1 2) (environment '(rnrs)))))"
+  "((in out) 3)")
+
+(deftest "(chezscheme) reader syntax: boxes, fxvectors, length-prefixed vectors" (r6)
+  "(import (chezscheme))
+   (list (unbox '#&5) (fxvector-ref '#vfx(1 2 3) 2) '#3(a b) (box? (box 1)))"
+  "(5 3 #(a b b) #t)")
+
+(deftest "(chezscheme) parameters are set by calling them, per thread" (r6)
+  "(import (chezscheme))
+   (define p (make-parameter 1))
+   (p 2)
+   (define seen #f)
+   (thread-join (fork-thread (lambda () (let ((before (p))) (p 9) (set! seen (list before (p)))))))
+   (list seen (p) (parameterize ((p 3)) (p)))"
+  "((2 9) 2 3)")
+
+(deftest "(chezscheme) a body imports a library" (r6)
+  "(import (chezscheme))
+   (let () (import (only (rnrs lists) fold-left)) (fold-left + 0 '(1 2 3)))"
+  "6")
+
+(deftest "(guile): catch and throw, prompts, hash tables, strings" (r6)
+  "(import (guile))
+   (define h (make-hash-table))
+   (hash-set! h \"k\" 1)
+   (define-syntax-rule (twice e) (list e e))
+   (list (catch 'oops (lambda () (throw 'oops 1 2)) (lambda (key . args) (cons key args)))
+         (false-if-exception (error 'x \"bad\"))
+         (hash-ref h \"k\") (string-split \"a,b\" #\\,) (twice (1+ 1))
+         (% (+ 1 (abort-to-prompt (default-prompt-tag) (lambda (k) (k (k 10)))))))"
+  "((oops 1 2) #f 1 (\"a\" \"b\") (2 2) 12)")
+
+(deftest "(chezscheme) format, paths, sort, 1+" (r6)
+  "(import (chezscheme))
+   (list (format \"~a-~s ~d\" \"x\" \"y\" 42) (path-parent \"a/b/c.ss\") (path-extension \"c.ss\")
+         (sort < '(3 1 2)) (1+ 4) (logand 12 10))"
+  "(\"x-\\\"y\\\" 42\" \"a/b\" \"ss\" (1 2 3) 5 8)")
+
 (deftest "SRFI 4: homogeneous vectors, literals and write" (r7)
   "(import (scheme base) (scheme write) (srfi 4))
    (let ((p (open-output-string))

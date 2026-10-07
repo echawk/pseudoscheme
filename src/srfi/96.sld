@@ -67,7 +67,7 @@
           (only (srfi 1) last-pair)
           (srfi 59)
           (srfi private srfi-59-support)
-          (only (pseudoscheme host) chez:system)
+          (only (pseudoscheme chez host) chez:system)
           (only (pseudoscheme lisp) lisp-function)
           (prefix (only (cl common-lisp) char-code-limit) cl:))
   (begin

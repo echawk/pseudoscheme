@@ -10,10 +10,10 @@ this file.
 | `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8902 of 8902 (8900 escape-only); all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 189 of 189 (188 escape-only; 183 of 188 with `--classic`) |
 | `tests/run-interop-tests.lisp` | 116/116 |
-| `tests/run-library-tests.lisp` | 55/55 |
+| `tests/run-library-tests.lisp` | 61/61 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
-| `tests/run-continuation-tests.lisp` | 37/37 |
+| `tests/run-continuation-tests.lisp` | 45/45 |
 | `make -C contrib/cli test` | 31/31 |
 | `make test-programs` (`tests/programs/`, needs Quicklisp) | 5 of 5 programs |
 | `make test-srfi` (`src/srfi/tests/`) | 121 of 121 test programs |
@@ -30,7 +30,7 @@ this file.
          v
    core Scheme --[src/continuations.lisp]--> translator (src/*.scm) ---> Common Lisp
          |
-   host globals: src/r6rs/, src/r7rs/, src/numbers.lisp, src/compat/,
+   host globals: src/r6rs/, src/r7rs/, src/numbers.lisp, src/chez/, src/compat/,
                  src/interop.lisp; SRFIs as Scheme in src/srfi/
 ```
 
@@ -180,19 +180,26 @@ the runtime pushes, measurements, and what's left.
   other Lisp code that calls Scheme procedures (the sorts, R6RS's folds,
   the bridge) pushes a barrier, which makes re-entering through it an
   error.
-- tests/run-continuation-tests.lisp: 37 of 37. Cost: 5.0% over
+- tests/run-continuation-tests.lisp: 45 of 45. Cost: 5.0% over
   escape-only as a geometric mean of bench/ (7.7% before the October
   2026 speed pass), 39 of 57 benchmarks within 5%, 1.4–1.8× on a few
   closure-heavy programs. A site costs about 2.4 ns; a generator's
   yield, two captures and re-entries, about 200 ns.
+- **Delimited continuations** on the same frames: a prompt is a frame
+  with a `catch`; `abort-to-prompt` copies the frames above it and
+  throws; calling the composable continuation rebuilds them on top of
+  the caller's stack. `(pseudoscheme control)` (src/control.sls) has
+  Guile's interface: `call-with-prompt`, `abort-to-prompt`, `%`,
+  `shift`/`reset`, `call/ec`. docs/continuations.md, "Delimited
+  continuations".
 - Built on it: SRFI 158's coroutine generators, SRFI 226 (the sample
   implementation, prompts and marks included), SRFI 248, and R6RS
   `guard`'s re-raise in the `raise`'s dynamic environment.
 
 Next (docs/continuations.md, "Further work"): frame-aware versions of
 the barriers' primitives; safety information across libraries;
-continuation marks and prompts on the same frames (SRFIs 226 and 248
-are written on call/cc and dynamic-wind, src/srfi/).
+continuation marks on the same frames as prompts (SRFIs 226 and 248
+are still written on call/cc and dynamic-wind, src/srfi/).
 
 **R5RS** runs on psyntax (`ps-r7rs::eval-at-r5rs-repl`, a top level whose
 bindings are `(pseudoscheme r5rs)`), so it gets full continuations too;
@@ -255,7 +262,9 @@ Next:
     serialized. This is enough for SRFI 18 threads running ordinary
     code;
   - `parameterize` assigns the parameter's one global value for the
-    extent of its body (`parameterize*`, src/r7rs/rts.lisp), so threads
+    extent of its body (`parameterize*`, src/r7rs/rts.lisp), unless the
+    thread has a table of its own values (`*thread-parameters*`, which
+    Chez's `fork-thread` gives the threads it makes); otherwise threads
     see each other's bindings. It should bind a special variable
     instead, which SRFI 18's `make-thread` would capture so that new
     threads inherit the current bindings. Only the port parameters are
@@ -331,47 +340,51 @@ run that code unchanged. libguile is about 1,100 C primitives; boot-9
 (the module system) and psyntax-pp, both Scheme, sit on top, and psyntax
 expands to Tree-IL.
 
-- **Stages:** the reader (`#:kw`, `#!...!#`, `#{}#`,
+- **Done**: prompts and composable continuations (section 3), which
+  Guile's exceptions, `catch`/`throw` and parameters are built on; and
+  `(guile)`, Guile's everyday procedures for R6RS programs
+  (`catch`/`throw`, hash tables, alists, strings, `format`,
+  `define-syntax-rule`), src/guile/.
+- **Stages left:** the reader (`#:kw`, `#!...!#`, `#{}#`,
   `read-hash-extend`); libguile's primitives in Lisp (boot-9 refers to
   about 210 of them, the common `ice-9` and SRFI modules about 350, all
   of Guile's bundled Scheme about 950); a Tree-IL-to-core compiler;
-  booting Guile's own `boot-9.scm` from an installed Guile; prompts;
-  ports and POSIX; `(system foreign)` on CFFI; GOOPS, run or mapped
-  onto CLOS.
+  booting Guile's own `boot-9.scm` from an installed Guile; ports and
+  POSIX; `(system foreign)` on CFFI (src/chez/ffi.lisp has Chez's on
+  it); GOOPS, run or mapped onto CLOS.
 - **Guix**, the long-term test: `(guix records)`, G-expressions, the
   store protocol to a real `guix-daemon`, and the FFI libraries
   (guile-gcrypt, guile-git, guile-sqlite3, guile-zlib). Milestone: the
   same derivation as `guix build -d hello`.
-- **Depends on:** prompts on full continuations (section 3; Guile's
-  exceptions and parameters are built on them), the compiled-library
-  cache (section 2; Guix is hundreds of modules), thread safety
-  (section 4), and the bridge's CFFI experience
-  (tests/programs/c-libraries.scm).
-- **First step:** an inventory, made in Guile itself, of the C
+- **Depends on:** the compiled-library cache (section 2; Guix is
+  hundreds of modules), thread safety (section 4), and the CFFI
+  experience of the bridge and of Chez's FFI.
+- **First step now:** an inventory, made in Guile itself, of the C
   primitives that Tree-IL from boot-9 and the `ice-9` modules actually
-  reaches.
+  reaches; then the reader's keywords and `define*`.
 
 ## 9. Chez Scheme (`--chez`)
 
-docs/chez.md has the measurements and plan. Chez is the closest of the
-three: psyntax is the portable version of Chez's own expander, R6RS is
-complete, and a top level with another base library already exists
-(R5RS's). So `(chezscheme)` would be implemented here, as the R6RS
-libraries were, rather than hosting Chez's own runtime code.
+`pseudoscheme --chez` (or `scheme-script`) runs Chez programs: Chez's
+top level, `(chezscheme)` with 1118 of Chez 10.4.1's 1715 names, and
+library files whose library a macro makes. The code is in src/chez/;
+docs/chez.md describes how each problem was solved, measured against
+[e](https://github.com/paveluv/e), an editor written in Chez:
+33 of its 63 test scripts pass.
 
-- **The gap**: Chez 10.4.1's `(chezscheme)` exports 1715 names; ours
-  exports 803 of them, and 59 more exist elsewhere here. Of the other
-  853, about 400 are easy (`r6rs:` variants, numbers, lists, property
-  lists, paths, records, hashtables, fx/flvectors, `trace-define`,
-  ignored optimization knobs); the FFI and ftypes, threads, weak and
-  ephemeron tables, the compile/load API and Chez's ports are medium;
-  engines, the inspector and profiler and the port-buffer internals are
-  last.
-- **Also**: reader syntax (`#&`, `#!eof`, `#N(...)`, `#vfx`, `#%`),
-  `format`'s directives, Chez's `Exception in WHO: ...` messages, and
-  `eval-when`/`meta`/`fluid-let-syntax` in psyntax.
-- **First step**: `--chez` with a `(chezscheme)` top level, and
-  `module`/`import`/`alias`/`define-property` re-exported from it.
+- **Done**: the top level (a `begin` evaluated form by form, as Chez
+  does), `meta define`, top-level `library` forms from macros, a body's
+  `import` of libraries, Chez's extensions to R6RS procedures
+  (`dynamic-wind`'s critical flag, file options, one-argument `eval`),
+  threads with per-thread parameters, recursive mutexes and conditions,
+  the FFI on CFFI, fd ports with nonblocking reads, `format` on CL's,
+  `Exception in ...` messages, the reader's `#&`, `#vfx`, `#N(...)`,
+  `#%`, `#!eof`, and about 300 procedures (lists, numbers, paths,
+  hashtables, time, boxes, fxvectors, system).
+- **Next**: engines and timer interrupts (a tick check at procedure
+  entry in `--chez` code, with the existing frames to capture);
+  annotations (`get-datum/annotations`); ftypes; `r6rs:` variants;
+  `define-record`/`record-case`; the printer's parameters.
 
 ## 10. Smaller items
 

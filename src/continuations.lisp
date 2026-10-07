@@ -378,6 +378,7 @@ call returns, then continue the frame."
       (:handlers (handlers-extent (svref frame 2) inner))
       (:extent (call-in-extent (svref frame 2) inner))
       (:escape (catch (svref frame 2) (with-frame (frame) (funcall inner))))
+      (:prompt (prompt-extent (vector :prompt nil (svref frame 2) (svref frame 3) *winders*) inner))
       (:resume (let ((value (with-frame (frame) (funcall inner))))
 		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
       (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
@@ -429,6 +430,66 @@ outer ends, innermost first."
 		     (t (error 'continuation-not-reentrant)))))
 	(unwind-protect (catch tag (funcall f #'k))
 	  (setf (car live) nil))))))
+
+;;; Delimited continuations: prompts, as Guile has them (call-with-prompt,
+;;; abort-to-prompt), and Racket and SRFI 226 too.  A prompt is a frame,
+;;; #(:prompt promoted catch-tag handler winders), with a catch of its
+;;; own: aborting to it copies the frames pushed since (the continuation
+;;; up to the prompt, not including it) and throws to the catch, whose
+;;; afters run on the way; the handler is then called with a composable
+;;; continuation.  Calling one rebuilds its frames on top of the current
+;;; stack, as RESUME-FRAME does when a full continuation is re-entered,
+;;; and returns what the outermost of them returns: there is no throw to
+;;; a base, since the frames outside are the caller's own.
+
+(defun prompt-extent (frame thunk)
+  "Call THUNK inside prompt FRAME; on an abort to it, call its handler with
+the composable continuation and the abort's values."
+  (let ((abort (catch (svref frame 2)
+		 (return-from prompt-extent (with-frame (frame) (funcall thunk))))))
+    (apply (svref frame 3) abort)))
+
+(defun call-with-prompt (tag thunk handler)
+  (let ((frame (vector :prompt nil (heap-cons 'prompt tag) handler *winders*)))
+    (declare (dynamic-extent frame))
+    (prompt-extent frame thunk)))
+
+(defun find-prompt (tag)
+  (dolist (frame *fstack*)
+    (when (and (vectorp frame) (eq (svref frame 0) :prompt) (eq (cdr (svref frame 2)) tag))
+      (return frame))))
+
+(defun fresh-frame (frame)
+  "A copy of FRAME, unpromoted: what is outside it when it's rebuilt is
+another continuation than when it was captured."
+  (let ((copy (copy-seq frame)))
+    (setf (svref copy 1) nil)
+    copy))
+
+(defun compose-continuation (frames winders values)
+  "Rebuild FRAMES (innermost first) on top of the current continuation,
+running the befores of their WINDERS, outermost first, and return
+VALUES to the innermost."
+  (let ((outer *winders*))
+    (dolist (w (reverse winders))
+      (let ((*winders* outer)) (funcall (car w)))
+      (push w outer)))
+  (rebuild-frames (reverse (mapcar #'fresh-frame frames)) values))
+
+(defun abort-to-prompt (tag &rest values)
+  (let ((prompt (find-prompt tag)))
+    (unless prompt
+      (ps:scheme-error "abort-to-prompt: no prompt with tag ~S in the current continuation" tag))
+    (let* ((frames (loop for frame in *fstack*
+			 until (eq frame prompt)
+			 collect (fresh-frame frame)))
+	   (winders (ldiff *winders* (svref prompt 4)))
+	   (full *full-continuations*))
+      (flet ((k (&rest values)
+	       (unless full
+		 (ps:scheme-error "a delimited continuation can't be called without full continuations"))
+	       (compose-continuation frames winders values)))
+	(throw (svref prompt 2) (cons #'k values))))))
 
 (defun continuation= (a b)
   "Whether continuations A and B are the same continuation: captured with
@@ -530,7 +591,7 @@ run a little faster in code that calls unknown procedures in loops.")
     "call-with-values" "map" "for-each" "%full-call/cc" "%full-dynamic-wind" "%full-call-with-values"
     "%full-map" "%full-for-each" "%call-with-frame"
     "%full-vector-map" "%full-vector-for-each" "%full-string-map" "%full-string-for-each"
-    "%escape-call/cc"
+    "%escape-call/cc" "call-with-prompt" "abort-to-prompt"
     "vector-map" "vector-for-each" "string-map" "string-for-each"
     "with-exception-handler" "raise" "raise-continuable" "force"
     "call-with-port" "call-with-input-file" "call-with-output-file"
@@ -576,7 +637,8 @@ no procedure.")
 	(dolist (p ps-r6rs:*primitives*) (setf (gethash (car p) table) t))
 	(dolist (p *full-replacements*)
 	  (setf (gethash (car p) table) t (gethash (cdr p) table) t))
-	(setf (gethash "%call-with-frame" table) t (gethash "%escape-call/cc" table) t)
+	(setf (gethash "%call-with-frame" table) t (gethash "%escape-call/cc" table) t
+	      (gethash "call-with-prompt" table) t (gethash "abort-to-prompt" table) t)
 	(dolist (name *adapter-primitives*) (setf (gethash name table) t))
 	(setq *primitive-names* table))))
 
@@ -1466,6 +1528,8 @@ its own, of the chunk's free variables."
   (defhost "%full-call-with-values" (producer consumer) (full-call-with-values producer consumer))
   (defhost "%guard-reraise" (k thunk) (guard-reraise k thunk))
   (defhost "%escape-call/cc" (f) (escape-call/cc f))
+  (defhost "call-with-prompt" (tag thunk handler) (call-with-prompt tag thunk handler))
+  (defhost "abort-to-prompt" (tag &rest values) (apply #'abort-to-prompt tag values))
   (defhost "%full-map" (f list &rest lists) (apply #'full-map f list lists))
   (defhost "%full-for-each" (f list &rest lists) (apply #'full-for-each f list lists))
   (defhost "%full-vector-map" (f v &rest more) (full-index-loop :vector-map f v more))

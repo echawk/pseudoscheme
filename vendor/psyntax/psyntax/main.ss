@@ -39,6 +39,7 @@
   ;; Expand and install one (library ...) form.
   (set-symbol-value! 'psyntax:library-expander (current-library-expander))
   (set-symbol-value! 'psyntax:eval eval)
+  (set-symbol-value! 'psyntax:eval-hook eval-hook)
   (set-symbol-value! 'psyntax:expand expand)
   (set-symbol-value! 'psyntax:environment environment)
   (set-symbol-value! 'psyntax:environment? environment?)

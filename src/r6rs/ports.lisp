@@ -619,10 +619,49 @@
 	ps:eof-object
 	(progn (replace bv got :start1 start) (length got)))))
 
+(defun byte-ready-p (port)
+  "Can a byte (or EOF) be read from PORT without waiting?  As far as is
+known: a file port's buffer or descriptor, a bytevector port always."
+  (typecase port
+    (bytevector-input-port t)
+    (octet-stream-input-port (or (peeked port) (listen (underlying port))))
+    (t nil)))
+
+(defun read-some-bytes (port bv start count &optional nonblocking)
+  "Read what is available from PORT into BV at START, at most COUNT bytes,
+waiting for the first unless NONBLOCKING; the number read, or :EOF."
+  (let ((n 0))
+    (flet ((take ()
+	     (let ((b (read-byte port nil :eof)))
+	       (if (eq b :eof)
+		   (return-from read-some-bytes (if (zerop n) :eof n))
+		   (progn (setf (aref bv (+ start n)) b) (incf n))))))
+      (when (plusp count)
+	(cond ((byte-ready-p port) (take))
+	      ((not nonblocking) (take))
+	      ;; nothing buffered and none ready: at EOF, the descriptor
+	      ;; polls readable all the same
+	      ((let ((fd (port-descriptor port)))
+		 (and fd #+sbcl (sb-unix:unix-simple-poll fd :input 0)))
+	       (take))
+	      (t (return-from read-some-bytes 0))))
+      (loop while (and (< n count) (byte-ready-p port)) do (take))
+      n)))
+
+(defun port-descriptor (port)
+  "The file descriptor under PORT, or NIL."
+  (loop for s = port then (and (typep s 'standard-object) (slot-exists-p s 'stream)
+			       (slot-boundp s 'stream) (slot-value s 'stream))
+	repeat 6
+	while s
+	do #+sbcl (when (typep s 'sb-sys:fd-stream) (return (sb-sys:fd-stream-fd s)))
+	   (unless (typep s 'standard-object) (return nil))))
+
 (defprim "get-bytevector-some" (port)
   (check-binary-in "get-bytevector-some" port)
-  (let ((b (read-byte port nil :eof)))
-    (if (eq b :eof) ps:eof-object (coerce (list b) 'octets))))
+  (let* ((bv (make-array 4096 :element-type '(unsigned-byte 8)))
+	 (n (read-some-bytes port bv 0 4096)))
+    (if (eq n :eof) ps:eof-object (subseq bv 0 n))))
 
 (defprim "get-bytevector-all" (port)
   (check-binary-in "get-bytevector-all" port)

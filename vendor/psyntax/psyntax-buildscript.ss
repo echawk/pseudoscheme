@@ -54,6 +54,10 @@
     ;; PSEUDOSCHEME: SRFIs 212, 213 and 139
     (alias               (alias))
     (define-property     (define-property))
+    ;; PSEUDOSCHEME: Chez Scheme's library (as a top-level form, so a
+    ;; macro can produce one) and meta definitions
+    (library             (library))
+    (meta                (meta))
     (syntax-parameterize (core-macro . syntax-parameterize))
     (foreign-call        (core-macro . foreign-call))
     (quote               (core-macro . quote))
@@ -964,6 +968,8 @@
     (import                   cm)
     (alias                    ext)  ; PSEUDOSCHEME: SRFI 212
     (define-property          ext)  ; PSEUDOSCHEME: SRFI 213
+    (library                  ext)  ; PSEUDOSCHEME: Chez's top-level library form
+    (meta                     ext)  ; PSEUDOSCHEME: Chez's meta definitions
     (syntax-parameterize      ext)  ; PSEUDOSCHEME: SRFI 139
     (syntax-dispatch ) ; only goes to $all
     (%guard-reraise ) ; PSEUDOSCHEME: guard's expansion, so only $all

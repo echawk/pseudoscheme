@@ -28,7 +28,7 @@
           ;; PSEUDOSCHEME
           scheme-report-environment
           interaction-library-name interaction-source-name
-          identifier-binding environment-symbols)
+          identifier-binding environment-symbols eval-hook)
   (import
     ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
@@ -657,7 +657,8 @@
                       macro! local-macro local-macro! global-macro
                       global-macro! module set! let-syntax 
                       letrec-syntax import $core-rtd
-                      alias define-property)          ; PSEUDOSCHEME
+                      alias define-property           ; PSEUDOSCHEME
+                      library meta)                   ; PSEUDOSCHEME: Chez's
 
                     (values type (binding-value b) id))
                    (else
@@ -1871,18 +1872,23 @@
           (cond
             ((null? ls) '())
             (else (cons i (f (cdr ls) (+ i 1)))))))
+      ;;; PSEUDOSCHEME: the names made for a record (make-foo, foo?,
+      ;;; foo-x, foo-x-set!) are in the record name's context, as Chez
+      ;;; makes them, not the define-record-type keyword's: when a macro's
+      ;;; output holds the keyword and its use supplies the name, the
+      ;;; names are the use's.  Without a macro the two are the same.
       (define (do-define-record ctxt namespec clause*)
         (let* ((foo (get-record-name namespec))
                (foo-rtd (gensym))
                (foo-rcd (gensym))
                (protocol (gensym))
-               (make-foo (get-record-constructor-name namespec ctxt))
+               (make-foo (get-record-constructor-name namespec foo))
                (fields (get-fields clause*))
                (idx* (enumerate fields))
-               (foo-x* (get-accessors foo fields ctxt))
-               (set-foo-x!* (get-mutators foo fields ctxt))
+               (foo-x* (get-accessors foo fields foo))
+               (set-foo-x!* (get-mutators foo fields foo))
                (set-foo-idx* (get-mutator-indices fields))
-               (foo? (get-record-predicate-name namespec ctxt))
+               (foo? (get-record-predicate-name namespec foo))
                (foo-rtd-code (foo-rtd-code ctxt foo clause*))
                (foo-rcd-code (foo-rcd-code clause* foo-rtd protocol))
                (protocol-code (get-protocol-code clause*)))
@@ -2882,6 +2888,43 @@
                               (cons (cons lab (cons '$module iface)) mr)
                               mod** kwd*)))))))))
 
+  ;;; PSEUDOSCHEME: Chez's (meta define id expr) and (meta define (id
+  ;;; . formals) body ...) -- meta and then the definition -- in a body: ID is bound for the expander only.
+  ;;; EXPR is expanded in the meta environment and evaluated now, into a
+  ;;; fresh global, which ID names as a lexical in both environments --
+  ;;; so transformer code (and, being permissive, run-time code) refers
+  ;;; to that global.  BIND! adds ID to the body's rib.  A library with
+  ;;; meta definitions isn't cached: visiting a cached one wouldn't
+  ;;; evaluate them again.
+  (define (chi-meta-definition e r mr bind!)
+    (syntax-match e ()
+      ((_ . def)
+       (let-values (((type value kwd) (syntax-type def r)))
+         (unless (eq? type 'define)
+           (stx-error e "meta supports only define"))
+         (let-values (((id rhs) (parse-define def)))
+           (let ((expr (if (eq? (car rhs) 'defun)
+                           (bless `(lambda ,(cadr rhs) ,@(cddr rhs)))
+                           (cdr rhs)))
+                 (loc (gen-global (id->sym id)))
+                 (lab (gen-label id)))
+             (bind! id lab)
+             (let ((r (add-lexical lab loc r))
+                   (mr (add-lexical lab loc mr)))
+               (set-symbol-value! loc
+                 (eval-core (expanded->core (expand-transformer expr mr))))
+               (mark-library-uncacheable!)
+               (values r mr))))))
+      (_ (stx-error e "malformed meta"))))
+
+  ;;; PSEUDOSCHEME: set while a library is expanded; something in it
+  ;;; (meta, define-property) makes it unfit for the compiled-library
+  ;;; cache, which library-expander then isn't told of.
+  (define library-uncacheable (make-parameter #f))
+  (define (mark-library-uncacheable!)
+    (let ((flag (library-uncacheable)))
+      (when flag (vector-set! flag 0 #t))))
+
   (define chi-body*
     (lambda (e* r mr lex* rhs* mod** kwd* rib top?)
       (cond
@@ -2963,6 +3006,14 @@
                     ((_ x* ...)
                      (chi-body* (append x* (cdr e*))
                         r mr lex* rhs* mod** kwd* rib top?))))
+                 ;; PSEUDOSCHEME: Chez's (meta define ...): see
+                 ;; chi-meta-definition.
+                 ((meta)
+                  (let-values (((r mr) (chi-meta-definition e r mr
+                                         (lambda (id lab) (extend-rib! rib id lab)))))
+                    (chi-body* (cdr e*) r mr lex* rhs* mod** kwd* rib top?)))
+                 ((library)
+                  (stx-error e "a library form is allowed only at top level"))
                  ;; PSEUDOSCHEME: (alias new old), SRFI 212: NEW is bound
                  ;; to OLD's binding (an unbound OLD's too).  OLD can't
                  ;; then be defined in this body, like a keyword used.
@@ -2990,6 +3041,7 @@
                              (new (gen-label id)))
                          (hashtable-set! property-table new
                            (cons old (list (cons key-label value))))
+                         (mark-library-uncacheable!)
                          (rib-rebind! rib id new)
                          (chi-body* (cdr e*) (cons (cons new b) r) (cons (cons new b) mr)
                                     lex* rhs* mod** kwd* rib top?))))))
@@ -3024,10 +3076,29 @@
                                 (let ((id* (car iface)) (lab* (cdr iface)))
                                   (values id* lab*))))
                              (else (stx-error e "invalid import")))))))
-                    (let-values (((id* lab*) (module-import e r)))
-                      (for-each
-                        (lambda (id lab) (extend-rib! rib id lab))
-                        id* lab*)))
+                    ;; PSEUDOSCHEME: as in Chez, a body's import may name
+                    ;; libraries too, (import (only (foo) bar)): their
+                    ;; names are bound in the body, in the context of the
+                    ;; import keyword
+                    (define (module-name? x)
+                      (and (id? x)
+                           (let-values (((type value kwd) (syntax-type x r)))
+                             (eq? type '$module))))
+                    (syntax-match e ()
+                      ((kwd spec* ...)
+                       (for-each
+                         (lambda (spec)
+                           (if (module-name? spec)
+                               (let-values (((id* lab*) (module-import (list kwd spec) r)))
+                                 (for-each
+                                   (lambda (id lab) (extend-rib! rib id lab))
+                                   id* lab*))
+                               (let-values (((subst lib*) (parse-import-spec* (list (stx->datum spec)))))
+                                 (for-each
+                                   (lambda (x) (extend-rib! rib (datum->stx kwd (car x)) (cdr x)))
+                                   subst)
+                                 (for-each (lambda (lib) ((inv-collector) lib) ((vis-collector) lib)) lib*))))
+                         spec*))))
                   (chi-body* (cdr e*) r mr lex* rhs* mod** kwd* rib top?))
                  (else
                   (if top?
@@ -3128,6 +3199,21 @@
                        (reverse subst))
                      (for-each (lambda (lib) ((inv-collector) lib) ((vis-collector) lib)) lib*)
                      (chi-top* (cdr e*) init*)))))
+               ;; PSEUDOSCHEME: Chez's library as a top-level form, so
+               ;; that a macro can produce one (top-level-library-expander)
+               ((library)
+                (top-level-library-expander e)
+                (chi-top* (cdr e*) init*))
+               ;; PSEUDOSCHEME: Chez's (meta define id expr) at top level:
+               ;; evaluated now, and an ordinary global besides
+               ((meta)
+                (syntax-match e ()
+                  ((_ . def)
+                   (let-values (((id rhs) (parse-define def)))
+                     (let ((loc (gen-global-var-binding id e)))
+                       (set-symbol-value! loc
+                         (eval-core (expanded->core (chi-rhs rhs '() '()))))
+                       (chi-top* (cdr e*) init*))))))
                ((global-macro global-macro!)
                 (chi-top* (cons (chi-global-macro value e) (cdr e*)) init*))
                ((local-macro local-macro!)
@@ -3446,12 +3532,17 @@
   ;;; variables of the library being expanded.
   (define library-export-locs (make-parameter '()))
 
+  ;;; PSEUDOSCHEME: B* may be syntax objects already wrapped for the top
+  ;;; level (WRAPPED?, a library a macro produced there), which get only
+  ;;; the library's rib.
   (define library-body-expander
-    (lambda (exp* imp* b*)
+    (lambda (exp* imp* b* . wrapped?)
       (let-values (((exp-int* exp-ext*) (parse-exports exp*))
                    ((subst imp*) (parse-import-spec* imp*)))
         (let ((rib (make-top-rib subst)))
-          (let ((b* (map (lambda (x) (mkstx x top-mark* (list rib))) b*))
+          (let ((b* (if (and (pair? wrapped?) (car wrapped?))
+                        (map (lambda (x) (add-subst rib x)) b*)
+                        (map (lambda (x) (mkstx x top-mark* (list rib))) b*)))
                 (rtc (make-collector))
                 (vtc (make-collector)))
             (parameterize ((inv-collector rtc)
@@ -3507,6 +3598,10 @@
   (define core-library-expander
     (lambda (e)
       (let-values (((name* exp* imp* b*) (parse-library e)))
+        (core-library-expander-parts name* exp* imp* b* #f))))
+
+  (define core-library-expander-parts
+    (lambda (name* exp* imp* b* wrapped?)
         (let-values (((name ver) (parse-library-name name*)))
           (let-values (((imp* invoke-req* visit-req* invoke-code
                               visit-code export-subst export-env)
@@ -3514,10 +3609,10 @@
                         ;; runs (imported there) doesn't see the REPL's
                         ;; bindings: its unbound identifiers stay unbound
                         (parameterize ((interaction-library #f))
-                          (library-body-expander exp* imp* b*))))
+                          (library-body-expander exp* imp* b* wrapped?))))
              (values name ver imp* invoke-req* visit-req* 
                      invoke-code visit-code export-subst
-                     export-env))))))
+                     export-env)))))
   
   (define (parse-top-level-program e*)
     (syntax-match e* ()
@@ -3594,18 +3689,45 @@
   ;;; This is R6RS's eval.  It takes an expression and an environment,
   ;;; expands the expression, invokes its invoke-required libraries and
   ;;; evaluates its expanded core form.
+  ;;; PSEUDOSCHEME: as in Chez, the environment is optional; without one,
+  ;;; or with one that isn't psyntax's (the host's interaction
+  ;;; environment), eval calls (eval-hook) with the expression and the
+  ;;; environment or #f.
   (define eval
-    (lambda (x env)
-      (unless (env? env)
-        (error 'eval "not an environment" env))
-      (let-values (((x invoke-req*) (expand x env)))
-        (for-each invoke-library invoke-req*)
-        (eval-core (expanded->core x)))))
+    (lambda (x . rest)
+      (let ((env (if (pair? rest) (car rest) #f)))
+        (if (env? env)
+            (let-values (((x invoke-req*) (expand x env)))
+              (for-each invoke-library invoke-req*)
+              (eval-core (expanded->core x)))
+            ((eval-hook) x env)))))
+
+  (define eval-hook
+    (make-parameter
+      (lambda (x env) (error 'eval "not an environment" env))))
 
   ;;; Given a (library . _) s-expression, library-expander expands
   ;;; it to core-form, registers it with the library manager, and
   ;;; returns its invoke-code, visit-code, subst and env.
   (define (library-expander x)
+    (library-expander-with (lambda () (core-library-expander x))))
+
+  ;;; PSEUDOSCHEME: Chez's library as a top-level form, which a macro may
+  ;;; have produced: its body keeps its syntax (an identifier the macro
+  ;;; put there refers to what it did where the macro was defined); its
+  ;;; name, exports and imports are data.
+  (define (top-level-library-expander e)
+    (syntax-match e ()
+      ((_ (name* ...) (export exp* ...) (import imp* ...) b* ...)
+       (and (id? export) (id? import)
+            (eq? (id->sym export) 'export) (eq? (id->sym import) 'import))
+       (library-expander-with
+         (lambda ()
+           (core-library-expander-parts (stx->datum name*) (stx->datum exp*)
+             (stx->datum imp*) b* #t))))
+      (_ (stx-error e "malformed library"))))
+
+  (define (library-expander-with expand-library)
     (define (build-visit-code macro*)
       (if (null? macro*)
           (build-void)
@@ -3619,8 +3741,10 @@
                   (let ((loc (car x)) (proc (cadr x)))
                     (set-symbol-value! loc proc)))
                 macro*))
-    (let-values (((name ver imp* inv* vis* invoke-code macro* export-subst export-env)
-                  (core-library-expander x)))
+    (let ((uncacheable (vector #f)))
+     (let-values (((name ver imp* inv* vis* invoke-code macro* export-subst export-env)
+                   (parameterize ((library-uncacheable uncacheable))
+                     (expand-library))))
       (let ((id (gensym))
             (name name)
             (ver ver)  ;;; FIXME
@@ -3635,13 +3759,14 @@
         ;; PSEUDOSCHEME: for compiled libraries (library-manager.ss).
         ;; The code is passed as thunks: converting it to core forms
         ;; looks up primitives, which a bootstrap may not have.
-        ((library-expanded-hook) id name ver imp* vis* inv*
-           export-subst export-env
-           (lambda () (expanded->core (build-visit-code macro*)))
-           (lambda () (expanded->core invoke-code)))
+        (unless (vector-ref uncacheable 0)
+          ((library-expanded-hook) id name ver imp* vis* inv*
+             export-subst export-env
+             (lambda () (expanded->core (build-visit-code macro*)))
+             (lambda () (expanded->core invoke-code))))
         (values invoke-code
                 (build-visit-code macro*)
-                export-subst export-env))))
+                export-subst export-env)))))
 
   ;;; when bootstrapping the system, visit-code is not (and cannot
   ;;; be) be used in the "next" system.  So, we drop it.

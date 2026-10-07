@@ -430,11 +430,57 @@ RAISE-CONTINUABLE, if CONTINUABLE) of OBJ."
 ;;; ------------------------------------------------------------------
 ;;; Parameters
 
-(defstruct (parameter-state (:constructor make-parameter-state (value converter)))
-  value converter)
+(defstruct (parameter-state (:constructor make-parameter-state (global converter)))
+  global converter)
 
-(defvar *parameter-states* (make-hash-table :test 'eq :weakness :key)
+(defvar *parameter-states* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "parameter procedure -> parameter-state")
+
+;;; A thread can have its parameters' values to itself, as Chez's threads
+;;; do (fork-thread): a table of them, a snapshot of its creator's
+;;; values when it was made.  Elsewhere a parameter's value is global.
+
+(defvar *thread-parameters* nil
+  "The current thread's own parameter values, parameter-state -> value,
+or NIL.")
+
+;;; Chez parameterizes any procedure taking no argument or one: (p)
+;;; gives its value, (p v) sets it.
+(defstruct (procedure-parameter-state (:include parameter-state)
+				      (:constructor make-procedure-parameter-state (procedure)))
+  procedure)
+
+(defun procedure-parameter-state (p)
+  (and (functionp p) (make-procedure-parameter-state p)))
+
+(declaim (inline parameter-state-value))
+(defun parameter-state-value (state)
+  (when (procedure-parameter-state-p state)
+    (return-from parameter-state-value
+      (funcall (procedure-parameter-state-procedure state))))
+  (let ((table *thread-parameters*))
+    (if table
+	(multiple-value-bind (value found) (gethash state table)
+	  (if found value (parameter-state-global state)))
+	(parameter-state-global state))))
+
+(defun (setf parameter-state-value) (value state)
+  (when (procedure-parameter-state-p state)
+    (funcall (procedure-parameter-state-procedure state) value)
+    (return-from parameter-state-value value))
+  (let ((table *thread-parameters*))
+    (if table
+	(setf (gethash state table) value)
+	(setf (parameter-state-global state) value))))
+
+(defun thread-parameters-snapshot ()
+  "A table of every parameter's current value, for a new thread."
+  (let ((table (make-hash-table :test 'eq :weakness :key)))
+    (maphash (lambda (param state)
+	       (declare (ignore param))
+	       (setf (gethash state table) (parameter-state-value state)))
+	     *parameter-states*)
+    table))
 
 (defprim "make-parameter" (init &optional converter)
   (let* ((state (make-parameter-state nil converter))
@@ -465,6 +511,7 @@ the context when a continuation captured in THUNK is re-entered.")
 	       (if port
 		   (progn (push (cdr port) specials) (push v special-values))
 		   (let ((s (or (gethash p *parameter-states*)
+				(procedure-parameter-state p)
 				(scheme-error "parameterize: not a parameter object: ~S" p))))
 		     (push s states)
 		     (push (if (parameter-state-converter s)

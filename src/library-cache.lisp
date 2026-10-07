@@ -80,8 +80,8 @@ Pseudoscheme is built from (their names and dates)."
 	    (fnv-1a
 	     (with-output-to-string (s)
 	       (format s "~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
-	       (dolist (pattern '("src/*.lisp" "src/*.pso" "src/r6rs/*.lisp" "src/r7rs/*.*"
-				  "src/compat/*.*" "src/interop/*.*"
+	       (dolist (pattern '("src/*.lisp" "src/*.pso" "src/*.sls" "src/r6rs/*.lisp" "src/r7rs/*.*"
+				  "src/compat/*.*" "src/chez/*.*" "src/guile/*.*" "src/interop/*.*"
 				  "vendor/psyntax/psyntax-pseudoscheme.pp"))
 		 (dolist (file (sort (mapcar #'namestring (directory (merge-pathnames pattern root)))
 				     #'string<))
@@ -271,10 +271,24 @@ NIL if that didn't work."
 
 ;;; ------------------------------------------------------------------
 
+(defvar *library-loaders* '()
+  "Functions tried, in order, after the compiled-library cache, as
+psyntax's LIBRARY-LOADER: each takes a library name, and may install the
+library itself and return true (src/chez/chez.lisp: a library file whose
+library a macro makes, as Chez allows).")
+
+(defun load-library (name)
+  "psyntax's LIBRARY-LOADER: the cache, then *LIBRARY-LOADERS*."
+  (let ((loaded (load-compiled-library name)))
+    (if (and loaded (not (eq loaded ps:false)))
+	loaded
+	(or (some (lambda (loader) (funcall loader name)) *library-loaders*)
+	    ps:false))))
+
 (defun install-library-cache-hooks ()
   "Point psyntax's library loader and expansion hook here (in an image
 that has them)."
   (when (and (boundp (location (sym "psyntax:library-loader")))
 	     (boundp (location (sym "psyntax:library-expanded-hook"))))
-    (funcall (host-ref "psyntax:library-loader") #'load-compiled-library)
+    (funcall (host-ref "psyntax:library-loader") #'load-library)
     (funcall (host-ref "psyntax:library-expanded-hook") #'library-expanded)))

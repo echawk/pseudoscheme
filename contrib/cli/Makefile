@@ -30,7 +30,7 @@ else
   $(error unknown LISP=$(LISP): use sbcl, ccl, ecl or clisp)
 endif
 
-SCRIPT_INTERPRETERS = scheme-r4rs scheme-r5rs scheme-ieee-1178-1990 scheme-srfi-0 scheme-r6rs scheme-r7rs
+SCRIPT_INTERPRETERS = scheme-r4rs scheme-r5rs scheme-ieee-1178-1990 scheme-srfi-0 scheme-r6rs scheme-r7rs scheme-script
 
 all: $(ROOT)/bin/pseudoscheme
 

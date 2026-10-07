@@ -434,11 +434,14 @@
       ;; SRFI 88: after #!srfi-88, foo: is a keyword
       (if (or (string=? name "srfi-88") (string=? name "no-srfi-88"))
 	  (ps:set-port-keywords port (ps-lisp:string= name "srfi-88")))
+      ;; Chez Scheme's #!eof: the end-of-file object
+      (if (string=? name "eof")
+	  ps:eof-object
       ;; #!sweet and the like: the port's alternative reader reads on
       (let ((reader (ps:reader-directive port name)))
 	(if reader
 	    (ps:call-alternative-reader reader port)
-	    (sub-read port))))))
+	    (sub-read port)))))))
 
 ; Datum labels, #<n>=<datum> and #<n># (R7RS 2.4).
 
@@ -455,6 +458,19 @@
 	       (lambda () (sub-read-carefully port))))
 	    ((char=? d #\#)
 	     (ps:datum-label-reference port n))
+	    ;; Chez Scheme's #3(a b): a vector of length 3, the last
+	    ;; element repeated to fill it
+	    ((char=? d #\()
+	     (let ((elements (sub-read-list c port)))
+	       (if (> (length elements) n)
+		   (reading-error port "too many elements for the vector's length" n))
+	       (let ((v (make-vector n (let last ((l elements))
+					  (cond ((null? l) 0)
+						((null? (cdr l)) (car l))
+						(else (last (cdr l))))))))
+		 (do ((i 0 (+ i 1)) (l elements (cdr l)))
+		     ((null? l) v)
+		   (vector-set! v i (car l))))))
 	    ((char-alphabetic? d)
 	     (sub-read-array-literal n d port))
 	    (else
@@ -693,7 +709,7 @@
 	(intern-token string))))
 
 (define strange-symbol-names
-  '("+" "-" "..." "1+" "-1+"))  ;The latter two only for S&ICP support
+  '("+" "-" "..." "1+" "-1+" "1-"))  ;1+ and -1+ for S&ICP, 1- for Chez Scheme
 
 ; NB: no special handling of ":" here. It's tempting to read FOO:BAR
 ; as a Common-Lisp-style package-qualified symbol (the way the CL
@@ -770,11 +786,32 @@
 (define-sharp-macro #\v
   (lambda (c port)
     (read-char port)                   ;consume v
-    (if (not (and (eqv? (read-char port) #\u)
-		  (eqv? (read-char port) #\8)
-		  (eqv? (read-char port) #\()))
-	(reading-error port "bad #vu8 syntax"))
-    (ps:list->bytevector (sub-read-list c port))))
+    (let* ((a (read-char port))
+	   (b (read-char port)))
+      (if (not (eqv? (read-char port) #\())
+	  (reading-error port "bad #v syntax"))
+      (cond ((and (eqv? a #\u) (eqv? b #\8))
+	     (ps:list->bytevector (sub-read-list c port)))
+	    ;; Chez Scheme's fxvectors and flvectors (f64vectors here)
+	    ((and (eqv? a #\f) (eqv? b #\x))
+	     (ps:list->fxvector (sub-read-list c port)))
+	    ((and (eqv? a #\f) (eqv? b #\l))
+	     (ps:list->numeric-vector "f64" (sub-read-list c port)))
+	    (else (reading-error port "bad #v syntax"))))))
+
+; Chez Scheme's #&x (a box) and #%x (($primitive x): the system's x).
+
+(define-sharp-macro #\&
+  (lambda (c port)
+    c
+    (read-char port)
+    (ps:make-box (sub-read-carefully port))))
+
+(define-sharp-macro #\%
+  (lambda (c port)
+    c
+    (read-char port)
+    (list '$primitive (sub-read-carefully port))))
 
 ;; R6RS 4.3.5 abbreviations: #'x #`x #,x #,@x.  (These replace an older
 ;; Pseudoscheme-specific #'cl-function escape; see README.)

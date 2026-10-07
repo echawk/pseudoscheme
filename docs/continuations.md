@@ -10,7 +10,7 @@ continuations instead. `(cond-expand (full-continuations ...))` tells
 which a program is compiled with.
 
 The implementation is src/continuations.lisp. Its tests are
-tests/run-continuation-tests.lisp (37 of 37), and the standards' suites
+tests/run-continuation-tests.lisp (45 of 45, prompts included), and the standards' suites
 pass in full only with it: R5RS 189 of 189, R7RS 978 of 978, R6RS all
 8902 (escape-only: 188, 977 and 8900).
 
@@ -457,6 +457,84 @@ it.
   context instead, which is one of the two R6RS tests that mode fails
   (the other re-enters a `dynamic-wind`).
 
+## Delimited continuations
+
+Guile builds its exceptions, `catch`/`throw` and much of `(ice-9
+control)` on prompts, and Racket builds nearly everything on them. So
+they are native here, on the same frames as `call/cc`, rather than a
+library on top of it. `(pseudoscheme control)` (src/control.sls) has
+Guile's interface:
+
+```scheme
+(import (rnrs) (pseudoscheme control))
+
+(call-with-prompt 'foo
+  (lambda () (+ 1 (abort-to-prompt 'foo 41)))
+  (lambda (k v) (+ v 1)))                       ; => 42
+
+(define k (call-with-prompt 'foo
+            (lambda () (+ 34 (abort-to-prompt 'foo)))
+            (lambda (k) k)))
+(list (k 10) (k 20))                            ; => (44 54), k is reusable
+
+(reset (+ 1 (shift k (k (k 10)))))             ; => 12
+(let/ec out (+ 1 (out 99)))                     ; => 99
+```
+
+plus `make-prompt-tag`, `default-prompt-tag`, Guile's `%`, `shift*`,
+`reset*`, `call-with-escape-continuation` and `call/ec`.
+
+**How.** A prompt is one more kind of frame, `#(:prompt promoted
+catch-tag handler winders)`, pushed by `call-with-prompt` around a
+`catch` (src/continuations.lisp, "Delimited continuations"):
+
+```lisp
+(defun call-with-prompt (tag thunk handler)
+  (let ((frame (vector :prompt nil (heap-cons 'prompt tag) handler *winders*)))
+    (declare (dynamic-extent frame))
+    (prompt-extent frame thunk)))
+
+(defun prompt-extent (frame thunk)
+  (let ((abort (catch (svref frame 2)
+                 (return-from prompt-extent (with-frame (frame) (funcall thunk))))))
+    (apply (svref frame 3) abort)))
+```
+
+`abort-to-prompt` walks `*fstack*` to the innermost prompt with its tag,
+copies the frames above it (the continuation *up to* the prompt, not
+including it, as Guile's is), and throws to the prompt's `catch` with
+the continuation and the values. The throw runs the afters of the
+`dynamic-wind`s it leaves, through their `unwind-protect`s.
+
+```lisp
+(let* ((frames (loop for frame in *fstack*
+                     until (eq frame prompt)
+                     collect (fresh-frame frame)))
+       (winders (ldiff *winders* (svref prompt 4))))
+  (flet ((k (&rest values) (compose-continuation frames winders values)))
+    (throw (svref prompt 2) (cons #'k values))))
+```
+
+Calling the continuation **composes** it with the caller's: it runs the
+befores of the `dynamic-wind`s it holds, then rebuilds its frames on
+top of the current stack with `rebuild-frames`, the same function a
+full continuation's re-entry uses, and returns what the outermost of
+them returns. There is no throw to a base: the frames outside are
+simply the caller's. Each call rebuilds from fresh copies, so a
+continuation can be called any number of times.
+
+Every Scheme frame between an abort and its prompt is in the copy,
+because a call to `abort-to-prompt` is a site like a call to `call/cc`
+(it's in `*calling-primitives*`). For the same reason, with
+`--continuations=escape` an abort works, but calling its continuation
+is an error. Escape-only code pushes no frames, so there is nothing to
+rebuild.
+
+tests/run-continuation-tests.lisp covers a tree-walking generator
+built from `shift`/`reset`, `dynamic-wind` through an abort and a
+re-entry, which logs `(in out in body out)`, nested tags, and a loop of
+100 000 compositions in constant stack.
+
 ## Limits
 
 - **Re-entering through Lisp code is an error**, not a silent wrong
@@ -511,12 +589,11 @@ it.
   (Hieb, Dybvig and Bruggeman's segmented stacks). That bounds the work
   per re-entry and makes it iterative. Generators, which re-enter the
   same few frames repeatedly, benefit most.
-- **Native prompts and continuation marks** on the same frames, rather
-  than SRFI 226's library implementation on top of `call/cc`. A prompt
-  would be a frame with its tag; a composable continuation would copy
-  the frames up to the prompt and be rebuilt on top of the current
-  stack, without a throw to the base; a mark would be a slot in a frame.
-  Racket (docs/racket.md) and Guile (docs/guile.md) both need this.
+- **Continuation marks** on the same frames, as prompts now are
+  ("Delimited continuations"): a mark would be a slot in a frame.
+  Racket (docs/racket.md) needs them; SRFI 226's sample implementation
+  could then use the native prompts and marks instead of its own, built
+  on `call/cc`.
 - **One dynamic environment**, as Racket and SRFI 226 keep: winders,
   handlers, the parameterization and marks in one value a continuation
   captures. That would make capturing it O(1). `parameterize` still

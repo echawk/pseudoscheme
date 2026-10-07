@@ -35,6 +35,18 @@
 
 ;;; (expression . expected written value)
 (defparameter *tests* '(
+;; delimited continuations (src/control.sls): aborts, composable
+;; continuations called more than once, shift/reset, dynamic-wind
+;; through an abort and back, escapes, nested tags, constant stack;
+;; each a program, so that its import is in effect
+("(import (scheme base) (pseudoscheme control)) (call-with-prompt 'foo (lambda () (+ 1 (abort-to-prompt 'foo 41))) (lambda (k v) (+ v 1)))" . "42")
+("(import (scheme base) (pseudoscheme control)) (let ((k (call-with-prompt 'foo (lambda () (+ 34 (abort-to-prompt 'foo))) (lambda (k) k)))) (list (k 10) (k 20)))" . "(44 54)")
+("(import (scheme base) (pseudoscheme control)) (list (reset (+ 1 (shift k (k (k 10))))) (+ 1 (reset (* 2 (shift k (k (k 3)))))) (reset (+ 1 (shift k 42))))" . "(12 13 42)")
+("(import (scheme base) (pseudoscheme control)) (let () (define (walk tree) (reset (let w ((t tree)) (cond ((null? t) 'done) ((pair? t) (w (car t)) (w (cdr t))) (else (shift k (cons t k))))) 'done)) (let loop ((r (walk '((1 2) (3 (4 5)) 6))) (acc '())) (if (pair? r) (loop ((cdr r) #f) (cons (car r) acc)) (reverse acc))))" . "(1 2 3 4 5 6)")
+("(import (scheme base) (pseudoscheme control)) (let* ((log '()) (note (lambda (x) (set! log (cons x log)))) (k (call-with-prompt 'p (lambda () (dynamic-wind (lambda () (note 'in)) (lambda () (abort-to-prompt 'p) (note 'body) 7) (lambda () (note 'out)))) (lambda (k) k)))) (list (k) (reverse log)))" . "(7 (in out in body out))")
+("(import (scheme base) (pseudoscheme control)) (list (let/ec out (+ 1 (out 99))) (call-with-prompt 'a (lambda () (call-with-prompt 'b (lambda () (abort-to-prompt 'a 1)) (lambda (k v) 'b))) (lambda (k v) (list 'a v))))" . "(99 (a 1))")
+("(import (scheme base) (pseudoscheme control)) (let ((k (reset (let loop ((i 0)) (if (= i 100000) i (begin (shift k k) (loop (+ i 1)))))))) (let run ((k k)) (if (procedure? k) (run (k #f)) k)))" . "100000")
+("(import (scheme base) (pseudoscheme control)) (guard (e (#t 'no-prompt)) (abort-to-prompt (make-prompt-tag) 1))" . "no-prompt")
 ("(let ((path '()) (c #f)) (let ((add (lambda (s) (set! path (cons s path))))) (dynamic-wind (lambda () (add 'connect)) (lambda () (add (call-with-current-continuation (lambda (c0) (set! c c0) 'talk1)))) (lambda () (add 'disconnect))) (if (< (length path) 4) (c 'talk2) (reverse path))))" . "(connect talk1 disconnect connect talk2 disconnect)")
 ("(let ((k #f) (n 0)) (let ((r (+ 1 (call/cc (lambda (c) (set! k c) 1))))) (set! n (+ n 1)) (if (< n 3) (k r) (list r n))))" . "(4 3)")
 ("(let ((r '())) (define (gen) (call/cc (lambda (ret) (for-each (lambda (x) (call/cc (lambda (resume) (set! gen (lambda () (resume #f))) (ret x)))) '(1 2 3)) (ret 'done)))) (let loop ((v (gen))) (if (eq? v 'done) (reverse r) (begin (set! r (cons v r)) (loop (gen))))))" . "(1 2 3)")

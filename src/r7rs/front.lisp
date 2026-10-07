@@ -46,14 +46,9 @@
     "r7rs:error" "r7rs:bytevector-copy!" "r7rs:load" "r7rs:translate-import-set"
     "r7rs:interaction-environment" "r7rs:eval-at-repl"
     "make-parameter" "make-list" "gensym" "open-input-string" "open-output-string" "get-output-string"
-    "chez:system" "chez:with-input-from-string" "chez:with-output-to-string"
-    "chez:current-directory" "chez:file-directory?" "chez:file-regular?"
-    "chez:file-symbolic-link?" "chez:directory-list" "chez:mkdir"
-    "chez:delete-directory" "chez:rename-file" "chez:file-modification-time"
-    "chez:library-directories" "chez:timezone-offset" "chez:get-mode"
-    "chez:chmod" "chez:file-change-time" "chez:machine-type"
     "psyntax:environment?" "psyntax:environment-symbols"
-    "r7rs:record-ref" "r7rs:record-set!" "r7rs:record?" "r7rs:make-record")
+    "r7rs:record-ref" "r7rs:record-set!" "r7rs:record?" "r7rs:make-record"
+    "call-with-prompt" "abort-to-prompt")
   "Host globals (pseudoscheme host) exports besides R7RS procedure names.")
 
 (defun host-library-exports ()
@@ -106,7 +101,13 @@ of the library or program being processed.")
 	    collect form))))
 
 (defun include-path (file)
-  (merge-pathnames file (or *include-directory* *default-pathname-defaults*)))
+  "FILE relative to the including file's directory, or else, if it isn't
+there, to the current directory (as Chez Scheme's include finds it)."
+  (let ((relative (merge-pathnames file (or *include-directory* *default-pathname-defaults*))))
+    (if (or (probe-file relative) (null *include-directory*))
+	relative
+	(let ((here (merge-pathnames file *default-pathname-defaults*)))
+	  (if (probe-file here) here relative)))))
 
 (defun feature-satisfied-p (req)
   (cond ((symbolp req)
@@ -409,8 +410,9 @@ cond-expand.")
 
 (defun install-standard-libraries ()
   (install-host-library '("pseudoscheme" "host") (host-library-exports))
-  (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme "src/r7rs/syntax.sls")))
-    (psx:eval-library form))
+  (dolist (file '("src/r7rs/syntax.sls" "src/control.sls"))
+    (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme file)))
+      (psx:eval-library form)))
   (loop for (name export-string) in *standard-libraries*
 	do (psx:eval-library (standard-library-form name (split-names export-string))))
   ;; (pseudoscheme r7rs): all of them but (scheme r5rs), for the REPL
@@ -426,7 +428,7 @@ cond-expand.")
 	    (loop for (name) in *standard-libraries*
 		  unless (equal (mapcar #'sname* name) '("scheme" "r5rs"))
 		    collect (format nil "(~{~(~A~)~^ ~})" (mapcar #'sname* name))))))
-  (install-chezscheme-library)
+  (install-chez-libraries)		; src/chez/chez.lisp
   (install-ikarus-library)
   (psx:eval-library (read-scheme *pseudoscheme-r5rs-library*))
   ;; the interaction libraries of the R7RS REPL, and of R5RS on psyntax
@@ -435,45 +437,6 @@ cond-expand.")
 	     (funcall (psx:host-ref "gensym"))
 	     (mapcar #'ssym name)
 	     '() '() '() '() '() '() (lambda () ps:unspecific) (lambda () ps:unspecific) t)))
-
-;;; (chezscheme): what Chez variants of libraries (foo.chezscheme.sls)
-;;; import.  R6RS, as Chez's re-exports it, plus src/compat/chezscheme.scm.
-
-(defparameter *chezscheme-extras*
-  '("void" "add1" "sub1" "call/1cc" "gensym" "getenv" "system"
-    "with-input-from-string" "with-output-to-string" "current-directory"
-    "file-directory?" "file-regular?" "file-symbolic-link?" "directory-list"
-    "mkdir" "delete-directory" "rename-file" "file-modification-time"
-    "directory-separator" "machine-type" "library-directories"
-    "get-mode" "chmod" "file-change-time"
-    "source-directories" "record-writer" "collect" "weak-cons" "weak-pair?"
-    "bwp-object?" "iota" "box" "box?" "unbox" "set-box!" "format" "printf"
-    "fprintf" "pretty-print" "errorf" "assertion-violationf" "warningf"
-    "fluid-let" "time" "parameterize" "include"
-    "open-input-string" "open-output-string" "get-output-string" "last-pair"
-    "list-head" "remq!" "remv!" "remove!" "string-copy!"
-    "fxquotient" "fxremainder" "fxmodulo" "fx1+" "fx1-" "fxlogand" "fxlogor"
-    "fxlogxor" "fxsll" "fxsra" "make-list" "fxabs" "with-implicit"
-    "make-time" "time?" "time-type" "time-second" "time-nanosecond"
-    "set-time-type!" "set-time-second!" "set-time-nanosecond!" "current-time"
-    "cpu-time" "real-time" "statistics" "sstats?" "sstats-cpu" "sstats-real"
-    "sstats-bytes" "sstats-gc-count" "sstats-gc-cpu" "sstats-gc-real"
-    "sstats-gc-bytes" "make-date" "date?" "date-nanosecond" "date-second"
-    "date-minute" "date-hour" "date-day" "date-month" "date-year"
-    "date-zone-offset" "time-utc->date" "current-date"))
-
-(defun install-chezscheme-library ()
-  (let ((r6rs (remove-duplicates (psx:table-exports '("r" "mp" "ms" "r5" "ev")) :test #'string=)))
-    (psx:eval-library
-     (list* (ssym "library") (list (ssym "chezscheme"))
-	    (cons (ssym "export")
-		  (append (mapcar #'ssym (remove-if (lambda (n) (member n *chezscheme-extras* :test #'string=)) r6rs))
-			  (mapcar #'ssym *chezscheme-extras*)
-			  (list (list (ssym "rename") (list (ssym "%make-parameter") (ssym "make-parameter"))))))
-	    (read-scheme "(import (rnrs) (rnrs mutable-pairs) (rnrs mutable-strings) (rnrs r5rs) (rnrs eval)
-                                  (only (pseudoscheme r7rs syntax) parameterize include)
-                                  (prefix (pseudoscheme host) %))")
-	    (read-forms (asdf:system-relative-pathname :pseudoscheme "src/compat/chezscheme.scm"))))))
 
 ;;; (ikarus): what Ikarus variants of libraries (foo.ikarus.sls) import.
 ;;; R6RS, the extensions Ikarus shares with Chez, from (chezscheme), and
@@ -577,13 +540,14 @@ then the rest."
 REPL's environment for it.")
 
 (defun load-file-at-repl (path)
-  "Load PATH at the REPL we're at: R5RS's (read case-folded) if called
-from there, else R7RS's."
+  "Load PATH at the top level we're at: R5RS's (read case-folded) if
+called from there, Chez's (src/chez/chez.lisp) if from there, else the
+R7RS REPL's."
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
-	(r5rs (at-r5rs-repl-p))
+	(top-level (current-top-level))
 	(value ps:unspecific))
-    (dolist (form (read-forms path :fold-case r5rs) value)
-      (setq value (if r5rs (eval-at-r5rs-repl form) (eval-at-repl form))))))
+    (dolist (form (read-forms path :fold-case (eq top-level :r5rs)) value)
+      (setq value (eval-at-top-level top-level form)))))
 
 (defun load-file (path)
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path))))
@@ -614,10 +578,22 @@ and eval in the interaction environment should be too)?"
        (equal (mapcar #'sname* (funcall (psx:host-ref "psyntax:interaction-library-name")))
 	      '("pseudoscheme" "r5rs" "interaction"))))
 
+(defun current-top-level ()
+  "Which top level is running: :R5RS, :CHEZ or :R7RS (the R7RS REPL's,
+also the default)."
+  (cond ((at-r5rs-repl-p) :r5rs)
+	((at-chez-top-level-p) :chez)	; src/chez/chez.lisp
+	(t :r7rs)))
+
+(defun eval-at-top-level (top-level form)
+  (ecase top-level
+    (:r5rs (eval-at-r5rs-repl form))
+    (:chez (eval-at-chez-top-level form))
+    (:r7rs (eval-at-repl form))))
+
 (defun eval-at-current-repl (form)
-  "Evaluate FORM at R5RS's top level if that's where we are, else at the
-R7RS REPL."
-  (if (at-r5rs-repl-p) (eval-at-r5rs-repl form) (eval-at-repl form)))
+  "Evaluate FORM at the top level we're at (see CURRENT-TOP-LEVEL)."
+  (eval-at-top-level (current-top-level) form))
 
 (defun translate-repl-imports (form)
   "FORM's import sets, R7RS's library names made psyntax's, it being an

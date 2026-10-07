@@ -91,8 +91,8 @@
   (LET ((LEN (LENGTH (THE SIMPLE-STRING NAME))))
     (PROG (.I.0)
       (SETQ .I.0 0)
-      (GO |.loop.290|)
-      |.loop.290|
+      (GO |.loop.306|)
+      |.loop.306|
       (LET ((I .I.0))
         (IF (SCHEME= I LEN)
             (RETURN (WRITE-CHAR #\| PORT))
@@ -108,7 +108,7 @@
                           (WRITE-CHAR #\; PORT))
                         (WRITE-CHAR C PORT))))
               (SETQ .I.0 (SCHEME+ I 1))
-              (GO |.loop.290|)))))))
+              (GO |.loop.306|)))))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-BARRED-SYMBOL 'SCHEME::WRITE-BARRED-SYMBOL)
 (DEFUN WRITE-BOOLEAN (MUMBLE PORT)
   (WRITE-CHAR #\# PORT)
@@ -131,8 +131,8 @@
   (LET ((LEN (LENGTH (THE SIMPLE-STRING OBJ))))
     (PROG (.I.0)
       (SETQ .I.0 0)
-      (GO |.loop.302|)
-      |.loop.302|
+      (GO |.loop.318|)
+      |.loop.318|
       (LET ((I .I.0))
         (IF (SCHEME= I LEN)
             (RETURN (WRITE-CHAR #\" PORT))
@@ -141,7 +141,7 @@
                 (IF (OR (CHAR= C #\\) (CHAR= C #\")) (WRITE-CHAR #\\ PORT))
                 (WRITE-CHAR C PORT))
               (SETQ .I.0 (SCHEME+ I 1))
-              (GO |.loop.302|)))))))
+              (GO |.loop.318|)))))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-STRING-LITERAL 'SCHEME::WRITE-STRING-LITERAL)
 (DEFUN WRITE-LIST (OBJ PORT RECUR)
   (IF (AND (TRUEP (QUOTATION? OBJ))
@@ -215,19 +215,34 @@
                         (WRITE-STRING "#{End-of-file}" PORT)
                         (IF (TRUEP (VECTOR? OBJ))
                             (WRITE-VECTOR OBJ PORT RECUR)
-                            (LET ((TAG (TRUE? (NUMERIC-VECTOR-TAG OBJ))))
-                              (IF (TRUEP TAG)
-                                  (PROGN
-                                    (WRITE-STRING "#" PORT)
-                                    (WRITE-STRING TAG PORT)
-                                    (LET ((ELEMENTS (NUMERIC-VECTOR-ELEMENTS
-                                                     OBJ)))
-                                      (IF (NULL ELEMENTS)
-                                          (WRITE-STRING "()" PORT)
-                                          (WRITE-LIST ELEMENTS PORT RECUR))))
-                                  (IF (EQ OBJ (IF NIL FALSE))
-                                      (WRITE-STRING "#{Unspecific}" PORT)
-                                      (PRIN1 OBJ PORT))))))))))))
+                            (IF (BOX-P OBJ)
+                                (PROGN
+                                  (WRITE-STRING "#&" PORT)
+                                  (FUNCALL RECUR (BOX-CONTENTS OBJ)))
+                                (IF (FXVECTOR-P OBJ)
+                                    (PROGN
+                                      (WRITE-STRING "#vfx" PORT)
+                                      (LET ((ELEMENTS (NUMERIC-VECTOR-ELEMENTS
+                                                       OBJ)))
+                                        (IF (NULL ELEMENTS)
+                                            (WRITE-STRING "()" PORT)
+                                            (WRITE-LIST ELEMENTS PORT RECUR))))
+                                    (LET ((TAG (TRUE? (NUMERIC-VECTOR-TAG OBJ))))
+                                      (IF (TRUEP TAG)
+                                          (PROGN
+                                            (WRITE-STRING "#" PORT)
+                                            (WRITE-STRING TAG PORT)
+                                            (LET ((ELEMENTS (NUMERIC-VECTOR-ELEMENTS
+                                                             OBJ)))
+                                              (IF (NULL ELEMENTS)
+                                                  (WRITE-STRING "()" PORT)
+                                                  (WRITE-LIST ELEMENTS
+                                                              PORT
+                                                              RECUR))))
+                                          (IF (EQ OBJ (IF NIL FALSE))
+                                              (WRITE-STRING "#{Unspecific}"
+                                                            PORT)
+                                              (PRIN1 OBJ PORT))))))))))))))
 (SET-VALUE-FROM-FUNCTION 'WRITE-OTHER 'SCHEME::WRITE-OTHER)
 (DEFUN DISPLAY-TYPE-NAME (NAME PORT)
   (IF (SCHEME-SYMBOL-P NAME)
@@ -240,8 +255,8 @@
                   (WRITE-CHAR (CHAR-UPCASE (CHAR (THE SIMPLE-STRING S) 0)) PORT)
                   (PROG (.I.0)
                     (SETQ .I.0 1)
-                    (GO |.loop.331|)
-                    |.loop.331|
+                    (GO |.loop.348|)
+                    |.loop.348|
                     (LET ((I .I.0))
                       (OR (SCHEME>= I LEN)
                           (PROGN
@@ -249,7 +264,7 @@
                                          (CHAR (THE SIMPLE-STRING S) I))
                                         PORT)
                             (SETQ .I.0 (SCHEME+ I 1))
-                            (GO |.loop.331|))))))
+                            (GO |.loop.348|))))))
                 (DISPLAY NAME PORT)))))
       (DISPLAY NAME PORT)))
 (SET-VALUE-FROM-FUNCTION 'DISPLAY-TYPE-NAME 'SCHEME::DISPLAY-TYPE-NAME)

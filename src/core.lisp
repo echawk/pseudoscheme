@@ -82,6 +82,22 @@
       (scheme-error "bytevector literal: not a byte: ~S" b)))
   (make-array (length list) :element-type '(unsigned-byte 8) :initial-contents list))
 
+;;; Chez Scheme's boxes, #&x (src/chez/), and fxvectors, #vfx(...), a
+;;; vector of fixnums.  Chez's flvectors are SRFI 4's f64vectors here.
+
+(defstruct (box (:constructor make-box (contents)))
+  contents)
+
+(defun fxvector-p (x)
+  (typep x '(simple-array fixnum (*))))
+
+(defun list->fxvector (list)
+  "For the reader's #vfx(...) and Chez's list->fxvector."
+  (dolist (x list)
+    (unless (typep x 'fixnum)
+      (scheme-error "fxvector: not a fixnum: ~S" x)))
+  (make-array (length list) :element-type 'fixnum :initial-contents list))
+
 ;;; Homogeneous numeric vectors (SRFI 4, SRFI 160) are CL specialized
 ;;; vectors: a u8vector is a bytevector, an s16vector a (simple-array
 ;;; (signed-byte 16) (*)), an f64vector a (simple-array double-float

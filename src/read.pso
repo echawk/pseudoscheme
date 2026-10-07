@@ -507,10 +507,12 @@
              (SET-PORT-FOLD-CASE PORT (STRING= NAME "fold-case")))
          (IF (OR (STRING= NAME "srfi-88") (STRING= NAME "no-srfi-88"))
              (SET-PORT-KEYWORDS PORT (STRING= NAME "srfi-88")))
-         (LET ((READER (READER-DIRECTIVE PORT NAME)))
-           (IF (TRUEP READER)
-               (CALL-ALTERNATIVE-READER READER PORT)
-               (SUB-READ PORT)))))))
+         (IF (STRING= NAME "eof")
+             EOF-OBJECT
+             (LET ((READER (READER-DIRECTIVE PORT NAME)))
+               (IF (TRUEP READER)
+                   (CALL-ALTERNATIVE-READER READER PORT)
+                   (SUB-READ PORT))))))))
 (DEFUN SUB-READ-DATUM-LABEL (C PORT)
   C
   (PROG (.N.0)
@@ -534,9 +536,51 @@
                              #'(LAMBDA NIL (SUB-READ-CAREFULLY PORT))))
                     (IF (CHAR= D #\#)
                         (RETURN (DATUM-LABEL-REFERENCE PORT N))
-                        (IF (ALPHA-CHAR-P D)
-                            (RETURN (SUB-READ-ARRAY-LITERAL N D PORT))
-                            (RETURN (READING-ERROR PORT "bad datum label" N D)))))))))))
+                        (IF (CHAR= D #\()
+                            (LET ((ELEMENTS (SUB-READ-LIST C PORT)))
+                              (IF (SCHEME> (LENGTH ELEMENTS) N)
+                                  (READING-ERROR
+                                   PORT
+                                   "too many elements for the vector's length"
+                                   N))
+                              (LET ((V (MAKE-VECTOR N
+                                                    (PROG (L)
+                                                      (SETQ L ELEMENTS)
+                                                      (GO .LAST)
+                                                      .LAST
+                                                      (IF (NULL L)
+                                                          (RETURN 0)
+                                                          (IF (NULL (CDR (THE CONS
+                                                                              L)))
+                                                              (RETURN (CAR (THE CONS
+                                                                                L)))
+                                                              (PROGN
+                                                                (SETQ L
+                                                                      (CDR (THE CONS
+                                                                                L)))
+                                                                (GO .LAST))))))))
+                                (RETURN (PROG (I L)
+                                          (PSETQ I 0 L ELEMENTS)
+                                          (GO |.loop.153|)
+                                          |.loop.153|
+                                          (IF (NULL L)
+                                              (RETURN V)
+                                              (PROGN
+                                                (SETF (SVREF V I)
+                                                      (CAR (THE CONS L)))
+                                                UNSPECIFIC
+                                                (PSETQ I
+                                                       (SCHEME+ I 1)
+                                                       L
+                                                       (CDR (THE CONS L)))
+                                                (GO |.loop.153|)))))))
+                            (IF (ALPHA-CHAR-P D)
+                                (RETURN (SUB-READ-ARRAY-LITERAL N D PORT))
+                                (RETURN (READING-ERROR
+                                         PORT
+                                         "bad datum label"
+                                         N
+                                         D))))))))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-DATUM-LABEL 'SCHEME::SUB-READ-DATUM-LABEL)
 (DEFUN SUB-READ-ARRAY-LITERAL (RANK FIRST PORT)
   (LET ((TAG (READ-ARRAY-TAG FIRST PORT)))
@@ -872,7 +916,7 @@
 (SET-VALUE-FROM-FUNCTION 'PARSE-TOKEN 'SCHEME::PARSE-TOKEN)
 (LOCALLY
   (DECLARE (SPECIAL STRANGE-SYMBOL-NAMES))
-  (SETQ STRANGE-SYMBOL-NAMES '("+" "-" "..." "1+" "-1+")))
+  (SETQ STRANGE-SYMBOL-NAMES '("+" "-" "..." "1+" "-1+" "1-")))
 (SET-FUNCTION-FROM-VALUE 'STRANGE-SYMBOL-NAMES 'SCHEME::STRANGE-SYMBOL-NAMES)
 (DEFUN INTERN-TOKEN (.STRING)
   (LET ((.STRING.0 (IF *FOLD-CASE* (STRING-DOWNCASE .STRING) .STRING))
@@ -959,11 +1003,29 @@
    #\v
    #'(LAMBDA (C PORT)
        (.READ-CHAR PORT)
-       (IF (NOT (AND (EQL (.READ-CHAR PORT) #\u)
-                     (EQL (.READ-CHAR PORT) #\8)
-                     (EQL (.READ-CHAR PORT) #\()))
-           (READING-ERROR PORT "bad #vu8 syntax"))
-       (LIST->BYTEVECTOR (SUB-READ-LIST C PORT)))))
+       (LET ((A (.READ-CHAR PORT)))
+         (LET ((B (.READ-CHAR PORT)))
+           (LET NIL
+             (IF (NOT (EQL (.READ-CHAR PORT) #\())
+                 (READING-ERROR PORT "bad #v syntax"))
+             (IF (AND (EQL A #\u) (EQL B #\8))
+                 (LIST->BYTEVECTOR (SUB-READ-LIST C PORT))
+                 (IF (AND (EQL A #\f) (EQL B #\x))
+                     (LIST->FXVECTOR (SUB-READ-LIST C PORT))
+                     (IF (AND (EQL A #\f) (EQL B #\l))
+                         (LIST->NUMERIC-VECTOR "f64" (SUB-READ-LIST C PORT))
+                         (READING-ERROR PORT "bad #v syntax"))))))))))
+(AT-TOP-LEVEL
+  (DEFINE-SHARP-MACRO
+   #\&
+   #'(LAMBDA (C PORT) C (.READ-CHAR PORT) (MAKE-BOX (SUB-READ-CAREFULLY PORT)))))
+(AT-TOP-LEVEL
+  (DEFINE-SHARP-MACRO
+   #\%
+   #'(LAMBDA (C PORT)
+       C
+       (.READ-CHAR PORT)
+       (LIST 'SCHEME::$PRIMITIVE (SUB-READ-CAREFULLY PORT)))))
 (AT-TOP-LEVEL
   (DEFINE-SHARP-MACRO
    #\'

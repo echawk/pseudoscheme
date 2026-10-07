@@ -168,7 +168,9 @@
   :pathname #p"src/"
   :depends-on (:pseudoscheme/r7rs-runtime
 	       :cl-unicode			; (rnrs unicode)
-	       :trivial-gray-streams)		; (rnrs io ports)
+	       :trivial-gray-streams		; (rnrs io ports)
+	       :bordeaux-threads		; (chezscheme)'s threads
+	       #+sbcl :sb-posix)		; (chezscheme)'s getpid, putenv
   :components ((:module "r6rs"
 		:components ((:file "rts")
 			     (:file "lists" :depends-on ("rts"))
@@ -181,17 +183,26 @@
 			     (:file "enums" :depends-on ("conditions"))
 			     (:file "ports" :depends-on ("bytevectors" "enums"))
 			     (:file "r7rs-compat" :depends-on ("ports"))))
-	       (:module "compat"
+	       ;; Chez Scheme's (chezscheme): host procedures here, the
+	       ;; library and Chez's top level in pseudoscheme/r7rs
+	       ;; (src/chez/chez.lisp); docs/chez.md
+	       (:module "chez"
 		:depends-on ("r6rs" "psyntax")
-		:components ((:file "chezscheme-host")
-			     (:static-file "chezscheme.scm")
-			     (:static-file "ikarus.scm")))
+		:components ((:file "host")
+			     (:file "ffi" :depends-on ("host"))
+			     (:static-file "chezscheme.scm") (:static-file "ffi.scm") (:static-file "lists.scm")
+			     (:static-file "numbers.scm") (:static-file "hashtables.scm")
+			     (:static-file "threads.scm") (:static-file "conditions.scm")
+			     (:static-file "top-level.scm")))
+	       (:module "compat"
+		:depends-on ("r6rs" "psyntax" "chez")
+		:components ((:static-file "ikarus.scm")))
 	       (:file "psyntax" :depends-on ("r6rs"))
 	       (:file "continuations" :depends-on ("psyntax"))
 	       (:file "library-cache" :depends-on ("psyntax" "continuations"))
 	       (psyntax-image "psyntax-pseudoscheme"
 		:pathname "../vendor/psyntax/psyntax-pseudoscheme"
-		:depends-on ("r6rs" "compat" "psyntax" "continuations" "library-cache"))))
+		:depends-on ("r6rs" "chez" "compat" "psyntax" "continuations" "library-cache"))))
 
 ;;; The Common Lisp face: packages R5RS, R6RS and R7RS (EVAL, LOAD,
 ;;; REPL, EXPAND, USE-LIBRARY, ...), and the bridge between the
@@ -237,7 +248,15 @@
   :pathname #p"src/r7rs/"
   :depends-on (:pseudoscheme/r6rs)
   :components ((:static-file "syntax.sls")
-	       (:file "front")))
+	       (:static-file "../control.sls")
+	       (:file "front")
+	       (:module "chez" :pathname "../chez/"
+		:depends-on ("front")
+		:components ((:file "chez")))
+	       (:module "guile" :pathname "../guile/"
+		:depends-on ("front")
+		:components ((:file "guile")
+			     (:static-file "guile.scm")))))
 
 ;;; Regenerates translator.files' .pso bootstrap artifacts from their
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.

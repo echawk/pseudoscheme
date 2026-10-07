@@ -1,18 +1,21 @@
 ;;; -*- Mode: Scheme -*-
-;;;; The body of Pseudoscheme's (chezscheme) library: Chez Scheme
-;;;; extensions that portable-in-practice libraries use, mostly through
-;;;; the Chez variants (foo.chezscheme.sls) of Akku packages.  The library
-;;;; form around this, which re-exports R6RS as Chez's does, is built by
-;;;; src/r7rs/front.lisp; host procedures come in with a % prefix.
-;;;;
-;;;; Only what libraries actually use is here (see ROADMAP.md for how the
-;;;; list was found).  No FFI, no ftypes, no guardians.
+;;;; The first part of the body of Pseudoscheme's (chezscheme) library:
+;;;; the Chez Scheme extensions the Chez variants of Akku packages
+;;;; (foo.chezscheme.sls) use.  The library form around this and the
+;;;; other src/chez/*.scm files, which re-exports R6RS as Chez's does, is
+;;;; built by src/chez/chez.lisp; host procedures come in with a %
+;;;; prefix.  docs/chez.md says what is and isn't here.
 
+;; Chez's parameters: called with a value, they set it
+(define make-parameter
+  (case-lambda ((init) (%chez:make-parameter init))
+               ((init converter) (%chez:make-parameter init converter))))
 (define (void) (if #f #f))
 (define (add1 n) (+ n 1))
 (define (sub1 n) (- n 1))
 (define call/1cc call/cc)
-(define gensym %gensym)
+(define gensym
+  (case-lambda (() (%chez:make-gensym "g")) ((name) (%chez:make-gensym name))))
 (define getenv %get-environment-variable)
 (define system %chez:system)
 (define with-input-from-string %chez:with-input-from-string)
@@ -31,7 +34,6 @@
 (define get-mode %chez:get-mode)
 (define chmod %chez:chmod)
 (define file-change-time %chez:file-change-time)
-(define library-directories %chez:library-directories)
 (define (source-directories) '("."))
 (define (record-writer . args) (if #f #f))
 (define (collect . args) (if #f #f))
@@ -75,64 +77,18 @@
     (let loop ((i (- n 1)) (acc '()))
       (if (< i 0) acc (loop (- i 1) (cons (+ start (* i step)) acc))))))
 
-;; Boxes
-(define-record-type (box-type box box?) (fields (mutable contents unbox set-box!)))
+;; Boxes, the host's (#&x reads as one)
+(define box %chez:box)
+(define box? %chez:box?)
+(define unbox %chez:unbox)
+(define set-box! %chez:set-box!)
+(define box-cas! %chez:box-cas!)
 
-;; format: (format #f fmt arg ...) => string, (format #t ...) to the
-;; current output port, (format port ...), and Chez's (format fmt arg ...).
-;; Directives: ~a ~s ~w ~d ~b ~o ~x ~c ~% ~n ~~, and ~<newline> to skip
-;; to the next non-blank.
-(define (format-to port fmt args)
-  (let ((n (string-length fmt)))
-    (let loop ((i 0) (args args))
-      (when (< i n)
-        (let ((c (string-ref fmt i)))
-          (if (and (char=? c #\~) (< (+ i 1) n))
-              (let ((d (char-downcase (string-ref fmt (+ i 1)))))
-                (case d
-                  ((#\a) (display (car args) port) (loop (+ i 2) (cdr args)))
-                  ((#\s #\w) (write (car args) port) (loop (+ i 2) (cdr args)))
-                  ((#\d) (display (number->string (car args) 10) port) (loop (+ i 2) (cdr args)))
-                  ((#\b) (display (number->string (car args) 2) port) (loop (+ i 2) (cdr args)))
-                  ((#\o) (display (number->string (car args) 8) port) (loop (+ i 2) (cdr args)))
-                  ((#\x) (display (number->string (car args) 16) port) (loop (+ i 2) (cdr args)))
-                  ((#\c) (write-char (car args) port) (loop (+ i 2) (cdr args)))
-                  ((#\% #\n) (newline port) (loop (+ i 2) args))
-                  ((#\~) (write-char #\~ port) (loop (+ i 2) args))
-                  ((#\newline)
-                   (let skip ((j (+ i 2)))
-                     (if (and (< j n) (char-whitespace? (string-ref fmt j)))
-                         (skip (+ j 1))
-                         (loop j args))))
-                  (else (write-char c port) (loop (+ i 1) args))))
-              (begin (write-char c port) (loop (+ i 1) args))))))))
-
-(define (format dest . rest)
-  (cond ((string? dest)
-         (call-with-string-output-port (lambda (p) (format-to p dest rest))))
-        ((eq? dest #f)
-         (call-with-string-output-port (lambda (p) (format-to p (car rest) (cdr rest)))))
-        ((eq? dest #t) (format-to (current-output-port) (car rest) (cdr rest)))
-        (else (format-to dest (car rest) (cdr rest)))))
-
-(define (printf fmt . args) (format-to (current-output-port) fmt args))
-(define (fprintf port fmt . args) (format-to port fmt args))
+;; format, printf, fprintf, errorf, warningf: src/chez/conditions.scm
 
 (define (pretty-print x . port)
   (let ((p (if (pair? port) (car port) (current-output-port))))
     (write x p)
-    (newline p)))
-
-(define (errorf who fmt . args)
-  (error who (call-with-string-output-port (lambda (p) (format-to p fmt args)))))
-(define (assertion-violationf who fmt . args)
-  (assertion-violation who (call-with-string-output-port (lambda (p) (format-to p fmt args)))))
-(define (warningf who fmt . args)
-  (let ((p (current-error-port)))
-    (display "Warning" p)
-    (when who (display " in " p) (display who p))
-    (display ": " p)
-    (format-to p fmt args)
     (newline p)))
 
 (define-syntax fluid-let
@@ -206,6 +162,41 @@
 (define (date-month d) (date-type*-month d))
 (define (date-year d) (date-type*-year d))
 (define (date-zone-offset d) (date-type*-zone-offset d))
+
+(define (time->nanoseconds t) (+ (* (time-second t) 1000000000) (time-nanosecond t)))
+(define (nanoseconds->time type ns)
+  (make-time type (mod ns 1000000000) (div ns 1000000000)))
+(define (copy-time t) (make-time (time-type t) (time-nanosecond t) (time-second t)))
+(define (time-difference a b)
+  (nanoseconds->time 'time-duration (- (time->nanoseconds a) (time->nanoseconds b))))
+(define (time-difference! a b) (time-difference a b))
+(define (add-duration t d)
+  (nanoseconds->time (time-type t) (+ (time->nanoseconds t) (time->nanoseconds d))))
+(define (add-duration! t d) (add-duration t d))
+(define (subtract-duration t d)
+  (nanoseconds->time (time-type t) (- (time->nanoseconds t) (time->nanoseconds d))))
+(define (subtract-duration! t d) (subtract-duration t d))
+(define (time=? a b) (= (time->nanoseconds a) (time->nanoseconds b)))
+(define (time<? a b) (< (time->nanoseconds a) (time->nanoseconds b)))
+(define (time<=? a b) (<= (time->nanoseconds a) (time->nanoseconds b)))
+(define (time>? a b) (> (time->nanoseconds a) (time->nanoseconds b)))
+(define (time>=? a b) (>= (time->nanoseconds a) (time->nanoseconds b)))
+
+(define (date->time-utc d)
+  ;; days from the civil date (Howard Hinnant's algorithm)
+  (let* ((y (if (<= (date-month d) 2) (- (date-year d) 1) (date-year d)))
+         (era (div y 400))
+         (yoe (- y (* era 400)))
+         (m (date-month d))
+         (doy (+ (div (+ (* 153 (+ m (if (> m 2) -3 9))) 2) 5) (- (date-day d) 1)))
+         (doe (+ (* yoe 365) (div yoe 4) (- (div yoe 100)) doy))
+         (days (+ (* era 146097) doe -719468)))
+    (make-time 'time-utc (date-nanosecond d)
+               (- (+ (* days 86400) (* 3600 (date-hour d)) (* 60 (date-minute d)) (date-second d))
+                  (date-zone-offset d)))))
+
+(define (date-week-day d)
+  (mod (+ 4 (div (time-second (date->time-utc d)) 86400)) 7))
 
 (define (time-utc->date t . offset)
   ;; days-from-civil inverted (Howard Hinnant's algorithm)

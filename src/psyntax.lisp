@@ -54,7 +54,9 @@
 		  (psl:install-variable! *host* name value))
 		(location name))))
     (setf (symbol-value loc) value)
-    (when (functionp value) (ps:set-function-from-value loc))
+    (if (functionp value)
+	(ps:set-function-from-value loc)
+	(unless (get loc 'ps::defined) (setf (get loc 'ps::defined) t)))
     value))
 
 (defmacro defhost (name lambda-list &body body)
@@ -802,7 +804,7 @@ An entry (PREFIX . DIR) roots names beginning with PREFIX at DIR: (srfi
   "Implementation-specific variants of a library file to try, in order:
 foo.pseudoscheme.sls first, then the generic foo.sls (NIL), then other
 systems' variants, as Akku lays them out.  Chez's is next because
-nearly every Akku package has one, and src/compat/ supplies the
+nearly every Akku package has one, and src/chez/ supplies the
 (chezscheme) library such variants import; Ikarus is psyntax-based.")
 
 (defun native-path (string)
@@ -852,9 +854,13 @@ define-library forms (src/r7rs/front.lisp).")
 	(and pending (fourth pending)
 	     (prog1 (fourth pending) (setf (fourth pending) nil))))
       (and *library-form-hook* (funcall *library-form-hook* name))
+      ;; the file's first datum, if it is a library form (a file that
+      ;; begins otherwise may define its library at top level, as Chez
+      ;; allows: *LIBRARY-LOADERS*)
       (let ((file (locate-library-file name)))
 	(and (stringp file)
-	     (with-open-file (in file) (funcall ps:*scheme-read* in))))
+	     (let ((form (with-open-file (in file) (funcall ps:*scheme-read* in))))
+	       (and (psl:keyword-head-p form "library") form))))
       ps:false))
 
 (defun locate-library-file (name)
