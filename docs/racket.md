@@ -26,8 +26,9 @@ to Racket CS (Chez Scheme) and Racket BC (C). Concretely:
 The output of `schemify` is the wrong layer to target (see "Why
 linklets"). The hard runtime problems are continuation marks and
 prompts (Racket's `parameterize`, exception handlers and `with-handlers`
-are built on them), structs with properties, and ports. The first of
-these is the same work as full continuations (docs/continuations.md).
+are built on them), structs with properties, and ports. Full
+re-entrant continuations exist now (docs/continuations.md); marks and
+prompts would go on the frames they already push.
 
 ## How Racket is layered
 
@@ -185,8 +186,9 @@ to a Lisp function, compiled with `compile`.
   translator (src/*.scm) already compiles it to Lisp: lambdas, `if`,
   `letrec`, calls, proper handling of `set!`. The linklet compiler can
   be a front end to the translator's back end rather than new code.
-  The open-coding of primitives (src/psyntax.lisp,
-  `*closed-primitives*`) carries over.
+  The open-coding of primitives (the translator's built-ins,
+  src/builtin.scm, and the host's inline primitives,
+  `*inline-primitives*` in src/psyntax.lisp) carries over.
 
 Test it on linklets dumped from a real Racket: a `boot/racket/` script,
 like the one used above, that compiles modules with
@@ -219,12 +221,17 @@ conditions. What's new:
     space. Code like this is rare outside the runtime, but it exists.
   - Prompts and aborts, and escaping continuations
     (`call-with-escape-continuation`, which is most `call/cc` use in
-    practice) map onto `catch`/`throw` as `call/cc` does today.
+    practice) map onto `catch`/`throw`, as an escape-only `call/cc`
+    does today (one the analysis proves is only used to escape, or any
+    with `--continuations=escape`).
   - **Composable and re-entrant continuations** (`racket/control`,
-    `racket/generator`, the web server's `send/suspend`) need the generalized-stack-inspection transformation of
-    docs/continuations.md. That paper builds continuations *out of*
-    continuation marks, so implementing marks properly is a step
-    towards it, not a detour.
+    `racket/generator`, the web server's `send/suspend`). Re-entrant
+    ones exist: the generalized-stack-inspection transformation of
+    docs/continuations.md is the default. Composable ones exist only in
+    SRFI 226's library implementation on top of `call/cc`; natively, a
+    composable continuation would copy the frames up to a prompt frame
+    and rebuild them on top of the current stack, and marks would be a
+    slot in each frame (docs/continuations.md, "Further work").
 - **Structs.** `make-struct-type` with properties, guards, inspectors,
   prefab structs, and `prop:procedure`: applicable structs. Keyword
   procedures (`make-optional-keyword-procedure` above) are applicable
@@ -248,8 +255,9 @@ conditions. What's new:
   layer schedules with engines (preemption via continuations and timer
   interrupts). Two options: map them onto Lisp threads (simplest, but
   the runtime's shared state then needs locking; see ROADMAP.md 4,
-  thread safety), or host the `thread` layer once full continuations
-  exist. Start with Lisp threads.
+  thread safety), or host the `thread` layer on full continuations,
+  which exist (SRFI 226's own threads already run that way). Start
+  with Lisp threads.
 - **Keywords.** Racket's keywords can be Lisp keywords: `#:name` reads
   as `:NAME` today (docs/interop.md), so a Racket keyword argument is
   already the Lisp spelling.
@@ -273,10 +281,13 @@ and `eval`, and `#lang` works.
 
 `racket/base` and its dependencies are a few hundred modules. Expanding
 them from source on every start is far too slow (it's slow even on
-Racket CS), so compiled linklets must be cached. That's ROADMAP.md 2's
-compiled-library cache again: Lisp fasls keyed by the module's source
-hash, the versions of the modules it depends on, and the expander's
-version, the way Racket keys `compiled/*.zo`. Two ways to fill it:
+Racket CS), so compiled linklets must be cached. That builds on the
+existing compiled-library cache (src/library-cache.lisp), which keeps
+Lisp fasls keyed by a library's form, a build signature and the ids of
+the libraries it was expanded against; for Racket the key would be the
+module's source hash, the versions of the modules it depends on, and
+the expander's version, the way Racket keys `compiled/*.zo`. Two ways
+to fill it:
 
 - compile from source with the hosted expander (always possible);
 - or, as a shortcut, load machine-independent `.zo` files that a real
@@ -335,11 +346,11 @@ interface is workable for a third party.
 - **Version coupling.** The expander linklet, the primitive tables and
   the `.zo` format change between Racket versions. Pin one version (9.3
   is installed here) and move deliberately.
-- **Control.** Without full continuations, programs that use
-  `racket/control`, generators or the web server's `send/suspend`
-  won't run. With escape-only continuations and marks, `racket/base`
-  should mostly work. Re-entry is the continuations work, which this
-  plan depends on but doesn't block on.
+- **Control.** Re-entrant continuations exist, so the risk is now
+  continuation marks and prompts in the runtime, and composable
+  continuations on the existing frames. Without them, `parameterize`,
+  exception handling, `racket/control` and the web server's
+  `send/suspend` won't run as Racket's own code expects.
 - **Speed.** Contracts, keyword procedures and generic sequences (`for`
   over non-specialized sequences) are expensive without schemify-style
   optimizations, so the linklet compiler's inference matters.
@@ -351,7 +362,7 @@ interface is workable for a third party.
    S-expressions (the snippet above, generalized).
 2. The linklet compiler and `#%linklet`, tested on hand-written linklets
    and on `fact`/`greet`, with the few primitives they use.
-3. Continuation marks and prompts in the runtime, shared with the
-   continuations work (docs/continuations.md).
+3. Continuation marks and prompts in the runtime, on the frames full
+   continuations push (docs/continuations.md, "Further work").
 4. A primitive-coverage script, then `#%kernel` until the expander
    linklet instantiates, then until `racket/base` instantiates.

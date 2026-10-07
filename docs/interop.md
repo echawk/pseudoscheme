@@ -24,7 +24,7 @@ libraries in `tests/programs/` (`make test-programs`); examples are in
 | port | stream | |
 | record | struct instance | |
 | condition | condition | Lisp errors are conditions in Scheme handlers, and vice versa |
-| multiple values | multiple values | |
+| multiple values | multiple values | except from a Lisp function treated as a predicate (section 2), which returns its first value only |
 | `dynamic-wind` | `unwind-protect` | |
 
 **Booleans** are the one real mismatch: `#f` is the symbol `PS:FALSE`,
@@ -55,7 +55,7 @@ A Lisp function counts as a predicate when:
   `STRING=`, `MEMBER`, `FIND`, `SOME`, and so on.
 
 `*not-lisp-predicates*` lists the names that only look like predicates
-(`MAP`).
+(`MAP`, `STEP`, `LOOP`, `SLEEP`, `DRIBBLE`).
 
 The rule for callbacks covers the common case, `(filter #'evenp ...)`.
 For a Lisp callback that returns *lists* to Scheme (where `NIL` means
@@ -95,7 +95,9 @@ package-inferred systems use.
   compiled as Lisp; see 3.5.
 - **Every other symbol** (types, classes, lambda-list keywords...) is
   syntax for the symbol itself, so `(cl:typep x cl:integer)` needs no
-  quote.
+  quote. A symbol that names a function too (`cl:character`) is the
+  function, outside Lisp macro calls; `(lisp-symbol "character" "cl")`
+  is the symbol.
 
 A library is built when first imported: a fraction of a second for all
 of `COMMON-LISP`. After that, a `(cl ...)` import costs nothing.
@@ -147,7 +149,7 @@ use it for their own keywords.
 | `(lisp-symbol name [package])` | a symbol, written the Scheme way: `(lisp-symbol "equal" "cl")` |
 | `(lisp-keyword name)` | what `#:name` reads as |
 | `(lisp-function name [package])` | the raw function, which Scheme calls without conversion |
-| `(lisp-funcall f arg ...)`, `(lisp-apply f arg ... list)` | call with `#f` passed as `NIL`; results unconverted |
+| `(lisp-funcall f arg ...)`, `(lisp-apply f arg ... list)` | call F; results unconverted. `#f` is passed as `NIL` when F is a `(cl ...)` export or a symbol, but not yet when it is a raw function from `lisp-function` (ROADMAP 4) |
 | `(lisp-value symbol)`, `(set-lisp-value! symbol v)` | `symbol-value` |
 | `(lisp-symbol-of id)` | the Lisp symbol behind a `(cl ...)` variable |
 | `(call-with-lisp-bindings symbols values thunk)` | `progv` |
@@ -176,13 +178,14 @@ each identifier is:
 |---|---|
 | a Scheme variable or procedure (`numbers`, `even?`, `square`) | a placeholder: the form is compiled, once, as a Lisp function of the placeholders, and the expansion calls it with the variables' values. A placeholder in operator position calls its value. |
 | an export of a `(cl ...)` library (`cl:car`, `cl:parse-error`, `cl:*print-base*`, a nested `cl:when`) | its Lisp symbol |
-| Scheme syntax with a Lisp counterpart: `lambda`, `if`, `let`, `let*`, `quote`, `set!` (`setq`), `begin` (`progn`), `and`, `or`, `when`, `unless`, `cond`, `case`, `do`, `else` (`t`) | that Lisp operator |
+| Scheme syntax with a Lisp counterpart: `lambda`, `if`, `let`, `let*`, `quote`, `quasiquote`, `set!` (`setq`), `begin` (`progn`), `and`, `or`, `when`, `unless`, `cond`, `case`, `do`, `else` (`t`) | that Lisp operator |
 | other Scheme syntax | an error |
 | unbound (`for`, `in`, `collect`, and `x`, which `loop` binds) | the symbol of that name in the macro's package, else in `COMMON-LISP`, else the Scheme symbol itself; `:name` is a keyword |
 
 Quoted data stays Scheme data, except that `(cl ...)` exports inside it
-become their Lisp symbols. Values cross by the section 2 rules, and so
-does the result. Because unbound names become the Scheme symbols, a
+become their Lisp symbols. Values passed in cross by the section 2
+rules; the result comes back unconverted, so `NIL` is `()`, and a `#f`
+passed through comes back as `()`. Because unbound names become the Scheme symbols, a
 class or function defined from Scheme is named by Scheme's symbol:
 `'circle` is the class above, and `(lisp-function 'radius)` is its
 reader.
@@ -277,7 +280,8 @@ meanings where they exist**:
 - a call of a name that is neither, and that Scheme doesn't bind, calls
   the global Lisp function of that name when it runs, as in Lisp: so a
   `defun` whose body uses a Scheme macro can call itself. Pass such a
-  function as a value with `#'name`;
+  function as a value with `#'name` (wrapped as a non-predicate,
+  whatever its name);
 - quoted data is Lisp data, and `NIL` is the empty list;
 - other symbols are Scheme's: syntax, Scheme-only procedures, and the
   variables the macro binds.
@@ -310,13 +314,18 @@ Each of `R7RS`, `R6RS` and `R5RS` has:
 | `load file`, `repl` | |
 | `expand source` | the core Scheme an expression expands to |
 | `translate source` | the Lisp code it compiles to |
-| `procedure name &key library convert` | a Scheme procedure as a Lisp function |
+| `procedure name &key library convert` | a Scheme procedure as a Lisp function (`r5rs:procedure` has no `:library`) |
 | `read-from-string`, `write-to-string` | the Scheme reader and writer |
 | `true-p`, `false`, `true`, `verbatim` | |
 
 `R7RS` and `R6RS` also have `use-library`, `library-exports`,
 `*library-path*` and `add-library-directory`. These names shadow CL's,
 so use them package-qualified (`r7rs:eval`).
+
+`(pseudoscheme-api:precompile-libraries &key directory output)` expands
+and compiles the libraries (`.sld` files) under a directory into the
+compiled-library cache, the bundled SRFIs by default; the command
+line's `--precompile-srfi` and `--precompile DIR` call it.
 
 ### 4.4 Errors
 
@@ -346,8 +355,10 @@ re-evaluating a `define-library` at the REPL) picks up changes. This is
 also how a Scheme library reaches Lisp users who never install a Scheme
 package manager: ship it as an ASDF system.
 
-Compiling the component does nothing yet: there are no compiled Scheme
-libraries (ROADMAP), so each load expands the sources again.
+Compiling the component does nothing: the component's own libraries
+are expanded again on each load (ROADMAP 2: compile them into the
+system's fasls). Libraries they import from the library path load from
+the compiled-library cache (README, "Loading real libraries").
 
 ## 6. Scheme libraries from Scheme package managers
 
@@ -363,8 +374,10 @@ measures how many load.
   `cl:defmethod` work through 3.5, with Lisp syntax. A `(pseudoscheme
   clos)` with Scheme-style forms (`define-class`, `define-method`
   bodies as Scheme) could follow.
-- **Compiled libraries** (ROADMAP). These would also make code that uses
-  Scheme macros from Lisp loadable from fasls into a fresh image.
+- **Compiled ASDF components**, and fasls of Lisp code that uses Scheme
+  macros, loadable into a fresh image (ROADMAP 2 and 4). Libraries from
+  the library path are compiled and cached; libraries that import a
+  `(cl ...)` library aren't, since their expansions hold Lisp functions.
 - **Continuations** captured in Scheme called from Lisp can escape
   through the Lisp frames above them but not be re-entered through
   them: a Scheme procedure handed to Lisp (`lisp-facing`, so any

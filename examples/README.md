@@ -17,7 +17,12 @@ on the source registry, or push it onto `asdf:*central-registry*`.
 (push #p"/path/to/pseudoscheme-asdf/examples/mixed-system/" asdf:*central-registry*)
 (asdf:load-system :mixed-demo)
 (mixed-demo:report '(2 4 4 4 5 5 7 9))
-;; n = 8, mean = 5, median = 9/2, standard deviation = 2.000
+;; prints
+;;   n = 8
+;;   mean = 5
+;;   median = 9/2
+;;   standard deviation = 2.000
+;; and returns the summary as an alist
 ```
 
 `docs/interop.md` describes the bridge in full.

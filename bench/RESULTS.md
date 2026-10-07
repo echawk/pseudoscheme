@@ -8,22 +8,26 @@ the figure in parentheses is the ratio to Chez Scheme. Lower is better.
 | implementation | version | geometric mean vs Chez | benchmarks completed |
 |---|---|---|---|
 | Chez Scheme (with akku-r7rs; `--optimize-level 2`) | 10.4.1 | 1.0× | 57/57 |
-| **Pseudoscheme** (SBCL 2.6.9; full continuations, the default) | 3.0 | **1.55×** | **57/57** |
-| Pseudoscheme, `--continuations=escape` | 3.0 | 1.44× | 57/57 |
+| **Pseudoscheme** (SBCL 2.6.9; full continuations, the default) | 3.0 | **1.37×** (1.55× before the second pass) | **57/57** |
+| Pseudoscheme, `--continuations=escape` | 3.0 | 1.30× (1.44× before) | 57/57 |
 | Guile | 3.0.11 | 2.8× | 56/57 |
 | Gauche | 0.9.15 | 9.2× | 57/57 |
 | Chibi (a bytecode interpreter) | 0.12.0 | 35.7× | 49/57 |
 
-Pseudoscheme is at or ahead of Chez on 14 benchmarks (`tail`,
-`chudnovsky`, `pi`, `earley`, `fft`, `mbrot`, `mperm`, `ntakl`,
-`parsing`, `cat`, ...), within 1.5× on 32 and within 2× on 41. Its worst ratios are
-`ack` (3.9×), `fibc` (3.7×), `divrec` (3.6×) and `browse` (3.5×), which
-come down to SBCL's own call and allocation costs. Full continuations
-(re-entrant, from generalized stack inspection: docs/continuations.md)
-cost 7.7% over escape-only as a geometric mean; most benchmarks run at
-the same speed, and the cost is in programs that call unknown
-procedures in tight loops (`lattice`, `graphs`, `quicksort`, `conform`,
-`matrix`: 1.6–1.8×).
+The table under "All benchmarks" is the first run. In the second
+pass's run (next
+section), with full continuations, Pseudoscheme is at or ahead of Chez
+on 15 benchmarks, within 1.5× on 33 and within 2× on 41. Its worst
+ratios are `conform` (3.6×), `ack` (3.6×), `fibc` (3.6×), `divrec`
+(3.5×), `browse` (3.4×) and `matrix` (3.4×); `ack`, `divrec` and
+`browse` come down to SBCL's own call and allocation costs, and
+`conform` and `matrix` are among those full continuations cost most.
+Full continuations (re-entrant, from generalized stack inspection:
+docs/continuations.md) cost 5.0% over escape-only as a geometric mean
+(7.7% in the first run); 39 of 57 benchmarks run within 5%, and the
+cost is in programs that call unknown procedures in tight loops
+(`lattice`, `matrix`, `conform`, `quicksort`: 1.66–1.76×; `scheme`,
+`graphs`: 1.4×).
 
 **Caveats.**
 - Chez, Guile, Gauche and Chibi are from an earlier run, in which the
@@ -47,9 +51,9 @@ then `python3 bench/summarize.py`.
 
 With the default full continuations, after the changes ROADMAP section
 2 lists under "Done in this pass": **1.37×** Chez's time as a geometric
-mean, from 1.55×, with all 57 benchmarks completing (a single run, the
-machine otherwise idle; escape-only mode wasn't rerun). Against the
-table above:
+mean, from 1.55×, and 1.30× escape-only, from 1.44×, with all 57
+benchmarks completing (single runs, the machine otherwise idle).
+Against the first run ("All benchmarks", its `full` column):
 
 | benchmark | before | after | now vs Chez | what |
 |---|---|---|---|---|
@@ -63,16 +67,17 @@ table above:
 | primes | 1.24 | 0.99 | 1.90× | inline fixnum `quotient`/`remainder`/`modulo` |
 
 Where no reason is given, the benchmark doesn't use what changed much,
-and part of the difference is from run to run. A few benchmarks that
-came out slower than in the table (`read1`, `paraffins`) were checked
-against a build from before the changes, run alternately on the same
-day: `read1` 1.72 s before and 1.55–1.62 s after, `paraffins` within
-0.2 s either way. The table above is from an earlier day.
+and part of the difference is from run to run: the first run is from an
+earlier day. Two benchmarks came out slower than in the first run
+(`read1`, `paraffins`), and were checked against a build from before
+the changes, the two run alternately on the same day: `read1` 1.45 s
+before and 1.43 s after, `paraffins` 2.84–3.42 s before and 2.91–3.21 s
+after.
 
 ## What made the difference
 
-From 3.0× Chez's time to 1.44× (earlier run on the same machine, then
-this one), in order of effect:
+From 3.0× Chez's time to 1.44× escape-only (an earlier run on the same
+machine, then the first run), in order of effect:
 
 - **Definitions as `letrec`** (src/psyntax.lisp, `definitions-as-letrec`).
   psyntax expands a body's definitions as `letrec*`: variables bound to
@@ -108,8 +113,8 @@ Biggest gains: `lattice` 23.2 → 2.9 s, `parsing` 11.2 → 1.4 s, `takl`
 
 Times in seconds; in parentheses, the ratio to Chez. "pseudoscheme" is
 escape-only continuations (`--continuations=escape`), "full" full
-continuations (now the default), both from the run of the summary above;
-the other columns are from the earlier run.
+continuations (now the default), both from the first run, before the
+second pass; the other columns are from the earlier run.
 
 | benchmark | chez | pseudoscheme | full | chibi | gauche | guile |
 |---|---|---|---|---|---|---|

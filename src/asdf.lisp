@@ -26,8 +26,10 @@
 ;;;; whatever the user installs systems with (Quicklisp, ocicl, qlot,
 ;;;; CLPM, a source registry) resolves them the usual way.
 ;;;;
-;;;; Compiling does nothing yet: there are no compiled Scheme libraries
-;;;; (ROADMAP.md), so every load expands the sources again.
+;;;; Compiling does nothing: a component's own libraries are expanded
+;;;; again on every load (ROADMAP.md 2: compile them into the system's
+;;;; fasls).  Libraries they import from the library path load from the
+;;;; compiled-library cache (src/library-cache.lisp).
 
 (defpackage "PSEUDOSCHEME-ASDF"
   (:use "COMMON-LISP")

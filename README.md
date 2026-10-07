@@ -25,6 +25,10 @@ bin/pseudoscheme -p '(exact-integer-sqrt 17)'
 bin/pseudoscheme --help
 ```
 
+Threads a program makes get 32 MB control stacks (the main thread has
+256 MB), since SBCL takes time in proportion to make one;
+`PSEUDOSCHEME_THREAD_STACK_SIZE` (in megabytes) changes that.
+
 From Lisp:
 
 ```lisp
@@ -82,8 +86,8 @@ bench/RESULTS.md.
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
 libraries and 91 of 130 snow-fort libraries load.
 
-Every final SRFI that hasn't been withdrawn, 208 of them through SRFI
-274, ships in `src/srfi/` or is built into the reader, the expander or
+Every final SRFI that hasn't been withdrawn but SRFI 124 (ephemerons),
+208 of them through SRFI 274, ships in `src/srfi/` or is built into the reader, the expander or
 the command line (`(srfi 1)`, `(srfi :1 lists)` and `(srfi srfi-1)`
 alike). `make test-srfi` runs their tests. See src/srfi/README.md for
 where each comes from and what each leaves out.
@@ -108,6 +112,10 @@ src/numbers.lisp     -- Scheme numerics on CL numbers: syntax, printing,
                         exactness, IEEE edge cases
 src/psyntax.lisp     -- psyntax as the front end: host environment,
                         library search, entry points
+src/continuations.lisp
+                     -- full continuations (docs/continuations.md)
+src/library-cache.lisp
+                     -- the compiled-library cache
 src/r6rs/            -- the R6RS standard libraries' procedures
 src/r7rs/            -- R7RS-small: its procedures, and define-library
                         on psyntax (front.lisp, syntax.sls)
@@ -125,6 +133,8 @@ src/asdf.lisp        -- Scheme sources as ASDF components
 vendor/psyntax/      -- Ghuloum & Dybvig's psyntax, patched, and the
                         image of it built on Pseudoscheme
 contrib/cli/         -- the `pseudoscheme' command
+boot/                -- making the generated files from source, with
+                        other Schemes (boot/README.md)
 examples/            -- Scheme using Lisp, Lisp using Scheme, a mixed
                         ASDF system
 bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
@@ -132,7 +142,8 @@ bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
 docs/                -- interop (the bridge), libraries (Akku and
-                        snow), continuations, racket and guile (designs)
+                        snow), continuations, and racket, guile and
+                        chez (designs)
 ```
 
 ## Systems
@@ -147,7 +158,8 @@ docs/                -- interop (the bridge), libraries (Akku and
 - `pseudoscheme/environments` -- native environments for the R5RS and
   R7RS implementation layers.
 - `pseudoscheme/r7rs-runtime` -- the procedures behind R7RS-small.
-- `pseudoscheme/r6rs` -- psyntax, the R6RS libraries and `(chezscheme)`.
+- `pseudoscheme/r6rs` -- psyntax, the R6RS libraries, `(chezscheme)`,
+  full continuations and the compiled-library cache.
 - `pseudoscheme/r7rs` -- R7RS-small on psyntax.
 - `pseudoscheme/api` -- the `R5RS`/`R6RS`/`R7RS` packages and the
   Scheme/Lisp bridge. The systems `r5rs`, `r6rs` and `r7rs` are
@@ -179,12 +191,13 @@ R7RS is on psyntax too. A `define-library` is translated into an R6RS
 names become `(srfi :1)`-style symbols, as Akku does. The `(scheme ...)`
 libraries are generated from the R7RS export table. R5RS runs on
 psyntax as well, at a top level whose bindings are `(pseudoscheme r5rs)`
-(`(scheme r5rs)` plus string ports), reading with case folding. One
+(`(scheme r5rs)` plus string ports, `cond-expand` and `flush-output`), reading with case folding. One
 expander serves every standard; the translator's native `syntax-rules`
 remains only as its own bootstrap expander.
 
 Libraries are found on a search path (`psx:*library-path*`, or `-L` on
-the command line): `(foo bar)` is `foo/bar.sls`, `.ss`, `.sld` or
+the command line, or the colon-separated `PSEUDOSCHEME_LIBRARY_PATH`,
+searched before `-L`'s): `(foo bar)` is `foo/bar.sls`, `.ss`, `.sld` or
 `.scm`. Akku's layout also works:
 - implementation variants such as `foo.chezscheme.sls` are tried after
   a generic file (`psx:*implementation-variants*`);
@@ -227,7 +240,7 @@ libraries, about half a minute per continuation mode), run
 `make precompile-srfi`, which does both modes, or
 `bin/pseudoscheme --precompile-srfi` for one (`--continuations=escape`
 before it for escape-only). `--precompile DIR` does the same for your own
-libraries under `DIR`, and from Lisp it is
+libraries (`.sld` files) under `DIR`, and from Lisp it is
 `(pseudoscheme-api:precompile-libraries :directory DIR)`. A library that
 takes long to compile then loads at once (SRFI 148: 1.2 s to 0.14 s);
 one that is quick to compile but large still takes the time to load.
@@ -295,10 +308,13 @@ boot falls back to the `.pp` while the fasl is older than it.
 Both kinds of generated file can also be made from source alone, with
 `make bootstrap`. First the translator's sources, running in Chibi,
 Guile, Gauche, CHICKEN, Chez, Racket or Scheme 48, write the `.pso`
-files (`SCHEME=guile` to choose). Then Pseudoscheme, loaded from those,
-builds psyntax's image from a seed that Chez Scheme expands natively
-from psyntax's sources. `make bootstrap-check` verifies both without
-installing anything. See boot/README.md.
+files (`SCHEME=guile` to choose; an s7 adapter is there, untested).
+Then Pseudoscheme, loaded from those, builds psyntax's image from a
+seed: one that Chez Scheme expands natively from psyntax's sources, or
+(`SEED=stage0`) one that any R5RS or R7RS Scheme (Chibi, Scheme 48,
+Gauche) builds through boot/stage0/. `make bootstrap-check` builds from
+both seeds without installing anything and checks each result against
+what's checked in. See boot/README.md.
 
 ## Tests
 
@@ -311,7 +327,9 @@ sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-libr
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-syntax-case-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-corpus.lisp DIR
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-interop-tests.lisp
+sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-srfi-system-tests.lisp
 make -C contrib/cli test
+make test-srfi                           # src/srfi/tests/, 121 programs
 sh tests/run-program-tests.sh [bin/pseudoscheme [name ...]]   # needs Quicklisp
 python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 ```
@@ -349,6 +367,9 @@ The big ones; `ROADMAP.md` has the rest.
   them. Nothing cleans stale cache entries yet.
 - **No Racket yet.** docs/racket.md plans a `--racket` mode that runs
   Racket's own expander on Pseudoscheme by compiling linklets.
+- **No Chez mode yet.** `(chezscheme)` has what Akku's Chez variants
+  need, 803 of Chez's 1715 names; docs/chez.md plans a `--chez` mode,
+  the nearest of the three.
 - **No Guile yet.** docs/guile.md plans a `--guile` mode that runs
   Guile's own boot-9 and libraries on libguile's primitives written in
   Lisp, and, much later, Guix's client side.

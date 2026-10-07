@@ -61,7 +61,8 @@ path, in order:
 
 1. the directories you add: `-L DIR` on the command line (repeatable),
    `--akku`, `PSEUDOSCHEME_LIBRARY_PATH` (directories separated by
-   colons), or `r7rs:add-library-directory` from Lisp. All of these put
+   colons; command line only, searched before the `-L` ones), or
+   `r7rs:add-library-directory` from Lisp. All of these put
    directories on `psx:*library-path*`, which starts as `("./")`;
 2. then the libraries that ship with Pseudoscheme: the SRFIs in
    `src/srfi/`. `(scheme ...)`, `(rnrs ...)`, `(chezscheme)` and
@@ -94,7 +95,7 @@ make -C contrib/cli           # writes bin/pseudoscheme
 
 The examples below put `bin/` on `PATH`. From Lisp you need Quicklisp,
 which fetches Pseudoscheme's own dependencies (float-features,
-cl-unicode, trivial-gray-streams):
+cl-unicode, trivial-gray-streams, trivial-garbage, trivial-cltl2):
 
 ```lisp
 (push #p"/path/to/pseudoscheme/" asdf:*central-registry*)
@@ -309,12 +310,16 @@ See `examples/mixed-system/`.
 says it should be, under one of the directories on the path. From Lisp,
 `psx:*library-path*` shows the list.
 
-**Your SRFIs replaced Pseudoscheme's.** Installing a snow package often
-installs SRFIs it depends on, such as `snow/srfi/1.sld`. Akku projects
-often install `chez-srfi`. Directories you add are searched before
-Pseudoscheme's own SRFIs, so those copies win. Usually that's harmless,
-but if a SRFI misbehaves, check which file is loaded. Removing the copy
-makes the built-in one be used.
+**Your SRFIs replaced Pseudoscheme's, or didn't.** The search tries
+each spelling of a file name in every directory before the next
+spelling. Installing a snow package often installs SRFIs it depends on,
+such as `snow/srfi/1.sld`; that has the same file name as the bundled
+`src/srfi/1.sld`, and directories you add come first, so the copy wins.
+Akku projects often install `chez-srfi`, as `srfi/%3a1.sls`: for
+`(srfi :1)` the bundled `srfi/1.sld` is an earlier spelling and wins,
+while its sub-libraries such as `(srfi :1 lists)` come from chez-srfi.
+Usually either is harmless, but if a SRFI misbehaves, check which file
+is loaded.
 
 **"two imports with different bindings".** Two imported libraries export
 the same name with different meanings. The usual case is `(rnrs)` with
@@ -327,14 +332,23 @@ example:
 
 **Implementation-specific libraries.** A package that has only
 `foo.guile.sls` or `foo.racket.sls` won't load. Pseudoscheme uses
-generic, Chez and Ikarus variants only. `(chezscheme)` and `(ikarus)`
+`.pseudoscheme`, generic, Chez and Ikarus variants only. `(chezscheme)` and `(ikarus)`
 cover what portable libraries commonly need from those systems: file
 system access, `format`, `printf`, boxes, time and dates. They don't
 cover FFIs or engines.
 
-**Continuations.** `call/cc` is escape-only, so a library that re-enters
-continuations, for coroutines or generators, fails with an error that
-says so.
+**Continuations.** They are full and re-entrant by default, so
+coroutines, generators and backtracking work. What can't be re-entered
+is a continuation captured in a Scheme procedure that Lisp code called
+(a sort's comparison, say): that is an error that says so
+(docs/continuations.md). With `--continuations=escape` no continuation
+can be re-entered.
+
+**Compiling.** A library loaded from one of these trees is compiled the
+first time it is imported and cached (README, "Loading real
+libraries"). `pseudoscheme --precompile DIR` compiles the `.sld`
+libraries under `DIR` ahead of time; it doesn't read Akku's `.sls`
+files.
 
 **Finding out how much of a tree loads.** This command imports every
 portable library under `DIR` and reports what fails and why:

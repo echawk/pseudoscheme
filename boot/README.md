@@ -52,7 +52,8 @@ Step 1 produces:
 
 These are what `src/bootit.scm` (and `pseudoscheme/bootstrap`) produce
 under Common Lisp. `boot/bootstrap.sh [--all] [--no-install] [--check]`
-runs step 1 alone. Each Scheme writes to `boot/build/<scheme>/` and logs
+runs step 1 alone (`SCHEME=` picks the host, `BOOT_HOSTS="chez
+scheme48"` limits `--all` to some, as CI does). Each Scheme writes to `boot/build/<scheme>/` and logs
 to `boot/build/<scheme>.log`.
 
 ### Schemes
@@ -152,7 +153,7 @@ alone, using whatever `.pso` files are in `src/`.
 - **Seed from Chez** (the default). `boot/psyntax/chez/psyntax/system/$bootstrap.ss` is the one
   host library psyntax's sources import (`compat.ss`): `gensym`,
   `eval-core`, `symbol-value`, `set-symbol-value!`, `void`,
-  `pretty-print` and `lisp-keyword?`. Its gensyms are interned
+  `pretty-print`, `lisp-keyword?` and `host-literal?`. Its gensyms are interned
   (`g$chez$N`), so the expanded code can be written out. Its `eval-core`
   evaluates in a copy of Chez's environment in which psyntax's own
   `identifier?`, `generate-temporaries`, `syntax->datum` and so on
@@ -177,8 +178,8 @@ alone, using whatever `.pso` files are in `src/`.
   an image built from these sources, such as the installed one. It
   converges on the same image. `vendor/psyntax/pre-built/psyntax-scheme48.pp`,
   the original upstream image, no longer works as a seed: the sources
-  have outgrown it, since `compat.ss` imports `lisp-keyword?`, which
-  its `$bootstrap` lacks.
+  have outgrown it, since `compat.ss` imports `lisp-keyword?` and
+  `host-literal?`, which its `$bootstrap` lacks.
 
 Any Scheme with R6RS libraries, `syntax-case`, `eval` into a mutable
 environment, and top-level variable access could build a seed the way

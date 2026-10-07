@@ -14,10 +14,12 @@ file. Most benchmarks are public domain or carry their authors' notices,
 which are kept intact: Olin Shivers, William D Clinger, Al Petrofsky.
 `alexpander.scm` is dual-licensed under a BSD-style licence or the GPL,
 and is used here under the BSD-style terms. Only `src/`, `inputs/`, the
-`bench` driver, `Makefile` and `README.org` are copied. ecraven's
+`bench` driver, `Makefile` and `README.org` are copied (with an empty
+`outputs/` and a `.gitignore` for the results). ecraven's
 published results, graphs and HTML are not.
 
-**Local changes**, each marked `PSEUDOSCHEME:` in `bench`:
+**Local changes** to `bench` (the first four are marked `PSEUDOSCHEME:`
+there):
 
 - `pseudoscheme`, run as `bin/pseudoscheme prog.scm < input`; its
   implementation name is defined in `src/Pseudoscheme-postlude.scm`.

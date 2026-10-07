@@ -52,7 +52,8 @@ rebuild from a rebuilt image reproduces it byte for byte.
 
 `pre-built/psyntax-scheme48.pp` is the original upstream image. The
 sources have outgrown it, so `(psx:rebuild :seed t)` no longer works:
-`compat.ss` imports `lisp-keyword?`, which its `$bootstrap` lacks.
+`compat.ss` imports `lisp-keyword?` and `host-literal?`, which its
+`$bootstrap` lacks.
 
 ## Patches
 
@@ -83,10 +84,12 @@ Each is marked `PSEUDOSCHEME:` in the source.
 **Continuations**
 
 * `guard` re-enters its handler's continuation to re-raise when no
-  clause matches, which escape-only continuations can't do. It does so
-  through the host primitive `%guard-reraise` (in the build-script table,
-  for `$all` only), which re-raises from the guard's own context where
-  the continuation can't be re-entered. See docs/continuations.md.
+  clause matches (R6RS's expansion), through the host primitive
+  `%guard-reraise` (in the build-script table, for `$all` only). With
+  full continuations, the default, that re-raises in the dynamic
+  environment of the `raise`; with `--continuations=escape`, where the
+  continuation can't be re-entered, it re-raises from the guard's own
+  context. See docs/continuations.md.
 
 **Conformance with the final R6RS** (the 2007 code predates it)
 
@@ -128,6 +131,11 @@ Each is marked `PSEUDOSCHEME:` in the source.
   modify imported identifier").
 * `let-syntax` / `letrec-syntax` at the REPL top level work as
   expressions (it was "not supported yet").
+* Defining an imported name at the REPL makes a new binding in the
+  interaction library that shadows the import, as R7RS REPLs do (it was
+  "cannot modify imported binding"; `shadow-at-top-level`).
+* A library expanded while the REPL runs (imported there) doesn't see
+  the REPL's bindings: its unbound identifiers stay unbound.
 
 **R7RS and real-world libraries**
 
@@ -159,6 +167,22 @@ Each is marked `PSEUDOSCHEME:` in the source.
   each variable to its location once, at the end of initialization
   (`library-export-locs`, `chi-set!`).
 
+**Expander extensions** (SRFIs 139, 149, 212, 213, 251; src/srfi/)
+
+* `alias` (SRFI 212): binds a new identifier to an existing one's label.
+* `define-property` and identifier properties (SRFI 213): a property
+  table keyed by binding labels; a transformer may return a procedure,
+  which `call-transformer` calls with a lookup procedure for properties.
+* `syntax-parameterize` (SRFI 139).
+* Templates with a pattern variable under more ellipses than in its
+  pattern (SRFI 149): repeated for the innermost excess ones; a
+  template with no meaning that way is expanded the other way.
+* Definitions after expressions in a body (SRFI 251) begin a body of
+  their own, in the scope of the earlier definitions (`split-commands`).
+* The build script's table has entries for all of these.
+* `#'(a b)` whose tail is a wrapped `()` builds a list, as other
+  expanders make it.
+
 **The Lisp bridge** (docs/interop.md)
 
 * Lisp keywords (`#:name`) are self-evaluating constants, not
@@ -172,6 +196,11 @@ Each is marked `PSEUDOSCHEME:` in the source.
 * `psyntax:library-export-bindings`, an entry point listing a
   library's exports with their binding types and locations, for
   `use-library`.
+* `psyntax:identifier-binding`, what an identifier refers to (unbound,
+  a variable, or its binding), and `psyntax:free-identifier=?`, for
+  Lisp macros used from Scheme. `identifier-binding` visits a library
+  macro's library first, so that the bridge finds its transformer even
+  when nothing has expanded a use of it yet.
 
 **Elsewhere**
 
@@ -193,8 +222,8 @@ Each is marked `PSEUDOSCHEME:` in the source.
   `psyntax:library-spec-by-name` finds or loads a library and returns
   its (id name version).
 * Marks are gensyms, not fresh one-character strings, so that, like
-  labels, they keep their identity across a write and a read: the first
-  step towards serializing expanded libraries (ROADMAP.md, 2).
+  labels, they keep their identity across a write and a read, which the
+  compiled-library cache relies on (src/library-cache.lisp).
 
 ## Known gaps
 

@@ -1,7 +1,7 @@
 # SRFIs
 
 The SRFI libraries that ship with Pseudoscheme: every final SRFI that
-hasn't been withdrawn, as of SRFI 274. Each `N.sld` is an R7RS
+hasn't been withdrawn, as of SRFI 274, except SRFI 124 (ephemerons). Each `N.sld` is an R7RS
 `define-library` for `(srfi N)` (a few are R6RS `library` forms). psyntax finds them with no setup:
 `psx:*system-library-path*` roots every name that starts with `srfi` here.
 That root is searched after the user's `psx:*library-path*`, so a project
@@ -283,12 +283,16 @@ Each library's header comment says what it doesn't do; the main points:
   (and `make-for-each-generator`) runs its producer to completion on the
   first call and buffers what it yields, so an infinite coroutine hangs;
   SRFI 225's default `dict->generator` likewise collects its entries up
-  front. SRFI 248's prompts are global, not per thread, and an ordinary
+  front. SRFI 226's re-entrant features and SRFI 248, both written on
+  full continuations, don't work in that mode.
+- SRFI 248's prompts are global, not per thread, and an ordinary
   continuation captured inside one and called during a reinstatement of
   it returns as the reinstatement does.
 - SRFI 115 matches leftmost-first by backtracking (cl-ppcre), not
   leftmost-longest; look-behind must have a fixed length.
-- SRFI 197's `_ ...` placeholder doesn't work (ROADMAP, 1).
+- SRFI 197's `_ ...` placeholder doesn't work: psyntax rejects `...` as
+  a literal in the custom-ellipsis `syntax-rules` the sample uses (see
+  `197.sld`).
 - SRFI 35's names clash with `(rnrs conditions)`'s (`condition`,
   `define-condition-type`, the `&` types), and SRFI 36's
   `i/o-read-error?` and `i/o-write-error?` with `(rnrs io ports)`'s.
