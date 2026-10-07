@@ -312,6 +312,7 @@ sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-synt
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-corpus.lisp DIR
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-interop-tests.lisp
 make -C contrib/cli test
+sh tests/run-program-tests.sh [bin/pseudoscheme [name ...]]   # needs Quicklisp
 python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 ```
 
@@ -322,6 +323,11 @@ from other Schemes (both kinds of generated file must come out as
 checked in). The benchmarks, in both modes, are a workflow of their own
 that runs by hand (`.github/workflows/bench.yml`: Actions, Benchmarks,
 Run workflow).
+
+`make test-programs` runs the programs in `tests/programs/`: Scheme and
+Lisp using each other, with Common Lisp libraries from Quicklisp and C
+libraries through CFFI (tests/programs/README.md). It needs Quicklisp,
+which downloads the libraries the first time.
 
 `tests/r6rs/` is Racket's R6RS test suite (MIT/Apache-2.0, see its
 `LICENSE-racket.txt`); `tests/chibi/` has chibi-scheme's R5RS and R7RS

@@ -193,20 +193,31 @@ an identifier, or the identifier in its car."
 			 (funcall (prim "make-message-condition") message))))
    nil))
 
+(defvar *foreign-originals* (make-hash-table :test 'eq :weakness :key)
+  "R6RS condition made by FOREIGN-CONDITION -> the Lisp condition it
+stands for, which it is again when passed back to Lisp (src/interop.lisp).")
+
+(defun foreign-original (c)
+  "The Lisp condition the R6RS condition C stands for, or NIL."
+  (values (gethash c *foreign-originals*)))
+
 (defun foreign-condition (c)
   "An R6RS condition standing for the Lisp condition C, so handlers in
 Scheme see something CONDITION? and MESSAGE-CONDITION? are true of."
   (multiple-value-bind (message irritants) (foreign-condition-message c)
-    (apply (prim "condition")
-	   (append
-	    (typecase c
-	      (file-error
-	       (list (funcall (prim "make-i/o-filename-error")
-			      (namestring (or (file-error-pathname c) "")))))
-	      (reader-error (list (funcall (prim "make-lexical-violation"))))
-	      (t (list (funcall (prim "make-assertion-violation")))))
-	    (list (funcall (prim "make-message-condition") message)
-		  (funcall (prim "make-irritants-condition") irritants))))))
+    (let ((condition
+	    (apply (prim "condition")
+		   (append
+		    (typecase c
+		      (file-error
+		       (list (funcall (prim "make-i/o-filename-error")
+				      (namestring (or (file-error-pathname c) "")))))
+		      (reader-error (list (funcall (prim "make-lexical-violation"))))
+		      (t (list (funcall (prim "make-assertion-violation")))))
+		    (list (funcall (prim "make-message-condition") message)
+			  (funcall (prim "make-irritants-condition") irritants))))))
+      (setf (gethash condition *foreign-originals*) c)
+      condition)))
 
 (defun foreign-condition-message (c)
   "The message and irritants a Scheme handler sees for Lisp condition C.

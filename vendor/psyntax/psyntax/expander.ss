@@ -545,7 +545,9 @@
   ;;; REPL variable), or else the binding itself (a primitive, a macro,
   ;;; or core syntax).  Local macros (let-syntax) look like
   ;;; lexicals here, since their bindings live in the expansion-time
-  ;;; environment, which isn't available.
+  ;;; environment, which isn't available.  A library macro's library is
+  ;;; visited first, so that the bridge finds its transformer even when
+  ;;; nothing has expanded a use of it yet.
   (define (identifier-binding id)
     (let ((label (id->label id)))
       (if (not label)
@@ -554,6 +556,9 @@
             (cond
               ((not b) 'variable)
               ((eq? (car b) 'global) 'variable)
+              ((memq (car b) '(global-macro global-macro!))
+               (visit-library (cadr b))
+               b)
               (else b))))))
 
   (define id->label

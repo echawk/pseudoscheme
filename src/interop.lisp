@@ -100,12 +100,16 @@ than a named function like #'evenp."
   (setf (gethash function *verbatim*) t)
   function)
 
-(defun false-to-nil (&rest values)
-  (values-list (mapcar (lambda (v) (if (eq v ps:false) nil v)) values)))
+(defun values-to-lisp (&rest values)
+  "VALUES, from Scheme, as Lisp gets them (TO-LISP): #f is NIL, and a
+Scheme procedure is wrapped, so that it is recognized when it crosses
+back."
+  (values-list (mapcar #'to-lisp values)))
 
 (defun lisp-facing (procedure)
   "PROCEDURE (a Scheme procedure) as a Lisp function: its arguments go
-to Scheme (TO-SCHEME), its results come back with #f as NIL.  It's
+to Scheme (TO-SCHEME), its results come back to Lisp (TO-LISP: #f as
+NIL, procedures wrapped).  It's
 called in a barrier frame (src/continuations.lisp): the Lisp code
 calling it isn't recorded in a captured continuation, so re-entering one
 captured in PROCEDURE would resume as if that Lisp code had returned at
@@ -114,7 +118,7 @@ once; the barrier makes it an error instead.  Escaping works."
       (gethash procedure *lisp-facing*)
       (let ((f (lambda (&rest args)
 		 (psx::%barrier "Lisp code that called a Scheme procedure"
-		   (multiple-value-call #'false-to-nil
+		   (multiple-value-call #'values-to-lisp
 		     (apply procedure (mapcar #'to-scheme args)))))))
 	(setf (gethash f *originals*) procedure
 	      (gethash procedure *lisp-facing*) f))))
@@ -135,9 +139,11 @@ Lisp (TO-LISP); if PREDICATE, a NIL result comes back as #f."
 	f)))
 
 (defun to-lisp (x)
-  "A Scheme value passed to Lisp."
+  "A Scheme value passed to Lisp.  A condition a Scheme handler got for
+a Lisp error is that Lisp condition again."
   (cond ((eq x ps:false) nil)
 	((and (functionp x) (not (gethash x *verbatim*))) (lisp-facing x))
+	((typep x 'structure-object) (or (ps-r6rs::foreign-original x) x))
 	(t x)))
 
 (defun to-scheme (x)
@@ -400,9 +406,13 @@ symbol."
 		   ((member kind '("global-macro" "global-macro!") :test #'string=)
 		    (let* ((loc (if (consp (cdr b)) (cddr b) (cdr b)))
 			   (transformer (and (symbolp loc) (boundp (psx:location loc)) (psx:host-ref loc))))
-		      (or (and transformer (gethash transformer *lisp-macro-transformers*))
-			  (ps:scheme-error "Scheme macro ~A can't be used inside a Lisp macro call"
-					   (string-downcase name)))))
+		      ;; (the symbol may be NIL: cl:nil)
+		      (multiple-value-bind (symbol found)
+			  (if transformer (gethash transformer *lisp-macro-transformers*) (values nil nil))
+			(if found
+			    symbol
+			    (ps:scheme-error "Scheme macro ~A can't be used inside a Lisp macro call"
+					     (string-downcase name))))))
 		   (t (let ((meaning (assoc (if (symbolp (cdr b)) (ps:scheme-symbol-name (cdr b)) "")
 					    *scheme-syntax-in-lisp* :test #'string=)))
 			(if meaning
@@ -413,7 +423,8 @@ symbol."
 
 (defun lisp-import-symbol (id)
   "If identifier ID is bound to an export of a (cl ...) library, that
-export's Lisp symbol."
+export's Lisp symbol; the second value says whether it is one (the
+symbol may be NIL)."
   (let ((b (funcall (psx:host-ref "psyntax:identifier-binding") id)))
     (when (consp b)
       (let ((kind (ps:scheme-symbol-name (car b))))
@@ -424,13 +435,44 @@ export's Lisp symbol."
 	      ((member kind '("global-macro" "global-macro!") :test #'string=)
 	       (let* ((loc (if (consp (cdr b)) (cddr b) (cdr b)))
 		      (transformer (and (symbolp loc) (boundp (psx:location loc)) (psx:host-ref loc))))
-		 (and transformer (gethash transformer *lisp-macro-transformers*)))))))))
+		 (if transformer (gethash transformer *lisp-macro-transformers*) (values nil nil)))))))))
+
+(defun process-compile-time (form placeholders)
+  "Do what COMPILE-FILE does at compile time for FORM as a top-level
+form: evaluate the bodies of its (EVAL-WHEN (:COMPILE-TOPLEVEL) ...)
+forms, found through macros, PROGN and EVAL-WHEN.  A Scheme program or
+library is expanded before any of it runs, so without this DEFVAR's
+special proclamation, DEFMACRO, DEFSTRUCT or CFFI's DEFCSTRUCT, used from
+Scheme, wouldn't be seen by the Lisp forms after them.  A body that
+mentions a Scheme variable (one of PLACEHOLDERS) can't be evaluated
+before the program runs, and is skipped; so is one that fails, since
+some compile-time effects make sense only inside COMPILE-FILE (DEFUN's
+note to the compiler) -- the form still runs when the program does."
+  (labels ((mentions-placeholder-p (x)
+	     (cond ((symbolp x) (member x placeholders))
+		   ((consp x) (or (mentions-placeholder-p (car x)) (mentions-placeholder-p (cdr x))))))
+	   (process (form)
+	     ;; a macro that fails to expand is left for COMPILE to report
+	     (let ((form (handler-case (macroexpand form) (error () nil))))
+	       (when (consp form)
+		 (case (car form)
+		   (progn (mapc #'process (cdr form)))
+		   (eval-when
+		    (let ((situations (second form)) (body (cddr form)))
+		      (if (intersection '(:compile-toplevel compile) situations)
+			  (unless (mentions-placeholder-p body)
+			    (handler-case (eval `(progn ,@body)) (error () nil)))
+			  (when (intersection '(:load-toplevel load) situations)
+			    (mapc #'process body))))))))))
+    (process form)))
 
 (defun compile-lisp-form (form placeholders)
   "A compiled function of PLACEHOLDERS (uninterned symbols standing for
 Scheme variables) that evaluates the Lisp FORM.  Each argument is
 converted with TO-LISP, and a placeholder in operator position calls
-its value."
+its value.  FORM's compile-time effects happen first, as in a file
+(PROCESS-COMPILE-TIME)."
+  (process-compile-time form placeholders)
   (let ((code `(lambda ,placeholders
 		 (let ,(mapcar (lambda (p) `(,p (to-lisp ,p))) placeholders)
 		   (declare (ignorable ,@placeholders))
@@ -455,6 +497,24 @@ its value."
 (defun lexical-variable-p (symbol env)
   (eq (trivial-cltl2:variable-information symbol env) :lexical))
 
+(defun local-function-p (symbol env)
+  "Is SYMBOL a function FLET or LABELS binds in ENV?"
+  (multiple-value-bind (kind local) (trivial-cltl2:function-information symbol env)
+    (and (eq kind :function) local)))
+
+(defun unbound-operator (e)
+  "If E is psyntax's error for a call (f ...) of an unbound identifier f,
+that identifier's symbol."
+  (when (typep e 'ps-r7rs::uncaught-raise)
+    (let ((c (ps-r7rs::uncaught-payload e)))
+      (when (ps-r6rs::condition-p* c)
+	(let ((message (ps-r6rs::component-of c "&message"))
+	      (irritants (ps-r6rs::component-of c "&irritants")))
+	  (when (and message irritants
+		     (equal (svref (ps-r6rs::record-values message) 0) "unbound identifier"))
+	    (let ((form (first (svref (ps-r6rs::record-values irritants) 0))))
+	      (and (consp form) (symbolp (car form)) (car form)))))))))
+
 (defun scheme-bound-p (symbol environment)
   "Does Scheme SYMBOL mean anything in psyntax ENVIRONMENT?"
   (handler-case (progn (psx:expand symbol environment) t)
@@ -478,11 +538,20 @@ meanings where they exist: a Lisp lexical variable is that variable, a
 Lisp function name that function (wrapped as a (cl ...) library's
 would be), a quoted datum Lisp data, NIL the empty list; other symbols
 are Scheme identifiers (Scheme syntax, Scheme procedures that aren't
-Lisp's, and variables the macro binds)."
-  (let* ((environment (funcall (psx:host-ref "psyntax:environment")
-			       (list (ssym "pseudoscheme") (ssym "r7rs"))
-			       (list (ssym "prefix") library (ssym "%%lib:"))))
-	 (params '()) (args '()))
+Lisp's, and variables the macro binds).
+
+A function name is a Lisp function's when FLET or LABELS binds it, or it
+is FBOUNDP.  A call of a name that is neither, and that Scheme doesn't
+bind either, is a call of the global Lisp function of that name, looked
+up when called, as in Lisp: the function DEFUN is defining, calling
+itself, or one defined later.  (Such a call is found when psyntax
+reports its name unbound, and the expansion is redone.)"
+  (let ((environment (funcall (psx:host-ref "psyntax:environment")
+			      (list (ssym "pseudoscheme") (ssym "r7rs"))
+			      (list (ssym "prefix") library (ssym "%%lib:"))))
+	(late-bound '())		; Lisp symbols named by unbound calls
+	(origins (make-hash-table :test 'eq)) ; Scheme symbol -> Lisp symbol
+	(params '()) (args '()))
     (labels ((lib-name (export) (ssym (concatenate 'string "%%lib:" (ps:scheme-symbol-name export))))
 	     (param (key value)
 	       (or (car (find key params :key #'cdr :test #'equal))
@@ -503,10 +572,16 @@ Lisp's, and variables the macro binds)."
 			((eq (symbol-package x) ps:scheme-package) x)
 			((boolean-constant-p x "FALSE") ps:false)
 			((boolean-constant-p x "TRUE") t)
-			((lisp-function-p x)
+			((or (local-function-p x env) (lisp-function-p x))
 			 (param (list 'function x)
 				`(scheme-facing #',x ,(and (lisp-predicate-name-p (symbol-name x)) t))))
-			(t (schemify x))))
+			((member x late-bound)
+			 (param (list 'function x)
+				`(scheme-facing (lambda (&rest args) (apply ',x args))
+						,(and (lisp-predicate-name-p (symbol-name x)) t))))
+			(t (let ((s (schemify x)))
+			     (setf (gethash s origins) x)
+			     s))))
 		 (cons
 		  (cond ((eq (car x) 'quote) (list (ssym "quote") (cadr x)))
 			((and (eq (car x) 'function) (symbolp (cadr x)))
@@ -519,13 +594,20 @@ Lisp's, and variables the macro binds)."
 	       (cond ((null x) nil)
 		     ((consp x) (cons (convert (car x)) (convert-args (cdr x))))
 		     (t (convert x)))))
-      (let* ((call (cons (lib-name macro-name) (convert-args (cdr form))))
-	     (params (reverse params))
-	     (lambda-form (list (ssym "lambda") (mapcar #'car params) call))
-	     (core (psx::open-primitives (values (psx:expand lambda-form environment))))
-	     (code (scheme-translator:translate core psx:*host*)))
-	`(multiple-value-call #'false-to-nil
-	   (funcall ,code ,@(reverse args)))))))
+      (loop
+	(setf params '() args '())
+	(let* ((call (cons (lib-name macro-name) (convert-args (cdr form))))
+	       (lambda-form (list (ssym "lambda") (mapcar #'car (reverse params)) call))
+	       (core (handler-case (psx::open-primitives (values (psx:expand lambda-form environment)))
+		       (ps-r7rs::uncaught-raise (e)
+			 (let ((lisp-symbol (gethash (unbound-operator e) origins)))
+			   (if (and lisp-symbol (not (member lisp-symbol late-bound)))
+			       (progn (push lisp-symbol late-bound) nil)
+			       (error e)))))))
+	  (when core
+	    (return
+	      `(multiple-value-call #'values-to-lisp
+		 (funcall ,(scheme-translator:translate core psx:*host*) ,@(reverse args))))))))))
 
 (defun define-scheme-macro (symbol library macro-name names)
   "Make SYMBOL a Lisp macro for Scheme macro MACRO-NAME of LIBRARY; NAMES
@@ -598,7 +680,9 @@ symbol case rule: \"equal\" and 'equal both name EQUAL."
 	      (dolist (x (cdr transformer))
 		(when (functionp x) (setf (gethash x *lisp-macro-transformers*) macro))))
 	    transformer)
-      (prim "%lisp-import-symbol" (id) (or (lisp-import-symbol id) ps:false))
+      (prim "%lisp-import-symbol" (id)
+	    (multiple-value-bind (symbol found) (lisp-import-symbol id)
+	      (if found symbol ps:false)))
       (prim "verbatim" (f) (verbatim f)))
     (ps-r7rs::install-host-library '("pseudoscheme" "lisp" "primitives") (nreverse prims))
     (dolist (form (ps-r7rs::read-forms

@@ -5,7 +5,7 @@
 SBCL ?= sbcl
 
 .PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
-	test test-escape test-cli test-srfi test-all precompile-srfi
+	test test-escape test-cli test-srfi test-programs test-all precompile-srfi
 
 # Tests.  `make test` runs every suite in the default mode (full
 # continuations, src/continuations.lisp); `make test-escape` the
@@ -13,7 +13,10 @@ SBCL ?= sbcl
 # `make test-cli` builds and tests the command
 # line; `make test-srfi` builds it and runs the bundled SRFIs' tests
 # (src/srfi/tests/, tests/run-srfi-tests.sh; SRFIS="1 13" for some);
-# `make test-all` all four.  Each suite prints its tally, and the
+# `make test-all` all four.  `make test-programs` builds it and runs the
+# programs in tests/programs/ (tests/run-program-tests.sh; PROGRAMS=
+# "kanren.lisp" for some), which use Common Lisp libraries from
+# Quicklisp and C libraries, so it needs Quicklisp and is apart.  Each suite prints its tally, and the
 # make stops at the first one that fails to finish.  The compiled-library
 # cache is off, so a stale cache can't hide anything.
 SCHEME_RUN = PSEUDOSCHEME_LIBRARY_CACHE=0 $(SBCL) --dynamic-space-size 4GB \
@@ -46,6 +49,12 @@ test-srfi:
 	@$(MAKE) -C contrib/cli > /tmp/pseudoscheme-cli-build.log 2>&1 \
 	  || { tail -20 /tmp/pseudoscheme-cli-build.log; exit 1; }
 	@sh tests/run-srfi-tests.sh bin/pseudoscheme $(SRFIS)
+
+test-programs:
+	@echo "Building bin/pseudoscheme (log: /tmp/pseudoscheme-cli-build.log) ..."
+	@$(MAKE) -C contrib/cli > /tmp/pseudoscheme-cli-build.log 2>&1 \
+	  || { tail -20 /tmp/pseudoscheme-cli-build.log; exit 1; }
+	@SBCL=$(SBCL) sh tests/run-program-tests.sh bin/pseudoscheme $(PROGRAMS)
 
 test-all: test test-escape test-cli test-srfi
 

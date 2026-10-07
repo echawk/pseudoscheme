@@ -5,7 +5,9 @@ Pseudoscheme compiles Scheme *to* Lisp, so most of the bridge is just
 converted at the boundary and why, the API in each direction, and how
 libraries are found and distributed. The code is in `src/interop.lisp`,
 `src/interop/lisp.sls`, `src/api.lisp` and `src/asdf.lisp`. Tests are in
-`tests/run-interop-tests.lisp`; examples are in `examples/`.
+`tests/run-interop-tests.lisp`, and programs using real Common Lisp and C
+libraries in `tests/programs/` (`make test-programs`); examples are in
+`examples/`.
 
 ## 1. Shared objects
 
@@ -40,8 +42,10 @@ values cross between the languages.
 | a result of a Lisp predicate returned to Scheme | `NIL` → `#f` |
 | a result of any other Lisp function returned to Scheme | none: `NIL` is `()` |
 | a Lisp function given to Scheme | wrapped, and treated as a predicate: its `NIL` → `#f` |
-| a Scheme procedure given to Lisp | wrapped: its `#f` → `NIL` |
+| a Scheme procedure given to Lisp, as an argument or a result | wrapped: its `#f` → `NIL` |
 | a wrapper crossing back | unwrapped (so `cl:equal` reaches `make-hash-table` as `#'equal`) |
+| a Lisp error, caught by a Scheme handler | an R6RS condition (`error-object?`, with the Lisp message) |
+| that condition passed back to Lisp | the Lisp condition again: `(cl:typep e sqlite:sqlite-error)` works |
 
 A Lisp function counts as a predicate when:
 - its name ends in `-P`;
@@ -186,8 +190,18 @@ reader.
 `(lisp form ...)`, from `(pseudoscheme lisp)`, is the same mechanism
 with `progn`: Lisp code anywhere in Scheme.
 
+A program or library is expanded before any of it runs, so each Lisp
+form's compile-time effects happen when it is expanded, as
+`compile-file` does them: after `(cl:defvar *depth* 0)` a later
+`(cl:let ((*depth* 5)) ...)` binds it dynamically, and a `cl:defmacro`,
+`cl:defstruct` or CFFI's `defcstruct` is known to the Lisp forms after
+it. (A compile-time part that mentions a Scheme variable can't run
+early, and is left to run time.)
+
 Limits. A Scheme variable can be read and called, but not assigned, from
-inside a Lisp form, since its value is passed in. Local macros
+inside a Lisp form, since its value is passed in. A Scheme name is
+Scheme's there even where Lisp code means something else: a CFFI struct
+slot named `min` is Scheme's `min`, so give it another name. Local macros
 (`let-syntax`) aren't recognized as syntax there. Each macro use is
 compiled when it's expanded, which takes milliseconds per use.
 
@@ -259,7 +273,11 @@ Its arguments are **Scheme code written in Lisp syntax, with Lisp's
 meanings where they exist**:
 - a Lisp lexical variable is that variable;
 - a Lisp function name is that function, wrapped as a `(cl ...)` export
-  would be;
+  would be: a global function, or a local one from `flet` or `labels`;
+- a call of a name that is neither, and that Scheme doesn't bind, calls
+  the global Lisp function of that name when it runs, as in Lisp: so a
+  `defun` whose body uses a Scheme macro can call itself. Pass such a
+  function as a value with `#'name`;
 - quoted data is Lisp data, and `NIL` is the empty list;
 - other symbols are Scheme's: syntax, Scheme-only procedures, and the
   variables the macro binds.

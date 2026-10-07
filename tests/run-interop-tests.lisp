@@ -193,6 +193,27 @@ written form of its value."
 (stest "CLOS defined from Scheme" "(12 27)"
        (p "(cl:defclass circle () ((radius #:initarg #:radius #:reader radius))) (cl:defgeneric area (shape)) (cl:defmethod area ((c circle)) (* 3 (* (radius c) (radius c)))) (list ((lisp-function 'area) (cl:make-instance 'circle #:radius 2)) (lisp (area (make-instance 'circle :radius 3))))"))
 (stest "a macro from another package: test lib" "3" (p "(lisp (t:add 1 2))"))
+(stest "cl:nil inside a Lisp form" "()" (p "(cl:when #t cl:nil)"))
+(stest "a Lisp condition caught in Scheme is itself again in Lisp" "(#t #t)"
+       (p "(guard (e (#t (list (cl:typep e cl:division-by-zero) (error-object? e)))) (cl:/ 1 0))"))
+;; a program is expanded before it runs, so a Lisp form's compile-time
+;; effects (DEFVAR's special proclamation, DEFMACRO) happen when it's
+;; expanded, as COMPILE-FILE does them
+(stest "defvar from Scheme: a later Lisp let binds it dynamically" "5"
+       (p "(cl:defvar *depth* 0) (define (depth) (lisp *depth*)) (cl:let ((*depth* 5)) (depth))"))
+(stest "defmacro from Scheme, used by a later Lisp form" "42"
+       (p "(cl:defmacro twice-it (x) (cl:list 'cl:* 2 x)) (lisp (twice-it 21))"))
+;; two libraries never used before: the inner macro's library hasn't
+;; been visited when the outer macro's transformer looks it up
+(stest "a Lisp macro inside another library's Lisp macro" "42"
+       (progn (dolist (spec '(("INTEROP-OUTER" "OUTER" (lambda (form env) (declare (ignore env)) (cons 'progn (cdr form))))
+			      ("INTEROP-INNER" "INNER" (lambda (form env) (declare (ignore env)) (list '* 2 (second form))))))
+		(destructuring-bind (package name expander) spec
+		  (let ((pkg (or (find-package package) (make-package package :use '()))))
+		    (let ((s (intern name pkg)))
+		      (export s pkg)
+		      (setf (macro-function s) (compile nil expander))))))
+	      "(import (scheme base) (prefix (cl interop-outer) o:) (prefix (cl interop-inner) i:)) (o:outer (i:inner 21))"))
 (test "Scheme macro inside a Lisp form is an error" t
   (handler-case (progn (r7rs:eval "(import (scheme base) (prefix (cl common-lisp) cl:)) (cl:progn (let-values (((a) 1)) a))") nil)
     (error (e) (and (search "inside a Lisp macro call" (princ-to-string e)) t))))
@@ -268,6 +289,18 @@ written form of its value."
   (in-import-test "(receive (q r) (floor 17 5) (list q r))"))
 (test "Scheme macro hygiene: the macro's own temporaries don't capture" (1 2)
   (in-import-test "(let ((x 1) (y 2)) (and-let* ((x x) (z y)) (list x z)))"))
+(test "Scheme macro from Lisp calls a local function" (2 4)
+  (in-import-test "(flet ((double (x) (* 2 x))) (mapcar (cut double <>) '(1 2)))"))
+(test "Scheme macro from Lisp calls the function being defined" (3 2 1)
+  (progn (in-import-test "(defun count-down (n) (and-let* (((plusp n))) (cons n (count-down (1- n)))))")
+	 (in-import-test "(count-down 3)")))
+(test "... or passes it, as #'" (1 2 3)
+  (progn (in-import-test "(defun count-up (n) (if (zerop n) '() (append (funcall (cut #'count-up <>) (1- n)) (list n))))")
+	 (in-import-test "(count-up 3)")))
+(test "a Scheme procedure returned to Lisp is Scheme's again when passed back" t
+  (progn (in-import-test "(r7rs:define (empty-thunk) (lambda () '()))")
+	 (in-import-test "(r7rs:define (gives-null? f) (null? (f)))")
+	 (in-import-test "(gives-null? (empty-thunk))")))
 (test "r7rs:define binds a Lisp function" (1 2 6 24)
   (progn (in-import-test "(r7rs:define (fact n) (if (= n 0) 1 (* n (fact (- n 1)))))")
 	 (in-import-test "(mapcar #'fact '(1 2 3 4))")))
