@@ -166,7 +166,20 @@ that reads the datum and records where it was (ports.lisp).")
 (defun read-atom (port)
   (let ((token (read-token port)))
     (or (and (plusp (length token)) (guile-number (ps:parse-scheme-number token 10)))
+	(keyword-token token)
 	(guile-symbol token))))
+
+(defun keyword-token (token)
+  "The keyword TOKEN is in the keywords read option's style (:foo for
+prefix, foo: for postfix), or NIL."
+  (let ((style (option-value (symbol-value '*read-options*) "keywords"))
+	(n (length token)))
+    (when (and style (not (eq style ps:false)) (ps:scheme-symbol-p style) (> n 1))
+      (let ((name (ps:scheme-symbol-name style)))
+	(cond ((and (string= name "prefix") (char= (char token 0) #\:))
+	       (intern (ps::invert-case (subseq token 1)) "KEYWORD"))
+	      ((and (string= name "postfix") (char= (char token (1- n)) #\:))
+	       (intern (ps::invert-case (subseq token 0 (1- n))) "KEYWORD")))))))
 
 (defun read-hex (port digits terminator)
   "A character code from DIGITS hex digits (or up to TERMINATOR when

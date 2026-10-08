@@ -620,21 +620,28 @@ the table's own, which hash-ref and the rest see too."
       (setf (ps-r7rs::parameter-state-value f) v)))
 
 (defun call-with-fluid (fluid value thunk)
-  (when (fluid-special fluid)
-    (return-from call-with-fluid
-      (funcall ps-r7rs::*call-in-extent*
-	       (lambda (inner) (progv (list (fluid-special fluid)) (list value) (funcall inner)))
-	       thunk)))
-  (funcall ps-r7rs::*call-in-extent*
-	   (lambda (inner)
-	     (let ((old (fluid-value fluid)))
-	       (push old (fluid-outer fluid))
-	       (unwind-protect
-		    (progn (setf (fluid-value fluid) value)
-			   (funcall inner))
-		 (pop (fluid-outer fluid))
-		 (setf (fluid-value fluid) old))))
-	   thunk))
+  ;; Leaving the extent keeps the binding's value in VALUE: re-entering
+  ;; it (by a continuation) binds the fluid to that, as Guile's dynamic
+  ;; states do.
+  (let ((symbol (fluid-special fluid)))
+    (if symbol
+	(funcall ps-r7rs::*call-in-extent*
+		 (lambda (inner)
+		   (progv (list symbol) (list value)
+		     (unwind-protect (funcall inner)
+		       (setq value (symbol-value symbol)))))
+		 thunk)
+	(funcall ps-r7rs::*call-in-extent*
+		 (lambda (inner)
+		   (let ((old (fluid-value fluid)))
+		     (push old (fluid-outer fluid))
+		     (unwind-protect
+			  (progn (setf (fluid-value fluid) value)
+				 (funcall inner))
+		       (setq value (fluid-value fluid))
+		       (pop (fluid-outer fluid))
+		       (setf (fluid-value fluid) old))))
+		 thunk))))
 
 (defun check-fluid (who f) (unless (fluid-p f) (wrong-type who 1 f)))
 

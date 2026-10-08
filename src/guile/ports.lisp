@@ -828,7 +828,10 @@ read buffer, unread."
     (def "current-error-port" (lambda () *error-output*))
     (def "current-warning-port" (lambda () *error-output*))
     (def "current-load-port" (lambda () ps:false))
-    (def "open-file" #'open-file)
+    (def "open-file" (lambda (filename mode &rest keys)
+		       ;; Guile's keyword errors, rather than Lisp's
+		       (check-keywords keys '(:encoding :guess-encoding :buffering) nil nil)
+		       (apply #'open-file filename mode keys)))
     (def "open-input-file" (lambda (f &rest options)
 			     (apply #'open-file f (if (getf (keywords options) :binary) "rb" "r")
 				    (encoding-options options))))

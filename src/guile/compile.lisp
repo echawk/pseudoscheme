@@ -359,9 +359,13 @@ documentation, and if NAMED its name."
 	     (opt (if (truthy (node-field case 2)) (length (node-field case 2)) 0))
 	     (rest (truthy (node-field case 3)))
 	     (kw (truthy (node-field case 4)))
-	     (test (if (or rest kw)
-		       (list (core "%guile-nargs>=") args req)
-		       (list (core "%guile-nargs-between") args req (+ req opt)))))
+	     (test (cond (rest (list (core "%guile-nargs>=") args req))
+			 ;; and, if another clause follows, no more positional
+			 ;; arguments than it takes
+			 ((and kw (node-type (node-field case 8)))
+			  (list (core "%guile-keywords-fit?") args req opt))
+			 (kw (list (core "%guile-nargs>=") args req))
+			 (t (list (core "%guile-nargs-between") args req (+ req opt))))))
 	(list (core "if") test
 	      (compile-clause case args)
 	      (compile-clauses (node-field case 8) args)))))
@@ -447,19 +451,32 @@ evaluated in the scope of those before it."
   (psx:defhost "%guile-nargs-between" (args min max)
     (let ((n (list-length args))) (bool (<= min n max))))
   (psx:defhost "%guile-positional?" (tail) (bool (and (consp tail) (not (keywordp (car tail))))))
+  (psx:defhost "%guile-keywords-fit?" (args req opt)
+    (bool (and (nthcdr-p args req)
+	       (let ((tail (nthcdr req args)))
+		 (loop repeat opt
+		       while (and (consp tail) (not (keywordp (car tail))))
+		       do (setq tail (cdr tail)))
+		 (or (atom tail) (keywordp (car tail)))))))
   (psx:defhost "%guile-check-no-more" (tail)
     (when tail (funcall (psx:host-ref "%guile-arity-error")))
     *unspecified*)
   (psx:defhost "%guile-check-keywords" (tail keywords allow-other rest)
     (check-keywords tail keywords (truthy allow-other) (truthy rest)))
   (psx:defhost "%guile-keyword-ref" (tail keyword)
-    (loop for x on tail by #'cddr
-	  when (and (eq (car x) keyword) (consp (cdr x))) return (cadr x)
-	  finally (return +unbound+)))
+    ;; the last value given, as Guile's; a non-keyword (with a rest
+    ;; argument) is passed over
+    (let ((value +unbound+))
+      (loop while (consp tail)
+	    do (if (and (keywordp (car tail)) (consp (cdr tail)))
+		   (progn (when (eq (car tail) keyword) (setq value (cadr tail)))
+			  (setq tail (cddr tail)))
+		   (setq tail (cdr tail))))
+      value))
   (psx::register-primitive-names
    '("%guile-ref" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
      "%guile-with-meta"
-     "%guile-nargs>=" "%guile-nargs-between" "%guile-positional?" "%guile-check-no-more"
+     "%guile-nargs>=" "%guile-nargs-between" "%guile-keywords-fit?" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
 
 (defun nthcdr-p (list n)
