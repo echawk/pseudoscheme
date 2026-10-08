@@ -640,7 +640,16 @@ no procedure.")
 	(setf (gethash "%call-with-frame" table) t (gethash "%escape-call/cc" table) t
 	      (gethash "call-with-prompt" table) t (gethash "abort-to-prompt" table) t)
 	(dolist (name *adapter-primitives*) (setf (gethash name table) t))
+	(dolist (name *registered-primitive-names*) (setf (gethash name table) t))
 	(setq *primitive-names* table))))
+
+(defvar *registered-primitive-names* '()
+  "Host primitives other layers define (src/guile/) that call no
+procedure, so that calls to them aren't call sites.")
+
+(defun register-primitive-names (names)
+  (setq *registered-primitive-names* (union names *registered-primitive-names* :test #'string=)
+	*primitive-names* nil))
 
 (defun primitive-name (x)
   "The name of primitive X, if X refers to one: a host global with a

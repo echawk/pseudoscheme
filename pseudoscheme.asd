@@ -266,3 +266,19 @@
   :pathname #p"src/"
   :depends-on (:pseudoscheme)
   :components ((:file "bootstrap")))
+
+;;; Guile: Guile's own boot-9, psyntax and modules, loaded from a Guile
+;;; installation, on libguile's primitives written in Lisp and a
+;;; Tree-IL compiler.  See src/guile/boot.lisp, docs/guile.md.
+(defsystem :pseudoscheme/guile
+  :version "3.0"
+  :pathname #p"src/guile/"
+  :depends-on (:pseudoscheme/api)
+  :components ((:file "reader")
+	       (:file "runtime" :depends-on ("reader"))
+	       (:file "compile" :depends-on ("runtime"))
+	       (:file "boot" :depends-on ("compile"))
+	       (:file "primitives" :depends-on ("boot"))
+	       (:file "ports" :depends-on ("primitives"))
+	       (:file "threads" :depends-on ("primitives"))
+	       (:static-file "root-primitives.txt")))
