@@ -146,7 +146,9 @@
 (defun default-encoding ()
   ;; #f is Latin-1, as Guile's: R6RS's binary ports are made so
   (let ((v (ignore-errors (fluid-value (root-value "%default-port-encoding")))))
-    (cond ((stringp v) (or (canonical-encoding v) "UTF-8"))
+    (cond ((stringp v)
+	   (or (canonical-encoding v)
+	       (guile-error (ssym "misc-error") "open-port" "unknown encoding: ~S" (list v))))
 	  ((eq v ps:false) "ISO-8859-1")
 	  (t "UTF-8"))))
 
@@ -166,28 +168,32 @@
 	(unless (port-input-p port)
 	  (wrong-type "read" 1 port))
 	(when (plusp (port-wend port)) (flush-output port))
-	;; read after what is there (unread bytes may precede): at end of
-	;; file the buffer is left as it was, so a position in it still holds
-	(when (>= (port-rend port) (length (port-rbuf port)))
-	  (setf (port-rpos port) 0 (port-rend port) 0))
-	;; an end of file just read is reported again without reading
+	;; an end of file just read stays until a read returns it (a peek
+	;; doesn't): CONSUME-EOF
 	(when (port-eof-pending port)
-	  (setf (port-eof-pending port) nil)
 	  (return-from fill-input nil))
-	(let* ((start (port-rend port))
-	       (n (funcall (port-read-fn port) (port-rbuf port) start
-			   ;; an unbuffered port reads a byte at a time
-			   (if (eq (port-buffering port) :none)
-			       1
-			       (- (length (port-rbuf port)) start)))))
-	  (incf (port-rend port) n)
-	  (when (zerop n) (setf (port-eof-pending port) t))
-	  (plusp n)))))
+	;; the empty buffer is filled from its start, all of it asked for;
+	;; at end of file it is left as it was, so a position in it (a bad
+	;; sequence's start) still holds
+	(let ((old-rpos (port-rpos port)) (old-rend (port-rend port)))
+	  (setf (port-rpos port) 0 (port-rend port) 0)
+	  (let ((n (funcall (port-read-fn port) (port-rbuf port) 0
+			    ;; an unbuffered port reads a byte at a time
+			    (if (eq (port-buffering port) :none) 1 (length (port-rbuf port))))))
+	    (if (zerop n)
+		(setf (port-eof-pending port) t
+		      (port-rpos port) old-rpos (port-rend port) old-rend)
+		(setf (port-rend port) n))
+	    (plusp n))))))
+
+(defun consume-eof (port)
+  "A read returns the pending end of file: the next reads read again."
+  (setf (port-eof-pending port) nil))
 
 (defun port-read-byte (port)
   (if (fill-input port)
       (prog1 (aref (port-rbuf port) (port-rpos port)) (incf (port-rpos port)))
-      :eof))
+      (progn (consume-eof port) :eof)))
 
 (defun port-peek-byte (port)
   (if (fill-input port) (aref (port-rbuf port) (port-rpos port)) :eof))
@@ -447,7 +453,9 @@ mark, as Guile writes."
 (defmethod trivial-gray-streams:stream-peek-char ((p gport))
   ;; read, then put the read position back where it was: the very bytes,
   ;; a bad sequence included
-  (fill-input p)
+  (unless (fill-input p)
+    ;; at end of file, which stays pending for the next read
+    (return-from trivial-gray-streams:stream-peek-char :eof))
   (let* ((start (port-rpos p))
 	 (buffer (port-rbuf p))
 	 (c (port-read-char p)))
@@ -536,6 +544,7 @@ mark, as Guile writes."
       (port-position port)
       (progn
 	(flush-output port)
+	(consume-eof port)		; a seek clears a pending end of file
 	(let ((pending (- (port-rend port) (port-rpos port))))
 	  (setf (port-rpos port) 0 (port-rend port) 0)
 	  (let ((pos (funcall (port-seek-fn port) (if (= whence 1) (- offset pending) offset) whence)))
@@ -715,10 +724,41 @@ read buffer, unread."
 	  (guile-error (ssym "system-error") "open-file" "~A: ~S"
 		       (list (sb-int:strerror errno) filename) (list errno)))
 	(fd-port fd mode
-		 :filename filename
+		 :filename (port-file-name filename)
 		 ;; a coding declaration, guessed, takes precedence
 		 :encoding (or (and (truthy guess-encoding) (find #\r mode) (file-coding filename))
 			       (and (stringp encoding) encoding)))))))
+
+;;; The file name a file port records, as %file-port-name-canonicalization
+;;; asks: as given (#f), canonical ('absolute), or relative to the
+;;; %load-path entry it is under, the longest ('relative; as given if
+;;; none).
+
+(defun real-path (path)
+  "PATH with symbolic links, . and .. resolved (realpath), or NIL."
+  (let ((p (cffi:foreign-funcall "realpath" :string path :pointer (cffi:null-pointer) :pointer)))
+    (unless (cffi:null-pointer-p p)
+      (prog1 (cffi:foreign-string-to-lisp p)
+	(cffi:foreign-funcall "free" :pointer p :void)))))
+
+(defun port-file-name (filename)
+  (let* ((fluid (root-value "%file-port-name-canonicalization"))
+	 (mode (and fluid (fluid-p fluid) (fluid-value fluid)))
+	 (mode (and (symbolp mode) mode (not (eq mode ps:false)) (ps:scheme-symbol-name mode))))
+    (cond ((equal mode "absolute") (or (real-path filename) filename))
+	  ((equal mode "relative")
+	   (let ((canonical (real-path filename)) (best nil))
+	     (when canonical
+	       (dolist (dir (let ((v (root-value "%load-path"))) (if (listp v) v '())))
+		 (let ((d (and (stringp dir) (plusp (length dir)) (real-path dir))))
+		   (when d
+		     (let ((prefix (if (char= (char d (1- (length d))) #\/) d (concatenate 'string d "/"))))
+		       (when (and (> (length canonical) (length prefix))
+				  (string= prefix canonical :end2 (length prefix))
+				  (or (null best) (> (length prefix) (length best))))
+			 (setq best prefix)))))))
+	     (if best (subseq canonical (length best)) filename)))
+	  (t filename))))
 
 ;;; Lisp streams as ports
 
@@ -953,10 +993,22 @@ read buffer, unread."
    (cons "SEEK_SET" 0) (cons "SEEK_CUR" 1) (cons "SEEK_END" 2)
    (cons "truncate-file" (lambda (obj &optional length)
 			   (cond
-			     ((stringp obj) (sb-posix:truncate obj (or length 0)))
-			     ((integerp obj) (sb-posix:ftruncate obj (or length 0)))
+			     ((stringp obj)
+			      (unless length
+				(guile-error (ssym "misc-error") "truncate-file"
+					     "must supply length if OBJECT is a filename" '()))
+			      (sb-posix:truncate obj length))
+			     ((integerp obj)
+			      ;; to the descriptor's position, if no length
+			      (sb-posix:ftruncate obj (or length (sb-posix:lseek obj 0 sb-posix:seek-cur))))
 			     (t
 			       (let ((p (->port obj "truncate-file")))
+				 (when (memory-p (port-data p))
+				   ;; a string or bytevector port: an output one, not cut
+				   ;; before its position
+				   (unless (port-output-p p) (wrong-type "truncate-file" 1 obj))
+				   (when (and length (< length (port-position p)))
+				     (out-of-range "truncate-file" length)))
 				 (flush-output p)
 				 (funcall (or (port-truncate-fn p) (wrong-type "truncate-file" 1 obj))
 					  (or length (port-position p))))))
@@ -1048,10 +1100,14 @@ read buffer, unread."
   "Up to N bytes from PORT, as a bytevector: fewer at end of file."
   (when (and (eq (port-buffering port) :none) (= (port-rpos port) (port-rend port)) (plusp n)
 	     (port-read-fn port))
-    ;; unbuffered: one read of what is asked for, as Guile's
+    ;; unbuffered: reads of what is still asked for, straight into the
+    ;; result, until it is all there or at end of file, as Guile's
     (when (plusp (port-wend port)) (flush-output port))
-    (let* ((out (make-octets n))
-	   (got (funcall (port-read-fn port) out 0 n)))
+    (let ((out (make-octets n)) (got 0))
+      (loop while (< got n)
+	    do (let ((k (funcall (port-read-fn port) out got (- n got))))
+		 (when (zerop k) (return))
+		 (incf got k)))
       (return-from get-bytes (if (= got n) out (subseq out 0 got)))))
   (let ((out (make-octets n)) (i 0))
     (loop while (and (< i n) (fill-input port))
@@ -1059,6 +1115,7 @@ read buffer, unread."
 	       (replace out (port-rbuf port) :start1 i :start2 (port-rpos port) :end2 (+ (port-rpos port) k))
 	       (incf (port-rpos port) k)
 	       (incf i k)))
+    (when (zerop i) (consume-eof port))
     (if (= i n) out (subseq out 0 i))))
 
 (defun binary-in (p who) (->port p who))
@@ -1097,7 +1154,7 @@ read buffer, unread."
 				 (let ((port (binary-in p "get-bytevector-some")))
 				   (if (fill-input port)
 				       (get-bytes port (- (port-rend port) (port-rpos port)))
-				       ps:eof-object))))
+				       (progn (consume-eof port) ps:eof-object)))))
    (cons "get-bytevector-some!" (lambda (p bv start count)
 				  (let ((port (binary-in p "get-bytevector-some!")))
 				    (cond ((zerop count) 0)
@@ -1105,7 +1162,7 @@ read buffer, unread."
 					   (let ((got (get-bytes port (min count (- (port-rend port) (port-rpos port))))))
 					     (replace bv got :start1 start)
 					     (length got)))
-					  (t ps:eof-object)))))
+					  (t (consume-eof port) ps:eof-object)))))
    (cons "get-string-n!" (lambda (p string start count)
 			   (let ((port (->port p "get-string-n!")))
 			     (let ((n (loop for i from 0 below count
