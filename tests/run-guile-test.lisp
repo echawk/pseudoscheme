@@ -42,6 +42,16 @@
 (when (uiop:getenv "GUILE_TRACE") (setq psg::*trace-lisp-errors* t))
 ;; GUILE_TRACE_CACHE=1: which modules load from the compiled-file cache
 (when (uiop:getenv "GUILE_TRACE_CACHE") (setq psg::*trace-cache* t))
+;; GUILE_VM_PRELOAD="srfi/srfi-1 ice-9/q": load those modules from the
+;; installed Guile's compiled .go files, on the VM (src/guile/vm.lisp),
+;; before the tests: the tests then call the VM's code
+(let ((preload (uiop:getenv "GUILE_VM_PRELOAD")))
+  (when preload
+    (dolist (name (uiop:split-string preload :separator " "))
+      (when (plusp (length name))
+	(psg::call-with-guile-catch
+	 (lambda ()
+	   (funcall (psg::load-go-file (psg::installed-go-file name)))))))))
 
 (defun guile-string (x)
   (with-output-to-string (s) (write-string (substitute #\/ #\\ (namestring x)) s)))

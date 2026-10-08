@@ -144,6 +144,11 @@ its type)."
 		 (13 (let* ((n (ash word0 -8)) (v (make-array n)))
 		       (dotimes (i n v) (setf (svref v i) (scm (+ 1 i))))))
 		 (21 (decode-static-string image (raw 1) (raw 2) (raw 3)))
+		 (61 (make-syntax-object (scm 1) (scm 2) (scm 3) (scm 4)))
+		 (77 (let* ((n (raw 1))
+			    (contents (raw 2))
+			    (bytes (vm-image-bytes image)))
+		       (subseq bytes contents (+ contents n))))
 		 (otherwise (vm-error "static object of type ~D at ~X not decoded yet" tc7 address)))))))))
 
 (defun decode-static-string (image stringbuf start length)
@@ -238,9 +243,16 @@ order of its fields; FP, SP and STACK are the machine's."
 				       (vm-error "VM instruction ~A isn't implemented" name))))))
 	(setq *vm-dispatch* table))))
 
-(defun run-vm (vm code)
+(defstruct (extent-exit (:constructor make-extent-exit (location)))
+  "The end of a dynamic extent a nested run of the machine is in: where
+to go on."
+  location)
+
+(defun run-vm (vm code &optional nested)
   "Run from CODE, a code-pointer, until a frame returns to Lisp: the
-values it returns."
+values it returns.  If NESTED, the run is a dynamic extent's body (a
+prompt's, a dynamic-wind's, a fluid binding's), and ends with the
+extent-exit of the instruction that ends the extent."
   (let ((dispatch (vm-dispatch-table))
 	(image (code-pointer-image code))
 	(ip (code-pointer-word code)))
@@ -254,7 +266,10 @@ values it returns."
 	    (etypecase to
 	      (fixnum (setq ip to))
 	      (code-pointer (setq image (code-pointer-image to) ip (code-pointer-word to)))
-	      (list (return to)))))))))
+	      (list (return to))
+	      (extent-exit
+	       (unless nested (vm-error "a dynamic extent ended that wasn't begun"))
+	       (return to)))))))))
 
 ;;; Locals
 
@@ -420,7 +435,7 @@ values in the frame, and return from it."
   (setf (vm-slot vm dst) (make-code-pointer image (+ ip offset)))
   next)
 (defop "load-u64" (dst high low) (setf (vm-slot vm dst) (logior (ash high 32) low)) next)
-(defop "load-s64" (dst high low) (setf (vm-slot vm dst) (sign-extend (logior (ash high 32) low) 64)) next)
+(defop "load-s64" (dst high low) (setf (vm-slot vm dst) (logior (ash high 32) low)) next)
 (defop "load-f64" (dst high low)
   (setf (vm-slot vm dst) (sb-kernel:make-double-float (sign-extend high 32) low))
   next)
@@ -451,8 +466,10 @@ values in the frame, and return from it."
     (vm-program (logior (ash (length (program-free x)) 16) 69))
     (gvariable 7)
     (string 21)
+    (vm-stringbuf (logior 39 (if (wide-string-p* (vm-stringbuf-string x)) #x400 0)))
+    (syntax-object 61)
     (raw-object (let ((w (svref (raw-object-words x) 0))) (if (integerp w) w 0)))
-    (t (cond ((gstruct-p x) 1)
+    (t (cond ((struct-p x) 1)
 	     ((and (symbolp x) x (not (keywordp x))) 5)
 	     ((keywordp x) 53)
 	     ((typep x 'double-float) 535)
@@ -492,7 +509,16 @@ values in the frame, and return from it."
     (vm-program (if (= i 1) (program-code x) (svref (program-free x) (- i 2))))
     (gvariable (gvariable-value x))
     (raw-object (svref (raw-object-words x) i))
-    (t (if (gstruct-p x)
+    (syntax-object (ecase i
+		     (1 (syntax-object-expression x)) (2 (syntax-object-wrap x))
+		     (3 (syntax-object-module x)) (4 (syntax-object-sourcev x))))
+    ;; a string: its buffer, start and length
+    (string (ecase i (1 (make-vm-stringbuf x)) (2 0) (3 (length x))))
+    (vm-stringbuf (ecase i (1 (length (vm-stringbuf-string x)))))
+    ;; a bytevector: its length, and a pointer to its contents
+    ((simple-array (unsigned-byte 8) (*))
+     (ecase i (1 (length x)) (2 (make-vm-pointer x 0))))
+    (t (if (struct-p x)
 	   (svref (struct-slots-of x) (- i 1))
 	   (vm-error "reading word ~D of ~S isn't supported yet" i x)))))
 
@@ -505,7 +531,7 @@ values in the frame, and return from it."
 		    (setf (svref (program-free x) (- i 2)) value)))
     (gvariable (setf (gvariable-value x) value))
     (raw-object (setf (svref (raw-object-words x) i) value))
-    (t (if (gstruct-p x)
+    (t (if (struct-p x)
 	   (setf (svref (struct-slots-of x) (- i 1)) value)
 	   (vm-error "writing word ~D of ~S isn't supported yet" i x)))))
 
@@ -527,6 +553,33 @@ values in the frame, and return from it."
   (if (and (raw-object-p obj) (= i 0))
       (realize vm obj value)
       (heap-set obj i value)))
+
+(defun struct-from-raw (vm raw vtable)
+  "RAW, whose first word now points to VTABLE, as a struct of VTABLE."
+  (let* ((words (raw-object-words raw))
+	 (slots (make-array (1- (length words)) :initial-element ps:false)))
+    (loop for i from 1 below (length words)
+	  for w = (svref words i)
+	  unless (eql w 0) do (setf (svref slots (1- i)) w))
+    (let* ((flags (vtable-flags vtable))
+	   (struct (cond ((logtest flags +vtable-flag-vtable+) (make-vtable-from-slots vtable slots))
+			 ((logtest flags +vtable-flag-applicable+) (make-applicable-struct vtable slots))
+			 (t (%make-gstruct vtable slots)))))
+      (replace-in-frame vm raw struct)
+      struct)))
+
+(defop "scm-ref/tag" (dst obj tag)
+  (let ((x (vm-slot vm obj)))
+    (setf (vm-slot vm dst)
+	  (if (and (struct-p x) (= tag 1))
+	      (struct-vtable-of x)
+	      (vm-error "scm-ref/tag ~D of ~S isn't supported yet" tag x))))
+  next)
+(defop "scm-set!/tag" (obj tag val)
+  (let ((x (vm-slot vm obj)))
+    (cond ((and (raw-object-p x) (= tag 1)) (struct-from-raw vm x (vm-slot vm val)))
+	  (t (vm-error "scm-set!/tag ~D of ~S isn't supported yet" tag x))))
+  next)
 
 (defop "scm-ref/immediate" (dst obj i) (setf (vm-slot vm dst) (heap-ref (vm-slot vm obj) i)) next)
 (defop "scm-ref" (dst obj i) (setf (vm-slot vm dst) (heap-ref (vm-slot vm obj) (vm-slot vm i))) next)
@@ -555,12 +608,12 @@ values in the frame, and return from it."
 (defop "heap-tag=?" (obj mask tag) (compare (= (logand (heap-header (vm-slot vm obj)) mask) tag) :equal))
 (defop "u64=?" (a b) (compare (= (vm-slot vm a) (vm-slot vm b)) :equal))
 (defop "u64<?" (a b) (compare (< (vm-slot vm a) (vm-slot vm b)) :less))
-(defop "s64<?" (a b) (compare (< (vm-slot vm a) (vm-slot vm b)) :less))
-(defop "s64-imm=?" (a imm) (compare (= (vm-slot vm a) imm) :equal))
+(defop "s64<?" (a b) (compare (< (s64 (vm-slot vm a)) (s64 (vm-slot vm b))) :less))
+(defop "s64-imm=?" (a imm) (compare (= (s64 (vm-slot vm a)) imm) :equal))
 (defop "u64-imm<?" (a imm) (compare (< (vm-slot vm a) imm) :less))
 (defop "imm-u64<?" (a imm) (compare (< imm (vm-slot vm a)) :less))
-(defop "s64-imm<?" (a imm) (compare (< (vm-slot vm a) imm) :less))
-(defop "imm-s64<?" (a imm) (compare (< imm (vm-slot vm a)) :less))
+(defop "s64-imm<?" (a imm) (compare (< (s64 (vm-slot vm a)) imm) :less))
+(defop "imm-s64<?" (a imm) (compare (< imm (s64 (vm-slot vm a))) :less))
 (defop "f64=?" (a b) (compare (= (vm-slot vm a) (vm-slot vm b)) :equal))
 (defop "f64<?" (a b)
   (let ((x (vm-slot vm a)) (y (vm-slot vm b)))
@@ -626,6 +679,41 @@ values in the frame, and return from it."
 (defintrinsic "module-variable" (module name)
   (funcall (root-procedure "module-variable") module name))
 
+(defun interned (x)
+  "X, or the symbol named X if it is a string: names in static data are
+strings, since symbols can't be allocated statically."
+  (if (stringp x) (ssym x) x))
+
+(defun lookup-bound (module-name name public)
+  "The bound variable NAME in the module named MODULE-NAME (its public
+interface if PUBLIC)."
+  (let* ((name (interned name))
+	 (module-name (if (listp module-name) (mapcar #'interned module-name) module-name))
+	 (module (funcall (root-procedure (if public "resolve-interface" "resolve-module")) module-name))
+	 (v (funcall (root-procedure "module-variable") module name)))
+    (unless (and (gvariable-p v) (not (eq (gvariable-value v) +unbound+)))
+      (guile-error (ssym "unbound-variable") ps:false "Unbound variable: ~S" (list name) ps:false))
+    v))
+
+(defintrinsic "lookup-bound-public" (module-name name) (lookup-bound module-name name t))
+(defintrinsic "lookup-bound-private" (module-name name) (lookup-bound module-name name nil))
+(defintrinsic "lookup" (module name)
+  (let ((v (funcall (root-procedure "module-variable") module name)))
+    (if (gvariable-p v) v ps:false)))
+(defintrinsic "lookup-bound" (module name)
+  (let ((v (funcall (root-procedure "module-variable") module name)))
+    (unless (and (gvariable-p v) (not (eq (gvariable-value v) +unbound+)))
+      (guile-error (ssym "unbound-variable") ps:false "Unbound variable: ~S" (list name) ps:false))
+    v))
+(defintrinsic "resolve-module" (name public)
+  (funcall (root-procedure (if (eql public 0) "resolve-module" "resolve-interface")) name))
+
+(defop "call-scm<-scmn-scmn" (dst a b idx)
+  (setf (vm-slot vm dst) (funcall (intrinsic idx)
+				  (image-object image (* 4 (+ ip a)))
+				  (image-object image (* 4 (+ ip b)))))
+  next)
+
 (defop "call-scm<-thread" (dst idx) (setf (vm-slot vm dst) (funcall (intrinsic idx))) next)
 (defop "call-scm<-scm" (dst a idx) (setf (vm-slot vm dst) (funcall (intrinsic idx) (vm-slot vm a))) next)
 (defop "call-scm<-scm-scm" (dst a b idx)
@@ -638,8 +726,8 @@ values in the frame, and return from it."
 (defop "call-scm-scm-scm" (a b c idx)
   (funcall (intrinsic idx) (vm-slot vm a) (vm-slot vm b) (vm-slot vm c))
   next)
-(defop "call-thread" (idx) (funcall (intrinsic idx)) next)
-(defop "call-thread-scm" (a idx) (funcall (intrinsic idx) (vm-slot vm a)) next)
+(defop "call-thread" (idx) (extent-step vm image next (funcall (intrinsic idx))))
+(defop "call-thread-scm" (a idx) (extent-step vm image next (funcall (intrinsic idx) (vm-slot vm a))))
 
 ;;; ------------------------------------------------------------------
 ;;; Loading images
@@ -661,3 +749,377 @@ thunk."
 	    (entry (or (dynamic-entry elf +dt-guile-entry+) (elf-error "ELF file has no entry thunk"))))
 	(when init (funcall (thunk init)))
 	(thunk entry)))))
+
+;;; ------------------------------------------------------------------
+;;; Unboxed values
+;;;
+;;; A u64 or s64 local holds its 64 bits as a nonnegative integer (the
+;;; manual: "the bits for a u64 value are the same as those for an s64
+;;; value"); an instruction that takes it as signed sign-extends it.  An
+;;; f64 local holds a double-float.
+
+(declaim (inline u64 s64))
+(defun u64 (n) (ldb (byte 64 0) n))
+(defun s64 (n) (sign-extend (ldb (byte 64 0) n) 64))
+
+(macrolet ((binary (name op &optional immediate)
+	     `(defop ,name (dst a b)
+		(setf (vm-slot vm dst) (u64 (,op (vm-slot vm a) ,(if immediate 'b '(vm-slot vm b)))))
+		next)))
+  (binary "uadd" +) (binary "usub" -) (binary "umul" *)
+  (binary "uadd/immediate" + t) (binary "usub/immediate" - t) (binary "umul/immediate" * t)
+  (binary "ulogand" logand) (binary "ulogior" logior) (binary "ulogxor" logxor)
+  (binary "ulogand/immediate" logand t))
+(defop "ulogsub" (dst a b) (setf (vm-slot vm dst) (u64 (logandc2 (vm-slot vm a) (vm-slot vm b)))) next)
+(macrolet ((shift (name kind &optional immediate)
+	     `(defop ,name (dst a b)
+		(let ((n (logand ,(if immediate 'b '(vm-slot vm b)) 63)) (x (vm-slot vm a)))
+		  (setf (vm-slot vm dst)
+			(u64 ,(ecase kind
+				(:left '(ash x n))
+				(:right '(ash x (- n)))
+				(:signed-right '(ash (s64 x) (- n)))))))
+		next)))
+  (shift "ulsh" :left) (shift "ursh" :right) (shift "srsh" :signed-right)
+  (shift "ulsh/immediate" :left t) (shift "ursh/immediate" :right t) (shift "srsh/immediate" :signed-right t))
+(macrolet ((float-op (name op)
+	     `(defop ,name (dst a b) (setf (vm-slot vm dst) (,op (vm-slot vm a) (vm-slot vm b))) next)))
+  (float-op "fadd" +) (float-op "fsub" -) (float-op "fmul" *))
+(defop "fdiv" (dst a b)
+  (setf (vm-slot vm dst) (sb-int:with-float-traps-masked (:divide-by-zero :invalid :overflow)
+			   (/ (vm-slot vm a) (vm-slot vm b))))
+  next)
+(defop "s64->f64" (dst src) (setf (vm-slot vm dst) (coerce (s64 (vm-slot vm src)) 'double-float)) next)
+
+(defop "tag-char" (dst src) (setf (vm-slot vm dst) (code-char (vm-slot vm src))) next)
+(defop "untag-char" (dst src) (setf (vm-slot vm dst) (char-code (vm-slot vm src))) next)
+(defop "tag-fixnum" (dst src) (setf (vm-slot vm dst) (s64 (vm-slot vm src))) next)
+(defop "untag-fixnum" (dst src) (setf (vm-slot vm dst) (u64 (vm-slot vm src))) next)
+
+;;; ------------------------------------------------------------------
+;;; Raw memory: pointers into a bytevector's or a string's contents
+;;;
+;;; A pointer is a base (a byte vector, or a string whose characters are
+;;; its "bytes": one per character if narrow, four if wide) and a byte
+;;; offset.
+
+(defstruct (vm-pointer (:constructor make-vm-pointer (base offset)))
+  base (offset 0))
+
+(defstruct (vm-stringbuf (:constructor make-vm-stringbuf (string)))
+  "A string's character buffer, as compiled code sees it."
+  string)
+
+(defun wide-string-p* (s) (some (lambda (c) (> (char-code c) 255)) s))
+
+(defun pointer-bytes (p who)
+  (let ((base (vm-pointer-base p)))
+    (unless (typep base '(simple-array (unsigned-byte 8) (*)))
+      (vm-error "~A of a pointer to ~S isn't supported" who base))
+    base))
+
+(defun raw-ref (p offset size signed)
+  (let ((base (vm-pointer-base p)) (at (+ (vm-pointer-offset p) offset)))
+    (if (stringp base)
+	(char-code (char base (if (= size 4) (floor at 4) at)))
+	(let ((n 0))
+	  (loop for i from (1- size) downto 0 do (setq n (logior (ash n 8) (aref base (+ at i)))))
+	  (if signed (u64 (sign-extend n (* 8 size))) n)))))
+
+(defun raw-set (p offset size value)
+  (let ((base (vm-pointer-base p)) (at (+ (vm-pointer-offset p) offset)))
+    (if (stringp base)
+	(setf (char base (if (= size 4) (floor at 4) at)) (code-char value))
+	(dotimes (i size)
+	  (setf (aref base (+ at i)) (ldb (byte 8 (* 8 i)) value))))))
+
+(macrolet ((refs (&rest specs)
+	     `(progn
+		,@(loop for (name size signed) in specs
+			collect `(defop ,name (dst ptr idx)
+				   (setf (vm-slot vm dst) (raw-ref (vm-slot vm ptr) (vm-slot vm idx) ,size ,signed))
+				   next)))))
+  (refs ("u8-ref" 1 nil) ("u16-ref" 2 nil) ("u32-ref" 4 nil) ("u64-ref" 8 nil)
+	("s8-ref" 1 t) ("s16-ref" 2 t) ("s32-ref" 4 t) ("s64-ref" 8 t)))
+(macrolet ((sets (&rest specs)
+	     `(progn
+		,@(loop for (name size) in specs
+			collect `(defop ,name (ptr idx val)
+				   (raw-set (vm-slot vm ptr) (vm-slot vm idx) ,size (u64 (vm-slot vm val)))
+				   next)))))
+  (sets ("u8-set!" 1) ("u16-set!" 2) ("u32-set!" 4) ("u64-set!" 8)
+	("s8-set!" 1) ("s16-set!" 2) ("s32-set!" 4) ("s64-set!" 8)))
+(defop "f32-ref" (dst ptr idx)
+  (setf (vm-slot vm dst) (coerce (sb-kernel:make-single-float (sign-extend (raw-ref (vm-slot vm ptr) (vm-slot vm idx) 4 nil) 32))
+				 'double-float))
+  next)
+(defop "f64-ref" (dst ptr idx)
+  (let ((bits (raw-ref (vm-slot vm ptr) (vm-slot vm idx) 8 nil)))
+    (setf (vm-slot vm dst) (sb-kernel:make-double-float (sign-extend (ash bits -32) 32) (ldb (byte 32 0) bits))))
+  next)
+(defop "f32-set!" (ptr idx val)
+  (raw-set (vm-slot vm ptr) (vm-slot vm idx) 4
+	   (ldb (byte 32 0) (sb-kernel:single-float-bits (coerce (vm-slot vm val) 'single-float))))
+  next)
+(defop "f64-set!" (ptr idx val)
+  (let ((d (coerce (vm-slot vm val) 'double-float)))
+    (raw-set (vm-slot vm ptr) (vm-slot vm idx) 8
+	     (logior (ash (ldb (byte 32 0) (sb-kernel:double-float-high-bits d)) 32)
+		     (sb-kernel:double-float-low-bits d))))
+  next)
+
+(defop "pointer-ref/immediate" (dst obj i)
+  (let ((x (vm-slot vm obj)))
+    (setf (vm-slot vm dst)
+	  (cond ((and (typep x 'ps-r6rs::octets) (= i 2)) (make-vm-pointer x 0))
+		(t (vm-error "pointer-ref/immediate ~D of ~S isn't supported yet" i x)))))
+  next)
+(defop "tail-pointer-ref/immediate" (dst obj i)
+  (let ((x (vm-slot vm obj)))
+    (setf (vm-slot vm dst)
+	  (cond ((and (vm-stringbuf-p x) (= i 2)) (make-vm-pointer (vm-stringbuf-string x) 0))
+		(t (vm-error "tail-pointer-ref/immediate ~D of ~S isn't supported yet" i x)))))
+  next)
+
+;;; ------------------------------------------------------------------
+;;; More calls to intrinsics
+
+(defop "call-thread-scm-scm" (a b idx)
+  (extent-step vm image next (funcall (intrinsic idx) (vm-slot vm a) (vm-slot vm b))))
+(defop "call-scm-sz-u32" (a b c idx) (funcall (intrinsic idx) (vm-slot vm a) (vm-slot vm b) (vm-slot vm c)) next)
+(defop "call-s64<-scm" (dst a idx) (setf (vm-slot vm dst) (u64 (funcall (intrinsic idx) (vm-slot vm a)))) next)
+(defop "call-u64<-scm" (dst a idx) (setf (vm-slot vm dst) (u64 (funcall (intrinsic idx) (vm-slot vm a)))) next)
+(defop "call-f64<-scm" (dst a idx) (setf (vm-slot vm dst) (funcall (intrinsic idx) (vm-slot vm a))) next)
+(defop "call-scm<-u64" (dst a idx) (setf (vm-slot vm dst) (funcall (intrinsic idx) (vm-slot vm a))) next)
+(defop "call-scm<-s64" (dst a idx) (setf (vm-slot vm dst) (funcall (intrinsic idx) (s64 (vm-slot vm a)))) next)
+(defop "call-scm<-thread-scm" (dst a idx) (setf (vm-slot vm dst) (funcall (intrinsic idx) (vm-slot vm a))) next)
+(defop "call-scm<-scm-u64" (dst a b idx)
+  (setf (vm-slot vm dst) (funcall (intrinsic idx) (vm-slot vm a) (vm-slot vm b)))
+  next)
+(defop "call-f64<-f64" (dst a idx) (setf (vm-slot vm dst) (funcall (intrinsic idx) (vm-slot vm a))) next)
+(defop "call-f64<-f64-f64" (dst a b idx)
+  (setf (vm-slot vm dst) (funcall (intrinsic idx) (vm-slot vm a) (vm-slot vm b)))
+  next)
+(defop "call-scm-uimm-scm" (a b c idx) (funcall (intrinsic idx) (vm-slot vm a) b (vm-slot vm c)) next)
+
+(defop "current-thread" (dst) (setf (vm-slot vm dst) sb-thread:*current-thread*) next)
+(defop "allocate-pointerless-words/immediate" (dst count)
+  (setf (vm-slot vm dst) (make-raw-object (make-array count :initial-element 0)))
+  next)
+(defop "allocate-pointerless-words" (dst count)
+  (setf (vm-slot vm dst) (make-raw-object (make-array (vm-slot vm count) :initial-element 0)))
+  next)
+
+(defop "builtin-ref" (dst idx)
+  (setf (vm-slot vm dst)
+	(root-procedure (svref #("apply" "values" "abort-to-prompt" "call-with-values"
+				 "call-with-current-continuation")
+			       idx)))
+  next)
+
+;;; Errors
+
+(defop "throw" (key args) (apply (root-procedure "throw") (vm-slot vm key) (vm-slot vm args)))
+(defun throw-value (vm image ip offset value data)
+  (let ((v (image-object image (* 4 (+ ip offset)))))
+    (funcall (root-procedure "throw") (interned (svref v 0)) (svref v 1) (svref v 2) (list value)
+	     (if data (list value) ps:false))
+    (vm-error "throw returned")))
+(defop "throw/value" (value offset) (throw-value vm image ip offset (vm-slot vm value) nil))
+(defop "throw/value+data" (value offset) (throw-value vm image ip offset (vm-slot vm value) t))
+(defop "unreachable" () (vm-error "unreachable instruction reached"))
+
+;;; Arguments
+
+(defop "expand-apply-argument" ()
+  (let* ((n (frame-size vm)) (list (vm-local vm (1- n))))
+    (set-frame-size vm (+ (1- n) (length list)))
+    (loop for x in list for i from (1- n) do (setf (vm-local vm i) x)))
+  next)
+
+(defun positional-count (vm nreq)
+  "NREQ, and the arguments after them that aren't keywords."
+  (let ((n (frame-size vm)))
+    (loop for i from nreq below n
+	  while (not (keywordp (vm-local vm i)))
+	  finally (return i))))
+
+(defop "positional-arguments<=?" (nreq expected)
+  (let ((npos (positional-count vm nreq)))
+    (setf (vm-compare vm) (cond ((< npos expected) :less) ((= npos expected) :equal) (t :none))))
+  next)
+
+(defop "bind-kwargs" (nreq flags nreq-and-opt ntotal kw-offset)
+  (let* ((allow-other-keys (logbitp 0 flags))
+	 (has-rest (logbitp 1 flags))
+	 (nargs (frame-size vm))
+	 (npos (min (positional-count vm nreq) nreq-and-opt))
+	 (rest (loop for i from npos below nargs collect (vm-local vm i)))
+	 (alist (image-object image (* 4 (+ ip kw-offset)))))
+    (set-frame-size vm (max ntotal npos) +unbound+)
+    (loop for i from npos below ntotal do (setf (vm-local vm i) +unbound+))
+    (set-frame-size vm ntotal)
+    (loop with tail = rest
+	  while tail
+	  do (let ((k (car tail)))
+	       (cond ((keywordp k)
+		      (unless (consp (cdr tail))
+			(guile-error (ssym "keyword-argument-error") ps:false "Keyword argument has no value"
+				     '() (list k)))
+		      (let ((entry (assoc k alist)))
+			(cond (entry (setf (vm-local vm (cdr entry)) (cadr tail)))
+			      ((not allow-other-keys)
+			       (guile-error (ssym "keyword-argument-error") ps:false "Unrecognized keyword"
+					    '() (list k)))))
+		      (setq tail (cddr tail)))
+		     (has-rest (setq tail (cdr tail)))
+		     (t (guile-error (ssym "keyword-argument-error") ps:false "Invalid keyword"
+				     '() (list k))))))
+    (when has-rest (setf (vm-local vm nreq-and-opt) rest)))
+  next)
+
+;;; ------------------------------------------------------------------
+;;; More intrinsics
+
+(macrolet ((by-root (&rest specs)
+	     `(progn
+		,@(loop for (name root args) in specs
+			collect `(defintrinsic ,name ,args (funcall (root-procedure ,root) ,@args))))))
+  (by-root ("string->number" "string->number" (s)) ("class-of" "class-of" (x))
+	   ("logand" "logand" (a b)) ("logior" "logior" (a b)) ("logxor" "logxor" (a b))
+	   ("abs" "abs" (x)) ("sqrt" "sqrt" (x)) ("floor" "floor" (x)) ("ceiling" "ceiling" (x))
+	   ("sin" "sin" (x)) ("cos" "cos" (x)) ("tan" "tan" (x)) ("asin" "asin" (x))
+	   ("acos" "acos" (x)) ("atan" "atan" (x)) ("atan2" "atan" (a b))
+	   ("inexact" "exact->inexact" (x)) ("symbol->string" "symbol->string" (x))
+	   ("string->utf8" "string->utf8" (x)) ("utf8->string" "utf8->string" (x))
+	   ("fluid-ref" "fluid-ref" (f)) ("fluid-set!" "fluid-set!" (f x))
+	   ("$car" "car" (x)) ("$cdr" "cdr" (x)) ("$set-car!" "set-car!" (x v)) ("$set-cdr!" "set-cdr!" (x v))
+	   ("$variable-ref" "variable-ref" (v)) ("$variable-set!" "variable-set!" (v x))
+	   ("$vector-ref" "vector-ref" (v i)) ("$vector-set!" "vector-set!" (v i x))
+	   ("$vector-ref/immediate" "vector-ref" (v i)) ("$vector-set!/immediate" "vector-set!" (v i x))
+	   ("$struct-vtable" "struct-vtable" (s)) ("$struct-ref" "struct-ref" (s i))
+	   ("$struct-set!" "struct-set!" (s i x)) ("$struct-ref/immediate" "struct-ref" (s i))
+	   ("$struct-set!/immediate" "struct-set!" (s i x))))
+
+(defintrinsic "logsub" (a b) (funcall (root-procedure "logand") a (funcall (root-procedure "lognot") b)))
+(defintrinsic "lsh" (a n) (funcall (root-procedure "ash") a n))
+(defintrinsic "rsh" (a n) (funcall (root-procedure "ash") a (- n)))
+(defintrinsic "lsh/immediate" (a n) (funcall (root-procedure "ash") a n))
+(defintrinsic "rsh/immediate" (a n) (funcall (root-procedure "ash") a (- n)))
+(defintrinsic "$vector-length" (v) (funcall (root-procedure "vector-length") v))
+(defintrinsic "string-utf8-length" (s) (length (sb-ext:string-to-octets s :external-format :utf-8)))
+(defintrinsic "string-set!" (s i c) (funcall (root-procedure "string-set!") s i (code-char c)))
+(defintrinsic "$allocate-struct" (vtable n)
+  (make-struct* vtable (make-list n :initial-element ps:false)))
+(defintrinsic "s64->f64" (x) (coerce (s64 x) 'double-float))
+(defintrinsic "expand-stack" (&rest args) (declare (ignore args)) nil)
+
+(defun conversion-error (who x)
+  (guile-error (ssym "wrong-type-arg") who "Wrong type argument in position 1: ~S" (list x) (list x)))
+
+(defintrinsic "scm->f64" (x)
+  (if (realp x) (coerce x 'double-float) (conversion-error "scm->f64" x)))
+(defintrinsic "scm->u64" (x)
+  (if (and (integerp x) (<= 0 x (1- (ash 1 64)))) x (conversion-error "scm->u64" x)))
+(defintrinsic "scm->u64/truncate" (x)
+  (if (integerp x) (u64 x) (conversion-error "scm->u64/truncate" x)))
+(defintrinsic "scm->s64" (x)
+  (if (and (integerp x) (<= (- (ash 1 63)) x (1- (ash 1 63)))) x (conversion-error "scm->s64" x)))
+(defintrinsic "u64->scm" (x) x)
+(defintrinsic "s64->scm" (x) x)
+
+(macrolet ((float-fns (&rest specs)
+	     `(progn
+		,@(loop for (name fn n) in specs
+			collect `(defintrinsic ,name ,(if (= n 1) '(x) '(a b))
+				   (sb-int:with-float-traps-masked (:invalid :divide-by-zero :overflow)
+				     ,(if (= n 1)
+					  `(let ((r (,fn x))) (if (realp r) (coerce r 'double-float) r))
+					  `(coerce (,fn a b) 'double-float))))))))
+  (float-fns ("fabs" abs 1) ("fsqrt" sqrt 1) ("ffloor" ffloor 1) ("fceiling" fceiling 1)
+	     ("fsin" sin 1) ("fcos" cos 1) ("ftan" tan 1) ("fasin" asin 1) ("facos" acos 1)
+	     ("fatan" atan 1) ("fatan2" atan 2)))
+
+;;; ------------------------------------------------------------------
+;;; Dynamic extents: prompts, dynamic-wind, fluid bindings, dynamic states
+;;;
+;;; Each is the runtime's own.  Its body runs in a nested run of the
+;;; machine, inside the runtime's call-with-prompt, winder or fluid
+;;; binding, until the instruction that ends it (the unwind, pop-fluid
+;;; and pop-dynamic-state intrinsics); then the outer run goes on after
+;;; that instruction.  An abort or a throw out of the body leaves it as
+;;; it leaves any Lisp code, undoing the runtime's dynamic state.
+
+(defstruct (extent-push (:constructor make-extent-push (establish)))
+  "An intrinsic's request to run the rest of the body in an extent:
+ESTABLISH takes the body, a thunk, and calls it in the extent."
+  establish)
+
+(defun extent-step (vm image next result)
+  "Where to go after an intrinsic call that returned RESULT."
+  (cond ((extent-push-p result)
+	 (let ((exit (funcall (extent-push-establish result)
+			      (lambda () (run-vm vm (make-code-pointer image next) t)))))
+	   (extent-exit-location exit)))
+	((eq result :pop-extent) (make-extent-exit (make-code-pointer image next)))
+	(t next)))
+
+(defintrinsic "wind" (winder unwinder)
+  ;; the compiled code calls WINDER before, and UNWINDER after a normal
+  ;; exit, itself; the runtime's winder calls UNWINDER on any other exit
+  (make-extent-push
+   (lambda (body)
+     (let ((popped nil))
+       (psx::winder-extent (cons winder (lambda () (unless popped (funcall unwinder))))
+			   (lambda () (prog1 (funcall body) (setq popped t))))))))
+(defintrinsic "unwind" () :pop-extent)
+(defintrinsic "push-fluid" (fluid value)
+  (make-extent-push (lambda (body) (call-with-fluid fluid value body))))
+(defintrinsic "pop-fluid" () :pop-extent)
+(defintrinsic "push-dynamic-state" (state)
+  (make-extent-push (lambda (body) (funcall (root-procedure "with-dynamic-state") state body))))
+(defintrinsic "pop-dynamic-state" () :pop-extent)
+
+(defop "prompt" (tag escape-only proc-slot handler)
+  (let ((saved-fp fp) (saved-sp sp)
+	(handler-at (make-code-pointer image (+ ip handler))))
+    (extent-exit-location
+     (psx::call-with-prompt
+      (vm-slot vm tag)
+      (lambda () (run-vm vm (make-code-pointer image next) t))
+      (lambda (k &rest values)
+	;; as if returned from a call with the procedure in PROC-SLOT
+	(setf (vm-fp vm) saved-fp (vm-sp vm) saved-sp)
+	(let ((all (cons k values)))
+	  (set-frame-size vm (+ proc-slot 1 (length all)))
+	  (loop for v in all for i from (+ proc-slot 1) do (setf (vm-local vm i) v)))
+	(make-extent-exit handler-at))))))
+
+(defop "abort" ()
+  ;; a tail call of abort-to-prompt: the tag in local 1, the values after
+  (let* ((n (frame-size vm))
+	 (args (loop for i from 1 below n collect (vm-local vm i)))
+	 (values (multiple-value-list (apply (root-procedure "abort-to-prompt") args))))
+    (set-frame-size vm (length values))
+    (loop for v in values for i from 0 do (setf (vm-local vm i) v))
+    (return-from-frame vm)))
+
+(defun read-file-bytes (path)
+  (with-open-file (in path :element-type '(unsigned-byte 8))
+    (let ((v (make-array (file-length in) :element-type '(unsigned-byte 8))))
+      (read-sequence v in)
+      v)))
+
+(defun load-go-file (path)
+  "The entry thunk of the compiled file at PATH, loaded."
+  (load-image (read-file-bytes path)))
+
+(defun installed-go-file (name)
+  "The installed Guile's compiled file for module file NAME (ice-9/q)."
+  (let ((dirs (root-value "%load-compiled-path")))
+    (or (loop for dir in (if (listp dirs) dirs '())
+	      for path = (format nil "~A/~A.go" dir name)
+	      when (probe-file path) return path)
+	(let ((libdir (string-trim '(#\Newline) (uiop:run-program '("guile" "-c" "(display (car %load-compiled-path))")
+								  :output :string :ignore-error-status t))))
+	  (format nil "~A/~A.go" libdir name)))))
