@@ -264,6 +264,13 @@ version (src/continuations.lisp)."
 	   (message "wrong-type-arg" ps:false "Wrong type argument: ~S"
 		    (list (type-error-datum c)))))
       (division-by-zero (message "numerical-overflow" ps:false "Numerical overflow" '()))
+      ;; a failed system call, as libguile's are: system-error with its errno
+      (sb-posix:syscall-error
+       (let ((errno (sb-posix:syscall-errno c)))
+	 (values (ssym "system-error")
+		 (list (let ((name (sb-posix::syscall-name c)))
+			 (string-downcase (if (symbolp name) (symbol-name name) (princ-to-string name))))
+		       "~A" (list (sb-int:strerror errno)) (list errno)))))
       (sb-int:simple-program-error
        (let ((text (princ-to-string c)))
 	 (if (search "number of arguments" text)
@@ -354,10 +361,12 @@ evaluator does.")
 otherwise form by form, keeping the code to cache it."
   (when *trace-loads* (format *trace-output* "~&;; loading ~A~%" filename))
   (let* ((cacheable (and *cacheable-load* (guile-cache-p)))
+	 (value *unspecified*)		; the last form's, as Guile's primitive-load returns
 	 (*cacheable-load* nil)
 	 (*current-load-file* filename)
 	 (*guile-fold-case* nil))
-    (unless (and cacheable (load-cached filename))
+    (if (and cacheable (load-cached filename))
+      *unspecified*
       (let ((kept (and cacheable (list '()))))
 	(with-open-file (in filename :external-format :utf-8)
 	  (loop for form = (let ((reader (fluid-value *current-reader*)))
@@ -366,14 +375,16 @@ otherwise form by form, keeping the code to cache it."
 		do (when *trace-loads*
 		     (let ((text (with-output-to-string (s) (guile-write form s))))
 		       (format *trace-output* "~&;;   ~A~%" (subseq text 0 (min 100 (length text))))))
-		   (if kept (eval-keeping form kept) (primitive-eval form))))
+		   (setq value (if kept (eval-keeping form kept) (primitive-eval form)))))
 	(when kept
-	  (write-cached-file (cache-fasl filename) filename (reverse (car kept)))))))
-  *unspecified*)
+	  (write-cached-file (cache-fasl filename) filename (reverse (car kept))))
+	value))))
 
 (defun primitive-load-path (name &optional (exception-on-not-found ps:true))
   (let ((path (search-load-path name)))
     (cond (path (let ((*cacheable-load* t)) (primitive-load path)))
+	  ;; a thunk to call instead of the error
+	  ((functionp exception-on-not-found) (funcall exception-on-not-found))
 	  ((truthy exception-on-not-found)
 	   (guile-error (ssym "system-error") "primitive-load-path"
 			"Unable to find file ~S in load path" (list name)))

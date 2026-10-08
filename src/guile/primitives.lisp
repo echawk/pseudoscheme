@@ -543,7 +543,11 @@ less than 0.0."
 	(t (float (denominator (rational x)) x))))
 
 (defun check-proper-list (who pos x)
-  (unless (and (listp x) (handler-case (list-length x) (error () nil)))
+  ;; a list may end with Emacs Lisp's nil
+  (unless (or (eq x *elisp-nil*)
+	      (and (listp x)
+		   (handler-case (progn (list-length (ldiff x (last x))) t) (error () nil))
+		   (member (cdr (last x)) (list nil *elisp-nil*))))
     (wrong-type who pos x)))
 
 (defguile "append!" (&rest lists)
@@ -642,8 +646,11 @@ less than 0.0."
 (defguile "%resolve-variable" (spec module)
   (or (module-variable* module (if (consp spec) (cdr spec) spec)) ps:false))
 (defguile "module-import-interface" (module sym)
-  (declare (ignore module sym))
-  ps:false)
+  ;; the interface MODULE's binding of SYM comes from
+  (let ((v (imported-variable module sym)))
+    (or (and v (find-if (lambda (iface) (eq (module-variable* iface sym) v))
+			(module-slot module +module-uses+)))
+	ps:false)))
 (defguile "memoized-typecode" (x) (declare (ignore x)) 0)
 (defguile "unmemoize-expression" (x) x)
 (defguile "system-async-mark" (&rest args) (declare (ignore args)) *unspecified*)
@@ -781,8 +788,10 @@ that name, if the host has one."
   (if (and (stringp path) (plusp (length path)))
       (append (funcall (gethash "string-split" *guile-primitives*) path #\:) tail)
       tail))
-(defguile "search-path" (path filename &optional (extensions '("")) require-exts)
-  (let ((extensions (if (listp extensions) extensions '(""))))
+(defguile "search-path" (path filename &optional (extensions '("")) (require-exts ps:false))
+  (let ((extensions (let ((l (loop for tail = extensions then (cdr tail)
+				   while (consp tail) collect (car tail))))	; #nil may end it
+		      (or l '("")))))
     (flet ((try (base)
 	     (loop for ext in (if (and (not (truthy require-exts))
 				       (some (lambda (e) (and (plusp (length e)) (uiop:string-suffix-p filename e)))
@@ -793,7 +802,9 @@ that name, if the host has one."
 		   when (and (probe-file f) (not (uiop:directory-exists-p f))) return f)))
       (or (if (uiop:absolute-pathname-p filename)
 	      (try filename)
-	      (loop for dir in path thereis (try (format nil "~A/~A" (string-right-trim "/" dir) filename))))
+	      (loop for tail = path then (cdr tail)
+		    while (consp tail)
+		    thereis (try (format nil "~A/~A" (string-right-trim "/" (car tail)) filename))))
 	  ps:false))))
 (defguile "procedure" (x)
   (if (typep x 'applicable-struct) (svref (astruct-slots x) 0) (wrong-type "procedure" 1 x)))
@@ -1234,10 +1245,19 @@ true (the predicate's value) if it matches."
 
 ;;; module-reverse-lookup: the name a module binds to a variable
 (defguile "module-reverse-lookup" (module variable)
+  ;; the name VARIABLE has in MODULE: its own, or (through the modules it
+  ;; uses, interfaces renaming) an imported one
   (unless (or (module-p* module) (eq module ps:false)) (wrong-type "module-reverse-lookup" 1 module))
-  (let ((obarray (if (module-p* module) (module-slot module +module-obarray+) *obarray*)))
-    (or (loop for (name . v) in (ghash-handles obarray) when (eq v variable) return name)
-	ps:false)))
+  (unless (gvariable-p variable) (wrong-type "module-reverse-lookup" 2 variable))
+  (let ((seen '()))
+    (labels ((look-in (m)
+	       (unless (member m seen :test #'eq)
+		 (push m seen)
+		 (let ((obarray (if (module-p* m) (module-slot m +module-obarray+) *obarray*)))
+		   (or (loop for (name . v) in (ghash-handles obarray) when (eq v variable) return name)
+		       (and (module-p* m)
+			    (loop for iface in (module-slot m +module-uses+) thereis (look-in iface))))))))
+      (or (look-in module) ps:false))))
 
 ;;; POSIX odds and ends
 (defguile "ttyname" (port)
