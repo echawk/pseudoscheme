@@ -130,11 +130,17 @@
 	 (hidden (vtable-hidden vtable))
 	 (layout (ps:scheme-symbol-name (svref (gstruct-slots vtable) 0)))
 	 (slots (make-array n)))
-    (dotimes (i n)
-      (setf (svref slots i)
-	    (if (and inits (not (member i hidden)))
-		(pop inits)
-		(field-default layout i))))
+    ;; a vtable's hidden fields (flags, size, ...) take no initializer;
+    ;; other structs' fields all do, as in Guile 3
+    (let ((skip (and (logtest (vtable-flags vtable) +vtable-flag-vtable+) hidden)))
+      (dotimes (i n)
+	(setf (svref slots i)
+	      (if (and inits (not (member i skip)))
+		  (let ((x (pop inits)))
+		    (when (and (char= (char layout (* 2 i)) #\u) (not (integerp x)))
+		      (wrong-type who (+ i 2) x))
+		    x)
+		  (field-default layout i)))))
     (when inits
       (guile-error (ssym "misc-error") who "too many initializers" '()))
     slots))
@@ -454,7 +460,28 @@ classes among them, are printed with it.")
     (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list size) (list size))))
 (defguile "hashq" (key size) (check-hash-size "hashq" size) (mod (sxhash key) size))
 (defguile "hashv" (key size) (check-hash-size "hashv" size) (mod (sxhash key) size))
-(defguile "hash" (key size) (check-hash-size "hash" size) (mod (ps-r6rs::sxhash-scheme key) size))
+(defun guile-hash (x)
+  "An equal?-consistent hash, through structs' and syntax objects'
+fields as Guile's hash goes; the first nodes only, so cycles end."
+  (let ((budget 64))
+    (labels ((walk (x)
+	       (if (<= (decf budget) 0)
+		   0
+		   (typecase x
+		     (cons (logand most-positive-fixnum (+ (* 31 (walk (car x))) (walk (cdr x)))))
+		     (simple-vector (let ((h 17))
+				      (loop for y across x while (plusp budget)
+					    do (setq h (logand most-positive-fixnum (+ (* h 31) (walk y)))))
+				      h))
+		     (syntax-object (logand most-positive-fixnum
+					    (+ (* 31 (walk (syntax-object-expression x)))
+					       (walk (syntax-object-module x)))))
+		     (gstruct (if (vtable-p x)
+				  (sxhash x)
+				  (walk (gstruct-slots x))))
+		     (t (sxhash x))))))
+      (walk x))))
+(defguile "hash" (key size) (check-hash-size "hash" size) (mod (guile-hash key) size))
 
 ;;; The alist procedures Guile writes in C, which skip an entry that
 ;;; isn't a pair ("sloppy"), as the -ref, -set! and -remove! ones do
@@ -787,7 +814,8 @@ fails over and over (boot-9 half loaded)."
 
 (defvar *guile-gensym-counter* 0)
 (defguile "gensym" (&optional (prefix " g"))
-  (let ((prefix (if (stringp prefix) prefix (ps:scheme-symbol-name prefix))))
+  (unless (stringp prefix) (wrong-type "gensym" 1 prefix))
+  (let ((prefix prefix))
     (ssym (format nil "~A~D" prefix (incf *guile-gensym-counter*)))))
 
 (defguile "noop" (&rest args) (if args (first args) ps:false))

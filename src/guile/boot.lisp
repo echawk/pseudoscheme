@@ -249,6 +249,23 @@ version (src/continuations.lisp)."
 		  (t most-positive-fixnum))))
     (list 0 hi)))
 
+(defun keyword-error-p (text)
+  (or (search "Unknown &KEY argument: " text) (search "odd number of &KEY arguments" text)))
+
+(defun keyword-error-arguments (text)
+  "Guile's keyword-argument-error key and (proc message args data) for
+Lisp's message TEXT about keyword arguments."
+  (let ((at (search "Unknown &KEY argument: " text)))
+    (if at
+	(let ((key (string-trim " " (subseq text (+ at 23)))))
+	  (values (ssym "keyword-argument-error")
+		  (list ps:false "Unrecognized keyword" '()
+			(list (if (and (plusp (length key)) (char= (char key 0) #\:))
+				  (intern (string-upcase (subseq key 1)) "KEYWORD")
+				  (ssym (string-downcase (subseq key (1+ (or (position #\: key :from-end t) -1))))))))))
+	(values (ssym "keyword-argument-error")
+		(list ps:false "Keyword argument has no value" '() ps:false)))))
+
 (defun condition-throw-arguments (c)
   "The key and throw arguments for Lisp condition C."
   (flet ((message (key subr message args)
@@ -273,11 +290,16 @@ version (src/continuations.lisp)."
 		       "~A" (list (sb-int:strerror errno)) (list errno)))))
       (sb-int:simple-program-error
        (let ((text (princ-to-string c)))
-	 (if (search "number of arguments" text)
-	     (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text))
-	     (message "wrong-number-of-args" ps:false "~A" (list text)))))
+	 (cond
+	   ((keyword-error-p text) (keyword-error-arguments text))
+	   ((search "number of arguments" text)
+	    (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text)))
+	   (t (message "wrong-number-of-args" ps:false "~A" (list text))))))
       (t (let ((text (remove #\Newline (princ-to-string c))))
 	   (cond
+	     ((keyword-error-p text) (keyword-error-arguments text))
+	     ((search "no prompt with tag" text)
+	      (message "misc-error" ps:false "Abort to unknown prompt" '()))
 	     ((search "out of range" text)
 	      (message "out-of-range" ps:false "Value out of range: ~A" (list text)))
 	     ((some (lambda (pattern) (search pattern text))

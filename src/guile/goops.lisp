@@ -329,6 +329,13 @@ which GOOPS can make only once it is loaded."
 ;;; generic (which GOOPS sets), other structs of one vtable field by field.
 
 (defun struct-equal (a b recur)
+  (cond ((and (syntax-object-p a) (syntax-object-p b))
+	 (and (funcall recur (syntax-object-expression a) (syntax-object-expression b))
+	      (funcall recur (syntax-object-wrap a) (syntax-object-wrap b))
+	      (funcall recur (syntax-object-module a) (syntax-object-module b))))
+	(t (struct-equal-1 a b recur))))
+
+(defun struct-equal-1 (a b recur)
   (if (or (garray-p a) (garray-p b))
       (and (guile-array-p a) (guile-array-p b) (arrays-equal a b))
       (struct-equal* a b recur)))

@@ -242,7 +242,7 @@ NaN is itself."
   (fill s c :start start :end end) *unspecified*)
 (defguile "substring-move!" (from start end to at)
   (replace to from :start1 at :start2 start :end2 end) *unspecified*)
-(defguile "char-is-both?" (c) (bool (and (both-case-p c) (not (upper-case-p c)) (not (lower-case-p c)))))
+(defguile "char-is-both?" (c) (bool (both-case-p c)))	; has case: upper or lower
 
 ;;; ------------------------------------------------------------------
 ;;; Vectors
@@ -457,19 +457,44 @@ NaN is itself."
 (defguile "kill" (pid sig) (sb-posix:kill pid sig) *unspecified*)
 (defguile "strerror" (n) (sb-int:strerror n))
 
-(defun tm-vector (seconds zone-offset dst)
-  (multiple-value-bind (s m h d mo y dow) (decode-universal-time (+ seconds #.(encode-universal-time 0 0 0 1 1 1970 0)) 0)
-    (vector s m h d (1- mo) (- y 1900) (mod (1+ dow) 7)
-	    (- (encode-universal-time 0 0 0 d mo y 0) (encode-universal-time 0 0 0 1 1 y 0) -0)
-	    (if dst 1 0) zone-offset (if (zerop zone-offset) "UTC" "LOCAL"))))
-(defguile "gmtime" (time) (tm-vector time 0 nil))
-(defguile "localtime" (time &optional zone)
-  (declare (ignore zone))
-  (multiple-value-bind (s m h d mo y dow dst tz)
-      (decode-universal-time (+ time #.(encode-universal-time 0 0 0 1 1 1970 0)))
-    (declare (ignore s m h d mo y dow))
-    (let ((offset (* 3600 (- tz (if dst 1 0)))))
-      (tm-vector (- time offset) offset dst))))
+;;; Broken-down time is libc's (struct tm: nine ints, then tm_gmtoff and
+;;; tm_zone), with a zone given as TZ is for the call, as Guile's.
+
+(defconstant +tm-size+ 64)
+
+(defun call-with-tz (zone thunk)
+  (if (stringp zone)
+      (let ((old (sb-posix:getenv "TZ")))
+	(sb-posix:setenv "TZ" zone 1)
+	(cffi:foreign-funcall "tzset" :void)
+	(unwind-protect (funcall thunk)
+	  (if old (sb-posix:setenv "TZ" old 1) (sb-posix:unsetenv "TZ"))
+	  (cffi:foreign-funcall "tzset" :void)))
+      (funcall thunk)))
+
+(defun tm->vector (tm)
+  (let ((zone (cffi:mem-ref tm :pointer 48)))
+    (vector (cffi:mem-aref tm :int 0) (cffi:mem-aref tm :int 1) (cffi:mem-aref tm :int 2)
+	    (cffi:mem-aref tm :int 3) (cffi:mem-aref tm :int 4) (cffi:mem-aref tm :int 5)
+	    (cffi:mem-aref tm :int 6) (cffi:mem-aref tm :int 7) (cffi:mem-aref tm :int 8)
+	    ;; Guile's gmtoff is seconds west of UTC
+	    (- (cffi:mem-ref tm :long 40))
+	    (if (cffi:null-pointer-p zone) ps:false (cffi:foreign-string-to-lisp zone)))))
+
+(defun vector->tm (v tm)
+  (dotimes (i 9) (setf (cffi:mem-aref tm :int i) (svref v i)))
+  (setf (cffi:mem-ref tm :long 40) (- (if (integerp (svref v 9)) (svref v 9) 0))))
+
+(defun broken-down-time (function time zone)
+  (cffi:with-foreign-objects ((tm :uint8 +tm-size+) (clock :long))
+    (setf (cffi:mem-ref clock :long) time)
+    (call-with-tz zone (lambda ()
+			 (cffi:foreign-funcall-pointer (cffi:foreign-symbol-pointer function) ()
+						       :pointer clock :pointer tm :pointer)
+			 (tm->vector tm)))))
+
+(defguile "gmtime" (time) (broken-down-time "gmtime_r" time nil))
+(defguile "localtime" (time &optional zone) (broken-down-time "localtime_r" time zone))
 
 ;;; ------------------------------------------------------------------
 ;;; Odds and ends
@@ -836,12 +861,14 @@ that name, if the host has one."
 		       (incf i 2))
 		     (progn (write-char c out) (incf i))))))))
 (defguile "strftime" (format tm) (strftime format tm))
-(defguile "mktime" (tm &optional zone)
-  (declare (ignore zone))
-  (let ((u (encode-universal-time (svref tm 0) (svref tm 1) (svref tm 2) (svref tm 3)
-				  (1+ (svref tm 4)) (+ 1900 (svref tm 5)))))
-    (cons (- u #.(encode-universal-time 0 0 0 1 1 1970 0)) tm)))
-(defguile "tzset" () *unspecified*)
+(defguile "mktime" (v &optional zone)
+  ;; the time, and the broken-down time normalized
+  (cffi:with-foreign-object (tm :uint8 +tm-size+)
+    (vector->tm v tm)
+    (call-with-tz zone (lambda ()
+			 (let ((time (cffi:foreign-funcall "mktime" :pointer tm :long)))
+			   (cons time (tm->vector tm)))))))
+(defguile "tzset" () (cffi:foreign-funcall "tzset" :void) *unspecified*)
 (defguile "primitive-fork" () (sb-posix:fork))
 (defguile "execlp" (program &rest args)
   (sb-ext:run-program program (cdr args) :search t :output t :error t :input t)

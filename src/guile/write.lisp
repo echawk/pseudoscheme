@@ -94,7 +94,11 @@ INITIAL): letters, marks, numbers, punctuation and symbols."
 (defun write-guile-char (c stream)
   (write-string "#\\" stream)
   (let ((name (cdr (assoc (char-code c) *char-write-names*))))
-    (cond ((and (graphic-char-p* c) (char/= c #\Space)) (write-char c stream))
+    (cond ((and (member (sb-unicode:general-category c) '(:mn :mc :me))
+		(plusp (sb-unicode:combining-class c)))
+	   ;; a combining character, over a dotted circle so it shows
+	   (write-char (code-char #x25cc) stream) (write-char c stream))
+	  ((and (graphic-char-p* c) (char/= c #\Space)) (write-char c stream))
 	  (name (write-string name stream))
 	  ((option-value *read-options* "r6rs-hex-escapes") (format stream "x~(~X~)" (char-code c)))
 	  (t (format stream "~O" (char-code c))))))
