@@ -531,7 +531,12 @@ square, else the nearest double, however big or small X is."
   (sb-ext:posix-environ))
 (defguile "getcwd" () (sb-posix:getcwd))
 (defguile "chdir" (dir)
-  (sb-posix:chdir dir)
+  ;; a directory port too (fchdir)
+  (handler-case (if (gport-p dir)
+		    (progn (unless (and (port-open-p dir) (port-fd dir)) (wrong-type "chdir" 1 dir))
+			   (sb-posix:fchdir (port-fd dir)))
+		    (sb-posix:chdir dir))
+    (sb-posix:syscall-error (e) (system-error "chdir" (sb-posix:syscall-errno e))))
   (setf *default-pathname-defaults* (uiop:ensure-directory-pathname (sb-posix:getcwd)))
   *unspecified*)
 (defguile "getpid" () (sb-posix:getpid))
@@ -1713,3 +1718,72 @@ true (the predicate's value) if it matches."
     (guile-error (ssym "misc-error") "string-join"
 		 "strict-infix grammar requires non-empty list" '()))
   (funcall (gethash (cons "(srfi 13)" "string-join") *library-values*) strings delimiter grammar))
+
+;;; The *at procedures: a file named relative to a directory port, by
+;;; libc's *at calls.  statat stats the directory's path joined to the
+;;; name (F_GETPATH on Darwin, /proc/self/fd elsewhere).
+
+(defun at-directory-fd (who dir)
+  "DIR's descriptor; #f is the current directory (AT_FDCWD)."
+  (cond ((eq dir ps:false) #+darwin -2 #-darwin -100)
+	((and (gport-p dir) (port-open-p dir) (port-fd dir)) (port-fd dir))
+	(t (wrong-type who 1 dir))))
+
+(defun at-result (who r)
+  (when (minusp r) (system-error who (sb-alien:extern-alien "errno" sb-alien:int)))
+  r)
+
+(defun fd-directory-path (fd)
+  #+darwin
+  (cffi:with-foreign-object (buf :char 1024)
+    (if (minusp (cffi:foreign-funcall-varargs "fcntl" (:int fd :int 50) :pointer buf :int)) ; F_GETPATH
+	(system-error "statat")
+	(cffi:foreign-string-to-lisp buf)))
+  #-darwin
+  (sb-posix:readlink (format nil "/proc/self/fd/~D" fd)))
+
+(defguile "statat" (dir path &optional (flags 0))
+  (unless (stringp path) (wrong-type "statat" 2 path))
+  (let* ((fd (at-directory-fd "statat" dir))
+	 (full (if (or (minusp fd) (and (plusp (length path)) (char= (char path 0) #\/)))
+		   path
+		   (concatenate 'string (fd-directory-path fd) "/" path))))
+    (handler-case (stat-vector (if (logtest flags #+darwin #x20 #-darwin #x100) ; AT_SYMLINK_NOFOLLOW
+				   (sb-posix:lstat full)
+				   (sb-posix:stat full)))
+      (sb-posix:syscall-error (e) (system-error "statat" (sb-posix:syscall-errno e))))))
+
+(defguile "symlinkat" (dir old new)
+  (unless (stringp old) (wrong-type "symlinkat" 2 old))
+  (at-result "symlinkat" (cffi:foreign-funcall "symlinkat" :string old :int (at-directory-fd "symlinkat" dir)
+							   :string new :int))
+  *unspecified*)
+
+(defguile "mkdirat" (dir path &optional (mode #o777))
+  (unless (stringp path) (wrong-type "mkdirat" 2 path))
+  (at-result "mkdirat" (cffi:foreign-funcall "mkdirat" :int (at-directory-fd "mkdirat" dir) :string path
+						       :unsigned-short (if (integerp mode) mode #o777) :int))
+  *unspecified*)
+
+(defguile "delete-file-at" (dir path &optional (flags 0))
+  (unless (stringp path) (wrong-type "delete-file-at" 2 path))
+  (at-result "delete-file-at" (cffi:foreign-funcall "unlinkat" :int (at-directory-fd "delete-file-at" dir)
+								:string path :int flags :int))
+  *unspecified*)
+
+(defguile "rename-file-at" (old-dir old new-dir new)
+  (unless (stringp old) (wrong-type "rename-file-at" 2 old))
+  (unless (stringp new) (wrong-type "rename-file-at" 4 new))
+  (at-result "rename-file-at"
+	     (cffi:foreign-funcall "renameat" :int (at-directory-fd "rename-file-at" old-dir) :string old
+					      :int (at-directory-fd "rename-file-at" new-dir) :string new :int))
+  *unspecified*)
+
+(defguile "openat" (dir path flags &optional (mode #o666))
+  (unless (stringp path) (wrong-type "openat" 2 path))
+  (let ((fd (at-result "openat" (cffi:foreign-funcall-varargs "openat" (:int (at-directory-fd "openat" dir)
+									  :string path :int flags)
+							 :unsigned-int mode :int))))
+    (fd-port fd (cond ((logtest flags sb-posix:o-rdwr) "rw")
+		      ((logtest flags sb-posix:o-wronly) "w")
+		      (t "r")))))

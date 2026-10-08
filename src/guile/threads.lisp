@@ -57,7 +57,16 @@ microseconds)) as seconds from now, or NIL for none."
       (setf (gmutex-owner m) sb-thread:*current-thread* (gmutex-level m) level)
       (bool woken))))
 
+(defparameter *guile-thread-stack-size* (* 256 1024 1024)
+  "The control stack of a thread Guile code makes: Guile's grow, so its
+code may recurse deeply in a thread (par-map's futures nest one per
+element).")
+
 (defun new-thread (thunk)
+  ;; SBCL gives each new thread a control stack of thread_control_stack_size
+  (setf (sb-alien:extern-alien "thread_control_stack_size" sb-alien:unsigned)
+	(max *guile-thread-stack-size*
+	     (sb-alien:extern-alien "thread_control_stack_size" sb-alien:unsigned)))
   (let ((out *standard-output*) (in *standard-input*) (err *error-output*)
 	(module *current-module*)
 	(params (ps-r7rs::thread-parameters-snapshot)))
@@ -66,7 +75,21 @@ microseconds)) as seconds from now, or NIL for none."
        (let ((*standard-output* out) (*standard-input* in) (*error-output* err)
 	     (*current-module* module)
 	     (ps-r7rs::*thread-parameters* params))
-	 (with-guile-errors (funcall thunk))))
+	 ;; an exhausted stack (SBCL's binding stack is of fixed size) is a
+	 ;; Guile stack-overflow, once unwound, rather than the end of the
+	 ;; process
+	 ;; an exception the thread doesn't handle ends it, not the process
+	 (flet ((uncaught (c)
+		  (ignore-errors
+		   (format *error-output* "~&In thread:~%~A~%" (error-text c))
+		   (finish-output *error-output*))
+		  ps:false))
+	   (handler-case
+	       (handler-case (with-guile-errors (funcall thunk))
+		 (storage-condition ()
+		   (with-guile-errors
+		     (guile-error (ssym "stack-overflow") ps:false "Stack overflow" '()))))
+	     (error (c) (uncaught c))))))
      :name "guile thread")))
 
 (defextension "scm_init_ice_9_threads"

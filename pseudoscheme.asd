@@ -298,4 +298,7 @@
 	       (:file "cache" :depends-on ("boot"))
 	       (:file "i18n" :depends-on ("primitives"))
 	       (:file "write" :depends-on ("goops" "ports" "regex" "arrays"))
+	       ;; Guile's VM (docs/guile-vm.md)
+	       (:file "vm-elf" :depends-on ("runtime"))
+	       (:file "vm-ops" :depends-on ("primitives"))
 	       (:static-file "root-primitives.txt")))

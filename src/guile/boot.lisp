@@ -587,7 +587,10 @@ not with Guile's behaviour.")
 				("SIG_DFL" 0) ("SIG_IGN" 1) ("SA_RESTART" #+darwin 2 #-darwin #x10000000)
 				("SA_NOCLDSTOP" 1)
 				("ITIMER_REAL" 0) ("ITIMER_VIRTUAL" 1) ("ITIMER_PROF" 2)
-				("AT_SYMLINK_NOFOLLOW" #+darwin #x20 #-darwin #x100))
+				("AT_SYMLINK_NOFOLLOW" #+darwin #x20 #-darwin #x100)
+				("AT_REMOVEDIR" #+darwin #x80 #-darwin #x200)
+				("AT_SYMLINK_FOLLOW" #+darwin #x40 #-darwin #x400)
+				("AT_EACCESS" #+darwin #x10 #-darwin #x200))
 	  do (def name value))
     (def "%load-compiled-path" '())
     (def "%load-compiled-extensions" (list ".go"))
@@ -612,7 +615,15 @@ not with Guile's behaviour.")
     (def "%file-port-name-canonicalization" (make-fluid* ps:false))
     (def "%guile-build-info" '())
     (def "%host-type" "aarch64-apple-darwin")
-    (def "*features*" (mapcar #'ssym '("guile" "r7rs" "srfi-0" "srfi-4" "srfi-6" "srfi-13" "srfi-14")))
+    (def "*features*" (mapcar #'ssym '("guile" "r7rs" "srfi-0" "srfi-4" "srfi-6" "srfi-13" "srfi-14"
+				       ;; what libguile adds, less sockets, fork,
+				       ;; effective ids and O_PATH ports; and less
+				       ;; threads, whose recursion SBCL's fixed binding
+				       ;; stack limits (docs/guile.md)
+				       "record" "defmacro" "debug-extensions" "values" "array-for-each"
+				       "array" "sort" "ITIMER_VIRTUAL" "ITIMER_PROF" "regex" "popen"
+				       "posix" "chdir-port" "inexact" "complex" "random" "i/o-extensions"
+				       "i18n" "current-time" "delay" "char-ready?" "system")))
     (def "%exception-handler" (make-fluid* ps:false))
     (def "%exception-epoch" (make-fluid* 1))
     (def "%init-exceptions!" (lambda (&rest types) (declare (ignore types)) *unspecified*))
