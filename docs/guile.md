@@ -7,7 +7,7 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
-`vendor/guile-test-suite/`), **5,982 tests pass** so far. See "Where it
+`vendor/guile-test-suite/`), **41,624 tests pass** so far. See "Where it
 stands" below. Emacs Lisp has started: Guile's elisp compiler runs, and
 `(compile '(defun ...) #:from 'elisp)` works. It is future work.
 
@@ -453,28 +453,35 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 40,475 |
-| fail | 191 | 241 |
-| error (an exception where a result was expected) | 465 | 363 |
-| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 85 / 14 / 6 / 4 |
-| files that crashed or hit the time limit | 32 | 4 |
+| pass | 5,982 | 41,624 |
+| fail | 191 | 90 |
+| error (an exception where a result was expected) | 465 | 186 |
+| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 95 / 49 / 7 / 4 |
+| files that crashed or hit the time limit | 32 | 3 |
 
-The biggest files pass entirely or nearly: `numbers` (28,931),
-`srfi-1` (1,902), `regexp` (1,090), `srfi-67` (902), `r4rs` (538),
-`srfi-13` (533 of 534), `arrays` (501), `syntax` (247), `goops` (237),
-`bytevectors` (218), `srfi-60` (168), `srfi-4` (143), `reader` (115),
-`foreign` (79), `print`, `format`, `r6rs-enums`,
-`r6rs-arithmetic-fixnums`, `sort`, `popen`, `ports`.
+(`compiler` hit the time limit in that run, six files at a time; on
+its own it takes under two minutes and 39 of its tests pass.)
+
+The biggest files pass entirely or nearly: `numbers` (28,987 of
+28,991), `srfi-1` (1,902), `regexp` (1,089), `srfi-67` (902), `r4rs`
+(538), `arrays` (564), `srfi-13` (533 of 534), `syntax` (251),
+`bytevectors` (238 of 239), `goops` (237), `srfi-60` (168), `peval`
+(163, all), `tree-il` (151), `srfi-4` (148), `optargs` (120, all),
+`reader` (115), `foreign` (79), `print`, `format`, `weaks`,
+`parameters`, `r6rs-enums`, `r6rs-arithmetic-fixnums`, `sort`, `popen`,
+`ports`.
 
 What fails now, by cause:
 
-- **Guile's compiler and VM** (`rtl`, `rtl-compilation`, `compiler`,
-  `peval`, `tree-il`, `cross-compilation`, `coverage`, `dwarf`,
-  `types`, `statprof`, part of `eval`): these test Guile's CPS compiler
-  and bytecode, frames and stacks, which aren't here: `compile` goes
-  from Tree-IL straight to native code.
-- **libguile's internals**: `%string-dump`, `%symbol-dump`, stringbufs,
-  weak-table and GC behaviour (`strings`, `symbols`, `weaks`, `gc`).
+- **Guile's VM** (`rtl`, `rtl-compilation`, part of `compiler`,
+  `cross-compilation`, `coverage`, `dwarf`, `types`, `statprof`, part
+  of `eval`): these load the bytecode Guile's compiler makes, or test
+  frames and stacks, which aren't here. Guile's compiler passes
+  themselves run (peval, the analyses, CPS and bytecode generation).
+- **libguile's internals**: immutable literal strings, copy-on-write
+  shared substrings (`substring/shared` copies), guardians (SBCL can't
+  give back a collected object), GC behaviour (`strings`, `guardians`,
+  `gc`).
 - **Emacs Lisp and ECMAScript** (`elisp*`, `ecmascript`): future work.
 - **A long tail** of exact error keys and messages, and smaller missing
   pieces (sockets, `sandbox`, source properties, some POSIX).
@@ -484,7 +491,7 @@ What fails now, by cause:
 | | Guile 3.0 | here |
 |---|---|---|
 | compiling | Tree-IL → CPS → bytecode (`.go` files cached) | Tree-IL → core Scheme → SBCL native code (fasls cached) |
-| `(system vm ...)`, `(language cps)`, the optimizer | present | absent: `compile` goes from Tree-IL to `value` directly |
+| `(system vm ...)`, `(language cps)`, the optimizer | present | Guile's passes run when compiling to `cps` or `bytecode`; bytecode can't be loaded. To `value` (`compile`'s default), Tree-IL goes to native code as it is |
 | GOOPS | present | present (`goops.test`: all 237) |
 | `(system foreign)` | present | present on CFFI (`foreign.test`: 79 pass, 0 fail). Structs aren't passed by value; `pointer->bytevector` of C's memory copies it; the deprecated `dynamic-link`/`dynamic-func` are absent |
 | `bytevector-slice` | shares the bytes | copies them |
@@ -496,7 +503,7 @@ What fails now, by cause:
 ### Emacs Lisp (future work)
 
 Guile's elisp front end (`language/elisp/`) loads and runs unmodified,
-through the replacement `(language tree-il spec)`, whose only compiler
+through the replacement `(language tree-il spec)`, whose native compiler
 goes from Tree-IL to `value`:
 
 ```scheme
@@ -517,8 +524,9 @@ Loading `language/elisp/boot.el` stops at the first missing piece
 
 1. The long tail of the suite: exact error keys, sockets, the sandbox,
    source properties.
-2. Guile's own compiler passes, to the extent they can run without its
-   VM (`peval`, `tree-il`, CPS), so `compile` can optimise as Guile's does.
+2. Running Guile's lowerer (peval) before native compilation, which
+   needs its primcalls for dynamic extents (`push-fluid`, prompts)
+   compiled structurally.
 3. A Scheme library putting the FFI layer (src/ffi.lisp) in front of
    R5RS, R6RS and R7RS programs.
 4. Then Emacs Lisp, and Guix's client side.

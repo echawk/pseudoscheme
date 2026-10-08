@@ -385,7 +385,7 @@ The big ones; `ROADMAP.md` has the rest.
   ftypes are missing (docs/chez.md, measured against the editor e).
 - **Guile mode.** `--guile` runs Guile's own boot-9 and modules (from
   an installed Guile 3.0) on libguile's primitives written in Lisp;
-  40,475 of Guile's own tests pass, GOOPS, ports, arrays, `(system
+  41,624 of Guile's own tests pass, GOOPS, ports, arrays, `(system
   foreign)` and locales included, and compiled modules are cached. Guile's
   compiler and VM internals, sockets and Emacs Lisp are still to come
   (docs/guile.md).
