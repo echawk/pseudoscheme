@@ -425,6 +425,24 @@
 (defguile "defined?" (sym &optional (module ps:false))
   (let ((v (module-variable* (if (truthy module) module *current-module*) sym)))
     (bool (and v (not (eq (gvariable-value v) +unbound+))))))
+(defguile "log2-binary-factors" (n)
+  ;; the number of trailing zero bits; -1 for 0
+  (if (zerop n) -1 (1- (integer-length (logand n (- n))))))
+
+(defguile "make-srfi-4-vector" (type length &optional (fill 0))
+  (let* ((tag (ps:scheme-symbol-name type))
+	 (tag (cond ((string= tag "c32") "c64") ((string= tag "c64") "c128") (t tag))))
+    (ps::list->numeric-vector tag (make-list length :initial-element fill))))
+
+(defguile "list-tail" (list k)
+  (unless (and (integerp k) (>= k 0))
+    (guile-error (ssym "out-of-range") "list-tail" "Value out of range: ~S" (list k) (list k)))
+  (dotimes (i k list)
+    (unless (consp list)
+      (guile-error (ssym "wrong-type-arg") "list-tail"
+		   "Wrong type argument in position 1 (expecting pair): ~S" (list list) (list list)))
+    (setq list (cdr list))))
+
 (defguile "procedure-minimum-arity" (p)
   ;; (required optional rest?)
   (destructuring-bind (required optional rest) (or (function-arity p) '(0 0 t))
@@ -705,3 +723,39 @@ that name, if the host has one."
   (sb-ext:run-program program (cdr args) :search t :output t :error t :input t)
   (sb-ext:exit :code 0))
 (setf (gethash "execl" *guile-primitives*) (gethash "execlp" *guile-primitives*))
+
+;;; Locales: the categories, and libc's setlocale.  Text here is Lisp's,
+;;; which no locale changes.
+
+(defparameter *locale-categories*
+  '(("LC_ALL" . 0) ("LC_COLLATE" . 1) ("LC_CTYPE" . 2) ("LC_MONETARY" . 3)
+    ("LC_NUMERIC" . 4) ("LC_TIME" . 5) ("LC_MESSAGES" . 6)))
+
+(defguile "setlocale" (category &optional locale)
+  (let ((result (if (or (null locale) (eq locale ps:false))
+		    (cffi:foreign-funcall "setlocale" :int category :pointer (cffi:null-pointer) :pointer)
+		    (cffi:foreign-funcall "setlocale" :int category :string locale :pointer))))
+    (if (cffi:null-pointer-p result)
+	(guile-error (ssym "system-error") "setlocale" "~A" (list "Invalid argument") (list 22))
+	(cffi:foreign-string-to-lisp result))))
+
+;;; (language bytecode)'s instruction-list: there is no VM here, but the
+;;; disassembler and assembler build their tables from it when they are
+;;; expanded, and the test suite's driver loads them.  It is the
+;;; installed Guile's own table, asked of its guile program once.
+
+(defvar *instruction-list* :unknown)
+
+(defun instruction-list ()
+  (when (eq *instruction-list* :unknown)
+    (setq *instruction-list*
+	  (or (ignore-errors
+	       (let ((text (uiop:run-program
+			    '("guile" "-c" "(use-modules (language bytecode)) (write (instruction-list))")
+			    :output :string :error-output nil)))
+		 (with-input-from-string (in text) (guile-read in))))
+	      '())))
+  *instruction-list*)
+
+(defextension "scm_init_instructions"
+  (list (cons "instruction-list" #'instruction-list)))

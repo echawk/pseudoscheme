@@ -44,6 +44,11 @@
 	     (psg:eval-string
 	      (format nil "(set! %load-path (cons ~S %load-path))
 (use-modules (test-suite lib))
+;; what (test-suite guile-test)'s main sets: the tests' directory, and
+;; where they may write files
+(let ((m (resolve-module '(test-suite guile-test))))
+  (module-set! m 'test-suite ~S)
+  (module-set! m 'tmp-dir (mkdtemp (string-copy \"/tmp/guile-test-XXXXXX\"))))
 (define %counter (make-count-reporter))
 (register-reporter (car %counter))
 ~A
@@ -57,10 +62,11 @@
   (map (lambda (r) (if (zero? (cdr r)) \"\" (string-append \" \" (symbol->string (car r)) \"=\" (number->string (cdr r)))))
        ((cadr %counter))))"
 		      (guile-string *suite*)
+		      (guile-string (merge-pathnames "tests/" *suite*))
 		      (if *verbose* "(register-reporter user-reporter)" "")
 		      (concatenate 'string name ".test") (guile-string path)
 		      (concatenate 'string name ".test")
-		      (if *verbose* "(format (current-error-port) \"file aborted: ~s ~s~%\" key args)" "#f")))
+		      "(format (current-error-port) \"file aborted: ~s ~s~%\" key args)"))
 	   (error (e) (format nil " error=1 (~A)" (remove #\Newline (princ-to-string e)))))))
   (format t "~&~A~A~%" name result)
   (finish-output))

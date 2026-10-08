@@ -1,6 +1,6 @@
 # Guile's test suite
 
-`test-suite/` (the `(test-suite lib)` module) and `tests/` are GNU Guile
+`test-suite/` (the `(test-suite lib)` and `(test-suite guile-test)` modules) and `tests/` are GNU Guile
 3.0.11's test suite, from `guile-3.0.11.tar.xz`'s `test-suite/`
 directory, unmodified. They are Guile's: copyright the Free Software
 Foundation and others, under the GNU Lesser General Public License,

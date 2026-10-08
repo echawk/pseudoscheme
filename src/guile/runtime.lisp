@@ -724,7 +724,7 @@ fails over and over (boot-9 half loaded)."
   (let ((prefix (if (stringp prefix) prefix (ps:scheme-symbol-name prefix))))
     (ssym (format nil "~A~D" prefix (incf *guile-gensym-counter*)))))
 
-(defguile "noop" (&rest args) (declare (ignore args)) ps:false)
+(defguile "noop" (&rest args) (if args (first args) ps:false))
 (defguile "1+" (x) (ps:scheme+ x 1))
 (defguile "1-" (x) (ps:scheme- x 1))
 (defguile "self-evaluating?" (x)

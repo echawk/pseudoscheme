@@ -154,7 +154,10 @@ version (src/continuations.lisp)."
     (lambda (f &rest args)
       (let ((tail (last args)))
 	(when (and tail (eq (car tail) *elisp-nil*))
-	  (setq args (append (butlast args) (list '())))))
+	  (setq args (append (butlast args) (list '()))))
+	(when (and tail (not (listp (car tail))))
+	  (guile-error (ssym "wrong-type-arg") "apply" "Apply to non-list: ~S" (list (car tail))
+		       (list (car tail)))))
       (apply apply f args))))
 (defun call-with-prompt-value () (gethash "call-with-prompt" *guile-primitives*))
 
@@ -265,9 +268,11 @@ version (src/continuations.lisp)."
   "Run BODY as Guile code: Lisp errors raised as Guile exceptions, and
 inside one continuation base (src/continuations.lisp), so that the
 forms it evaluates see the prompts (catch, with-exception-handler)
-set up around them."
-  `(handler-bind ((error #'lisp-error->guile))
-     (psx::call-with-continuation-base (lambda () ,@body))))
+set up around them.  Floating-point traps are off, so that overflow
+gives an infinity and 0.0/0.0 a NaN, as in Guile."
+  `(sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow)
+     (handler-bind ((error #'lisp-error->guile))
+       (psx::call-with-continuation-base (lambda () ,@body)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Loading
@@ -446,6 +451,7 @@ not with Guile's behaviour.")
     (def "%load-path" (list (namestring (our-modules-directory))
 			    (namestring *guile-source-directory*)))
     (def "%load-extensions" (list ".scm" ""))
+    (loop for (name . value) in *locale-categories* do (def name value))
     (def "%load-compiled-path" '())
     (def "%load-compiled-extensions" (list ".go"))
     (def "%load-should-auto-compile" ps:false)
