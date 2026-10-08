@@ -102,6 +102,13 @@ counted from START."
   (+ start (length (sb-ext:octets-to-string octets :external-format :utf-8 :end byte))))
 
 (defguile "regexp-exec" (rx string &optional (start 0) (eflags 0))
+  (unless (stringp string) (wrong-type "regexp-exec" 2 string))
+  (unless (integerp start) (wrong-type "regexp-exec" 3 start))
+  (unless (<= 0 start (length string)) (out-of-range "regexp-exec" start))
+  (unless (integerp eflags) (wrong-type "regexp-exec" 4 eflags))
+  (when (find (code-char 0) string)
+    (guile-error (ssym "misc-error") "regexp-exec" "string contains #\\nul character: ~S"
+		 (list string)))
   (let* ((rx (if (stringp rx) (funcall (gethash "make-regexp" *guile-primitives*) rx) rx))
 	 (octets (sb-ext:string-to-octets string :external-format :utf-8 :start start))
 	 (n 10)

@@ -378,6 +378,15 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 a file loaded otherwise (load, a script) is evaluated as read, as Guile's
 evaluator does.")
 
+(defun top-level-form-start (text i)
+  "The index in TEXT, from I, past whitespace and line comments."
+  (loop
+    (cond ((>= i (length text)) (return i))
+	  ((member (char text i) '(#\Space #\Tab #\Newline #\Return #\Page)) (incf i))
+	  ((char= (char text i) #\;)
+	   (setq i (or (position #\Newline text :start i) (length text))))
+	  (t (return i)))))
+
 (defun primitive-load (filename)
   "Load FILENAME: from its compiled fasl if the cache has one (cache.lisp),
 otherwise form by form, keeping the code to cache it."
@@ -393,10 +402,27 @@ otherwise form by form, keeping the code to cache it."
 	;; in the encoding its coding: comment names, as Guile reads it
 	(with-open-file (in filename :external-format (let ((coding (file-coding filename)))
 							(or (and coding (external-format-of coding)) :utf-8)))
-	  (loop for form = (let ((reader (fluid-value *current-reader*)))
-			     (if (functionp reader) (funcall reader in) (guile-read in)))
+	  (loop with text = (let ((s (make-string (file-length in))))
+			      (subseq s 0 (read-sequence s in)))
+		with stream = (make-string-input-stream text)
+		with line = 0 and line-start = 0 and scanned = 0
+		for start = (top-level-form-start text (file-position stream))
+		for form = (progn
+			     ;; the line and column the form starts at
+			     (loop for i from scanned below start
+				   when (char= (char text i) #\Newline)
+				     do (incf line) (setq line-start (1+ i)))
+			     (setq scanned start)
+			     (let ((reader (fluid-value *current-reader*)))
+			       (if (functionp reader) (funcall reader stream) (guile-read stream))))
 		until (eq form ps:eof-object)
-		do (when *trace-loads*
+		do (when (and (consp form) (not (gethash form *source-properties*)))
+		     ;; as Guile's reader records them: define-module takes the
+		     ;; module's file name from them
+		     (setf (gethash form *source-properties*)
+			   (list (cons (ssym "filename") filename) (cons (ssym "line") line)
+				 (cons (ssym "column") (- start line-start)))))
+		   (when *trace-loads*
 		     (let ((text (with-output-to-string (s) (guile-write form s))))
 		       (format *trace-output* "~&;;   ~A~%" (subseq text 0 (min 100 (length text))))))
 		   (setq value (if kept (eval-keeping form kept) (primitive-eval form)))))

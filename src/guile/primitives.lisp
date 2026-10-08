@@ -342,10 +342,22 @@ square, else the nearest double, however big or small X is."
   (- (log (- 1d0 (random 1d0 (if (random-state-p state) state *guile-random-state*))))))
 (defguile "copy-random-state" (&optional (state *guile-random-state*)) (make-random-state state))
 (defguile "seed->random-state" (seed)
-  (let ((s (sb-ext:seed-random-state (if (stringp seed) (sxhash seed) seed)))) s))
+  (sb-ext:seed-random-state (cond ((stringp seed) (sxhash seed))
+				  ((integerp seed) (abs seed))
+				  ((realp seed) (abs (truncate seed)))
+				  (t (wrong-type "seed->random-state" 1 seed)))))
 (defguile "random-state-from-platform" () (make-random-state t))
-(defguile "random-state->datum" (state) (declare (ignore state)) ps:false)
-(defguile "datum->random-state" (datum) (declare (ignore datum)) (make-random-state t))
+;; a state as a datum: the generator's words, as a vector
+(defguile "random-state->datum" (state)
+  (unless (random-state-p state) (wrong-type "random-state->datum" 1 state))
+  (coerce (sb-kernel::random-state-state state) 'simple-vector))
+(defguile "datum->random-state" (datum)
+  (let ((state (make-random-state t))
+	(words (sb-kernel::random-state-state (make-random-state t))))
+    (unless (and (simple-vector-p datum) (= (length datum) (length words)))
+      (wrong-type "datum->random-state" 1 datum))
+    (replace (sb-kernel::random-state-state state) datum)
+    state))
 
 ;;; ------------------------------------------------------------------
 ;;; Symbols
@@ -458,6 +470,12 @@ square, else the nearest double, however big or small X is."
   (loop for i from (1- end) downto start for j downfrom (+ at (- end start 1)) do (setf (aref to j) (aref from i)))
   *unspecified*)
 (defguile "vector-copy!" (to at from &optional (start 0) (end (length from)))
+  (unless (simple-vector-p to) (wrong-type "vector-copy!" 1 to))
+  (unless (simple-vector-p from) (wrong-type "vector-copy!" 3 from))
+  (unless (and (integerp start) (<= 0 start (length from))) (out-of-range "vector-copy!" start))
+  (unless (and (integerp end) (<= start end (length from))) (out-of-range "vector-copy!" end))
+  (unless (and (integerp at) (<= 0 at) (<= (+ at (- end start)) (length to)))
+    (out-of-range "vector-copy!" at))
   (replace to from :start1 at :start2 start :end2 end) *unspecified*)
 (defguile "vector-fill!" (v x &optional (start 0) (end (length v)))
   (fill v x :start start :end end) *unspecified*)
@@ -1668,3 +1686,21 @@ true (the predicate's value) if it matches."
 (defguile "char-set-ref" (cs cursor)
   (handler-case (funcall (gethash (cons "(srfi 14)" "char-set-ref") *library-values*) cs cursor)
     (error () (wrong-type "char-set-ref" 2 cursor))))
+
+;;; (system vm loader): there is no VM to load bytecode into, but an ELF
+;;; image is checked as libguile's loader checks it first.
+
+(defun load-thunk-from-memory (bv)
+  (flet ((fail (message) (guile-error (ssym "misc-error") "load-thunk-from-memory" message '())))
+    (unless (typep bv 'ps-r6rs::octets) (wrong-type "load-thunk-from-memory" 1 bv))
+    (unless (and (>= (length bv) 64) (= (aref bv 0) #x7f) (= (aref bv 1) (char-code #\E))
+		 (= (aref bv 2) (char-code #\L)) (= (aref bv 3) (char-code #\F)))
+      (fail "not an ELF file"))
+    (unless (= (aref bv 4) 2) (fail "ELF file does not have native word size"))
+    (unless (= (aref bv 5) #+little-endian 1 #+big-endian 2)
+      (fail "ELF file does not have native byte order"))
+    (unless (member (aref bv 7) '(0 255)) (fail "ELF file does not have the expected OS ABI"))
+    (fail "can't load bytecode: there is no Guile VM here")))
+
+(defextension "scm_init_loader"
+  (list (cons "load-thunk-from-memory" #'load-thunk-from-memory)))
