@@ -282,7 +282,8 @@
 (defsystem :pseudoscheme/guile
   :version "3.0"
   :pathname #p"src/guile/"
-  :depends-on (:pseudoscheme/api :pseudoscheme/cffi)
+  :depends-on (:pseudoscheme/api :pseudoscheme/cffi
+	       :trivial-gray-streams)		; ports (src/guile/ports.lisp)
   :components ((:file "reader")
 	       (:file "runtime" :depends-on ("reader"))
 	       (:file "compile" :depends-on ("runtime"))
@@ -293,4 +294,5 @@
 	       (:file "regex" :depends-on ("primitives"))
 	       (:file "foreign" :depends-on ("primitives"))
 	       (:file "goops" :depends-on ("foreign" "ports"))
+	       (:file "write" :depends-on ("goops" "ports" "regex"))
 	       (:static-file "root-primitives.txt")))

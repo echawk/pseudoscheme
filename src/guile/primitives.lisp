@@ -578,7 +578,7 @@ less than 0.0."
 (defguile "object->string" (x &optional printer)
   (if (functionp printer)
       (with-output-to-string (s) (funcall printer x s))
-      (with-output-to-string (s) (funcall ps:*scheme-write* x s))))
+      (with-output-to-string (s) (guile-write x s))))
 (defguile "syntax-source" (s)
   (let ((v (and (syntax-object-p s) (syntax-object-sourcev s))))
     (if (simple-vector-p v)
@@ -978,3 +978,93 @@ that name, if the host has one."
 	((integerp n) (string-downcase (write-to-string n :base radix :radix nil)))
 	((rationalp n) (string-downcase (write-to-string n :base radix :radix nil)))
 	(t (wrong-type "number->string" 1 n))))
+
+;;; SRFI 60's C half (scm_init_srfi_60), as the SRFI defines them
+
+(defun bit-field-mask (start end) (ash (1- (ash 1 (- end start))) start))
+
+(defextension "scm_init_srfi_60"
+  (list
+   (cons "copy-bit" (lambda (index n bit)
+		      (if (truthy bit) (logior n (ash 1 index)) (logandc2 n (ash 1 index)))))
+   (cons "rotate-bit-field"
+	 (lambda (n count start end)
+	   (let* ((width (- end start))
+		  (field (ldb (byte width start) n)))
+	     (if (zerop width)
+		 n
+		 (let* ((count (mod count width))
+			(rotated (logand (logior (ash field count) (ash field (- count width)))
+					 (1- (ash 1 width)))))
+		   (dpb rotated (byte width start) n))))))
+   (cons "reverse-bit-field"
+	 (lambda (n start end)
+	   (let* ((width (- end start))
+		  (field (ldb (byte width start) n))
+		  (reversed 0))
+	     (dotimes (i width) (setq reversed (logior (ash reversed 1) (ldb (byte 1 i) field))))
+	     (dpb reversed (byte width start) n))))
+   (cons "integer->list"
+	 (lambda (n &optional (length (integer-length n)))
+	   (loop for i from (1- length) downto 0 collect (bool (logbitp i n)))))
+   (cons "list->integer"
+	 (lambda (list) (reduce (lambda (acc b) (logior (ash acc 1) (if (truthy b) 1 0))) list :initial-value 0)))
+   (cons "booleans->integer"
+	 (lambda (&rest list) (reduce (lambda (acc b) (logior (ash acc 1) (if (truthy b) 1 0))) list :initial-value 0)))))
+
+;;; SRFI 13 where Guile's differs from the reference implementation:
+;;; string-any and string-every take a character or char-set, as the
+;;; others do; string-replace's indices are optional; string-concatenate
+;;; checks its strings.
+
+(defun char-or-set-matcher (who pos x)
+  "A function of a character for X, a character, char-set or predicate:
+true (the predicate's value) if it matches."
+  (cond ((characterp x) (lambda (c) (char= c x)))
+	((functionp x) x)
+	((truthy (funcall (library-value "(srfi 14)" "char-set?") x))
+	 (let ((contains (library-value "(srfi 14)" "char-set-contains?")))
+	   (lambda (c) (funcall contains x c))))
+	(t (wrong-type who pos x))))
+
+(defun string-bounds (who s start end)
+  (unless (stringp s) (wrong-type who 2 s))
+  (let ((end (if (or (null end) (eq end ps:false)) (length s) end)))
+    (unless (and (integerp start) (<= 0 start (length s))) (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list start) (list start)))
+    (unless (and (integerp end) (<= start end (length s))) (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list end) (list end)))
+    end))
+
+(defguile "string-any-c-code" (pred s &optional (start 0) end)	; boot-9's string-any
+  (let ((match (char-or-set-matcher "string-any" 1 pred))
+	(end (string-bounds "string-any" s start end)))
+    (loop for i from start below end
+	  for v = (funcall match (char s i))
+	  when (truthy* v) return (if (functionp pred) v ps:true)
+	  finally (return ps:false))))
+
+(defguile "string-every-c-code" (pred s &optional (start 0) end)	; and string-every
+  (let ((match (char-or-set-matcher "string-every" 1 pred))
+	(end (string-bounds "string-every" s start end))
+	(last ps:true))
+    (loop for i from start below end
+	  for v = (funcall match (char s i))
+	  unless (truthy* v) return ps:false
+	  do (setq last (if (functionp pred) v ps:true))
+	  finally (return last))))
+
+(defun truthy* (v) (and v (not (eq v ps:false))))
+
+(defguile "string-replace" (s1 s2 &optional (start1 0) end1 (start2 0) end2)
+  (let ((end1 (string-bounds "string-replace" s1 start1 end1))
+	(end2 (string-bounds "string-replace" s2 start2 end2)))
+    (concatenate 'string (subseq s1 0 start1) (subseq s2 start2 end2) (subseq s1 end1))))
+
+(defun check-string-list (who list)
+  (check-proper-list who 1 list)
+  (dolist (s list) (unless (stringp s) (wrong-type who 1 s)))
+  list)
+
+(defguile "string-concatenate" (list)
+  (apply #'concatenate 'string (check-string-list "string-concatenate" list)))
+(defguile "string-concatenate/shared" (list)
+  (apply #'concatenate 'string (check-string-list "string-concatenate/shared" list)))

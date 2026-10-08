@@ -320,7 +320,7 @@ classes among them, are printed with it.")
   (if (eq (gvariable-value v) +unbound+)
       (format stream "#<variable ~X unbound>" (logand (sb-kernel:get-lisp-obj-address v) #xffffffffff))
       (progn (format stream "#<variable ~X value: " (logand (sb-kernel:get-lisp-obj-address v) #xffffffffff))
-	     (funcall ps:*scheme-write* (gvariable-value v) stream)
+	     (guile-write (gvariable-value v) stream)
 	     (write-string ">" stream))))
 
 (defguile "make-variable" (value) (make-gvariable value))
@@ -488,7 +488,7 @@ classes among them, are printed with it.")
   (special nil))			; a Lisp special variable that holds the value
 
 (defmethod print-object ((f fluid) stream)
-  (format stream "#<fluid ~X>" (logand (sb-kernel:get-lisp-obj-address f) #xffffffffff)))
+  (format stream "#<fluid ~(~X~)>" (logand (sb-kernel:get-lisp-obj-address f) #xffffffffff)))
 
 (defun make-fluid* (&optional (default ps:false))
   (let ((f (%make-fluid default nil)))
@@ -570,7 +570,7 @@ classes among them, are printed with it.")
 
 (defmethod print-object ((s syntax-object) stream)
   (write-string "#<syntax " stream)
-  (funcall ps:*scheme-write* (syntax-object-expression s) stream)
+  (guile-write (syntax-object-expression s) stream)
   (write-string ">" stream))
 
 (defguile "make-syntax" (exp wrap module &optional (sourcev ps:false))
@@ -616,13 +616,19 @@ classes among them, are printed with it.")
 a primitive, which (ice-9 documentation) finds its docstring by.")
 
 (defun root-procedure-name (p)
+  "P's name in the root module.  A Lisp function bound to several names
+(car and first) takes the one that is its Lisp name, if one is."
   (unless *root-procedure-names*
     (let ((table (make-hash-table :test 'eq :weakness :key)))
       (dolist (handle (ghash-handles *obarray*))
 	(let ((v (cdr handle)))
-	  (when (and (gvariable-p v) (functionp (gvariable-value v))
-		     (not (gethash (gvariable-value v) table)))
-	    (setf (gethash (gvariable-value v) table) (car handle)))))
+	  (when (and (gvariable-p v) (functionp (gvariable-value v)))
+	    (let* ((f (gvariable-value v))
+		   (old (gethash f table))
+		   (lisp-name (ignore-errors (string-downcase (string (sb-kernel:%fun-name f))))))
+	      (when (or (null old)
+			(and lisp-name (string= lisp-name (ps:scheme-symbol-name (car handle)))))
+		(setf (gethash f table) (car handle)))))))
       (setq *root-procedure-names* table)))
   (gethash p *root-procedure-names*))
 
@@ -710,7 +716,7 @@ a primitive, which (ice-9 documentation) finds its docstring by.")
    (args :initarg :args :reader guile-throw-args))
   (:report (lambda (c stream)
 	     (format stream "Guile throw to ~A: " (guile-throw-key c))
-	     (funcall ps:*scheme-write* (guile-throw-args c) stream))))
+	     (guile-write (guile-throw-args c) stream))))
 
 (defvar *throw* nil
   "boot-9's throw, once it is defined (src/guile/boot.lisp).")
@@ -722,7 +728,7 @@ a primitive, which (ice-9 documentation) finds its docstring by.")
   "boot-9's throw, or a Lisp error before there is one, or when throwing
 fails over and over (boot-9 half loaded)."
   (when *trace-throws*
-    (format *trace-output* "~&;; throw ~A ~A~%" key (with-output-to-string (s) (funcall ps:*scheme-write* args s))))
+    (format *trace-output* "~&;; throw ~A ~A~%" key (with-output-to-string (s) (guile-write args s))))
   (if (and *throw* (< *throw-depth* 3))
       (let ((*throw-depth* (1+ *throw-depth*)))
 	(apply *throw* key args))
@@ -810,8 +816,74 @@ and whether it takes more; NIL if that isn't known."
 (defguile "effective-version" () "3.0")
 (defguile "version" () "3.0.11")
 (defguile "debug-options-interface" (&rest args) (declare (ignore args)) '())
-(defguile "read-options-interface" (&rest args) (declare (ignore args)) '())
-(defguile "print-options-interface" (&rest args) (declare (ignore args)) '())
+;;; Option sets, as libguile's scm_options: (name boolean-p value doc).
+;;; Called with no argument, the interface returns the options set (a
+;;; boolean by its name alone, others as name and value); with a list, it
+;;; sets them (booleans by being named); with #t, it describes them.
+
+(defun make-options (specs)
+  (mapcar (lambda (spec) (destructuring-bind (name boolean value doc) spec
+			   (list (ssym name) boolean value doc)))
+	  specs))
+
+(defvar *print-options*
+  (make-options
+   '(("highlight-prefix" nil "{" "The string to print before highlighted values.")
+     ("highlight-suffix" nil "}" "The string to print after highlighted values.")
+     ("quote-keywordish-symbols" nil :reader "How to print symbols that have a colon as their first or last character.")
+     ("escape-newlines" t t "Render newlines as \\n when printing using `write'.")
+     ("r7rs-symbols" t nil "Escape symbols using R7RS |...| symbol notation.")
+     ("bytestrings" t nil "Render bytevectors as bytestrings (SRFI 207)."))))
+
+(defvar *read-options*
+  (make-options
+   '(("copy-source" t nil "Copy source code expressions.")
+     ("positions" t t "Record positions of source code expressions.")
+     ("case-insensitive" t nil "Convert symbols to lower case.")
+     ("keywords" nil nil "Style of keyword recognition: #f, 'prefix or 'postfix.")
+     ("r6rs-hex-escapes" t nil "Use R6RS variable-length character and string hex escapes.")
+     ("square-brackets" t t "Treat `[' and `]' as parentheses, for R6RS compatibility.")
+     ("hungry-eol-escapes" t nil "In strings, consume leading whitespace after an escaped end-of-line.")
+     ("curly-infix" t nil "Support SRFI-105 curly infix expressions.")
+     ("r7rs-symbols" t nil "Support R7RS |...| symbol notation.")
+     ("bytestrings" t nil "Read bytestrings (SRFI 207)."))))
+
+(defun option-scheme-value (v)
+  (cond ((eq v :reader) (ssym "reader")) ((eq v t) ps:true) ((null v) ps:false) (t v)))
+
+(defun option-value (options name)
+  "NAME's value in OPTIONS, Lisp-style: booleans as T or NIL."
+  (let ((o (find name options :key (lambda (o) (ps:scheme-symbol-name (first o))) :test #'string=)))
+    (third o)))
+
+(defun options-interface (options &optional (arg nil argp))
+  (cond ((not argp)
+	 (loop for (name boolean value) in options
+	       if boolean when value collect name end
+	       else append (list name (option-scheme-value value))))
+	((eq arg ps:true)
+	 (loop for (name boolean value doc) in options
+	       collect (list name (if boolean (bool value) (option-scheme-value value)) doc)))
+	(t (let ((old (options-interface options)))
+	     (dolist (o options)
+	       (when (second o) (setf (third o) nil)))
+	     (loop for tail on arg
+		   do (let ((o (find (car tail) options :key #'first)))
+			(cond ((null o))
+			      ((second o) (setf (third o) t))
+			      (t (setq tail (cdr tail))
+				 (setf (third o)
+				       (let ((v (car tail)))
+					 (cond ((eq v ps:false) nil)
+					       ((eq v ps:true) t)
+					       ((and (symbolp v) (string= (ps:scheme-symbol-name v) "reader")) :reader)
+					       (t v))))))))
+	     old))))
+
+(defguile "read-options-interface" (&optional (arg nil argp))
+  (if argp (options-interface *read-options* arg) (options-interface *read-options*)))
+(defguile "print-options-interface" (&optional (arg nil argp))
+  (if argp (options-interface *print-options* arg) (options-interface *print-options*)))
 (defguile "call-with-blocked-asyncs" (thunk) (funcall thunk))
 (defguile "call-with-unblocked-asyncs" (thunk) (funcall thunk))
 (defguile "with-continuation-barrier" (thunk) (funcall thunk))
@@ -821,18 +893,6 @@ and whether it takes more; NIL if that isn't known."
 (defguile "current-time" () (- (get-universal-time) #.(encode-universal-time 0 0 0 1 1 1970 0)))
 (defguile "program-arguments" () (copy-list *program-arguments*))
 (defguile "set-program-arguments" (args) (setq *program-arguments* args) *unspecified*)
-
-(defguile "string-any-c-code" (pred s &optional (start 0) (end (length s)))
-  (loop for i from start below end
-	do (let ((r (if (characterp pred) (bool (char= pred (char s i))) (funcall pred (char s i)))))
-	     (when (truthy r) (return r)))
-	finally (return ps:false)))
-(defguile "string-every-c-code" (pred s &optional (start 0) (end (length s)))
-  (let ((r ps:true))
-    (loop for i from start below end
-	  do (setq r (if (characterp pred) (bool (char= pred (char s i))) (funcall pred (char s i))))
-	     (unless (truthy r) (return ps:false))
-	  finally (return r))))
 
 ;; Keywords are Lisp symbols, but not Scheme symbols to Guile
 (defguile "symbol?" (x) (bool (and (symbolp x) (ps:scheme-symbol-p x) (not (keywordp x)))))

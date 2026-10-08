@@ -270,7 +270,10 @@ version (src/continuations.lisp)."
 	     (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text))
 	     (message "wrong-number-of-args" ps:false "~A" (list text)))))
       (t (let ((text (remove #\Newline (princ-to-string c))))
-	   (if (or (search "isn't a pair" text) (search ": not a " text) (search ": not an " text))
+	   (if (some (lambda (pattern) (search pattern text))
+		     ;; the type errors of Pseudoscheme's own libraries
+		     '("isn't a pair" ": not a " ": not an " "neither char-set" "not predicate, char or char-set"
+		       "bad argument"))
 	       (message "wrong-type-arg" ps:false "Wrong type argument: ~A" (list text))
 	       (message "misc-error" ps:false "~A" (list text))))))))
 
@@ -293,7 +296,8 @@ set up around them.  Floating-point traps are off, so that overflow
 gives an infinity and 0.0/0.0 a NaN, as in Guile."
   `(sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow)
      (handler-bind ((error #'lisp-error->guile))
-       (psx::call-with-continuation-base (lambda () ,@body)))))
+       (call-with-guile-ports
+	(lambda () (psx::call-with-continuation-base (lambda () ,@body)))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Loading
@@ -345,7 +349,7 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 			 (if (functionp reader) (funcall reader in) (guile-read in)))
 	    until (eq form ps:eof-object)
 	    do (when *trace-loads*
-		 (format *trace-output* "~&;;   ~A~%" (subseq (with-output-to-string (s) (funcall ps:*scheme-write* form s)) 0 (min 100 (length (with-output-to-string (s) (funcall ps:*scheme-write* form s)))))))
+		 (format *trace-output* "~&;;   ~A~%" (subseq (with-output-to-string (s) (guile-write form s)) 0 (min 100 (length (with-output-to-string (s) (guile-write form s)))))))
 	       (primitive-eval form))))
   *unspecified*)
 
@@ -521,8 +525,8 @@ not with Guile's behaviour.")
     (def "%search-load-path" (lambda (name) (or (search-load-path name) ps:false)))
     (def "read" (lambda (&optional (port *standard-input*)) (guile-read port)))
     (def "primitive-read" (lambda (&optional (port *standard-input*)) (guile-read port)))
-    (def "write" (lambda (x &optional (port *standard-output*)) (funcall ps:*scheme-write* x port) *unspecified*))
-    (def "display" (lambda (x &optional (port *standard-output*)) (funcall ps:*scheme-display* x port) *unspecified*))
+    (def "write" (lambda (x &optional (port *standard-output*)) (guile-write x port) *unspecified*))
+    (def "display" (lambda (x &optional (port *standard-output*)) (guile-display x port) *unspecified*))
     (def "simple-format" #'simple-format)
     (def "format" #'simple-format)
     (def "gensym" (gethash "gensym" *guile-primitives*))
@@ -531,7 +535,7 @@ not with Guile's behaviour.")
     (def "print-exception" (lambda (port frame key args)
 			     (declare (ignore frame))
 			     (format port "~A: " key)
-			     (funcall ps:*scheme-write* args port)
+			     (guile-write args port)
 			     (terpri port)
 			     *unspecified*))
     (def "macroexpanded?" (lambda (x) (bool (node-type x))))))
@@ -545,8 +549,8 @@ not with Guile's behaviour.")
 	       (if (and (char= c #\~) (< (1+ i) (length message)))
 		   (let ((d (char message (1+ i))))
 		     (case (char-downcase d)
-		       (#\a (funcall ps:*scheme-display* (pop args) out))
-		       (#\s (funcall ps:*scheme-write* (pop args) out))
+		       (#\a (guile-display (pop args) out))
+		       (#\s (guile-write (pop args) out))
 		       (#\% (terpri out))
 		       (#\~ (write-char #\~ out))
 		       (t (write-char c out) (write-char d out)))
@@ -634,5 +638,5 @@ boot); the last form's values."
 				 (call-with-guile-catch (lambda () (primitive-eval form)))))
 		       (unless (eq v *unspecified*)
 			 (format output "$~D = ~A~%" (incf n)
-				 (with-output-to-string (s) (funcall ps:*scheme-write* v s)))))
+				 (with-output-to-string (s) (guile-write v s)))))
 		   (error (e) (format output "~&~A~%" (error-text e))))))))))
