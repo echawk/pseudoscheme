@@ -142,8 +142,19 @@ psyntax's 18 core types, (language tree-il) defines <fix>, <let-values>,
 
 (defun core (name) (ssym name))
 
+(defvar *lexical-tag* "b"
+  "Part of each lexical name, new in each process: big top-level forms'
+lexicals become global definitions (FLATTEN-TOP-LEVEL-LETS, psyntax's
+hoisting), and those of a cached module's fasl (cache.lisp), of the
+image and of this process mustn't collide.")
+
+(defun new-lexical-tag ()
+  (setq *lexical-tag* (format nil "~36R" (random (expt 36 6) (make-random-state t)))))
+
+(pushnew 'new-lexical-tag sb-ext:*init-hooks*)
+
 (defun fresh-lexical ()
-  (ssym (format nil "~~~D" (incf *lexical-count*))))
+  (ssym (format nil "~~~D.~A" (incf *lexical-count*) *lexical-tag*)))
 
 (defun lexical (gensym)
   (or (gethash gensym *lexicals*)

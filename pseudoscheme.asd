@@ -294,5 +294,7 @@
 	       (:file "regex" :depends-on ("primitives"))
 	       (:file "foreign" :depends-on ("primitives"))
 	       (:file "goops" :depends-on ("foreign" "ports"))
-	       (:file "write" :depends-on ("goops" "ports" "regex"))
+	       (:file "arrays" :depends-on ("primitives"))
+	       (:file "cache" :depends-on ("boot"))
+	       (:file "write" :depends-on ("goops" "ports" "regex" "arrays"))
 	       (:static-file "root-primitives.txt")))

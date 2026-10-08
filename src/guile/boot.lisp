@@ -270,12 +270,15 @@ version (src/continuations.lisp)."
 	     (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text))
 	     (message "wrong-number-of-args" ps:false "~A" (list text)))))
       (t (let ((text (remove #\Newline (princ-to-string c))))
-	   (if (some (lambda (pattern) (search pattern text))
+	   (cond
+	     ((search "out of range" text)
+	      (message "out-of-range" ps:false "Value out of range: ~A" (list text)))
+	     ((some (lambda (pattern) (search pattern text))
 		     ;; the type errors of Pseudoscheme's own libraries
 		     '("isn't a pair" ": not a " ": not an " "neither char-set" "not predicate, char or char-set"
 		       "bad argument"))
-	       (message "wrong-type-arg" ps:false "Wrong type argument: ~A" (list text))
-	       (message "misc-error" ps:false "~A" (list text))))))))
+	      (message "wrong-type-arg" ps:false "Wrong type argument: ~A" (list text)))
+	     (t (message "misc-error" ps:false "~A" (list text)))))))))
 
 (defvar *trace-lisp-errors* nil "Print a backtrace of each Lisp error raised in Guile code.")
 
@@ -340,22 +343,37 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 
 (defvar *trace-loads* nil)
 
+(defvar *cache-ready* nil "Set once Guile has booted (cache.lisp).")
+(defvar *cacheable-load* nil
+  "True in PRIMITIVE-LOAD of a module from the load path, which is cached;
+a file loaded otherwise (load, a script) is evaluated as read, as Guile's
+evaluator does.")
+
 (defun primitive-load (filename)
+  "Load FILENAME: from its compiled fasl if the cache has one (cache.lisp),
+otherwise form by form, keeping the code to cache it."
   (when *trace-loads* (format *trace-output* "~&;; loading ~A~%" filename))
-  (with-open-file (in filename :external-format :utf-8)
-    (let ((*current-load-file* filename)
-	  (*guile-fold-case* nil))
-      (loop for form = (let ((reader (fluid-value *current-reader*)))
-			 (if (functionp reader) (funcall reader in) (guile-read in)))
-	    until (eq form ps:eof-object)
-	    do (when *trace-loads*
-		 (format *trace-output* "~&;;   ~A~%" (subseq (with-output-to-string (s) (guile-write form s)) 0 (min 100 (length (with-output-to-string (s) (guile-write form s)))))))
-	       (primitive-eval form))))
+  (let* ((cacheable (and *cacheable-load* (guile-cache-p)))
+	 (*cacheable-load* nil)
+	 (*current-load-file* filename)
+	 (*guile-fold-case* nil))
+    (unless (and cacheable (load-cached filename))
+      (let ((kept (and cacheable (list '()))))
+	(with-open-file (in filename :external-format :utf-8)
+	  (loop for form = (let ((reader (fluid-value *current-reader*)))
+			     (if (functionp reader) (funcall reader in) (guile-read in)))
+		until (eq form ps:eof-object)
+		do (when *trace-loads*
+		     (let ((text (with-output-to-string (s) (guile-write form s))))
+		       (format *trace-output* "~&;;   ~A~%" (subseq text 0 (min 100 (length text))))))
+		   (if kept (eval-keeping form kept) (primitive-eval form))))
+	(when kept
+	  (write-cached-file (cache-fasl filename) filename (reverse (car kept)))))))
   *unspecified*)
 
 (defun primitive-load-path (name &optional (exception-on-not-found ps:true))
   (let ((path (search-load-path name)))
-    (cond (path (primitive-load path))
+    (cond (path (let ((*cacheable-load* t)) (primitive-load path)))
 	  ((truthy exception-on-not-found)
 	   (guile-error (ssym "system-error") "primitive-load-path"
 			"Unable to find file ~S in load path" (list name)))
@@ -469,8 +487,8 @@ not with Guile's behaviour.")
     (def "vtable-index-layout" +vtable-index-layout+)
     (def "vtable-index-printer" +vtable-index-printer+)
     (def "vtable-index-size" +vtable-index-size+)
-    (def "most-positive-fixnum" most-positive-fixnum)
-    (def "most-negative-fixnum" most-negative-fixnum)
+    (def "most-positive-fixnum" +guile-fixnum-max+)	; Guile's, narrower than SBCL's
+    (def "most-negative-fixnum" (- -1 +guile-fixnum-max+))
     (def "*unspecified*" *unspecified*)
     (def "macroexpand" #'pre-expand)
     (def "%load-path" (list (namestring (our-modules-directory))
@@ -576,6 +594,8 @@ not with Guile's behaviour.")
     (let ((start (get-internal-real-time)))
       (with-guile-errors
 	(primitive-load-path "ice-9/boot-9"))
+      ;; what loads from here on is cached (cache.lisp)
+      (setq *cache-ready* t)
       (when verbose
 	(format *error-output* "~&;; boot-9 loaded in ~,1F s~%"
 		(/ (- (get-internal-real-time) start) internal-time-units-per-second))))

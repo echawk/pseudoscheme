@@ -401,6 +401,11 @@ Guile mode compares its structs with it.")
 
 (defun equal-step (obj1 obj2 recur)
   (cond ((eql obj1 obj2) t)
+	;; the extension's objects are structure instances, and may be
+	;; EQUAL? to vectors (a Guile array to the vector it views)
+	((and *equal-extension*
+	      (or (typep obj1 'structure-object) (typep obj2 'structure-object)))
+	 (funcall *equal-extension* obj1 obj2 recur))
         ((consp obj1)			;pair?
          (and (consp obj2)
 	      (funcall recur (car obj1) (car obj2))

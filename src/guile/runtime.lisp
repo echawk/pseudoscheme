@@ -247,7 +247,7 @@ one): it has no fields until then."
   (check-unboxed "struct-set!" s i v)
   (setf (svref (struct-slots-of s) i) v)
   (when (and (vtable-p s) (= i +vtable-index-flags+)) (setf (vtable-flags s) v))
-  *unspecified*)
+  v)					; as libguile's: (rnrs enums) relies on it
 (setf (gethash "struct-ref/unboxed" *guile-primitives*) (gethash "struct-ref" *guile-primitives*)
       (gethash "struct-set!/unboxed" *guile-primitives*) (gethash "struct-set!" *guile-primitives*))
 (defguile "make-struct/no-tail" (vtable &rest inits) (make-struct* vtable inits "make-struct/no-tail"))
@@ -778,7 +778,16 @@ fails over and over (boot-9 half loaded)."
 (defguile "logxor" (&rest ns) (apply #'logxor ns))
 (defguile "lognot" (n) (lognot n))
 (defguile "bit-extract" (n start end) (ldb (byte (- end start) start) n))
-(defguile "object-address" (x) (sb-kernel:get-lisp-obj-address x))
+(defconstant +guile-fixnum-max+ (1- (ash 1 61)) "Guile's most-positive-fixnum, 62 bits.")
+
+(defguile "object-address" (x)
+  ;; Guile's bits for an immediate (a fixnum is n<<2 | 2, which (rnrs
+  ;; arithmetic fixnums) tests), an address otherwise
+  (cond ((and (integerp x) (<= (- -1 +guile-fixnum-max+) x +guile-fixnum-max+))
+	 (ldb (byte 64 0) (logior (ash x 2) 2)))
+	((characterp x) (logior (ash (char-code x) 8) #x0c))
+	((eq x ps:false) #x4) ((eq x ps:true) #x404) ((null x) #x304)
+	(t (logandc2 (sb-kernel:get-lisp-obj-address x) 7))))
 (defguile "inf" () sb-ext:double-float-positive-infinity)
 (defguile "nan" () (- sb-ext:double-float-positive-infinity sb-ext:double-float-positive-infinity))
 (defun function-arity (f)

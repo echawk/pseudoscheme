@@ -76,7 +76,7 @@ type, say): made the first time, as scm_i_define_class_for_vtable does."
 	  (t (class-for-vtable vtable)))))
 
 (defparameter *smob-classes*
-  '(("<promise>" . revised^4-scheme::promisep) ("<thread>" . sb-thread::thread-p)
+  '(("<promise>" . gpromise-p) ("<thread>" . sb-thread::thread-p)
     ("<mutex>" . gmutex-p) ("<condition-variable>" . gcondvar-p)
     ("<regexp>" . regexp-p) ("<hook>" . hook-p) ("<random-state>" . random-state-p)
     ("<directory>" . directory-stream-p) ("<macro>" . gmacro-p) ("<character-set>" . nil)
@@ -329,12 +329,24 @@ which GOOPS can make only once it is loaded."
 ;;; generic (which GOOPS sets), other structs of one vtable field by field.
 
 (defun struct-equal (a b recur)
+  (if (or (garray-p a) (garray-p b))
+      (and (guile-array-p a) (guile-array-p b) (arrays-equal a b))
+      (struct-equal* a b recur)))
+
+(defvar *structs-being-compared* '()
+  "Pairs of structs being compared: met again (a cycle), they are taken
+to be equal, as equal? does for pairs and vectors.")
+
+(defun struct-equal* (a b recur)
   (and (struct-p a) (struct-p b)
        (eq (struct-vtable-of a) (struct-vtable-of b))
-       (if (logtest (vtable-flags (struct-vtable-of a)) +vtable-flag-goops-class+)
-	   (and *equal-generic* (truthy (funcall *equal-generic* a b)))
-	   (let ((x (struct-slots-of a)) (y (struct-slots-of b)))
-	     (and (= (length x) (length y))
-		  (every recur x y))))))
+       (or (eq a b)
+	   (if (logtest (vtable-flags (struct-vtable-of a)) +vtable-flag-goops-class+)
+	       (and *equal-generic* (truthy (funcall *equal-generic* a b)))
+	       (or (find-if (lambda (p) (and (eq (car p) a) (eq (cdr p) b))) *structs-being-compared*)
+		   (let ((*structs-being-compared* (cons (cons a b) *structs-being-compared*))
+			 (x (struct-slots-of a)) (y (struct-slots-of b)))
+		     (and (= (length x) (length y))
+			  (every recur x y))))))))
 
 (setq ps::*equal-extension* 'struct-equal)

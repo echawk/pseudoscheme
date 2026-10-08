@@ -68,11 +68,37 @@
 
 (defun guile-less (less) (lambda (a b) (truthy (funcall less a b))))
 
+(defun sort-elements (seq less who)
+  "SEQ's elements, a list or a rank-1 array's, sorted (stably) by LESS."
+  (stable-sort (if (listp seq) (copy-list seq) (array->list* (check-sortable seq who))) (guile-less less)))
+
+(defun check-sortable (seq who)
+  (unless (and (guile-array-p seq) (= 1 (length (nth-value 3 (array-view seq who)))))
+    (wrong-type who 1 seq))
+  seq)
+
+(defun store-elements (array elements)
+  "Put ELEMENTS into ARRAY, a rank-1 array, in index order."
+  (destructuring-bind (lo hi stride) (first (nth-value 3 (array-view array "sort!")))
+    (declare (ignore hi stride))
+    (loop for x in elements for i from lo do (set-array-element array x (list i) "sort!")))
+  array)
+
 (defguile "sort" (seq less)
+  (let ((sorted (sort-elements seq less "sort")))
+    (if (listp seq)
+	sorted
+	(multiple-value-bind (root type offset dims) (array-view seq "sort")
+	  (declare (ignore root offset))
+	  (store-elements (make-typed-array* (type-symbol type) *unspecified*
+					      (list (list (first (first dims)) (second (first dims)))))
+			  sorted)))))
+
+(defguile "sort!" (seq less)
   (if (listp seq)
-      (stable-sort (copy-list seq) (guile-less less))
-      (stable-sort (copy-seq seq) (guile-less less))))
-(defguile "sort!" (seq less) (stable-sort seq (guile-less less)))
+      (stable-sort seq (guile-less less))
+      (store-elements seq (sort-elements seq less "sort!"))))
+
 (setf (gethash "stable-sort" *guile-primitives*) (gethash "sort" *guile-primitives*)
       (gethash "stable-sort!" *guile-primitives*) (gethash "sort!" *guile-primitives*)
       (gethash "sort-list" *guile-primitives*) (gethash "sort" *guile-primitives*)
@@ -82,9 +108,10 @@
 (defguile "merge!" (a b less)
   (merge (if (listp a) 'list 'vector) a b (guile-less less)))
 (defguile "sorted?" (seq less)
-  (let ((list (coerce seq 'list)))
-    (bool (loop for (a b) on list while (cdr (member b list :test #'eq))
-		never (and b (truthy (funcall less b a)))))))
+  (let ((list (if (listp seq) seq (array->list* (check-sortable seq "sorted?")))))
+    (bool (loop for tail on list
+		while (cdr tail)
+		never (truthy (funcall less (cadr tail) (car tail)))))))
 (defguile "restricted-vector-sort!" (v less start end)
   (setf (subseq v start end) (stable-sort (subseq v start end) (guile-less less)))
   *unspecified*)
@@ -275,46 +302,6 @@ NaN is itself."
 (defguile "bit-count" (b v) (count (if (truthy b) 1 0) v))
 (defguile "bit-position" (b v start) (or (position (if (truthy b) 1 0) v :start start) ps:false))
 (defguile "bit-invert!" (v) (bit-not v v) *unspecified*)
-
-;;; ------------------------------------------------------------------
-;;; Arrays: Lisp arrays (a vector is a rank-1 array)
-
-(defguile "array?" (x) (bool (and (arrayp x) (not (stringp x)) t)))
-(defguile "typed-array?" (x type) (declare (ignore type)) (bool (arrayp x)))
-(defguile "array-rank" (a) (if (arrayp a) (array-rank a) 0))
-(defguile "array-dimensions" (a) (array-dimensions a))
-(defguile "array-length" (a) (array-dimension a 0))
-(defguile "array-ref" (a &rest indices) (let ((x (apply #'aref a indices))) (if (typep a 'bit-vector) (bool (= x 1)) x)))
-(defguile "array-set!" (a v &rest indices) (setf (apply #'aref a indices) v) *unspecified*)
-(defguile "array-in-bounds?" (a &rest indices) (bool (apply #'array-in-bounds-p a indices)))
-(defguile "make-array" (fill &rest bounds)
-  (make-array (mapcar (lambda (b) (if (consp b) (1+ (- (cadr b) (car b))) b)) bounds) :initial-element fill))
-(defguile "make-typed-array" (type fill &rest bounds)
-  (declare (ignore type))
-  (make-array (mapcar (lambda (b) (if (consp b) (1+ (- (cadr b) (car b))) b)) bounds) :initial-element fill))
-(defguile "array->list" (a)
-  (labels ((walk (dims indices)
-	     (if (null dims)
-		 (apply #'aref a (reverse indices))
-		 (loop for i below (car dims) collect (walk (cdr dims) (cons i indices))))))
-    (walk (array-dimensions a) '())))
-(defguile "list->array" (rank list)
-  (labels ((dims (x r) (if (zerop r) '() (cons (length x) (dims (car x) (1- r))))))
-    (make-array (dims list (if (integerp rank) rank (length rank))) :initial-contents list)))
-(defguile "array-fill!" (a x)
-  (let ((v (make-array (array-total-size a) :displaced-to a))) (fill v x)) *unspecified*)
-(defguile "array-type" (a) (declare (ignore a)) ps:true)
-(defguile "array-for-each" (proc a &rest more)
-  (dotimes (i (array-total-size a))
-    (apply proc (row-major-aref a i) (mapcar (lambda (b) (row-major-aref b i)) more)))
-  *unspecified*)
-(defguile "array-map!" (dest proc &rest sources)
-  (dotimes (i (array-total-size dest))
-    (setf (row-major-aref dest i) (apply proc (mapcar (lambda (b) (row-major-aref b i)) sources))))
-  *unspecified*)
-(defguile "array-copy!" (src dest)
-  (dotimes (i (array-total-size src)) (setf (row-major-aref dest i) (row-major-aref src i)))
-  *unspecified*)
 
 ;;; ------------------------------------------------------------------
 ;;; The operating system
@@ -557,11 +544,6 @@ less than 0.0."
   ;; the number of trailing zero bits; -1 for 0
   (if (zerop n) -1 (1- (integer-length (logand n (- n))))))
 
-(defguile "make-srfi-4-vector" (type length &optional (fill 0))
-  (let* ((tag (ps:scheme-symbol-name type))
-	 (tag (cond ((string= tag "c32") "c64") ((string= tag "c64") "c128") (t tag))))
-    (ps::list->numeric-vector tag (make-list length :initial-element fill))))
-
 (defguile "list-tail" (list k)
   (unless (and (integerp k) (>= k 0))
     (guile-error (ssym "out-of-range") "list-tail" "Value out of range: ~S" (list k) (list k)))
@@ -681,7 +663,28 @@ that name, if the host has one."
 ;;; (rnrs bytevectors gnu)'s bytevector-slice: a copy here, where Guile's
 ;;; shares the bytes
 (defextension "scm_init_bytevectors"
-  (list (cons "bytevector-slice"
+  (list (cons "u8-list->bytevector"
+	      (lambda (list)
+		(check-proper-list "u8-list->bytevector" 1 list)
+		(dolist (b list) (unless (typep b '(unsigned-byte 8)) (wrong-type "u8-list->bytevector" 1 b)))
+		(make-array (length list) :element-type '(unsigned-byte 8) :initial-contents list)))
+	;; the host's, after Guile's check of the list (a circular one would loop)
+	(cons "sint-list->bytevector"
+	      (lambda (list &rest args)
+		(check-proper-list "sint-list->bytevector" 1 list)
+		(apply (psx:host-ref "sint-list->bytevector") list args)))
+	(cons "uint-list->bytevector"
+	      (lambda (list &rest args)
+		(check-proper-list "uint-list->bytevector" 1 list)
+		(apply (psx:host-ref "uint-list->bytevector") list args)))
+	(cons "bytevector-fill!"
+	      ;; with Guile's optional range
+	      (lambda (bv fill &optional (start 0) (end (length bv)))
+		(unless (typep bv 'ps-r6rs::octets) (wrong-type "bytevector-fill!" 1 bv))
+		(unless (and (integerp fill) (<= -128 fill 255)) (wrong-type "bytevector-fill!" 2 fill))
+		(fill bv (ldb (byte 8 0) fill) :start start :end end)
+		*unspecified*))
+	(cons "bytevector-slice"
 	      (lambda (bv offset &optional (size (- (length bv) offset)))
 		(subseq bv offset (+ offset size))))))
 
@@ -754,11 +757,11 @@ that name, if the host has one."
 
 ;;; File descriptors and processes
 
-(defun fd-port (fd mode)
-  (sb-sys:make-fd-stream fd :input (find #\r mode) :output (or (find #\w mode) (find #\a mode))
-			    :external-format :utf-8 :buffering :full :auto-close t))
 (defguile "pipe" ()
   (multiple-value-bind (in out) (sb-posix:pipe)
+    ;; close-on-exec (FD_CLOEXEC, 1), as Guile's: a child gets the ends it is given
+    ;; (piped-process), not the others, which would keep a pipe open
+    (dolist (fd (list in out)) (sb-posix:fcntl fd sb-posix:f-setfd 1))
     (cons (fd-port in "r") (fd-port out "w"))))
 (defguile "open-fdes" (path flags &optional (mode #o666)) (sb-posix:open path flags mode))
 (defguile "open" (path flags &optional (mode #o666))
@@ -966,6 +969,8 @@ that name, if the host has one."
 	       (shortest-float-digits x radix out))))))
 
 (defguile "number->string" (n &optional (radix 10))
+  (unless (and (integerp radix) (<= 2 radix 36))
+    (guile-error (ssym "out-of-range") "number->string" "Value out of range: ~S" (list radix) (list radix)))
   (cond ((floatp n) (guile-float-string n radix))
 	((complexp n)
 	 (let ((re (realpart n)) (im (imagpart n)))
@@ -1068,3 +1073,78 @@ true (the predicate's value) if it matches."
   (apply #'concatenate 'string (check-string-list "string-concatenate" list)))
 (defguile "string-concatenate/shared" (list)
   (apply #'concatenate 'string (check-string-list "string-concatenate/shared" list)))
+
+;;; Promises, Guile's: make-promise takes a thunk, forced once
+(defstruct (gpromise (:constructor make-gpromise (thunk)) (:copier nil))
+  thunk (value nil) (done nil))
+
+(defmethod print-object ((p gpromise) stream)
+  (format stream "#<promise ~A>" (if (gpromise-done p) "forced" "delayed")))
+
+(defguile "make-promise" (thunk)
+  (unless (functionp thunk) (wrong-type "make-promise" 1 thunk))
+  (make-gpromise thunk))
+(defguile "promise?" (x) (bool (gpromise-p x)))
+(defguile "force" (p)
+  (unless (gpromise-p p) (wrong-type "force" 1 p))
+  (unless (gpromise-done p)
+    (let ((v (funcall (gpromise-thunk p))))
+      ;; forcing it may have forced it already: the first value wins
+      (unless (gpromise-done p)
+	(setf (gpromise-value p) v (gpromise-done p) t (gpromise-thunk p) nil))))
+  (gpromise-value p))
+
+;;; (ice-9 popen)'s C half: piped-process starts PROG with ARGS, its
+;;; standard input and output the given pipe ends (FROM, the child's
+;;; output pipe (read . write); TO, its input pipe) or else the current
+;;; ports' descriptors, as libguile's does, by posix_spawnp.
+
+(defun port-fd-or (port null-mode)
+  (or (and (gport-p port) (port-open-p port) (port-fd port))
+      (sb-posix:open "/dev/null" null-mode)))
+
+(defun spawn-process (prog args in out err)
+  "The pid of PROG run with ARGS, its descriptors 0-2 IN, OUT and ERR."
+  (let ((argv (cons prog args))
+	(env (sb-ext:posix-environ)))
+    (flet ((string-array (strings)
+	     (let ((a (cffi:foreign-alloc :pointer :count (1+ (length strings)))))
+	       (loop for s in strings for i from 0
+		     do (setf (cffi:mem-aref a :pointer i) (cffi:foreign-string-alloc s :encoding :utf-8)))
+	       (setf (cffi:mem-aref a :pointer (length strings)) (cffi:null-pointer))
+	       a)))
+      (let ((c-argv (string-array argv)) (c-env (string-array env)))
+	(cffi:with-foreign-objects ((actions :uint8 256) (pid :int))
+	  (unwind-protect
+	       (progn
+		 (cffi:foreign-funcall "posix_spawn_file_actions_init" :pointer actions :int)
+		 (loop for (fd target) in (list (list in 0) (list out 1) (list err 2))
+		       do (cffi:foreign-funcall "posix_spawn_file_actions_adddup2"
+						:pointer actions :int fd :int target :int))
+		 (let ((code (cffi:foreign-funcall "posix_spawnp" :pointer pid :string prog
+								  :pointer actions :pointer (cffi:null-pointer)
+								  :pointer c-argv :pointer c-env :int)))
+		   (if (zerop code)
+		       (cffi:mem-ref pid :int)
+		       (progn
+			 (format *error-output* "In execvp of ~A: ~A~%" prog (sb-int:strerror code))
+			 -1))))
+	    (cffi:foreign-funcall "posix_spawn_file_actions_destroy" :pointer actions :int)
+	    (dolist (a (list c-argv c-env))
+	      (loop for i from 0 for p = (cffi:mem-aref a :pointer i)
+		    until (cffi:null-pointer-p p) do (cffi:foreign-free p))
+	      (cffi:foreign-free a))))))))
+
+(defextension "scm_init_popen"
+  (list
+   (cons "piped-process"
+	 (lambda (prog args &optional (from ps:false) (to ps:false))
+	   (flush-all-ports)
+	   (let* ((out (if (consp from) (cdr from) (port-fd-or *standard-output* sb-posix:o-wronly)))
+		  (in (if (consp to) (car to) (port-fd-or *standard-input* sb-posix:o-rdonly)))
+		  (err (port-fd-or *error-output* sb-posix:o-wronly))
+		  (pid (spawn-process prog args in out err)))
+	     ;; the child's ends, which the parent closes
+	     (when (consp from) (sb-posix:close (cdr from)))
+	     (when (consp to) (sb-posix:close (car to)))
+	     pid)))))

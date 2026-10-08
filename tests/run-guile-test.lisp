@@ -35,6 +35,8 @@
 (psg:boot)
 ;; GUILE_TRACE=1: a backtrace for each Lisp error that becomes a Guile exception
 (when (uiop:getenv "GUILE_TRACE") (setq psg::*trace-lisp-errors* t))
+;; GUILE_TRACE_CACHE=1: which modules load from the compiled-file cache
+(when (uiop:getenv "GUILE_TRACE_CACHE") (setq psg::*trace-cache* t))
 
 (defun guile-string (x)
   (with-output-to-string (s) (write-string (substitute #\/ #\\ (namestring x)) s)))
