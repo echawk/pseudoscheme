@@ -155,7 +155,7 @@ version (src/continuations.lisp)."
       (let ((tail (last args)))
 	(when (and tail (eq (car tail) *elisp-nil*))
 	  (setq args (append (butlast args) (list '()))))
-	(when (and tail (not (listp (car tail))))
+	(when (and tail (not (and (listp (car tail)) (ignore-errors (list-length (car tail))))))
 	  (guile-error (ssym "wrong-type-arg") "apply" "Apply to non-list: ~S" (list (car tail))
 		       (list (car tail)))))
       (apply apply f args))))
@@ -233,6 +233,22 @@ version (src/continuations.lisp)."
 ;;; Errors: a Lisp error in Guile code is raised as a Guile exception,
 ;;; in the dynamic context of the error, as libguile's own errors are.
 
+(defun index-type-p (type)
+  "Whether TYPE, a type error's expected type, is that of an index."
+  (or (member type '(sb-int:index sb-kernel:index-or-minus-1))
+      (and (consp type)
+	   (or (eq (car type) 'mod)
+	       (and (eq (car type) 'unsigned-byte) (integerp (second type)) (>= (second type) 32))
+	       (and (eq (car type) 'integer) (eql (second type) 0))))))
+
+(defun index-type-bounds (type)
+  (let ((hi (cond ((and (consp type) (eq (car type) 'mod)) (1- (second type)))
+		  ((and (consp type) (eq (car type) 'unsigned-byte)) (1- (ash 1 (second type))))
+		  ((and (consp type) (eq (car type) 'integer))
+		   (let ((h (third type))) (cond ((consp h) (1- (car h))) ((integerp h) h) (t ps:false))))
+		  (t most-positive-fixnum))))
+    (list 0 hi)))
+
 (defun condition-throw-arguments (c)
   "The key and throw arguments for Lisp condition C."
   (flet ((message (key subr message args)
@@ -240,8 +256,13 @@ version (src/continuations.lisp)."
     (typecase c
       (guile-throw (values (guile-throw-key c) (guile-throw-args c)))
       (type-error
-       (message "wrong-type-arg" ps:false "Wrong type argument: ~S"
-		(list (type-error-datum c))))
+       (if (index-type-p (type-error-expected-type c))
+	   ;; a negative or huge index: Guile's arguments are the bounds and the index
+	   (message "out-of-range" ps:false "Value out of range ~S to ~S: ~S"
+		    (append (index-type-bounds (type-error-expected-type c))
+			    (list (type-error-datum c))))
+	   (message "wrong-type-arg" ps:false "Wrong type argument: ~S"
+		    (list (type-error-datum c)))))
       (division-by-zero (message "numerical-overflow" ps:false "Numerical overflow" '()))
       (sb-int:simple-program-error
        (let ((text (princ-to-string c)))

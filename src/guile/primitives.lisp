@@ -58,11 +58,10 @@
 (defguile "list-cdr-ref" (list k) (nthcdr k list))
 (defguile "list-cdr-set!" (list k v) (setf (cdr (nthcdr k list)) v) *unspecified*)
 (defguile "list-set!" (list k v) (setf (nth k list) v) *unspecified*)
-(defguile "append!" (&rest lists) (apply #'nconc lists))
 (defguile "reverse!" (list &optional (tail '())) (nreconc list tail))
 (defguile "filter" (pred list) (remove-if-not (lambda (x) (truthy (funcall pred x))) list))
 (defguile "filter!" (pred list) (delete-if-not (lambda (x) (truthy (funcall pred x))) list))
-(defguile "make-list" (n &optional (fill *unspecified*)) (make-list n :initial-element fill))
+(defguile "make-list" (n &optional (fill (quote ()))) (make-list n :initial-element fill))  ; Guile fills with ()
 
 ;;; ------------------------------------------------------------------
 ;;; Sorting: (sort sequence less), lists and vectors
@@ -517,6 +516,42 @@ less than 0.0."
 	((sb-ext:float-infinity-p x) 1.0d0)
 	((nan-p x) x)
 	(t (float (denominator (rational x)) x))))
+
+(defun check-proper-list (who pos x)
+  (unless (and (listp x) (handler-case (list-length x) (error () nil)))
+    (wrong-type who pos x)))
+
+(defguile "append!" (&rest lists)
+  (let ((lists (remove '() lists :end (max 0 (1- (length lists))))))
+    (loop for (l . more) on lists for pos from 1
+	  when more do (check-proper-list "append!" pos l))
+    (apply #'nconc lists)))
+
+(defguile "last-pair" (l)
+  (check-proper-list "last-pair" 1 (if (consp l) (loop for x on l while (consp (cdr x)) finally (return (list (car x)))) l))
+  (last l))
+
+(defun list-index-tail (who list k)
+  "The tail of LIST after K pairs, which must exist."
+  (flet ((out () (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list k) (list k))))
+    (unless (and (integerp k) (>= k 0)) (out))
+    (dotimes (i k list)
+      (unless (consp list) (out))
+      (setq list (cdr list)))))
+
+(defun list-index-pair (who list k)
+  (let ((tail (list-index-tail who list k)))
+    (unless (consp tail)
+      (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list k) (list k)))
+    tail))
+
+(defguile "list-ref" (list k) (car (list-index-pair "list-ref" list k)))
+(defguile "list-set!" (list k v) (setf (car (list-index-pair "list-set!" list k)) v) *unspecified*)
+(defguile "list-cdr-ref" (list k) (list-index-tail "list-cdr-ref" list k))
+(defguile "list-cdr-set!" (list k v) (setf (cdr (list-index-pair "list-cdr-set!" list k)) v) *unspecified*)
+(defguile "list-head" (list k)
+  (list-index-tail "list-head" list k)
+  (subseq list 0 k))
 
 (defguile "log2-binary-factors" (n)
   ;; the number of trailing zero bits; -1 for 0

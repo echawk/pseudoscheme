@@ -749,7 +749,6 @@ fails over and over (boot-9 half loaded)."
 (defguile "nil?" (x) (bool (or (null x) (eq x ps:false) (eq x *elisp-nil*))))
 (defguile "acons" (k v alist) (acons k v alist))
 (defguile "cons*" (x &rest more) (apply #'list* x more))
-(defguile "last-pair" (l) (last l))
 (defguile "logbit?" (i n) (bool (logbitp i n)))
 (defguile "logtest" (a b) (bool (logtest a b)))
 (defguile "logcount" (n) (logcount n))

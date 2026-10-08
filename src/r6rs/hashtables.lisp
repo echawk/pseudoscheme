@@ -163,15 +163,23 @@
 
 (defun sxhash-scheme (obj)
   ;; SXHASH is EQUAL-consistent; Scheme EQUAL? also descends vectors,
-  ;; which CL EQUAL doesn't, so hash vectors by their contents.
-  (typecase obj
-    (simple-vector (let ((h 17))
-		     (loop for x across obj
-			   do (setq h (logand most-positive-fixnum (+ (* h 31) (sxhash-scheme x)))))
-		     h))
-    (cons (logand most-positive-fixnum
-		  (+ (* 31 (sxhash-scheme (car obj))) (sxhash-scheme (cdr obj)))))
-    (t (sxhash obj))))
+  ;; which CL EQUAL doesn't, so hash vectors by their contents.  Only the
+  ;; first nodes count, as with SXHASH: EQUAL? objects are walked alike,
+  ;; so they still hash alike, and a circular one is finite work.
+  (let ((budget 64))
+    (labels ((walk (obj)
+	       (if (<= (decf budget) 0)
+		   0
+		   (typecase obj
+		     (simple-vector (let ((h 17))
+				      (loop for x across obj
+					    while (plusp budget)
+					    do (setq h (logand most-positive-fixnum (+ (* h 31) (walk x)))))
+				      h))
+		     (cons (logand most-positive-fixnum
+				   (+ (* 31 (walk (car obj))) (walk (cdr obj)))))
+		     (t (sxhash obj))))))
+      (walk obj))))
 
 (defvar *globals-hook* nil
   "Function from a name to a host global's value, set by src/psyntax.lisp,
