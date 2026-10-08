@@ -390,7 +390,9 @@ otherwise form by form, keeping the code to cache it."
     (if (and cacheable (load-cached filename))
       *unspecified*
       (let ((kept (and cacheable (list '()))))
-	(with-open-file (in filename :external-format :utf-8)
+	;; in the encoding its coding: comment names, as Guile reads it
+	(with-open-file (in filename :external-format (let ((coding (file-coding filename)))
+							(or (and coding (external-format-of coding)) :utf-8)))
 	  (loop for form = (let ((reader (fluid-value *current-reader*)))
 			     (if (functionp reader) (funcall reader in) (guile-read in)))
 		until (eq form ps:eof-object)
@@ -511,6 +513,15 @@ not with Guile's behaviour.")
 
 (defun install-root-variables ()
   (flet ((def (name value) (obarray-define (ssym name) value)))
+    ;; libguile's: every assigned code point (no unassigned ones, no surrogates)
+    (let ((list->char-set (gethash (cons "(srfi 14)" "list->char-set") *library-values*)))
+      (when list->char-set
+	(def "char-set:designated"
+	  (funcall list->char-set
+		   (loop for i below char-code-limit
+			 for c = (code-char i)
+			 when (and c (not (member (sb-unicode:general-category c) '(:cn :cs))))
+			   collect c)))))
     (def "%expanded-vtables" *expanded-vtables*)
     (def "<standard-vtable>" *standard-vtable*)
     (def "<applicable-struct-vtable>" *applicable-struct-vtable*)
@@ -536,12 +547,20 @@ not with Guile's behaviour.")
 		    "EISDIR" "EINVAL" "ENFILE" "EMFILE" "ENOTTY" "EFBIG" "ENOSPC" "ESPIPE" "EROFS"
 		    "EMLINK" "EPIPE" "EDOM" "ERANGE" "EWOULDBLOCK" "EINPROGRESS" "EALREADY" "ENOSYS"
 		    "ENOTEMPTY" "ELOOP" "ENAMETOOLONG" "ECONNREFUSED" "ECONNRESET" "ETIMEDOUT"
-		    "EADDRINUSE" "ENOTSOCK" "ENOTCONN" "EHOSTUNREACH"))
+		    "EADDRINUSE" "ENOTSOCK" "ENOTCONN" "EHOSTUNREACH"
+		    ;; signals
+		    "SIGHUP" "SIGINT" "SIGQUIT" "SIGILL" "SIGTRAP" "SIGABRT" "SIGFPE" "SIGKILL"
+		    "SIGBUS" "SIGSEGV" "SIGSYS" "SIGPIPE" "SIGALRM" "SIGTERM" "SIGURG" "SIGSTOP"
+		    "SIGTSTP" "SIGCONT" "SIGCHLD" "SIGTTIN" "SIGTTOU" "SIGIO" "SIGXCPU" "SIGXFSZ"
+		    "SIGVTALRM" "SIGPROF" "SIGWINCH" "SIGUSR1" "SIGUSR2"))
       (let ((sym (find-symbol (substitute #\- #\_ name) "SB-POSIX")))
 	(when (and sym (boundp sym)) (def name (symbol-value sym)))))
     (def "O_CLOEXEC" #+darwin #x1000000 #-darwin #o2000000)
     (loop for (name value) in '(("F_DUPFD" 0) ("F_GETFD" 1) ("F_SETFD" 2) ("F_GETFL" 3) ("F_SETFL" 4)
 				("FD_CLOEXEC" 1)
+				("SIG_DFL" 0) ("SIG_IGN" 1) ("SA_RESTART" #+darwin 2 #-darwin #x10000000)
+				("SA_NOCLDSTOP" 1)
+				("ITIMER_REAL" 0) ("ITIMER_VIRTUAL" 1) ("ITIMER_PROF" 2)
 				("AT_SYMLINK_NOFOLLOW" #+darwin #x20 #-darwin #x100))
 	  do (def name value))
     (def "%load-compiled-path" '())
@@ -552,7 +571,7 @@ not with Guile's behaviour.")
     (def "%load-hook" ps:false)
     (def "%stacks" (make-fluid* ps:false))
     (def "*random-state*" *guile-random-state*)
-    (def "after-gc-hook" (make-hook* 0))
+    (def "after-gc-hook" (setq *after-gc-hook* (make-hook* 0)))
     (def "signal-handlers" (make-array 32 :initial-element ps:false))
     (def "source-whash" (make-ghash :key))
     (def "%sizeof-struct-pollfd" 8)

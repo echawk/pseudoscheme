@@ -531,3 +531,11 @@ of SOURCES, which must have them."
 (setf (gethash "uniform-array->bytevector" *extension-primitives*)
       (gethash "uniform-array->bytevector" *guile-primitives*))
 (remhash "uniform-array->bytevector" *guile-primitives*)
+
+;; libguile's enum scm_t_array_element_type
+(defguile "array-type-code" (a)
+  (let ((type (nth-value 1 (array-view a "array-type-code"))))
+    (or (position type '("#t" "a" "b" "vu8" "u8" "s8" "u16" "s16" "u32" "s32" "u64" "s64"
+			 "f32" "f64" "c32" "c64")
+		  :test #'string=)
+	(wrong-type "array-type-code" 1 a))))

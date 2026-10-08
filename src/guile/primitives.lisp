@@ -879,8 +879,71 @@ less than 0.0."
 	ps:false)))
 (defguile "memoized-typecode" (x) (declare (ignore x)) 0)
 (defguile "unmemoize-expression" (x) x)
-(defguile "system-async-mark" (&rest args) (declare (ignore args)) *unspecified*)
-(defguile "sigaction" (&rest args) (declare (ignore args)) (cons ps:false 0))
+;;; Signals, timers and asyncs.  A Guile signal handler is an SBCL
+;;; interrupt handler: it runs in the thread the signal interrupts, and
+;;; may leave by a non-local exit (abort-to-prompt), as Guile's asyncs
+;;; may.  An async is run by interrupting its thread.
+
+(defvar *signal-handlers* (make-hash-table) "signal -> (Guile handler . flags)")
+(defvar *original-interrupt-handlers* (make-hash-table) "signal -> SBCL's own handler")
+
+(defguile "sigaction" (signum &optional (handler nil handler-p) (flags 0) thread)
+  (declare (ignore thread))
+  (unless (integerp signum) (wrong-type "sigaction" 1 signum))
+  (let ((previous (gethash signum *signal-handlers* (cons 0 0))))
+    (when handler-p
+      (flet ((install (lisp-handler)
+	       (let ((old (sb-sys:enable-interrupt signum lisp-handler)))
+		 (unless (nth-value 1 (gethash signum *original-interrupt-handlers*))
+		   (setf (gethash signum *original-interrupt-handlers*) old)))))
+	(cond ((eq handler ps:false)
+	       ;; the handler there was before Guile's
+	       (multiple-value-bind (original found) (gethash signum *original-interrupt-handlers*)
+		 (when found (sb-sys:enable-interrupt signum original)))
+	       (remhash signum *signal-handlers*))
+	      ((integerp handler)
+	       (install (if (= handler 1) :ignore :default))
+	       (setf (gethash signum *signal-handlers*) (cons handler flags)))
+	      ((functionp handler)
+	       (install (lambda (signal info context)
+			  (declare (ignore info context))
+			  (funcall handler signal)))
+	       (setf (gethash signum *signal-handlers*) (cons handler flags)))
+	      (t (wrong-type "sigaction" 2 handler)))))
+    previous))
+
+(defun itimer-which (which)
+  (case which (0 :real) (1 :virtual) (2 :profile) (t (wrong-type "setitimer" 1 which))))
+
+(defun itimer-values (results)
+  "(interval . value) of UNIX-SETITIMER's or UNIX-GETITIMER's values, as
+Guile's ((seconds . microseconds) (seconds . microseconds))."
+  (destructuring-bind (ok interval-s interval-us value-s value-us) results
+    (declare (ignore ok))
+    (list (cons interval-s interval-us) (cons value-s value-us))))
+
+(defguile "setitimer" (which interval-seconds interval-microseconds value-seconds value-microseconds)
+  (itimer-values (multiple-value-list
+		  (sb-unix:unix-setitimer (itimer-which which) interval-seconds interval-microseconds
+					  value-seconds value-microseconds))))
+(defguile "getitimer" (which)
+  (itimer-values (multiple-value-list (sb-unix:unix-getitimer (itimer-which which)))))
+
+(defguile "system-async-mark" (proc &optional thread)
+  (let ((thread (if (typep thread 'sb-thread:thread) thread sb-thread:*current-thread*)))
+    (sb-thread:interrupt-thread thread (lambda () (funcall proc)))
+    *unspecified*))
+
+;;; after-gc-hook, run after each garbage collection (by SBCL's
+;;; *after-gc-hooks*, in whichever thread SBCL runs them)
+
+(defun run-after-gc-hook ()
+  (let ((hook *after-gc-hook*))
+    (when (and hook (hook-procedures hook))
+      (dolist (p (hook-procedures hook))
+	(ignore-errors (funcall p))))))
+
+(pushnew 'run-after-gc-hook sb-ext:*after-gc-hooks*)
 (defguile "restore-signals" () *unspecified*)
 (defguile "alarm" (n) (declare (ignore n)) 0)
 (defguile "load-compiled" (file) (declare (ignore file)) ps:false)
@@ -1450,6 +1513,11 @@ true (the predicate's value) if it matches."
       (check-stack-limit "call-with-stack-overflow-handler" (funcall handler))
       (guile-error (ssym "stack-overflow") "call-with-stack-overflow-handler" "Stack overflow" '()))))
 
+;; (system vm vm) exports it; it isn't in the root module
+(setf (gethash "call-with-stack-overflow-handler" *extension-primitives*)
+      (gethash "call-with-stack-overflow-handler" *guile-primitives*))
+(remhash "call-with-stack-overflow-handler" *guile-primitives*)
+
 ;;; ------------------------------------------------------------------
 ;;; More of libguile
 
@@ -1595,3 +1663,8 @@ true (the predicate's value) if it matches."
   (let ((r (cffi:foreign-funcall "fchmodat" :int (port-fd dir) :string path :unsigned-short mode :int flags :int)))
     (unless (zerop r) (system-error "chmodat" (sb-alien:extern-alien "errno" sb-alien:int)))
     *unspecified*))
+
+;; SRFI 14's char-set-ref, with libguile's error for a bad cursor
+(defguile "char-set-ref" (cs cursor)
+  (handler-case (funcall (gethash (cons "(srfi 14)" "char-set-ref") *library-values*) cs cursor)
+    (error () (wrong-type "char-set-ref" 2 cursor))))

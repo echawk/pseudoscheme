@@ -846,6 +846,8 @@ character, boolean or () is an immediate)."
 ;;; ------------------------------------------------------------------
 ;;; Hooks
 
+(defvar *after-gc-hook* nil "Guile's after-gc-hook, once there is one.")
+
 (defstruct (hook (:constructor make-hook* (arity)) (:copier nil))
   arity (procedures '()))
 
@@ -997,7 +999,14 @@ and whether it takes more; NIL if that isn't known."
 (defguile "issue-deprecation-warning" (&rest messages) (declare (ignore messages)) *unspecified*)
 (defguile "%warn-auto-compilation-enabled" () *unspecified*)
 (defguile "gc" () (sb-ext:gc :full t) *unspecified*)
-(defguile "gc-stats" () '())
+(defguile "gc-stats" ()
+  (list (cons (ssym "gc-time-taken") (* sb-ext:*gc-run-time* (floor 1000000 internal-time-units-per-second)))
+	(cons (ssym "heap-size") (sb-ext:dynamic-space-size))
+	(cons (ssym "heap-free-size") (- (sb-ext:dynamic-space-size) (sb-kernel:dynamic-usage)))
+	(cons (ssym "heap-total-allocated") (sb-ext:get-bytes-consed))
+	(cons (ssym "heap-allocated-since-gc") (sb-kernel:dynamic-usage))
+	(cons (ssym "protected-objects") 0)
+	(cons (ssym "gc-times") 0)))
 (defguile "major-version" () "3")
 (defguile "minor-version" () "0")
 (defguile "micro-version" () "11")
