@@ -1225,7 +1225,7 @@ installed Guile returns it; '() if there's no guile program."
 	(setf (gethash name *bytecode-tables*)
 	      (or (ignore-errors
 		   (let ((text (uiop:run-program
-				(list "guile" "-c" (format nil "(use-modules (language bytecode)) (write (~A))" name))
+				(list "guile" "-c" (format nil "(write ((@@ (language bytecode) ~A)))" name))
 				:output :string :error-output nil)))
 		     (with-input-from-string (in text) (guile-read in))))
 		  '())))))

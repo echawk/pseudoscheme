@@ -301,4 +301,5 @@
 	       ;; Guile's VM (docs/guile-vm.md)
 	       (:file "vm-elf" :depends-on ("runtime"))
 	       (:file "vm-ops" :depends-on ("primitives"))
+	       (:file "vm" :depends-on ("vm-elf" "vm-ops" "goops"))
 	       (:static-file "root-primitives.txt")))
