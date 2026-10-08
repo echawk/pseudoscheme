@@ -144,12 +144,16 @@ a plain lock. `condition-wait` releases the whole count while it waits.
 
 ### The FFI
 
-`foreign-procedure` compiles a Lisp function that calls the entry point
-through `cffi:foreign-funcall-pointer`, with Chez's types translated:
+The FFI is the foreign-function layer the Chez and Guile modes share
+(src/ffi.lisp, system `pseudoscheme/cffi`). `foreign-procedure` compiles
+a Lisp function that calls the entry point through
+`cffi:foreign-funcall-pointer`, with Chez's types translated:
 `int`, `unsigned`, `uptr`, `void*`, `double`, `boolean`, `string`,
 `u8*` (a bytevector's data, pinned for the call), and so on. Pointers
 are integers, as in Chez. `foreign-ref`, `foreign-set!` and
-`foreign-alloc` work on those addresses. e's `(sys sys)` uses this to
+`foreign-alloc` work on those addresses. `foreign-callable` compiles a
+CFFI callback; its code object is its entry point, and it is never
+freed. e's `(sys sys)` uses this to
 call `fork`, `execvp`, `pipe`, `poll`, `waitpid` and `openpty`. Its
 process tests run real children through it.
 

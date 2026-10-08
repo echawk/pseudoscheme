@@ -148,9 +148,15 @@ ending at !#.  True if handled; it always is."
 (defun guile-symbol (name)
   (ssym (if *guile-fold-case* (string-downcase name) name)))
 
+(defun guile-number (x)
+  "Guile has no exact complex numbers: 1+3i is 1.0+3.0i."
+  (if (and (complexp x) (rationalp (realpart x)))
+      (coerce x '(complex double-float))
+      x))
+
 (defun read-atom (port)
   (let ((token (read-token port)))
-    (or (and (plusp (length token)) (ps:parse-scheme-number token 10))
+    (or (and (plusp (length token)) (guile-number (ps:parse-scheme-number token 10)))
 	(guile-symbol token))))
 
 (defun read-hex (port digits terminator)
@@ -272,7 +278,7 @@ DIGITS is NIL)."
 		 (ps::list->bytevector list)
 		 (ps::list->numeric-vector token list))))
 	  ((member (char-downcase c) '(#\e #\i #\x #\o #\b #\d))
-	   (or (ps:parse-scheme-number (concatenate 'string "#" token) 10)
+	   (or (guile-number (ps:parse-scheme-number (concatenate 'string "#" token) 10))
 	       (read-error port "bad number #~A" token)))
 	  (t (read-error port "unknown # syntax #~A" token)))))
 

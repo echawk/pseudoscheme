@@ -346,11 +346,11 @@ expands to Tree-IL.
   and C extensions as Lisp `load-extension` init functions (src/guile/).
   Guile's own test suite is vendored (`make test-guile`): 5,982 tests pass
   on the first run. Prompts (section 3) are what its exceptions are built
-  on. Guile's elisp compiler runs the basics.
+  on. `(system foreign)` is on CFFI, through the FFI layer Chez's FFI
+  uses too (src/ffi.lisp, system `pseudoscheme/cffi`). Guile's elisp compiler runs the basics.
 - **Left:** the test files that stop on a missing primitive or extension;
   Guile-style printing and error keys; GOOPS's C half; a compiled-module
-  cache; `(system foreign)` on CFFI (src/chez/ffi.lisp has Chez's on it);
-  sockets and popen; source positions; Emacs Lisp's `boot.el` and its
+  cache; sockets and popen; source positions; Emacs Lisp's `boot.el` and its
   tests.
 - **Guix**, the long-term test: `(guix records)`, G-expressions, the
   store protocol to a real `guix-daemon`, and the FFI libraries

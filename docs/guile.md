@@ -203,21 +203,34 @@ continuations"):
   Perl-flavoured, so the syntax needs a translation layer, or calls to
   libc's `regcomp`/`regexec` through CFFI, which matches Guile exactly.
 
-### Stage 6: `(system foreign)` on CFFI
+### Stage 6: `(system foreign)` on CFFI (done)
 
-Guile libraries bind C with `(system foreign)`: `dynamic-link`,
-`dynamic-func`, `pointer->procedure`, `procedure->pointer`,
-`make-c-struct`/`parse-c-struct`, `bytevector->pointer` and
-`pointer->bytevector`. CFFI covers all of it.
-- `pointer->procedure` takes the C types at run time. We have SBCL's
-  compiler at run time, so it can compile a CFFI call stub for each
-  signature and cache it, without libffi.
-- **`bytevector->pointer` is the catch.** Guile's GC doesn't move
-  bytevectors, so the pointer stays valid. SBCL's does move them, and
-  `with-pointer-to-vector-data` pins a vector only for its dynamic
-  extent. Bytevectors that reach C would have to be allocated where the
-  GC doesn't move them (static-vectors), or pinned for as long as C may
-  hold the pointer.
+Guile libraries bind C with `(system foreign)`: `pointer->procedure`,
+`procedure->pointer`, `make-c-struct`/`parse-c-struct`,
+`bytevector->pointer` and `pointer->bytevector`, and
+`(system foreign-library)`'s `load-foreign-library` and
+`foreign-library-function`. Guile's two modules load unmodified. Their
+C halves (`scm_init_foreign`, `scm_init_system_foreign_library`) are
+src/guile/foreign.lisp, on the foreign-function layer the Chez mode
+uses too (src/ffi.lisp, system `pseudoscheme/cffi`).
+- `pointer->procedure` takes the C types at run time. SBCL's compiler is
+  there at run time, so each call compiles a CFFI call stub, without
+  libffi. `procedure->pointer` compiles a CFFI callback the same way.
+- **`bytevector->pointer`.** Guile's GC doesn't move bytevectors, so
+  the pointer stays valid; SBCL's does move them. A pointer made from
+  a bytevector is therefore a place in it, not an address: whenever it
+  is passed to C, the bytevector is pinned for the call, so C reads and
+  writes the bytevector itself. `qsort` on a bytevector, through a
+  Scheme comparison procedure, sorts it in place. C must not keep such
+  a pointer after the call returns.
+- `pointer->bytevector` of C's memory copies it: a Lisp vector can't be
+  laid over memory it didn't allocate, so writes to the copy don't reach
+  C.
+- Structs and complex numbers are read and written in memory
+  (`make-c-struct`, `parse-c-struct`), but not passed to or returned
+  from C by value: CFFI does that only through libffi.
+- Pointers to the same address are `eq?`, as `%null-pointer` and
+  `(make-pointer 0)` must be.
 - This is what Guix needs from C: guile-gcrypt (libgcrypt), guile-git
   (libgit2, through bytestructures), guile-sqlite3, guile-zlib,
   guile-lzlib and guile-zstd all use `(system foreign)`.
@@ -327,7 +340,7 @@ All of it is in `src/guile/`, system `pseudoscheme/guile`:
 | runtime.lisp | structs and vtables (applicable structs are funcallable instances, so they are procedures), variables, Guile's hash tables (one table for `hashq-`/`hashv-`/`hash-`, handles shared with the table), fluids, syntax objects, macros, procedure properties, hooks, `scm-error` |
 | compile.lisp | Tree-IL to Pseudoscheme's core Scheme, and a pre-expander standing in for libguile's `expand.c` until psyntax is loaded |
 | boot.lisp | the module system's C half (`module-variable` and friends over boot-9's module records), `primitive-eval`, `primitive-load`, the root module's bindings, errors, the REPL |
-| primitives.lisp, ports.lisp, threads.lisp, regex.lisp | the rest of libguile so far, and the C halves that Guile's modules install with `load-extension` |
+| primitives.lisp, ports.lisp, threads.lisp, regex.lisp, foreign.lisp | the rest of libguile so far, and the C halves that Guile's modules install with `load-extension` |
 | modules/ | replacements for the few Guile modules written on libguile's internals: `(ice-9 binary-ports)`, `(ice-9 textual-ports)`, `(ice-9 custom-ports)` and `(language tree-il spec)`. They are written afresh, not edited copies |
 
 How each problem was solved:
@@ -421,7 +434,7 @@ What fails, by cause:
 - **A file that stops at once ("error=1")**, about 60 files. Each meets a
   primitive, module or C extension that isn't here yet: `(system vm ...)`
   and the compiler's own passes (`compiler`, `rtl`, `peval`, `tree-il`,
-  `dwarf`), `(system foreign)` (`foreign`, `c-api`), sockets (`00-socket`,
+  `dwarf`), libguile's C API (`c-api`), sockets (`00-socket`,
   `net-db`, `web-server`), `(ice-9 popen)`, `iconv` encodings, `statprof`,
   the R6RS I/O layer (`r6rs-ports`, `rnrs io ports`), `srfi-4` and
   `srfi-60`.
@@ -449,7 +462,7 @@ What fails, by cause:
 | compiling | Tree-IL → CPS → bytecode (`.go` files cached) | Tree-IL → core Scheme → SBCL native code, each time a module is loaded |
 | `(system vm ...)`, `(language cps)`, the optimizer | present | absent: `compile` goes from Tree-IL to `value` directly |
 | GOOPS | present | not yet: `(oop goops)` needs its C half (`scm_init_goops_builtins`) |
-| `(system foreign)` | present | not yet: the Chez FFI (src/chez/ffi.lisp) has the parts, on CFFI |
+| `(system foreign)` | present | present on CFFI (`foreign.test`: 79 pass, 0 fail). Structs aren't passed by value; `pointer->bytevector` of C's memory copies it; the deprecated `dynamic-link`/`dynamic-func` are absent |
 | `bytevector-slice` | shares the bytes | copies them |
 | port buffers, `(ice-9 suspendable-ports)` | Guile's | absent: ports are Lisp streams |
 | stacks, frames, backtraces | Guile's VM's | none: `make-stack` is #f |
@@ -487,7 +500,8 @@ Loading `language/elisp/boot.el` stops at the first missing piece
 5. A compiled-module cache, so that a module is expanded and compiled
    once (the library cache, src/library-cache.lisp, or saving more
    modules into the image).
-6. `(system foreign)` on the Chez mode's CFFI layer, and sockets.
+6. Sockets, and a Scheme library putting the FFI layer (src/ffi.lisp)
+   in front of R5RS, R6RS and R7RS programs.
 7. Then Emacs Lisp, and Guix's client side.
 
 The earlier `(guile)` R6RS library (src/guile/guile.lisp, guile.scm), which

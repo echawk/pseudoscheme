@@ -158,6 +158,14 @@
 	       :pseudoscheme/evaluator :pseudoscheme/reader)
   :components ((:file "environments")))
 
+;;; The foreign-function layer the Schemes share, on CFFI: Chez's FFI
+;;; and Guile's (system foreign) are made of it.  See src/ffi.lisp.
+(defsystem :pseudoscheme/cffi
+  :version "3.0"
+  :pathname #p"src/"
+  :depends-on (:pseudoscheme/rts :cffi)
+  :components ((:file "ffi")))
+
 ;;; R6RS, with psyntax (vendor/psyntax/) as the front end: psyntax does
 ;;; all expansion and provides every standard library's namespace; the
 ;;; files of src/r6rs/ are the primitives those libraries refer to.  See
@@ -167,6 +175,7 @@
   :author "Jonathan Rees"
   :pathname #p"src/"
   :depends-on (:pseudoscheme/r7rs-runtime
+	       :pseudoscheme/cffi		; (chezscheme)'s FFI
 	       :cl-unicode			; (rnrs unicode)
 	       :trivial-gray-streams		; (rnrs io ports)
 	       :bordeaux-threads		; (chezscheme)'s threads
@@ -273,7 +282,7 @@
 (defsystem :pseudoscheme/guile
   :version "3.0"
   :pathname #p"src/guile/"
-  :depends-on (:pseudoscheme/api :cffi)
+  :depends-on (:pseudoscheme/api :pseudoscheme/cffi)
   :components ((:file "reader")
 	       (:file "runtime" :depends-on ("reader"))
 	       (:file "compile" :depends-on ("runtime"))
@@ -282,4 +291,5 @@
 	       (:file "ports" :depends-on ("primitives"))
 	       (:file "threads" :depends-on ("primitives"))
 	       (:file "regex" :depends-on ("primitives"))
+	       (:file "foreign" :depends-on ("primitives"))
 	       (:static-file "root-primitives.txt")))

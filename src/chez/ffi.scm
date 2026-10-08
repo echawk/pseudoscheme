@@ -13,6 +13,15 @@
     ((_ conv ... entry (param ...) result)
      (%chez:foreign-procedure entry '(param ...) 'result))))
 
+; (foreign-callable conv ... procedure (param-type ...) result-type): the
+; code object is its entry point, an address, and is never freed
+(define-syntax foreign-callable
+  (syntax-rules ()
+    ((_ conv ... proc (param ...) result)
+     (%chez:foreign-callable proc '(param ...) 'result))))
+(define (foreign-callable-entry-point code) code)
+(define (foreign-callable-code-object address) address)
+
 (define foreign-entry? %chez:foreign-entry?)
 (define foreign-entry %chez:foreign-entry)
 (define foreign-alloc %chez:foreign-alloc)

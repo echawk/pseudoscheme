@@ -31,7 +31,8 @@
 
 ;;; macOS's regcomp (unlike glibc's, which Guile is usually built on)
 ;;; rejects empty alternatives, as in (|.*;): such a group becomes an
-;;; optional group of its other alternatives, (.*;)?, numbered the same.
+;;; optional group of its other alternatives, (.*;)?, numbered the same;
+;;; and the empty expression, which it rejects too, becomes ^.
 
 (defun regex-groups (pattern)
   "Each group of PATTERN, an extended regular expression: (open close
@@ -55,6 +56,9 @@ alternative-starts), indices into PATTERN."
     groups))
 
 (defun drop-empty-alternatives (pattern)
+  (when (string= pattern "")
+    ;; the empty expression, which matches at the start
+    (return-from drop-empty-alternatives "^"))
   (let ((group (find-if (lambda (g)
 			  (destructuring-bind (open close bars) g
 			    (let ((edges (append (list open) bars (list close))))

@@ -112,6 +112,7 @@
     "inspect" "inspect/object" "debug" "break" "procedure-arity-mask"
     ;; ffi.scm
     "load-shared-object" "foreign-procedure" "foreign-entry?" "foreign-entry"
+    "foreign-callable" "foreign-callable-entry-point" "foreign-callable-code-object"
     "foreign-alloc" "foreign-free" "foreign-sizeof" "foreign-ref" "foreign-set!"
     "open-fd-input-port" "open-fd-output-port" "open-fd-input/output-port"
     "port-file-descriptor" "set-port-nonblocking!" "port-nonblocking?"

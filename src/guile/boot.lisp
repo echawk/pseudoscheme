@@ -241,7 +241,10 @@ version (src/continuations.lisp)."
 		(list (type-error-datum c))))
       (division-by-zero (message "numerical-overflow" ps:false "Numerical overflow" '()))
       (sb-int:simple-program-error
-       (message "wrong-number-of-args" ps:false "~A" (list (princ-to-string c))))
+       (let ((text (princ-to-string c)))
+	 (if (search "number of arguments" text)
+	     (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text))
+	     (message "wrong-number-of-args" ps:false "~A" (list text)))))
       (t (message "misc-error" ps:false "~A" (list (remove #\Newline (princ-to-string c))))))))
 
 (defvar *trace-lisp-errors* nil "Print a backtrace of each Lisp error raised in Guile code.")
