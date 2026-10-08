@@ -1,0 +1,66 @@
+;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER -*-
+
+;;;; One file of Guile's test suite (vendor/guile-test-suite/) on the
+;;;; Guile mode (src/guile/), counted with the suite's own reporters.
+;;;; Prints one line, "<file> pass=N fail=N ...", and with -v the
+;;;; failures as Guile's user-reporter prints them.
+;;;;
+;;;; Usage:  sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
+;;;;              --script tests/run-guile-test.lisp FILE.test [-v]
+;;;; tests/run-guile-tests.sh runs every file.
+
+(require :asdf)
+
+(let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+  (when (probe-file setup) (load setup)))
+
+(let* ((here (make-pathname :name nil :type nil
+			    :defaults (or *load-truename* *load-pathname*)))
+       (root (merge-pathnames (make-pathname :directory '(:relative :up)) here)))
+  (pushnew (truename root) asdf:*central-registry* :test #'equal))
+
+(let ((*standard-output* (make-broadcast-stream))
+      (*error-output* (make-broadcast-stream)))
+  (handler-bind ((warning #'muffle-warning))
+    (if (find-package "QL")
+	(uiop:symbol-call "QL" "QUICKLOAD" :pseudoscheme/guile :silent t)
+	(asdf:load-system :pseudoscheme/guile))))
+
+(defparameter *args* (uiop:command-line-arguments))
+(defparameter *file* (find-if (lambda (a) (search ".test" a)) *args*))
+(defparameter *verbose* (member "-v" *args* :test #'string=))
+(defparameter *suite* (asdf:system-relative-pathname :pseudoscheme "vendor/guile-test-suite/"))
+
+(setq psx::*full-continuations* t)
+(psg:boot)
+
+(defun guile-string (x)
+  (with-output-to-string (s) (write-string (substitute #\/ #\\ (namestring x)) s)))
+
+(let* ((path (merge-pathnames *file*))
+       (name (pathname-name path))
+       (result
+	 (handler-case
+	     (psg:eval-string
+	      (format nil "(set! %load-path (cons ~S %load-path))
+(use-modules (test-suite lib))
+(define %counter (make-count-reporter))
+(register-reporter (car %counter))
+~A
+(catch #t
+  (lambda ()
+    (with-test-prefix ~S (load ~S)))
+  (lambda (key . args)
+    ((car %counter) 'error (list ~S \"file aborted\") (cons key args))
+    ~A))
+(apply string-append
+  (map (lambda (r) (if (zero? (cdr r)) \"\" (string-append \" \" (symbol->string (car r)) \"=\" (number->string (cdr r)))))
+       ((cadr %counter))))"
+		      (guile-string *suite*)
+		      (if *verbose* "(register-reporter user-reporter)" "")
+		      (concatenate 'string name ".test") (guile-string path)
+		      (concatenate 'string name ".test")
+		      (if *verbose* "(format (current-error-port) \"file aborted: ~s ~s~%\" key args)" "#f")))
+	   (error (e) (format nil " error=1 (~A)" (remove #\Newline (princ-to-string e)))))))
+  (format t "~&~A~A~%" name result)
+  (finish-output))

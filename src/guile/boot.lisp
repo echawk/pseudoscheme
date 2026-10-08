@@ -148,7 +148,14 @@ version (src/continuations.lisp)."
 (defun with-dynamic-state-value () (gethash "with-dynamic-state" *guile-primitives*))
 (defun call/cc-value () (host-procedure "call-with-current-continuation"))
 (defun call-with-values-value () (host-procedure "call-with-values"))
-(defun apply-value () (psx:host-ref "apply"))
+(defun apply-value ()
+  ;; #nil ends a list as () does, for Emacs Lisp's sake
+  (let ((apply (psx:host-ref "apply")))
+    (lambda (f &rest args)
+      (let ((tail (last args)))
+	(when (and tail (eq (car tail) *elisp-nil*))
+	  (setq args (append (butlast args) (list '())))))
+      (apply apply f args))))
 (defun call-with-prompt-value () (gethash "call-with-prompt" *guile-primitives*))
 
 (defvar *raise-exception* nil "boot-9's raise-exception, once defined.")
@@ -237,7 +244,12 @@ version (src/continuations.lisp)."
        (message "wrong-number-of-args" ps:false "~A" (list (princ-to-string c))))
       (t (message "misc-error" ps:false "~A" (list (remove #\Newline (princ-to-string c))))))))
 
+(defvar *trace-lisp-errors* nil "Print a backtrace of each Lisp error raised in Guile code.")
+
 (defun lisp-error->guile (c)
+  (when (and *trace-lisp-errors* (not (typep c 'guile-throw)))
+    (format *trace-output* "~&;; Lisp error: ~A~%" c)
+    (sb-debug:print-backtrace :count 25 :stream *trace-output*))
   (when (and *throw* (not (typep c 'guile-throw)))
     (multiple-value-bind (key args) (condition-throw-arguments c)
       (handler-bind ((error #'lisp-error->guile))
@@ -351,6 +363,7 @@ not with Guile's behaviour.")
   (install-library-bindings)
   (maphash (lambda (name f) (obarray-define (ssym name) f)) *guile-primitives*)
   (install-port-root-bindings)
+  (install-regex-root-bindings)
   (install-root-variables))
 
 ;;; Root primitives that are SRFI 13's and SRFI 14's, as in Guile, taken
@@ -433,10 +446,21 @@ not with Guile's behaviour.")
     (def "%fresh-auto-compile" ps:false)
     (def "%load-verbosely" ps:false)
     (def "%load-hook" ps:false)
+    (def "%stacks" (make-fluid* ps:false))
+    (def "*random-state*" *guile-random-state*)
+    (def "after-gc-hook" (make-hook* 0))
+    (def "signal-handlers" (make-array 32 :initial-element ps:false))
+    (def "source-whash" (make-ghash :key))
+    (def "%sizeof-struct-pollfd" 8)
+    (loop for (name . bit) in '(("validated" . 0) ("vtable" . 1) ("applicable-vtable" . 2)
+				("applicable" . 3) ("setter-vtable" . 4) ("setter" . 5)
+				("goops-class" . 9) ("goops-slot" . 10) ("goops-static-slot-allocation" . 11)
+				("goops-indirect" . 12) ("goops-needs-migration" . 13))
+	  do (def (format nil "vtable-flag-~A" name) (ash 1 bit)))
     (def "current-reader" *current-reader*)
     (def "%compile-fallback-path" ps:false)
     (def "%auto-compilation-options" '())
-    (def "%file-port-name-canonicalization" ps:false)
+    (def "%file-port-name-canonicalization" (make-fluid* ps:false))
     (def "%guile-build-info" '())
     (def "%host-type" "aarch64-apple-darwin")
     (def "*features*" (mapcar #'ssym '("guile" "r7rs" "srfi-0" "srfi-4" "srfi-6" "srfi-13" "srfi-14")))
@@ -455,6 +479,9 @@ not with Guile's behaviour.")
     (def "module-transformer" (lambda (m) (if (module-p* m) (module-slot m +module-transformer+) ps:false)))
     (def "define!" (lambda (name value) (define-in-module *current-module* name value)))
     (def "primitive-eval" #'primitive-eval)
+    (def "%eval-tree-il" (lambda (tree module)
+			   (let ((*current-module* (if (module-p* module) module *current-module*)))
+			     (eval-tree-il tree))))
     (def "eval" #'guile-eval)
     (def "primitive-load" #'primitive-load)
     (def "primitive-load-path" #'primitive-load-path)
@@ -544,5 +571,35 @@ boot); the last form's values."
 (defun load-file (path)
   "Load the Guile source file PATH at the current top level."
   (boot)
-  (with-guile-errors
-    (funcall (root-value "load") (namestring (merge-pathnames path)))))
+  (call-with-guile-catch (lambda () (primitive-load (namestring (merge-pathnames path))))))
+
+(defun error-text (condition)
+  "CONDITION as Guile prints an uncaught exception: by print-exception."
+  (if (and (typep condition 'guile-throw) (root-value "print-exception"))
+      (with-output-to-string (s)
+	(ignore-errors
+	 (funcall (root-value "print-exception") s ps:false
+		  (guile-throw-key condition) (guile-throw-args condition))))
+      (princ-to-string condition)))
+
+(defun repl (&key (input *standard-input*) (output *standard-output*))
+  "Guile's REPL, more or less: each value printed as $N = value."
+  (boot)
+  (let ((n 0))
+    (loop
+      (format output "scheme@~A> "
+	      (with-output-to-string (s)
+		(funcall ps:*scheme-write*
+			 (funcall (root-value "module-name") *current-module*) s)))
+      (finish-output output)
+      (let ((form (handler-case (guile-read input)
+		    (error (e) (format output "~&ERROR: ~A~%" e) (clear-input input) nil))))
+	(cond ((eq form ps:eof-object) (terpri output) (return))
+	      ((null form))
+	      (t (handler-case
+		     (dolist (v (multiple-value-list
+				 (call-with-guile-catch (lambda () (primitive-eval form)))))
+		       (unless (eq v *unspecified*)
+			 (format output "$~D = ~A~%" (incf n)
+				 (with-output-to-string (s) (funcall ps:*scheme-write* v s)))))
+		   (error (e) (format output "~&~A~%" (error-text e))))))))))

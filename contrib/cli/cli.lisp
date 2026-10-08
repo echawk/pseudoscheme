@@ -31,6 +31,9 @@
   --chez           Chez Scheme: FILE runs as a Chez script, at a top level
                    with (chezscheme)'s bindings (docs/chez.md); run as
                    scheme-script, this program is --chez
+  --guile          GNU Guile: Guile's own boot-9 and modules, loaded from
+                   a Guile installation (docs/guile.md); FILE is loaded
+                   in (guile-user), -e/-p evaluate there
   -e, --eval EXPR  evaluate EXPR (Scheme text); may be repeated
   -p, --print EXPR evaluate EXPR and write its value
   -L, --library-path DIR
@@ -95,6 +98,7 @@ definition holds for the next -e too); the last one's values."
     (:r7rs (pseudoscheme-api::r7rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
     (:r6rs (pseudoscheme-api::r6rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
     (:r5rs (r5rs:eval text))
+    (:guile (psg:eval-string text))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (let ((values (list ps:unspecific)))
 	     (dolist (form (pseudoscheme-api:read-scheme-forms text) (values-list values))
@@ -105,6 +109,7 @@ definition holds for the next -e too); the last one's values."
     (:r7rs (r7rs:load path))
     (:r6rs (r6rs:load path))
     (:r5rs (r5rs:load path))
+    (:guile (psg:load-file path))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (ps-r7rs::load-file-at-chez-top-level path))))
 
@@ -242,6 +247,7 @@ proportion (ps:limit-thread-stack-size)."
     (:r7rs (r7rs:repl))
     (:r6rs (r6rs:repl))
     (:r5rs (r5rs:repl))
+    (:guile (psg:repl))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (pseudoscheme-api::repl-loop (lambda (form) (ps-r7rs::eval-at-chez-top-level form))
 					:prompt "> "))))
@@ -289,6 +295,7 @@ list of (:eval text) / (:print text)."
 		((string= a "--r6rs") (setq *standard* :r6rs))
 		((string= a "--r5rs") (setq *standard* :r5rs))
 		((string= a "--chez") (setq *standard* :chez))
+		((string= a "--guile") (setq *standard* :guile))
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
 		((member a '("-p" "--print") :test #'string=) (push (list :print (value)) actions))
 		((member a '("-L" "--library-path") :test #'string=) (add-library-path (value)))
@@ -362,11 +369,13 @@ is reported, and the program runs anyway."
     (load setup)))
 
 (defun report-and-exit (e)
-  (if (eq *standard* :chez)
-      (format *error-output* "~&~A~%" (ps-r7rs::chez-error-text e))
-      (format *error-output* "~&Error: ~A~%" (pseudoscheme-api:error-message e)))
+  (case *standard*
+    (:chez (format *error-output* "~&~A~%" (ps-r7rs::chez-error-text e)))
+    (:guile (format *error-output* "~&~A" (psg:error-text e)))
+    (t
+      (format *error-output* "~&Error: ~A~%" (pseudoscheme-api:error-message e))))
   (finish-output *error-output*)
-  (uiop:quit 70))
+  (uiop:quit (if (eq *standard* :guile) 1 70)))
 
 (defun interrupt-p (condition)
   "Control-C?"
@@ -393,7 +402,8 @@ is reported, and the program runs anyway."
     (when *userinit* (load-user-init-file))
     ;; With no program, SRFI 193's ("") as in Chez.  A script's name is
     ;; made absolute before it runs, in case it changes directory.
-    (setf ps-r7rs:*command-line* (cons (or file "") file-args))
+    (setf ps-r7rs:*command-line* (cons (or file "") file-args)
+	  psg:*program-arguments* (if file (cons file file-args) (list "pseudoscheme")))
     (when file
       (setf ps-r7rs:*script-file*
             (namestring (merge-pathnames (uiop:parse-native-namestring file) (uiop:getcwd)))))
@@ -431,5 +441,8 @@ is reported, and the program runs anyway."
     (finish-output)
     (uiop:quit (if *precompile-failed* 1 0))))
 
-;;; Initialize everything now, at build time, so it's in the saved image.
+;;; Initialize everything now, at build time, so it's in the saved image:
+;;; Guile's boot-9 too, if a Guile installation is there to load it from.
 (pseudoscheme-interop:boot)
+(handler-case (psg:boot)
+  (error (e) (format *error-output* "~&;; Guile not booted into the image: ~A~%" e)))

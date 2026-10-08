@@ -340,18 +340,18 @@ run that code unchanged. libguile is about 1,100 C primitives; boot-9
 (the module system) and psyntax-pp, both Scheme, sit on top, and psyntax
 expands to Tree-IL.
 
-- **Done**: prompts and composable continuations (section 3), which
-  Guile's exceptions, `catch`/`throw` and parameters are built on; and
-  `(guile)`, Guile's everyday procedures for R6RS programs
-  (`catch`/`throw`, hash tables, alists, strings, `format`,
-  `define-syntax-rule`), src/guile/.
-- **Stages left:** the reader (`#:kw`, `#!...!#`, `#{}#`,
-  `read-hash-extend`); libguile's primitives in Lisp (boot-9 refers to
-  about 210 of them, the common `ice-9` and SRFI modules about 350, all
-  of Guile's bundled Scheme about 950); a Tree-IL-to-core compiler;
-  booting Guile's own `boot-9.scm` from an installed Guile; ports and
-  POSIX; `(system foreign)` on CFFI (src/chez/ffi.lisp has Chez's on
-  it); GOOPS, run or mapped onto CLOS.
+- **Done**: `--guile` runs Guile 3.0's own `boot-9.scm`, psyntax and
+  modules, unmodified and loaded from a Guile installation. They run on
+  libguile's primitives in Lisp, with a Tree-IL compiler to core Scheme
+  and C extensions as Lisp `load-extension` init functions (src/guile/).
+  Guile's own test suite is vendored (`make test-guile`): 5,982 tests pass
+  on the first run. Prompts (section 3) are what its exceptions are built
+  on. Guile's elisp compiler runs the basics.
+- **Left:** the test files that stop on a missing primitive or extension;
+  Guile-style printing and error keys; GOOPS's C half; a compiled-module
+  cache; `(system foreign)` on CFFI (src/chez/ffi.lisp has Chez's on it);
+  sockets and popen; source positions; Emacs Lisp's `boot.el` and its
+  tests.
 - **Guix**, the long-term test: `(guix records)`, G-expressions, the
   store protocol to a real `guix-daemon`, and the FFI libraries
   (guile-gcrypt, guile-git, guile-sqlite3, guile-zlib). Milestone: the
@@ -359,9 +359,8 @@ expands to Tree-IL.
 - **Depends on:** the compiled-library cache (section 2; Guix is
   hundreds of modules), thread safety (section 4), and the CFFI
   experience of the bridge and of Chez's FFI.
-- **First step now:** an inventory, made in Guile itself, of the C
-  primitives that Tree-IL from boot-9 and the `ice-9` modules actually
-  reaches; then the reader's keywords and `define*`.
+- **First step now:** the "error=1" files of Guile's suite
+  (docs/guile.md, "Where it stands").
 
 ## 9. Chez Scheme (`--chez`)
 

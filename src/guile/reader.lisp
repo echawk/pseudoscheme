@@ -17,7 +17,8 @@
 (defpackage "PSEUDOSCHEME-GUILE"
   (:nicknames "PSG")
   (:use "COMMON-LISP")
-  (:export "GUILE-READ" "BOOT" "EVAL-STRING" "LOAD-FILE" "*GUILE-ROOT*"))
+  (:export "GUILE-READ" "BOOT" "EVAL-STRING" "LOAD-FILE" "REPL" "ERROR-TEXT"
+	   "*PROGRAM-ARGUMENTS*"))
 
 (in-package "PSEUDOSCHEME-GUILE")
 

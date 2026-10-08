@@ -9,7 +9,7 @@
 (defsystem :pseudoscheme-cli
   :version "3.0"
   :description "A standalone Scheme (R7RS, R6RS, R5RS) on Pseudoscheme"
-  :depends-on (:pseudoscheme/api)
+  :depends-on (:pseudoscheme/api :pseudoscheme/guile)
   :components ((:file "cli"))
   :build-operation "program-op"
   :build-pathname "../../bin/pseudoscheme.new"

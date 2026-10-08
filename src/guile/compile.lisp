@@ -65,9 +65,19 @@
 	  do (setf (gethash v table) (intern (string-upcase stem) "KEYWORD")))
     table))
 
-(declaim (inline node-type node-field))
+(declaim (inline node-field))
 (defun node-type (x)
-  (and (gstruct-p x) (gethash (gstruct-vtable x) *node-types*)))
+  "X's Tree-IL type, a keyword; or NIL if it isn't Tree-IL.  Besides
+psyntax's 18 core types, (language tree-il) defines <fix>, <let-values>,
+<prompt> and <abort> as records, src first."
+  (and (gstruct-p x)
+       (or (gethash (gstruct-vtable x) *node-types*)
+	   (let ((name (svref (gstruct-slots (gstruct-vtable x)) +vtable-index-name+)))
+	     (and (symbolp name)
+		  (cdr (assoc (ps:scheme-symbol-name name)
+			      '(("<fix>" . :fix) ("<let-values>" . :let-values)
+				("<prompt>" . :prompt) ("<abort>" . :abort))
+			      :test #'string=)))))))
 (defun node-field (x i) (svref (gstruct-slots x) i))
 
 (defun make-node (type &rest fields)
@@ -147,7 +157,7 @@
 
 (defparameter *open-primitives*
   '("car" "cdr" "cons" "list" "append" "vector" "list->vector" "apply" "values"
-    "call-with-values" "call-with-current-continuation" "eq?" "eqv?" "equal?" "not" "null?"
+    "call-with-values" "call-with-current-continuation" "eq?" "eqv?" "equal?"
     "pair?" "string?" "vector?" "procedure?" "char?" "number?" "integer?" "zero?"
     "+" "-" "*" "/" "<" ">" "<=" ">=" "=" "vector-ref" "vector-set!" "vector-length"
     "string-ref" "string-length" "length" "memq" "memv" "member" "assq" "assv" "assoc"
@@ -202,7 +212,7 @@ name and behaviour: a primcall of one compiles to a call of the host's.")
      (list (core "%guile-define!") (quoted *compile-module*) (quoted (node-field x 2))
 	   (compile-tree-il (node-field x 3))))
     (:conditional
-     (list (core "if") (compile-tree-il (node-field x 1)) (compile-tree-il (node-field x 2))
+     (list (core "if") (compile-test (node-field x 1)) (compile-tree-il (node-field x 2))
 	   (compile-tree-il (node-field x 3))))
     (:call (cons (compile-tree-il (node-field x 1)) (mapcar #'compile-tree-il (node-field x 2))))
     (:primcall (cons (primitive-operator (node-field x 1)) (mapcar #'compile-tree-il (node-field x 2))))
@@ -216,16 +226,55 @@ name and behaviour: a primcall of one compiles to a call of the host's.")
     (:let (let ((vals (mapcar #'compile-tree-il (node-field x 3)))
 		(vars (mapcar #'bind-lexical (node-field x 2))))
 	    (cons (list (core "lambda") vars (compile-tree-il (node-field x 4))) vals)))
-    (:letrec
-     ;; as psyntax's letrec* for the translator: ((lambda (v ...) (set! v e) ... body) #f ...),
-     ;; which src/psyntax.lisp makes a LABELS when the e are lambdas
-     (let* ((vars (mapcar #'bind-lexical (node-field x 3)))
-	    (vals (mapcar #'compile-tree-il (node-field x 4))))
-       (cons (list (core "lambda") vars
-		   (list* (core "begin")
-			  (append (mapcar (lambda (v e) (list (core "set!") v e)) vars vals)
-				  (list (compile-tree-il (node-field x 5))))))
-	     (mapcar (constantly (quoted ps:false)) vars))))))
+    (:fix (compile-letrec (node-field x 2) (node-field x 3) (node-field x 4)))
+    (:let-values
+     (list (core "call-with-values")
+	   (list (core "lambda") '() (compile-tree-il (node-field x 1)))
+	   (compile-lambda (node-field x 2))))
+    (:prompt				; the body is a thunk
+     (list (core "call-with-prompt") (compile-tree-il (node-field x 2))
+	   (compile-tree-il (node-field x 3)) (compile-tree-il (node-field x 4))))
+    (:abort
+     (list* (core "apply") (core "abort-to-prompt") (compile-tree-il (node-field x 1))
+	    (append (mapcar #'compile-tree-il (node-field x 2))
+		    (list (compile-tree-il (node-field x 3))))))
+    (:letrec (compile-letrec (node-field x 3) (node-field x 4) (node-field x 5)))))
+
+(defun compile-letrec (gensyms vals body)
+  ;; as psyntax's letrec* for the translator: ((lambda (v ...) (set! v e) ... body) #f ...),
+  ;; which src/psyntax.lisp makes a LABELS when the e are lambdas
+  (let* ((vars (mapcar #'bind-lexical gensyms))
+	 (vals (mapcar #'compile-tree-il vals)))
+    (cons (list (core "lambda") vars
+		(list* (core "begin")
+		       (append (mapcar (lambda (v e) (list (core "set!") v e)) vars vals)
+			       (list (compile-tree-il body)))))
+	  (mapcar (constantly (quoted ps:false)) vars))))
+
+(defun compile-test (x)
+  "Test X of a conditional.  Emacs Lisp's nil, #nil, is false to Guile's
+if, though it isn't #f: a test that might be #nil goes through
+%guile-true, which makes it #f.  The calls of predicates (name?) and
+comparisons can't return it."
+  (let ((core (compile-tree-il x)))
+    (if (boolean-node-p x) core (list (core "%guile-true") core))))
+
+(defun boolean-node-p (x)
+  (flet ((predicate-name-p (name)
+	   (and (symbolp name)
+		(let ((s (ps:scheme-symbol-name name)))
+		  (or (char= (char s (1- (length s))) #\?)
+		      (member s '("not" "<" ">" "<=" ">=" "=") :test #'string=))))))
+    (case (node-type x)
+      (:const (not (eq (node-field x 1) *elisp-nil*)))
+      ((:lambda :void) t)
+      (:primcall (predicate-name-p (node-field x 1)))
+      (:call (let ((f (node-field x 1)))
+	       (case (node-type f)
+		 (:primitive-ref (predicate-name-p (node-field f 1)))
+		 ((:toplevel-ref :module-ref) (predicate-name-p (node-field f 2))))))
+      (:conditional (and (boolean-node-p (node-field x 2)) (boolean-node-p (node-field x 3))))
+      (t nil))))
 
 (defun compile-lambda (case)
   (cond ((not (node-type case))
@@ -323,6 +372,7 @@ evaluated in the scope of those before it."
 
 (defun install-compiler-primitives ()
   (psx:defhost "%guile-ref" (site) (site-ref site))
+  (psx:defhost "%guile-true" (x) (if (eq x *elisp-nil*) ps:false x))
   (psx:defhost "%guile-set!" (site value) (site-set site value))
   (psx:defhost "%guile-define!" (module name value) (define-in-module module name value))
   (psx:defhost "%guile-unsupported" (name)
@@ -346,7 +396,7 @@ evaluated in the scope of those before it."
 	  when (and (eq (car x) keyword) (consp (cdr x))) return (cadr x)
 	  finally (return +unbound+)))
   (psx::register-primitive-names
-   '("%guile-ref" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
+   '("%guile-ref" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
      "%guile-nargs>=" "%guile-nargs-between" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
 

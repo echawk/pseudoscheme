@@ -273,7 +273,7 @@
 (defsystem :pseudoscheme/guile
   :version "3.0"
   :pathname #p"src/guile/"
-  :depends-on (:pseudoscheme/api)
+  :depends-on (:pseudoscheme/api :cffi)
   :components ((:file "reader")
 	       (:file "runtime" :depends-on ("reader"))
 	       (:file "compile" :depends-on ("runtime"))
@@ -281,4 +281,5 @@
 	       (:file "primitives" :depends-on ("boot"))
 	       (:file "ports" :depends-on ("primitives"))
 	       (:file "threads" :depends-on ("primitives"))
+	       (:file "regex" :depends-on ("primitives"))
 	       (:static-file "root-primitives.txt")))

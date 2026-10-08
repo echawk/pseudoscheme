@@ -22,6 +22,7 @@ make -C contrib/cli                 # builds bin/pseudoscheme
 bin/pseudoscheme                    # R7RS REPL (,q quits)
 bin/pseudoscheme --r6rs prog.sps a b
 bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
+bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
 bin/pseudoscheme -p '(exact-integer-sqrt 17)'
 bin/pseudoscheme --help
 ```
@@ -126,8 +127,10 @@ src/srfi/            -- SRFI libraries, mostly reference implementations
 src/chez/            -- Chez Scheme: (chezscheme), its top level
                         (--chez), threads, the FFI on CFFI
                         (docs/chez.md)
-src/guile/           -- (guile): Guile's everyday procedures, a first
-                        piece of docs/guile.md
+src/guile/           -- Guile (--guile): libguile in Lisp, a Tree-IL
+                        compiler, Guile's own boot-9 and modules loaded
+                        from a Guile installation (docs/guile.md); and
+                        (guile), Guile's procedures for R6RS programs
 src/control.sls      -- (pseudoscheme control): delimited
                         continuations, as Guile has them
 src/compat/          -- (ikarus), for the Ikarus variants of Akku
@@ -141,6 +144,8 @@ src/interop.lisp, src/interop/
 src/asdf.lisp        -- Scheme sources as ASDF components
 vendor/psyntax/      -- Ghuloum & Dybvig's psyntax, patched, and the
                         image of it built on Pseudoscheme
+vendor/guile-test-suite/ -- GNU Guile 3.0.11's test suite, unmodified
+                        (LGPL), run by make test-guile
 contrib/cli/         -- the `pseudoscheme' command
 boot/                -- making the generated files from source, with
                         other Schemes (boot/README.md)
@@ -379,7 +384,7 @@ The big ones; `ROADMAP.md` has the rest.
 - **Chez mode is partial.** `--chez` runs Chez scripts and libraries,
   with 1118 of `(chezscheme)`'s 1715 names; engines, annotations and
   ftypes are missing (docs/chez.md, measured against the editor e).
-- **No Guile mode yet.** Prompts and `(guile)`'s everyday procedures
-  exist; docs/guile.md plans a `--guile` mode that runs Guile's own
-  boot-9 and libraries on libguile's primitives written in Lisp, and,
-  much later, Guix's client side.
+- **Guile mode is early.** `--guile` runs Guile's own boot-9 and modules
+  (from an installed Guile 3.0) on libguile's primitives written in Lisp;
+  5,982 of Guile's own tests pass, and GOOPS, `(system foreign)`, sockets
+  and Emacs Lisp are still to come (docs/guile.md).

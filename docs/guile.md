@@ -1,23 +1,18 @@
-# Guile on Pseudoscheme: a `--guile` mode, and someday Guix
+# Guile on Pseudoscheme: `--guile`
 
-Status: a plan, with two pieces done. **Delimited continuations** are
-native (`call-with-prompt`, `abort-to-prompt`, composable continuations;
-docs/continuations.md, "Delimited continuations"), and **`(guile)`**, a
-library of Guile's everyday procedures on top of them, works for R6RS
-programs (see "Started" below).
+Status: **running.** `pseudoscheme --guile prog.scm` loads GNU Guile 3.0's
+own `ice-9/boot-9.scm` and `ice-9/psyntax-pp.scm`, unmodified, from the
+Guile installation on the machine. They run on libguile's primitives
+written in Lisp and a Tree-IL compiler. After that, `define-module`,
+`use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
+`(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
+and the rest. On Guile's own test suite (vendored,
+`vendor/guile-test-suite/`), **5,982 tests pass** so far. See "Where it
+stands" below. Emacs Lisp has started: Guile's elisp compiler runs, and
+`(compile '(defun ...) #:from 'elisp)` works. It is future work.
 
-The goal: `pseudoscheme --guile prog.scm` runs programs written for GNU
-Guile, with `(use-modules (ice-9 match) (srfi srfi-1) ...)` and the
-libraries people install for Guile. Guile has a large body of real code
-behind it, and the largest is GNU Guix. Running Guix's client side
-(evaluating package definitions, computing derivations, talking to the
-daemon) would be a long-term milestone that tests everything below it.
-As with Scheme today (docs/interop.md), Guile code would then also be
-callable from Common Lisp.
-
-The figures below come from Guile 3.0.11's installed sources
-(`/opt/homebrew/share/guile/3.0`). The primitive counts are token
-scans, not a real analysis, and so are approximate.
+The sections after "Where it stands" are the plan as written before the
+work started, with each stage marked as it now is.
 
 ## Summary
 
@@ -87,7 +82,7 @@ top-level environment rather than an R6RS library; and, for Guix,
 
 ## The plan
 
-### Stage 0: the reader and the flag
+### Stage 0: the reader and the flag (done)
 
 `--guile` selects a Guile top level and reader. The reader extensions:
 - `#:kw` keywords: these already read as Lisp keywords, and Guile's
@@ -99,7 +94,7 @@ top-level environment rather than an R6RS library; and, for Guix,
 - **`read-hash-extend`**, the user-defined `#` syntax. Guix's
   G-expressions are `#~`, `#$`, `#$@` and `#+`.
 
-### Stage 1: libguile's primitives
+### Stage 1: libguile's primitives (largely done; see "Where it stands")
 
 Written in Lisp, as the R6RS layer is (src/r6rs/), and grouped as
 libguile is:
@@ -127,7 +122,7 @@ libguile is:
   `primitive-load-path` and `%load-path`. These call stage 2's compiler
   one top-level form at a time.
 
-### Stage 2: a Tree-IL compiler
+### Stage 2: a Tree-IL compiler (done)
 
 Guile's psyntax calls the Tree-IL constructors. Ours would build core
 Scheme forms (the `lambda`/`if`/`set!`/`letrec`/`begin` language that
@@ -153,7 +148,7 @@ translate and compile them.
   thousands of small forms: src/psyntax.lisp now shares compiled lambdas
   between forms of the same shape. Guile code leans on that path too.
 
-### Stage 3: boot-9 and the module system
+### Stage 3: boot-9 and the module system (done, without the compiled-module cache)
 
 Load `ice-9/boot-9.scm` from an installed Guile: it loads
 `psyntax-pp.scm`, then defines the module system, load paths,
@@ -192,7 +187,7 @@ continuations"):
   `--continuations=escape`, aborts work but their continuations can't
   be called.
 
-### Stage 5: ports and POSIX
+### Stage 5: ports and POSIX (partly done)
 
 - **Ports:** Guile's ports include custom ports, soft ports, string
   and bytevector ports, `(ice-9 rdelim)`, `(ice-9 textual-ports)` and
@@ -320,46 +315,181 @@ hashing all match Guile byte for byte.
   `fork-thread` threads get; src/r7rs/rts.lisp); Guile's threads would
   get the same. ROADMAP section 4's expansion lock is still needed.
 
-## Started: `(guile)`
+## Where it stands
 
-`(import (guile))` gives an R6RS program Guile's default environment as
-far as it goes so far: all of R6RS, plus
+### How it is built
 
-- prompts: `call-with-prompt`, `abort-to-prompt`, `make-prompt-tag`,
-  `default-prompt-tag`, `%`, `call/ec`, `let/ec`;
-- `catch`, `throw`, `with-throw-handler` and `false-if-exception`, on
-  R6RS conditions. `(catch #t ...)` also catches R6RS errors, as
-  `misc-error` (Guile gives some of them other keys, such as
-  `wrong-type-arg`);
-- `define-syntax-rule`, `1+`, `1-`, `const`, `compose`, `negate`;
-- Guile's hash tables (`make-hash-table`, `hash-ref`, `hash-set!`,
-  `hash-fold`, ...), association lists (`assoc-ref`, `acons`, ...), and
-  SRFI 1's and SRFI 13's list and string procedures;
-- `format` (Chez's, i.e. Common Lisp's directives, as Guile's
-  `(ice-9 format)` mostly follows) and `simple-format`, `pk`.
+All of it is in `src/guile/`, system `pseudoscheme/guile`:
 
-It is src/guile/guile.scm, made into a library by src/guile/guile.lisp
-when first imported, which is how it reuses `(chezscheme)`'s `format`
-and the SRFIs without slowing every boot. This is the *imitation* path
-the Summary argues against for the long run, since Guile's own modules
-should eventually run unchanged. But it lets Guile-flavoured R6RS code
-run now, and each procedure here maps onto a libguile primitive that
-stage 1 needs anyway. Not yet: keywords (`#:key`, which the reader
-needs), `define*`/`lambda*`, `define-module`/`use-modules`, fluids.
+| file | what |
+|---|---|
+| reader.lisp | Guile's reader: `#:kw`, `#{odd}#`, `#!...!#`, `#nil`, `#*101`, `#vu8(...)`, arrays, `read-hash-extend` |
+| runtime.lisp | structs and vtables (applicable structs are funcallable instances, so they are procedures), variables, Guile's hash tables (one table for `hashq-`/`hashv-`/`hash-`, handles shared with the table), fluids, syntax objects, macros, procedure properties, hooks, `scm-error` |
+| compile.lisp | Tree-IL to Pseudoscheme's core Scheme, and a pre-expander standing in for libguile's `expand.c` until psyntax is loaded |
+| boot.lisp | the module system's C half (`module-variable` and friends over boot-9's module records), `primitive-eval`, `primitive-load`, the root module's bindings, errors, the REPL |
+| primitives.lisp, ports.lisp, threads.lisp, regex.lisp | the rest of libguile so far, and the C halves that Guile's modules install with `load-extension` |
+| modules/ | replacements for the few Guile modules written on libguile's internals: `(ice-9 binary-ports)`, `(ice-9 textual-ports)`, `(ice-9 custom-ports)` and `(language tree-il spec)`. They are written afresh, not edited copies |
 
-## First steps
+How each problem was solved:
 
-1. **An inventory.** Run Guile's psyntax on Guile's own module sources
-   *in Guile*, record every `primcall`, `primitive-ref` and
-   `toplevel-ref` that resolves to a C primitive, and count them by
-   module. That turns this document's token scan into a real worklist,
-   ordered by what boot-9 needs first.
-2. **Tree-IL by hand.** Construct Tree-IL for small programs in Guile,
-   write it out as data, and compile it with a first Tree-IL-to-core
-   translator here, before psyntax is involved.
-3. **Boot to the first `define-module`.** Load `boot-9.scm` up to and
-   including `psyntax-pp`, with stubs for everything that isn't used
-   yet, until `(define-module (test) #:use-module (ice-9 match))` works.
-4. **Then** `ice-9` modules one by one, with Guile's own test suite
-   (`test-suite/tests/*.test` in Guile's source tree) as the measure,
-   as chibi's and Racket's suites are for R7RS and R6RS here.
+- **Guile's sources are never copied or changed.** They are LGPL. They are
+  read from the installation (`guile -c '(display (%package-data-dir))'`,
+  the usual prefixes, or `GUILE_SOURCE_DIR`). `src/guile/modules/` comes
+  first on `%load-path`, for the replacements.
+- **Tree-IL to core Scheme.** psyntax builds Tree-IL with the
+  constructors in `%expanded-vtables`. `compile-tree-il` turns each node
+  into the core forms `host-eval` (src/psyntax.lisp) already compiles:
+  - lexical variables are renamed apart (`~1`, `~2`, ...);
+  - top-level and `@`/`@@` references go through a *site*, which caches
+    the variable once it has been looked up, as Guile's compiled code does;
+  - `lambda-case`, with `#:optional`, `#:key` and several clauses,
+    becomes a dispatch on the argument count followed by ordered binding;
+  - a primcall becomes the host's procedure where it behaves the same,
+    and is otherwise a call of the `(guile)` binding.
+  `(language tree-il)`'s record nodes (`<prompt>`, `<abort>`,
+  `<let-values>`, `<fix>`) compile too.
+- **Before psyntax exists**, `macroexpand` is a pre-expander written in
+  Lisp. It knows the core forms that boot-9's first page and
+  `psyntax-pp.scm` use, and builds the same Tree-IL. `psyntax-pp.scm` is
+  one top-level `let` around a `letrec*` of 400 procedures, too big for
+  one SBCL code object. The lets around it become top-level definitions,
+  and the `letrec*` is hoisted the way psyntax's own image is
+  (`hoist-definitions`).
+- **The C half of the module system** reads boot-9's module records by
+  field position, as `modules.h` does. Duplicate imports are resolved by
+  boot-9's own duplicate handlers.
+- **boot-9's `dynamic-wind`, `with-fluid*`, `apply`, `call/cc` and
+  `call-with-prompt`** are written on libguile's internal `wind`/`unwind`
+  and `push-fluid`. Their definitions are replaced, as they are made, by
+  Pseudoscheme's own continuation-aware procedures (`*boot-overrides*`).
+- **Fluids** are the R7RS layer's parameter states, so they are
+  per-thread and survive re-entered continuations. They keep the stack of
+  outer values that `fluid-ref*` reads, which boot-9's `raise-exception`
+  walks. The current-port fluids hold Lisp's `*standard-output*` and the
+  other stream variables, so Pseudoscheme's own I/O follows
+  `(current-output-port)`.
+- **Errors.** A Lisp error inside Guile code is raised as a Guile
+  exception (`wrong-type-arg`, `unbound-variable`, `misc-error`, ...)
+  where it happens, so `catch`, `with-exception-handler` and
+  `false-if-exception` see it. Each entry point runs inside one
+  continuation base, so prompts set up by a `catch` around `eval` are
+  visible to the code evaluated.
+- **C extensions.** `load-extension` runs a Lisp version of the C init
+  function where there is one (ports, fports, ioext, threads, control,
+  i18n, bytevectors, rdelim, rw). After that, every variable the module
+  exports and nothing has defined gets Pseudoscheme's procedure of the
+  same name, if it has one. That is how `(rnrs bytevectors)`, SRFI 4 and
+  others get their C procedures.
+- **Ports** are Lisp streams. Guile's ports are binary and textual at
+  once, so Pseudoscheme's binary ports also read and write characters,
+  as UTF-8.
+- **Regular expressions** are libc's `regcomp`/`regexec` through CFFI.
+  That is POSIX, as Guile's are. macOS's `regcomp` rejects empty
+  alternatives, `(|x)`, which glibc accepts; on macOS they become `(x)?`.
+- **`#nil`**, Emacs Lisp's nil, is a distinct object. Guile's `not`,
+  `null?` and `boolean?` know it, and a conditional's test goes through
+  a `#nil` check unless it is a predicate's call or a comparison.
+- **Booting into the image.** The command-line program boots boot-9 when
+  it is built, so `--guile` starts in under a second. Modules that are
+  used are still expanded and compiled when they are loaded: there is no
+  compiled-module cache yet.
+
+### Guile's test suite
+
+`make test-guile` runs each of the 186 files in
+`vendor/guile-test-suite/tests` in its own process, 6 at a time, each
+under 5 minutes (tests/run-guile-tests.sh). It reports Guile's own
+result kinds. The first full run:
+
+| | count |
+|---|---|
+| pass | 5,982 |
+| fail | 191 |
+| error (an exception where a result was expected) | 465 |
+| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 |
+| files that crashed or hit the time limit | 32 |
+
+Files that pass everything include: `match` (94), `srfi-67` (902),
+`srfi-42` (163), `srfi-41` (176, but 1), `sxml.ssax` (180), `sxml.xpath`
+(57), `texinfo*`, `vlist` (38), `q`, `poe`, `and-let-star`, `srfi-2/11/26/34/37/45`
+and `syncase` (30). Most of `srfi-1` (1735), `srfi-13` (477), `srfi-43`
+(262), `syntax` (230), `bit-operations` (137), `control` (119) and
+`r6rs-base` (112) pass too.
+
+What fails, by cause:
+
+- **A file that stops at once ("error=1")**, about 60 files. Each meets a
+  primitive, module or C extension that isn't here yet: `(system vm ...)`
+  and the compiler's own passes (`compiler`, `rtl`, `peval`, `tree-il`,
+  `dwarf`), `(system foreign)` (`foreign`, `c-api`), sockets (`00-socket`,
+  `net-db`, `web-server`), `(ice-9 popen)`, `iconv` encodings, `statprof`,
+  the R6RS I/O layer (`r6rs-ports`, `rnrs io ports`), `srfi-4` and
+  `srfi-60`.
+- **Crashes and time-outs** (32 files): GOOPS (`goops`, `hash`, `format`
+  and `print` load it), `strings`, `list`, `fluids`, `continuations`,
+  `modules`, `import`, `elisp*`, `ecmascript`, `peg`, `brainfuck` and
+  `i18n`. Most are one missing piece, or an infinite loop in some
+  primitive, still to be found.
+- **Error messages and keys.** Many tests check Guile's exact exception
+  key and arguments, e.g. `wrong-type-arg` with the procedure's name and
+  the argument's position. Lisp's errors become `wrong-type-arg` or
+  `misc-error` with Lisp's message (`alist`, `chars`, `srfi-1`'s
+  "improper list" cases).
+- **Printing.** Pseudoscheme's writer writes Pseudoscheme's way:
+  `#{End-of-file}` for Guile's `#<eof>`, `#{Unspecific}`, `|a b|` for
+  `#{a b}#`, procedures. That affects `reader`, `symbols`, `srcprop` and
+  the web tests.
+- **Source properties.** The reader records no positions, so
+  `syntax-source`, `current-filename` and `srcprop` don't work.
+
+### Differences from Guile that remain
+
+| | Guile 3.0 | here |
+|---|---|---|
+| compiling | Tree-IL → CPS → bytecode (`.go` files cached) | Tree-IL → core Scheme → SBCL native code, each time a module is loaded |
+| `(system vm ...)`, `(language cps)`, the optimizer | present | absent: `compile` goes from Tree-IL to `value` directly |
+| GOOPS | present | not yet: `(oop goops)` needs its C half (`scm_init_goops_builtins`) |
+| `(system foreign)` | present | not yet: the Chez FFI (src/chez/ffi.lisp) has the parts, on CFFI |
+| `bytevector-slice` | shares the bytes | copies them |
+| port buffers, `(ice-9 suspendable-ports)` | Guile's | absent: ports are Lisp streams |
+| stacks, frames, backtraces | Guile's VM's | none: `make-stack` is #f |
+| locales | the C library's | the C locale only |
+
+### Emacs Lisp (future work)
+
+Guile's elisp front end (`language/elisp/`) loads and runs unmodified,
+through the replacement `(language tree-il spec)`, whose only compiler
+goes from Tree-IL to `value`:
+
+```scheme
+(compile '(progn (defun sq (x) (* x x)) (sq 7)) #:from 'elisp #:to 'value)  ; => 49
+(compile '(if nil 1 2) #:from 'elisp #:to 'value)                           ; => 2
+```
+
+Loading `language/elisp/boot.el` stops at the first missing piece
+(`*random-state*`, now defined; the next one is unknown). Still to do:
+
+- `#nil` as the end of a list in the host's list procedures (only
+  `apply` accepts it so far);
+- `#nil` and `#t` as Scheme's when elisp values reach Scheme code;
+- `elisp.test`, `elisp-compiler.test` and `elisp-reader.test`, which
+  currently crash.
+
+### Next steps
+
+1. The files that stop at once: each is one missing primitive or
+   extension, and together they hold most of the tests not yet run.
+2. A writer mode that writes Guile's way (`#<eof>`, `#<unspecified>`,
+   `#{...}#`, `#<procedure name (args)>`).
+3. Guile's error keys and arguments for Lisp's errors: the procedure
+   name and argument position are in SBCL's conditions.
+4. GOOPS's C half, then `(oop goops)`.
+5. A compiled-module cache, so that a module is expanded and compiled
+   once (the library cache, src/library-cache.lisp, or saving more
+   modules into the image).
+6. `(system foreign)` on the Chez mode's CFFI layer, and sockets.
+7. Then Emacs Lisp, and Guix's client side.
+
+The earlier `(guile)` R6RS library (src/guile/guile.lisp, guile.scm), which
+imitates Guile's everyday procedures for R6RS programs, remains. It is
+separate from all of this.

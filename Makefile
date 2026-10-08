@@ -5,7 +5,7 @@
 SBCL ?= sbcl
 
 .PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
-	test test-escape test-cli test-srfi test-programs test-all precompile-srfi
+	test test-escape test-cli test-srfi test-programs test-guile test-all precompile-srfi
 
 # Tests.  `make test` runs every suite in the default mode (full
 # continuations, src/continuations.lisp); `make test-escape` the
@@ -49,6 +49,14 @@ test-srfi:
 	@$(MAKE) -C contrib/cli > /tmp/pseudoscheme-cli-build.log 2>&1 \
 	  || { tail -20 /tmp/pseudoscheme-cli-build.log; exit 1; }
 	@sh tests/run-srfi-tests.sh bin/pseudoscheme $(SRFIS)
+
+# Guile's own test suite (vendor/guile-test-suite) on the --guile mode
+# (src/guile/, docs/guile.md): each file in its own process, JOBS at a
+# time (6), each under LIMIT seconds (300).  Needs a Guile 3.0
+# installation, whose Scheme sources the mode loads.  GUILE_TESTS="hash
+# alist" for some.
+test-guile:
+	@sh tests/run-guile-tests.sh $(GUILE_TESTS)
 
 test-programs:
 	@echo "Building bin/pseudoscheme (log: /tmp/pseudoscheme-cli-build.log) ..."

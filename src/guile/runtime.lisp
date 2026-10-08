@@ -43,6 +43,8 @@
 
 (defvar *unspecified* ps:unspecific)
 
+(defvar *program-arguments* '() "What Guile's (program-arguments) returns.")
+
 (defun guile-error (key subr message args &optional (rest ps:false))
   "Raise Guile exception KEY as scm-error does."
   (funcall (gethash "scm-error" *guile-primitives*) key subr message args rest))
@@ -737,8 +739,6 @@ fails over and over (boot-9 half loaded)."
 (defguile "program-arguments" () (copy-list *program-arguments*))
 (defguile "set-program-arguments" (args) (setq *program-arguments* args) *unspecified*)
 
-(defvar *program-arguments* '())
-
 (defguile "string-any-c-code" (pred s &optional (start 0) (end (length s)))
   (loop for i from start below end
 	do (let ((r (if (characterp pred) (bool (char= pred (char s i))) (funcall pred (char s i)))))
@@ -756,3 +756,13 @@ fails over and over (boot-9 half loaded)."
 
 (defvar *syntax-session-id* (list :session))
 (defguile "syntax-session-id" () *syntax-session-id*)
+
+;; Pseudoscheme's own procedures by name, for the replacement modules in
+;; src/guile/modules/
+(defguile "%host-ref" (name) (psx:host-ref (ps:scheme-symbol-name name)))
+
+;;; #nil, Emacs Lisp's nil: false, and the empty list, to Guile's own
+;;; predicates (src/guile/compile.lisp makes it false to `if').
+(defguile "not" (x) (bool (or (eq x ps:false) (eq x *elisp-nil*))))
+(defguile "null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
+(defguile "boolean?" (x) (bool (or (eq x ps:false) (eq x ps:true) (eq x *elisp-nil*))))
