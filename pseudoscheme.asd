@@ -292,4 +292,5 @@
 	       (:file "threads" :depends-on ("primitives"))
 	       (:file "regex" :depends-on ("primitives"))
 	       (:file "foreign" :depends-on ("primitives"))
+	       (:file "goops" :depends-on ("foreign" "ports"))
 	       (:static-file "root-primitives.txt")))

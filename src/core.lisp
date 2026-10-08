@@ -366,6 +366,11 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 
 (defvar *equal-budget* 100000)
 
+(defvar *equal-extension* nil
+  "NIL, or a function of two objects that EQUAL-STEP knows nothing of
+and the function comparing their parts: true if they are EQUAL?.  The
+Guile mode compares its structs with it.")
+
 (defun scheme-equal-p (obj1 obj2)
   (let ((budget *equal-budget*))
     (declare (fixnum budget))
@@ -426,6 +431,7 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 	      (equal (array-element-type obj1) (array-element-type obj2))
 	      (= (length obj1) (length obj2))
 	      (every #'eql obj1 obj2)))
+	(*equal-extension* (funcall *equal-extension* obj1 obj2 recur))
         (t nil)))
 
 

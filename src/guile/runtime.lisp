@@ -139,29 +139,46 @@
       (guile-error (ssym "misc-error") who "too many initializers" '()))
     slots))
 
+(defun inherited-vtable-flags (meta layout)
+  "The flags a vtable of LAYOUT gets from its vtable META, as Guile's
+scm_i_struct_inherit_vtable_magic computes them."
+  (let ((meta-flags (vtable-flags meta))
+	(string (ps:scheme-symbol-name layout)))
+    (logior (if (and (>= (length string) (length *standard-vtable-fields*))
+		     (string= *standard-vtable-fields* string
+			      :end2 (length *standard-vtable-fields*)))
+		+vtable-flag-vtable+ 0)
+	    (if (logtest meta-flags +vtable-flag-applicable-vtable+)
+		+vtable-flag-applicable+ 0)
+	    (if (logtest meta-flags +vtable-flag-setter-vtable+)
+		(logior +vtable-flag-applicable+ +vtable-flag-setter+) 0))))
+
+(defvar *vtables* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Each named vtable (set-struct-vtable-name!, as records are) -> its
+GOOPS class, or NIL until GOOPS starts (src/guile/goops.lisp).")
+
 (defun make-vtable-from-slots (meta slots)
   "SLOTS made into a vtable whose vtable is META: its layout parsed,
-its flags computed as Guile's scm_i_struct_inherit_vtable_magic does."
+its flags computed as Guile's scm_i_struct_inherit_vtable_magic does.  A
+GOOPS class is made before its layout is known (%init-layout! gives it
+one): it has no fields until then."
   (let ((layout (svref slots 0)))
     (when (stringp layout) (setf (svref slots 0) (setq layout (layout-symbol layout))))
-    (unless (and layout (symbolp layout) (not (eq layout ps:false)))
-      (wrong-type "make-struct" 2 layout))
-    (multiple-value-bind (n hidden) (parse-layout layout)
-      (let* ((meta-flags (vtable-flags meta))
-	     (string (ps:scheme-symbol-name layout))
-	     (flags (logior (if (and (>= (length string) (length *standard-vtable-fields*))
-				     (string= *standard-vtable-fields* string
-					      :end2 (length *standard-vtable-fields*)))
-				+vtable-flag-vtable+ 0)
-			    (if (logtest meta-flags +vtable-flag-applicable-vtable+)
-				+vtable-flag-applicable+ 0)
-			    (if (logtest meta-flags +vtable-flag-setter-vtable+)
-				+vtable-flag-setter+ 0)))
-	     (v (%make-vtable meta slots)))
-	(setf (vtable-nfields v) n (vtable-hidden v) hidden (vtable-flags v) flags
-	      (svref slots +vtable-index-flags+) flags
-	      (svref slots +vtable-index-size+) n)
-	v))))
+    (let ((v (%make-vtable meta slots)))
+      (if (and layout (symbolp layout) (not (eq layout ps:false)) (not (keywordp layout)))
+	  (multiple-value-bind (n hidden) (parse-layout layout)
+	    (let ((flags (logior (let ((f (svref slots +vtable-index-flags+))) (if (integerp f) f 0))
+				 (inherited-vtable-flags meta layout))))
+	      (setf (vtable-nfields v) n (vtable-hidden v) hidden (vtable-flags v) flags
+		    (svref slots +vtable-index-flags+) flags
+		    (svref slots +vtable-index-size+) n)))
+	  (let ((flags (logand (vtable-flags meta)
+			       (logior +vtable-flag-applicable-vtable+ +vtable-flag-setter-vtable+))))
+	    (setf (vtable-flags v) (logior (if (logtest flags +vtable-flag-applicable-vtable+) +vtable-flag-applicable+ 0)
+					   (if (logtest flags +vtable-flag-setter-vtable+)
+					       (logior +vtable-flag-applicable+ +vtable-flag-setter+) 0))
+		  (svref slots +vtable-index-flags+) (vtable-flags v))))
+      v)))
 
 (defun make-struct* (vtable inits &optional (who "make-struct"))
   (unless (vtable-p vtable) (wrong-type who 1 vtable))
@@ -216,9 +233,18 @@ its flags computed as Guile's scm_i_struct_inherit_vtable_magic does."
   (unless (struct-p s) (wrong-type "struct-ref" 1 s))
   (check-index "struct-ref" s i)
   (svref (struct-slots-of s) i))
+(defun check-unboxed (who s i v)
+  "An unboxed field (u) holds a 64-bit word."
+  (let ((layout (svref (gstruct-slots (struct-vtable-of s)) +vtable-index-layout+)))
+    (when (and (symbolp layout) (not (typep v '(unsigned-byte 64))))
+      (let ((string (ps:scheme-symbol-name layout)))
+	(when (and (< (* 2 i) (length string)) (char= (char string (* 2 i)) #\u))
+	  (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list v) (list v)))))))
+
 (defguile "struct-set!" (s i v)
   (unless (struct-p s) (wrong-type "struct-set!" 1 s))
   (check-index "struct-set!" s i)
+  (check-unboxed "struct-set!" s i v)
   (setf (svref (struct-slots-of s) i) v)
   (when (and (vtable-p s) (= i +vtable-index-flags+)) (setf (vtable-flags s) v))
   *unspecified*)
@@ -236,15 +262,25 @@ its flags computed as Guile's scm_i_struct_inherit_vtable_magic does."
 (defguile "struct-vtable-name" (v) (svref (gstruct-slots v) +vtable-index-name+))
 (defguile "set-struct-vtable-name!" (v name)
   (setf (svref (gstruct-slots v) +vtable-index-name+) name)
+  (if (goops-ready-p)
+      (class-for-vtable v)
+      (setf (gethash v *vtables*) nil))
   *unspecified*)
 
 (defun struct-printer (s)
   (let ((printer (svref (gstruct-slots (struct-vtable-of s)) +vtable-index-printer+)))
     (and (functionp printer) printer)))
 
+(defvar *goops-write* nil
+  "GOOPS's write generic, once (oop goops) is loaded: GOOPS instances,
+classes among them, are printed with it.")
+
 (defun print-struct (s stream)
   (let ((printer (struct-printer s)))
     (cond (printer (funcall printer s stream))
+	  ((and *goops-write*
+		(logtest (vtable-flags (struct-vtable-of s)) 512)) ; vtable-flag-goops-class
+	   (funcall *goops-write* s stream))
 	  ((vtable-p s)
 	   (let ((name (svref (gstruct-slots s) +vtable-index-name+)))
 	     (format stream "#<vtable:~A ~A>"
@@ -711,7 +747,26 @@ fails over and over (boot-9 half loaded)."
 (defguile "object-address" (x) (sb-kernel:get-lisp-obj-address x))
 (defguile "inf" () sb-ext:double-float-positive-infinity)
 (defguile "nan" () (- sb-ext:double-float-positive-infinity sb-ext:double-float-positive-infinity))
-(defguile "thunk?" (x) (bool (functionp x)))
+(defun function-arity (f)
+  "F's arity from its Lisp lambda list: required and optional counts,
+and whether it takes more; NIL if that isn't known."
+  (let ((lambda-list (if (functionp f) (sb-kernel:%fun-lambda-list f) :unknown)))
+    (when (listp lambda-list)
+      (let ((required 0) (optional 0) (rest nil) (state :required))
+	(dolist (x lambda-list)
+	  (case x
+	    (&optional (setq state :optional))
+	    ((&rest &body &key) (setq rest t state :done))
+	    (&aux (setq state :done))
+	    (t (case state
+		 (:required (incf required))
+		 (:optional (incf optional))))))
+	(list required optional rest)))))
+
+(defguile "thunk?" (x)
+  (bool (and (functionp x)
+	     (let ((arity (function-arity x)))
+	       (or (null arity) (zerop (first arity)))))))
 (defguile "primitive-exit" (&optional (code 0))
   (finish-output *standard-output*)
   (sb-ext:exit :code (cond ((eq code ps:false) 1) ((eq code ps:true) 0) (t code)) :abort t))

@@ -245,7 +245,10 @@ version (src/continuations.lisp)."
 	 (if (search "number of arguments" text)
 	     (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text))
 	     (message "wrong-number-of-args" ps:false "~A" (list text)))))
-      (t (message "misc-error" ps:false "~A" (list (remove #\Newline (princ-to-string c))))))))
+      (t (let ((text (remove #\Newline (princ-to-string c))))
+	   (if (search "isn't a pair" text)
+	       (message "wrong-type-arg" ps:false "Wrong type argument: ~A" (list text))
+	       (message "misc-error" ps:false "~A" (list text))))))))
 
 (defvar *trace-lisp-errors* nil "Print a backtrace of each Lisp error raised in Guile code.")
 

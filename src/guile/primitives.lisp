@@ -426,20 +426,9 @@
   (let ((v (module-variable* (if (truthy module) module *current-module*) sym)))
     (bool (and v (not (eq (gvariable-value v) +unbound+))))))
 (defguile "procedure-minimum-arity" (p)
-  ;; (required optional rest?), from the Lisp lambda list
-  (let ((lambda-list (if (functionp p) (sb-kernel:%fun-lambda-list p) :unknown)))
-    (if (not (listp lambda-list))
-	(list 0 0 ps:true)
-	(let ((required 0) (optional 0) (rest nil) (state :required))
-	  (dolist (x lambda-list)
-	    (case x
-	      (&optional (setq state :optional))
-	      ((&rest &body &key) (setq rest t state :done))
-	      (&aux (setq state :done))
-	      (t (case state
-		   (:required (incf required))
-		   (:optional (incf optional))))))
-	  (list required optional (bool rest))))))
+  ;; (required optional rest?)
+  (destructuring-bind (required optional rest) (or (function-arity p) '(0 0 t))
+    (list required optional (bool rest))))
 (defguile "object->string" (x &optional printer)
   (if (functionp printer)
       (with-output-to-string (s) (funcall printer x s))
