@@ -31,6 +31,8 @@
   '(("u8" . 1) ("s8" . 1) ("u16" . 2) ("s16" . 2) ("u32" . 4) ("s32" . 4) ("u64" . 8) ("s64" . 8)
     ("f32" . 4) ("f64" . 8) ("c32" . 8) ("c64" . 16) ("vu8" . 1)))
 
+(setq ps::*bytevector-type* (lambda (v) (gethash v *bytevector-types* "vu8")))
+
 (defun type-size (type) (cdr (assoc type *type-sizes* :test #'string=)))
 
 (defun type-name (type)
@@ -249,24 +251,34 @@
     (mapcar (lambda (d) (list (first d) (second d))) dims)))
 
 (defun shared-array (a mapping bounds)
+  ;; As Guile's: what matters is that the new array's corners map into
+  ;; A's elements, by their position in the root; an index may run past
+  ;; one of A's dimensions into the next.
   (multiple-value-bind (root type offset dims) (array-view a "make-shared-array")
-    (let ((bounds (mapcar (lambda (b) (bound-pair b "make-shared-array")) bounds)))
-      (flet ((old-index (indices)
+    (let ((bounds (mapcar (lambda (b) (bound-pair b "make-shared-array")) bounds))
+	  (lowest (+ offset (loop for (lo hi stride) in dims sum (min 0 (* (- hi lo) stride)))))
+	  (highest (+ offset (loop for (lo hi stride) in dims sum (max 0 (* (- hi lo) stride))))))
+      (flet ((position-of (indices)
 	       (let ((old (apply mapping indices)))	; a list of indices
-		 (view-index "make-shared-array" offset dims old))))
+		 (unless (and (listp old) (= (length old) (length dims)) (every #'integerp old))
+		   (guile-error (ssym "misc-error") "make-shared-array" "bad mapping: ~S" (list old)))
+		 (+ offset (loop for i in old for (lo nil stride) in dims sum (* (- i lo) stride))))))
 	(if (some (lambda (b) (> (first b) (second b))) bounds)
 	    (%make-garray root type 0 (mapcar (lambda (b) (list (first b) (second b) 0)) bounds))
 	    (let* ((los (mapcar #'first bounds))
-		   (base (old-index los))
-		   (new-dims (loop for (lo hi) in bounds for k from 0
-				   collect (list lo hi
-						 (if (= lo hi)
-						     0
-						     (- (old-index (loop for l in los for j from 0
-									 collect (if (= j k) (1+ l) l)))
-							base))))))
-	      ;; the offset is of the lower corner: so the bounds' origin
-	      (make-view root type base new-dims)))))))
+		   (base (position-of los))
+		   (far (position-of (mapcar #'second bounds))))
+	      (unless (<= lowest base highest) (out-of-range "make-shared-array" base))
+	      (unless (<= lowest far highest)
+		(guile-error (ssym "misc-error") "make-shared-array" "mapping out of range" '()))
+	      (make-view root type base
+			 (loop for (lo hi) in bounds for k from 0
+			       collect (list lo hi
+					     (if (= lo hi)
+						 0
+						 (- (position-of (loop for l in los for j from 0
+								       collect (if (= j k) (1+ l) l)))
+						    base)))))))))))
 
 (defun transpose (a axes)
   (multiple-value-bind (root type offset dims) (array-view a "transpose-array")
@@ -291,7 +303,8 @@
 	(destructuring-bind (lo hi s) d
 	  (unless (or (= s stride) (= lo hi)) (setq contiguous nil))
 	  (setq stride (* stride (max 0 (1+ (- hi lo)))))))
-      (cond ((not contiguous) ps:false)
+      (cond ((and (= (length dims) 1) (not (truthy strict))) a)
+	    ((not contiguous) ps:false)
 	    ((and (truthy strict) (/= offset 0)) ps:false)
 	    (t (make-view root type offset (list (list 0 (1- (dims-size dims)) 1))))))))
 
@@ -305,8 +318,10 @@
 		(ps:scheme-equal-p (array->list* a) (array->list* b)))))))
 
 (defun same-shape-p (arrays)
-  (let ((shape (array-shape* (first arrays))))
-    (every (lambda (a) (equal (array-shape* a) shape)) (rest arrays))))
+  "Whether ARRAYS have the same lengths (their bounds may differ)."
+  (flet ((lengths (a) (mapcar (lambda (b) (- (second b) (first b))) (array-shape* a))))
+    (let ((shape (lengths (first arrays))))
+      (every (lambda (a) (equal (lengths a) shape)) (rest arrays)))))
 
 ;;; The primitives
 
@@ -349,7 +364,7 @@
 	(root-set root type offset value)
 	(let ((cell (%make-garray root type offset dims)))
 	  (walk-indices dims (lambda (ix) (set-array-element cell (array-element value ix "array-cell-set!") ix "array-cell-set!")))))
-    *unspecified*))
+    a))
 (defguile "transpose-array" (a &rest axes) (transpose a axes))
 (defguile "array-contents" (a &optional (strict ps:false)) (array-contents* a strict))
 (defguile "list->typed-array" (type shape list) (list->typed-array* type shape list))
@@ -358,44 +373,52 @@
   (let ((dims (nth-value 3 (array-view a "array-fill!"))))
     (walk-indices dims (lambda (ix) (set-array-element a fill ix "array-fill!"))))
   *unspecified*)
+(defun covers-p (big small)
+  "Whether array BIG has every index position SMALL has (by offset from
+the lower bounds), with the same rank."
+  (let ((b (array-shape* big)) (s (array-shape* small)))
+    (and (= (length b) (length s))
+	 (every (lambda (x y) (>= (- (second x) (first x)) (- (second y) (first y)))) b s))))
+
+(defun shape-mismatch (who)
+  (guile-error (ssym "misc-error") who "array shape mismatch" '()))
+
+(defun corresponding (a ix b)
+  "The index in B of index IX of A: the same offsets from the lower bounds."
+  (mapcar (lambda (i da db) (+ (- i (first da)) (first db))) ix (array-shape* a) (array-shape* b)))
+
 (defguile "array-copy!" (src dst)
-  (unless (same-shape-p (list src dst)) (guile-error (ssym "misc-error") "array-copy!" "array shapes differ" '()))
-  (let ((dims (nth-value 3 (array-view src "array-copy!")))
-	(dst-dims (nth-value 3 (array-view dst "array-copy!"))))
-    (let ((cells '()))
-      (walk-indices dims (lambda (ix) (push (array-element src ix "array-copy!") cells)))
-      (setq cells (nreverse cells))
-      (walk-indices dst-dims (lambda (ix) (set-array-element dst (pop cells) ix "array-copy!")))))
+  ;; SRC's elements, each to the same place in DST, which may be bigger
+  (unless (covers-p dst src) (shape-mismatch "array-copy!"))
+  (let ((cells '()))
+    (walk-indices (nth-value 3 (array-view src "array-copy!"))
+		  (lambda (ix) (push (cons (corresponding src ix dst) (array-element src ix "array-copy!")) cells)))
+    (dolist (c (nreverse cells))
+      (set-array-element dst (cdr c) (car c) "array-copy!")))
   *unspecified*)
 (setf (gethash "array-copy-in-order!" *guile-primitives*) (gethash "array-copy!" *guile-primitives*))
 
 (defun map-arrays (who dest proc sources)
-  "Set each element of DEST to PROC of the corresponding elements of SOURCES."
-  (unless (same-shape-p (cons dest sources)) (guile-error (ssym "misc-error") who "array shapes differ" '()))
-  (let* ((dims (nth-value 3 (array-view dest who)))
-	 (source-dims (mapcar (lambda (s) (nth-value 3 (array-view s who))) sources))
-	 (n (dims-size dims))
-	 (values (make-array n)) (k 0))
-    ;; the sources' elements, in order (their bounds may differ from DEST's)
-    (let ((columns (mapcar (lambda (s sd)
-			     (let ((xs '())) (walk-indices sd (lambda (ix) (push (array-element s ix who) xs))) (nreverse xs)))
-			   sources source-dims)))
-      (dotimes (i n) (setf (svref values i) (mapcar (lambda (c) (nth i c)) columns))))
-    (walk-indices dims (lambda (ix)
-			 (set-array-element dest (apply proc (svref values k)) ix who)
-			 (incf k)))))
+  "Set each element of DEST to PROC of the elements in the same places
+of SOURCES, which must have them."
+  (dolist (s sources) (unless (covers-p s dest) (shape-mismatch who)))
+  (let ((results '()))
+    (walk-indices (nth-value 3 (array-view dest who))
+		  (lambda (ix)
+		    (push (cons ix (apply proc (mapcar (lambda (s) (array-element s (corresponding dest ix s) who))
+						       sources)))
+			  results)))
+    (dolist (r (nreverse results))
+      (set-array-element dest (cdr r) (car r) who))))
 
 (defguile "array-map!" (dest proc &rest sources) (map-arrays "array-map!" dest proc sources) *unspecified*)
 (setf (gethash "array-map-in-order!" *guile-primitives*) (gethash "array-map!" *guile-primitives*))
 (defguile "array-for-each" (proc a &rest more)
-  (unless (same-shape-p (cons a more)) (guile-error (ssym "misc-error") "array-for-each" "array shapes differ" '()))
-  (let ((columns (mapcar (lambda (x)
-			   (let ((xs '()))
-			     (walk-indices (nth-value 3 (array-view x "array-for-each"))
-					   (lambda (ix) (push (array-element x ix "array-for-each") xs)))
-			     (nreverse xs)))
-			 (cons a more))))
-    (apply #'mapc proc columns))
+  (dolist (m more) (unless (covers-p m a) (shape-mismatch "array-for-each")))
+  (walk-indices (nth-value 3 (array-view a "array-for-each"))
+		(lambda (ix)
+		  (apply proc (array-element a ix "array-for-each")
+			 (mapcar (lambda (m) (array-element m (corresponding a ix m) "array-for-each")) more))))
   *unspecified*)
 (defguile "array-index-map!" (a proc)
   (walk-indices (nth-value 3 (array-view a "array-index-map!"))
@@ -433,8 +456,11 @@
       (write-char #\# stream)
       (format stream "~D" rank)
       (unless (string= type "#t") (write-string type stream))
-      (let ((empty (some (lambda (d) (> (first d) (second d))) dims))
-	    (bounds (some (lambda (d) (/= (first d) 0)) dims)))
+      (let* ((lengths (mapcar (lambda (d) (max 0 (1+ (- (second d) (first d))))) dims))
+	     ;; lengths only where the parentheses can't show them: a
+	     ;; dimension after an empty one isn't empty
+	     (empty (let ((at (position 0 lengths))) (and at (some #'plusp (nthcdr at lengths)))))
+	     (bounds (some (lambda (d) (/= (first d) 0)) dims)))
 	(dolist (d dims)
 	  (when bounds (format stream "@~D" (first d)))
 	  (when empty (format stream ":~D" (max 0 (1+ (- (second d) (first d))))))))

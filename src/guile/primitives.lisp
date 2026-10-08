@@ -13,24 +13,7 @@
 ;;; ------------------------------------------------------------------
 ;;; Lists
 
-(macrolet ((alist-procs (prefix test)
-	     (flet ((name (s) (format nil "~A~A" prefix s)))
-	       `(progn
-		  (defguile ,(name "-ref") (alist key)
-		    (let ((entry (assoc key alist :test ,test)))
-		      (if entry (cdr entry) ps:false)))
-		  (defguile ,(name "-set!") (alist key value)
-		    (let ((entry (assoc key alist :test ,test)))
-		      (if entry
-			  (progn (setf (cdr entry) value) alist)
-			  (acons key value alist))))
-		  (defguile ,(name "-remove!") (alist key)
-		    (let ((entry (assoc key alist :test ,test)))
-		      (if entry (delete entry alist :test #'eq :count 1) alist)))))))
-  (alist-procs "assq" #'eq)
-  (alist-procs "assv" #'scheme-eqv)
-  (alist-procs "assoc" #'scheme-equal))
-
+;; assq-ref and the other alist procedures: runtime.lisp
 (defguile "sloppy-assq" (key alist)
   (or (find-if (lambda (e) (and (consp e) (eq (car e) key))) alist) ps:false))
 (defguile "sloppy-assv" (key alist)
@@ -449,6 +432,16 @@ NaN is itself."
 (defguile "defined?" (sym &optional (module ps:false))
   (let ((v (module-variable* (if (truthy module) module *current-module*) sym)))
     (bool (and v (not (eq (gvariable-value v) +unbound+))))))
+(macrolet ((comparisons (&rest pairs)
+	     `(progn
+		,@(loop for (name test real) in pairs
+			collect `(defguile ,name (&rest args)
+				   ;; any number of arguments, as Guile's: (=) and (= x) are #t
+				   (dolist (x args)
+				     (unless (if ,real (realp x) (numberp x)) (wrong-type ,name 1 x)))
+				   (bool (or (null (cdr args)) (apply #',test args))))))))
+  (comparisons ("=" = nil) ("<" < t) (">" > t) ("<=" <= t) (">=" >= t)))
+
 (defun all-adjacent (test args)
   (loop for tail on args while (cdr tail) always (funcall test (car tail) (cadr tail))))
 (defguile "eq?" (&rest args) (bool (all-adjacent #'eq args)))

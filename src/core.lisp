@@ -366,6 +366,11 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
 
 (defvar *equal-budget* 100000)
 
+(defvar *bytevector-type* nil
+  "NIL, or a function giving a bytevector's element type: bytevectors of
+different types aren't EQUAL? (the Guile mode's SRFI 4 vectors are
+bytevectors tagged with their type).")
+
 (defvar *equal-extension* nil
   "NIL, or a function of two objects that EQUAL-STEP knows nothing of
 and the function comparing their parts: true if they are EQUAL?.  The
@@ -429,7 +434,11 @@ Guile mode compares its structs with it.")
 	;; R7RS bytevectors
 	((typep obj1 '(simple-array (unsigned-byte 8) (*)))
 	 (and (typep obj2 '(simple-array (unsigned-byte 8) (*)))
-	      (equalp obj1 obj2)))
+	      (equalp obj1 obj2)
+	      (or (null *bytevector-type*)
+		  (equal (funcall *bytevector-type* obj1) (funcall *bytevector-type* obj2)))))
+	((bit-vector-p obj1)
+	 (and (bit-vector-p obj2) (equal obj1 obj2)))
 	;; SRFI 4 vectors: the same type, and elements EQV?
 	((numeric-vector-tag obj1)
 	 (and (typep obj2 '(simple-array * (*)))

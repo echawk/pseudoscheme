@@ -223,9 +223,7 @@ INITIAL): letters, marks, numbers, punctuation and symbols."
 	 (write-elements (format nil "#~A" (guile-uniform-tag x)) (coerce x 'list) stream display))
 	((struct-p x) (print-struct x stream))
 	((functionp x) (write-procedure x stream))
-	((ghash-p x) (format stream "#<hash-table ~A ~D/~D>" (object-address-string x)
-			     (funcall (gethash "hash-count" *guile-primitives* (constantly 0)) (constantly t) x)
-			     31))
+	((ghash-p x) (print-object x stream))
 	((streamp x) (if (gport-p x) (print-object x stream) (print-object (stream-port x) stream)))
 	(t (let ((*print-pretty* nil)) (princ x stream)))))
 

@@ -346,17 +346,30 @@ classes among them, are printed with it.")
 
 (sb-ext:define-hash-table-test ps:scheme-equal-p ps-r6rs::sxhash-scheme)
 
-(defstruct (ghash (:constructor %make-ghash (weakness)) (:copier nil))
+(defstruct (ghash (:constructor %make-ghash (weakness &optional (initial-size 31))) (:copier nil))
   (table nil)
   (kind nil)				; :eql or :equal once used
-  (weakness nil))
+  (weakness nil)
+  (initial-size 31))
+
+(defparameter *hash-table-sizes*
+  '(31 61 113 223 443 883 1759 3517 7027 14051 28099 56197 112363 224717 449419 898823
+    1797641 3595271 7190537 14381041 28762081 57524111 115048217 230096423)
+  "Guile's bucket counts: a table has the first that holds its entries.")
+
+(defun ghash-bucket-count (h)
+  (let ((n (max (ghash-initial-size h) (if (ghash-table h) (hash-table-count (ghash-table h)) 0))))
+    (or (find-if (lambda (size) (>= size n)) *hash-table-sizes*) n)))
 
 (defmethod print-object ((h ghash) stream)
-  (format stream "#<hash-table ~X ~D/~D>" (logand (sb-kernel:get-lisp-obj-address h) #xffffffffff)
+  (format stream "#<hash-table ~(~X~) ~D/~D>" (logand (sb-kernel:get-lisp-obj-address h) #xffffffffff)
 	  (if (ghash-table h) (hash-table-count (ghash-table h)) 0)
-	  (if (ghash-table h) (hash-table-size (ghash-table h)) 31)))
+	  (ghash-bucket-count h)))
 
-(defun make-ghash (&optional weakness) (%make-ghash weakness))
+(defun make-ghash (&optional weakness (size 31))
+  (unless (and (integerp size) (>= size 0))
+    (guile-error (ssym "out-of-range") "make-hash-table" "Value out of range: ~S" (list size) (list size)))
+  (%make-ghash weakness (max 1 size)))
 
 (defun ghash-table-for (h kind)
   "H's table, made for KIND (:eql or :equal) if it hasn't one yet."
@@ -405,7 +418,7 @@ classes among them, are printed with it.")
 (define-hash-procedures "hashv" :eql)
 (define-hash-procedures "hash" :equal)
 
-(defguile "make-hash-table" (&optional n) (declare (ignore n)) (make-ghash))
+(defguile "make-hash-table" (&optional (n 31)) (make-ghash nil n))
 (defguile "make-weak-key-hash-table" (&optional n) (declare (ignore n)) (make-ghash :key))
 (defguile "make-weak-value-hash-table" (&optional n) (declare (ignore n)) (make-ghash :value))
 (defguile "make-doubly-weak-hash-table" (&optional n) (declare (ignore n)) (make-ghash :key-and-value))
@@ -435,9 +448,38 @@ classes among them, are printed with it.")
     (dolist (handle (ghash-handles h) acc)
       (setq acc (funcall proc (car handle) (cdr handle) acc)))))
 
-(defguile "hashq" (key size) (mod (sxhash key) size))
-(defguile "hashv" (key size) (mod (sxhash key) size))
-(defguile "hash" (key size) (mod (ps-r6rs::sxhash-scheme key) size))
+(defun check-hash-size (who size)
+  (unless (and (integerp size) (plusp size))
+    (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list size) (list size))))
+(defguile "hashq" (key size) (check-hash-size "hashq" size) (mod (sxhash key) size))
+(defguile "hashv" (key size) (check-hash-size "hashv" size) (mod (sxhash key) size))
+(defguile "hash" (key size) (check-hash-size "hash" size) (mod (ps-r6rs::sxhash-scheme key) size))
+
+;;; The alist procedures Guile writes in C, which skip an entry that
+;;; isn't a pair ("sloppy"), as the -ref, -set! and -remove! ones do
+(defun alist-entry (alist key test)
+  "The first pair in ALIST whose car is KEY by TEST: other entries, and
+an improper tail, are skipped, as Guile's sloppy procedures do."
+  (loop for tail = alist then (cdr tail)
+	while (consp tail)
+	when (and (consp (car tail)) (funcall test (caar tail) key)) return (car tail)))
+
+(macrolet ((alist-procedures (prefix test)
+	     (let ((ref (format nil "~A-ref" prefix)) (set (format nil "~A-set!" prefix))
+		   (remove (format nil "~A-remove!" prefix)))
+	       `(progn
+		  (defguile ,ref (alist key)
+		    (let ((e (alist-entry alist key #',test)))
+		      (if e (cdr e) ps:false)))
+		  (defguile ,set (alist key value)
+		    (let ((e (alist-entry alist key #',test)))
+		      (if e (progn (setf (cdr e) value) alist) (acons key value alist))))
+		  (defguile ,remove (alist key)
+		    (let ((e (alist-entry alist key #',test)))
+		      (if e (delete e alist :count 1 :test #'eq) alist)))))))
+  (alist-procedures "assq" eq)
+  (alist-procedures "assv" eql)
+  (alist-procedures "assoc" ps:scheme-equal-p))
 
 ;;; hashx-: the caller's hash and assoc procedures, over an alist per
 ;;; bucket kept in an equal? table by hash value
