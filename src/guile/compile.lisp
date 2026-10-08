@@ -173,7 +173,7 @@ image and of this process mustn't collide.")
     "+" "-" "*" "/" "<" ">" "<=" ">=" "=" "vector-ref" "vector-set!" "vector-length"
     "string-ref" "string-length" "length" "memq" "memv" "member" "assq" "assv" "assoc"
     "caar" "cadr" "cdar" "cddr" "caddr" "cdddr" "cadddr" "set-car!" "set-cdr!" "reverse"
-    "list?" "boolean?" "char=?" "string=?" "quotient" "remainder" "modulo" "map" "for-each"
+    "list?" "boolean?" "char=?" "quotient" "remainder" "modulo" "map" "for-each"
     "call-with-prompt" "abort-to-prompt" "dynamic-wind")
   "Guile primitives that are Pseudoscheme's host procedures of the same
 name and behaviour: a primcall of one compiles to a call of the host's.")

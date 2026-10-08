@@ -230,6 +230,46 @@ NaN is itself."
     (or (loop for i from (1- end) downto start when (funcall match (char s i)) return i)
 	ps:false)))
 (defguile "substring/copy" (s start &optional (end (length s))) (subseq s start end))
+;;; libguile's debugging dumps of a string's and a symbol's buffer, as
+;;; they are here: a string is its own buffer, never shared, and
+;;; mutable; "wide" if a character is past Latin-1.
+
+(defun wide-string-p (s) (some (lambda (c) (> (char-code c) 255)) s))
+
+(defguile "%string-dump" (s)
+  (unless (stringp s) (wrong-type "%string-dump" 1 s))
+  (flet ((entry (key value) (cons (ssym key) value)))
+    (list (entry "string" s) (entry "start" 0) (entry "length" (length s))
+	  (entry "shared" ps:false) (entry "read-only" ps:false)
+	  (entry "stringbuf" s) (entry "stringbuf-chars" (copy-seq s))
+	  (entry "stringbuf-length" (length s)) (entry "stringbuf-shared" ps:false)
+	  (entry "stringbuf-mutable" ps:true) (entry "stringbuf-wide" (bool (wide-string-p s))))))
+
+(defguile "%symbol-dump" (sym)
+  (unless (ps:scheme-symbol-p sym) (wrong-type "%symbol-dump" 1 sym))
+  (let ((name (ps:scheme-symbol-name sym)))
+    (flet ((entry (key value) (cons (ssym key) value)))
+      (list (entry "symbol" sym) (entry "hash" (sxhash name)) (entry "interned" ps:true)
+	    (entry "stringbuf" name) (entry "stringbuf-chars" (copy-seq name))
+	    (entry "stringbuf-length" (length name)) (entry "stringbuf-shared" ps:false)
+	    (entry "stringbuf-wide" (bool (wide-string-p name)))))))
+
+;;; String comparisons: any number of strings, as Guile's (the host's
+;;; take string designators, such as symbols).
+(macrolet ((comparisons (&rest pairs)
+	     `(progn
+		,@(loop for (name test) in pairs
+			collect `(defguile ,name (&rest strings)
+				   (loop for x in strings for i from 1
+					 unless (stringp x) do (wrong-type ,name i x))
+				   (bool (loop for (a b) on strings while b
+					       always (,test a b))))))))
+  (comparisons ("string=?" string=) ("string<?" string<) ("string>?" string>)
+	       ("string<=?" string<=) ("string>=?" string>=)
+	       ("string-ci=?" string-equal) ("string-ci<?" string-lessp)
+	       ("string-ci>?" string-greaterp) ("string-ci<=?" string-not-greaterp)
+	       ("string-ci>=?" string-not-lessp)))
+
 (defguile "substring/read-only" (s start &optional (end (length s))) (subseq s start end))
 (defguile "string-append/shared" (&rest strings) (apply #'concatenate 'string strings))
 (defguile "string-bytes-per-char" (s) (if (every (lambda (c) (< (char-code c) 256)) s) 1 4))
@@ -241,6 +281,12 @@ NaN is itself."
 (defguile "string-fill!" (s c &optional (start 0) (end (length s)))
   (fill s c :start start :end end) *unspecified*)
 (defguile "substring-move!" (from start end to at)
+  (unless (stringp from) (wrong-type "substring-move!" 1 from))
+  (unless (stringp to) (wrong-type "substring-move!" 4 to))
+  (unless (and (integerp start) (<= 0 start (length from))) (out-of-range "substring-move!" start))
+  (unless (and (integerp end) (<= start end (length from))) (out-of-range "substring-move!" end))
+  (unless (and (integerp at) (<= 0 at) (<= (+ at (- end start)) (length to)))
+    (out-of-range "substring-move!" at))
   (replace to from :start1 at :start2 start :end2 end) *unspecified*)
 (defguile "char-is-both?" (c) (bool (both-case-p c)))	; has case: upper or lower
 
@@ -761,8 +807,38 @@ that name, if the host has one."
 		(fill bv (ldb (byte 8 0) fill) :start start :end end)
 		*unspecified*))
 	(cons "bytevector-slice"
-	      (lambda (bv offset &optional (size (- (length bv) offset)))
-		(subseq bv offset (+ offset size))))))
+	      (lambda (bv offset &optional (size nil size-p))
+		(unless (typep bv 'ps-r6rs::octets) (wrong-type "bytevector-slice" 1 bv))
+		(unless (and (integerp offset) (<= 0 offset (length bv)))
+		  (out-of-range "bytevector-slice" offset))
+		(let ((size (if size-p size (- (length bv) offset))))
+		  (unless (and (integerp size) (<= 0 size (- (length bv) offset)))
+		    (out-of-range "bytevector-slice" size))
+		  (subseq bv offset (+ offset size)))))
+	;; Guile's checks of the size, before the host's
+	(cons "bytevector->sint-list" (lambda (bv endianness size) (integer-list-size-check "bytevector->sint-list" bv size)
+					(funcall (psx:host-ref "bytevector->sint-list") bv endianness size)))
+	(cons "bytevector->uint-list" (lambda (bv endianness size) (integer-list-size-check "bytevector->uint-list" bv size)
+					(funcall (psx:host-ref "bytevector->uint-list") bv endianness size)))
+	(cons "utf8->string"
+	      (lambda (bv &optional (start 0) (end nil))
+		(unless (typep bv 'ps-r6rs::octets) (wrong-type "utf8->string" 1 bv))
+		(handler-case (sb-ext:octets-to-string bv :external-format '(:utf-8 :replacement nil)
+							  :start start :end end)
+		  (sb-int:character-decoding-error ()
+		    (call-throw (ssym "decoding-error") (list "utf8->string" "input decoding error" +eilseq+ bv))))))
+	;; the endianness is optional, big by default
+	(cons "utf16->string" (lambda (bv &optional (endianness (ssym "big")) endianness-mandatory)
+				(funcall (psx:host-ref "utf16->string") bv endianness
+					 (if (truthy endianness-mandatory) ps:true ps:false))))
+	(cons "utf32->string" (lambda (bv &optional (endianness (ssym "big")) endianness-mandatory)
+				(funcall (psx:host-ref "utf32->string") bv endianness
+					 (if (truthy endianness-mandatory) ps:true ps:false))))))
+
+(defun integer-list-size-check (who bv size)
+  (unless (typep bv 'ps-r6rs::octets) (wrong-type who 1 bv))
+  (unless (and (integerp size) (plusp size)) (out-of-range who size))
+  (unless (zerop (mod (length bv) size)) (wrong-type who 3 size)))
 
 (defguile "raise" (signal) (sb-posix:kill (sb-posix:getpid) signal) ps:true)
 

@@ -125,7 +125,11 @@
     (cond ((string= type "#t") (make-array n :initial-element (if (null fill) *unspecified* fill)))
 	  ((string= type "a") (make-string n :initial-element (if (characterp fill) fill #\Space)))
 	  ((string= type "b") (make-array n :element-type 'bit :initial-element (if (and (not unspecified) (truthy fill)) 1 0)))
-	  ((string= type "vu8") (make-array n :element-type '(unsigned-byte 8) :initial-element (if unspecified 0 fill)))
+	  ((string= type "vu8")
+	   (unless (or unspecified (typep fill '(unsigned-byte 8)))
+	     (guile-error (ssym "out-of-range") "make-typed-array" "Value out of range 0 to 255: ~S"
+			  (list fill) (list fill)))
+	   (make-array n :element-type '(unsigned-byte 8) :initial-element (if unspecified 0 fill)))
 	  ((type-size type)
 	   (let ((v (make-array (* n (type-size type)) :element-type '(unsigned-byte 8) :initial-element 0)))
 	     (setf (gethash v *bytevector-types*) type)
@@ -494,8 +498,19 @@ of SOURCES, which must have them."
 
 (defguile "uniform-array->bytevector" (a)
   ;; the elements' bytes, in row-major order
+  (uniform-array->bytevector a))
+
+(defun uniform-array->bytevector (a)
   (multiple-value-bind (root type offset dims) (array-view a "uniform-array->bytevector")
     (declare (ignore root offset))
+    (when (string= type "b")
+      ;; a bitvector's bits in 32-bit words, least significant first
+      (let* ((bits (array->list* a))
+	     (out (make-array (* 4 (ceiling (length bits) 32)) :element-type '(unsigned-byte 8) :initial-element 0)))
+	(loop for bit in bits for i from 0
+	      when (truthy bit)
+		do (setf (ldb (byte 1 (mod i 8)) (aref out (floor i 8))) 1))
+	(return-from uniform-array->bytevector out)))
     (let* ((size (or (type-size type) (wrong-type "uniform-array->bytevector" 1 a)))
 	   (n (dims-size dims))
 	   (out (make-root (if (string= type "vu8") "vu8" type) n 0))
