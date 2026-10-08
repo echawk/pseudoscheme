@@ -296,5 +296,6 @@
 	       (:file "goops" :depends-on ("foreign" "ports"))
 	       (:file "arrays" :depends-on ("primitives"))
 	       (:file "cache" :depends-on ("boot"))
+	       (:file "i18n" :depends-on ("primitives"))
 	       (:file "write" :depends-on ("goops" "ports" "regex" "arrays"))
 	       (:static-file "root-primitives.txt")))
