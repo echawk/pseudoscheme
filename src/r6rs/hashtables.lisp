@@ -178,3 +178,17 @@
 for the few primitives that hand back other standard procedures.")
 
 (defun r6rs-global (name) (funcall *globals-hook* name))
+
+;;; SRFI 124's ephemerons (src/srfi/124.sld): a one-entry weak-key table,
+;;; which SBCL makes ephemeral.
+
+(defun make-ephemeron-table (key datum)
+  (let ((table (make-hash-table :test 'eq :weakness :key)))
+    (setf (gethash key table) datum)
+    table))
+
+(defun ephemeron-entry (table)
+  "The key and datum of TABLE's entry, or #f and #f if it has none."
+  (block nil
+    (maphash (lambda (k v) (return (values k v))) table)
+    (values ps:false ps:false)))

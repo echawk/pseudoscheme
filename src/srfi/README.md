@@ -1,7 +1,7 @@
 # SRFIs
 
 The SRFI libraries that ship with Pseudoscheme: every final SRFI that
-hasn't been withdrawn, as of SRFI 274, except SRFI 124 (ephemerons). Each `N.sld` is an R7RS
+hasn't been withdrawn, as of SRFI 274. Each `N.sld` is an R7RS
 `define-library` for `(srfi N)` (a few are R6RS `library` forms). psyntax finds them with no setup:
 `psx:*system-library-path*` roots every name that starts with `srfi` here.
 That root is searched after the user's `psx:*library-path*`, so a project
@@ -140,6 +140,7 @@ throughout:
 | 120 | Takashi Kato's sample implementation (four changes, see `120.sld`) | 2-clause BSD |
 | 121 | Re-exports SRFI 158, which extends it | — |
 | 123 | Taylan Kammer's reference implementation, on (srfi 17) and R6RS records (field-name wrappers, see `123.sld`) | MIT |
+| 124 | Written here: an ephemeron is a one-entry weak-key SBCL hash table, which SBCL makes ephemeral (src/r6rs/hashtables.lisp) | — |
 | 125 | William D Clinger's reference implementation, on `(rnrs hashtables)` in place of SRFI 126 | Clinger (permissive) |
 | 126 | Taylan Kammer's reference implementation, with weak tables on trivial-garbage (see `126.sld`) | MIT |
 | 127 | John Cowan's reference implementation | MIT |

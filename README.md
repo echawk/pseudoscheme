@@ -89,8 +89,7 @@ bench/RESULTS.md.
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
 libraries and 91 of 130 snow-fort libraries load.
 
-Every final SRFI that hasn't been withdrawn but SRFI 124 (ephemerons),
-208 of them through SRFI 274, ships in `src/srfi/` or is built into the reader, the expander or
+Every final SRFI that hasn't been withdrawn, 209 of them through SRFI 274, ships in `src/srfi/` or is built into the reader, the expander or
 the command line (`(srfi 1)`, `(srfi :1 lists)` and `(srfi srfi-1)`
 alike). `make test-srfi` runs their tests. See src/srfi/README.md for
 where each comes from and what each leaves out.

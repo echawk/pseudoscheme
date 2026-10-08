@@ -16,7 +16,7 @@ this file.
 | `tests/run-continuation-tests.lisp` | 45/45 |
 | `make -C contrib/cli test` | 31/31 |
 | `make test-programs` (`tests/programs/`, needs Quicklisp) | 5 of 5 programs |
-| `make test-srfi` (`src/srfi/tests/`) | 121 of 121 test programs |
+| `make test-srfi` (`src/srfi/tests/`) | 122 of 122 test programs |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
 | `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.37× Chez's time, 1.30× escape-only (1.55× and 1.44× before the second pass; Guile 2.8×, Gauche 9.2×) |
 
