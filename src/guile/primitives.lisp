@@ -1704,3 +1704,12 @@ true (the predicate's value) if it matches."
 
 (defextension "scm_init_loader"
   (list (cons "load-thunk-from-memory" #'load-thunk-from-memory)))
+
+;; SRFI 13's string-join, with libguile's error for joining nothing with
+;; the strict-infix grammar
+(defguile "string-join" (strings &optional (delimiter " ") (grammar (ssym "infix")))
+  (when (and (null strings) (symbolp grammar) grammar
+	     (string= (ps:scheme-symbol-name grammar) "strict-infix"))
+    (guile-error (ssym "misc-error") "string-join"
+		 "strict-infix grammar requires non-empty list" '()))
+  (funcall (gethash (cons "(srfi 13)" "string-join") *library-values*) strings delimiter grammar))

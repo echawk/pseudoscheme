@@ -522,7 +522,15 @@ fields as Guile's hash goes; the first nodes only, so cycles end."
 					       (walk (syntax-object-module x)))))
 		     (gstruct (if (vtable-p x)
 				  (sxhash x)
-				  (walk (gstruct-slots x))))
+				  ;; its type, and its fields but the hidden ones
+				  (let* ((vtable (struct-vtable-of x))
+					 (hidden (vtable-hidden vtable))
+					 (h (sxhash vtable)))
+				    (loop for y across (gstruct-slots x) for i from 0
+					  while (plusp budget)
+					  unless (member i hidden)
+					    do (setq h (logand most-positive-fixnum (+ (* h 31) (walk y)))))
+				    h)))
 		     (t (sxhash x))))))
       (walk x))))
 (defguile "hash" (key size) (check-hash-size "hash" size) (mod (guile-hash key) size))

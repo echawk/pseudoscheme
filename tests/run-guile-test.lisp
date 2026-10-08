@@ -30,6 +30,8 @@
 (defparameter *file* (find-if (lambda (a) (search ".test" a)) *args*))
 (defparameter *verbose* (member "-v" *args* :test #'string=))
 (defparameter *suite* (asdf:system-relative-pathname :pseudoscheme "vendor/guile-test-suite/"))
+;; as Guile's check-guile sets it: popen.test runs tests/popen-child.scm
+(sb-posix:setenv "TEST_SUITE_DIR" (string-right-trim "/" (namestring *suite*)) 1)
 
 (setq psx::*full-continuations* t)
 (psg:boot)

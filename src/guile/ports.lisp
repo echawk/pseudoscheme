@@ -213,8 +213,9 @@
 (defun write-octets (port octets &optional (start 0) (end (length octets)))
   (check-open port "write")
   (unless (port-output-p port) (wrong-type "write" 1 port))
-  ;; writing discards buffered input, as in Guile (its position is the file's)
-  (when (and (< (port-rpos port) (port-rend port)) (port-seek-fn port))
+  ;; writing discards buffered input, as in Guile (its position is the
+  ;; file's), on a port with random access; a pipe's input stays
+  (when (and (< (port-rpos port) (port-rend port)) (port-random-access-p port))
     (discard-input port))
   (setf (gethash port *open-output-ports*) t)
   (loop while (< start end)
@@ -235,6 +236,13 @@
 	      do (let ((n (funcall (port-write-fn port) (port-wbuf port) start (- wend start))))
 		   (when (<= n 0) (return))
 		   (incf start n)))))))
+
+(defun port-random-access-p (port)
+  (and (port-seek-fn port)
+       (if (string= (port-kind port) "custom")
+	   (let ((random-access (custom-dispatcher "custom-port-random-access?")))
+	     (or (null random-access) (truthy (funcall random-access port (port-data port)))))
+	   t)))
 
 (defun discard-input (port)
   "Forget buffered input, moving the backend back to where it was read to."
