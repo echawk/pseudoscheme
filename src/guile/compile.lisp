@@ -170,7 +170,7 @@ image and of this process mustn't collide.")
   '("car" "cdr" "cons" "list" "append" "vector" "list->vector" "apply" "values"
     "call-with-values" "call-with-current-continuation" "eq?" "eqv?" "equal?"
     "pair?" "string?" "vector?" "procedure?" "char?" "number?" "integer?" "zero?"
-    "+" "-" "*" "/" "<" ">" "<=" ">=" "=" "vector-ref" "vector-set!" "vector-length"
+    "+" "-" "*" "<" ">" "<=" ">=" "=" "vector-ref" "vector-set!" "vector-length"
     "string-ref" "string-length" "length" "memq" "memv" "member" "assq" "assv" "assoc"
     "caar" "cadr" "cdar" "cddr" "caddr" "cdddr" "cadddr" "set-car!" "set-cdr!" "reverse"
     "list?" "boolean?" "char=?" "quotient" "remainder" "modulo" "map" "for-each"

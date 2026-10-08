@@ -165,21 +165,170 @@ NaN is itself."
 				   (nth-value 1 (guile-division ,kind n d))))))))
   (divisions :floor :ceiling :truncate :round :euclidean :centered))
 
-(defguile "integer-expt" (n k) (expt n k))
+;;; Transcendental and other numeric procedures where Guile's results
+;;; at the edges (zero, infinities, NaNs, huge exact numbers) differ from
+;;; the host's.
+
+(defvar +nan+ (sb-kernel:make-double-float #x7FF80000 0) "+nan.0")
+
+(defun numerical-overflow (who)
+  (guile-error (ssym "numerical-overflow") who "Numerical overflow" '()))
+
+(defun host-call (name &rest args) (apply (psx:host-ref name) args))
+
+(defun exact-zero-p (x) (eql x 0))
+
+(defguile "integer-expt" (n k)
+  (unless (integerp k) (wrong-type "integer-expt" 2 k))
+  (cond ((zerop k) 1)
+	((and (zerop n) (minusp k)) +nan+)
+	(t (expt n k))))
+
+(defguile "expt" (z w)
+  (cond ((exact-zero-p w) 1)
+	((and (zerop z) (realp w) (minusp w)) +nan+)
+	(t (host-call "expt" z w))))
+
 (defguile "modulo-expt" (n k m)
-  (let ((result 1) (base (mod n m)))
-    (loop while (plusp k)
-	  do (when (oddp k) (setq result (mod (* result base) m)))
-	     (setq base (mod (* base base) m) k (ash k -1)))
-    result))
-(defguile "log10" (x) (log x 10d0))
+  (let ((base (mod n m)))
+    (when (minusp k)
+      ;; the inverse of N modulo M, raised to -K
+      (multiple-value-bind (g inverse) (extended-gcd base m)
+	(unless (= g 1) (numerical-overflow "modulo-expt"))
+	(setq base (mod inverse m) k (- k))))
+    (let ((result (mod 1 m)))
+      (loop while (plusp k)
+	    do (when (oddp k) (setq result (mod (* result base) m)))
+	       (setq base (mod (* base base) m) k (ash k -1)))
+      result)))
+
+(defun extended-gcd (a b)
+  "(gcd a b) and x such that a x = gcd (mod b)."
+  (let ((r0 a) (r1 b) (s0 1) (s1 0))
+    (loop until (zerop r1)
+	  do (let ((q (floor r0 r1)))
+	       (psetq r0 r1 r1 (- r0 (* q r1)))
+	       (psetq s0 s1 s1 (- s0 (* q s1)))))
+    (values (abs r0) (if (minusp r0) (- s0) s0))))
+
+(defun log-of-positive-rational (x)
+  "The natural log of X, a positive rational, as a double, even when X is
+past the range of doubles."
+  (flet ((log-integer (n)
+	   (let ((shift (max 0 (- (integer-length n) 64))))
+	     (+ (log (coerce (ash n (- shift)) 'double-float))
+		(* shift (log 2d0))))))
+    (- (log-integer (numerator x)) (log-integer (denominator x)))))
+
+(defun guile-log (who z)
+  (cond ((exact-zero-p z) (numerical-overflow who))
+	((nan-p z) +nan+)
+	((and (floatp z) (zerop z))
+	 (if (minusp (float-sign z))
+	     (complex sb-ext:double-float-negative-infinity pi)
+	     sb-ext:double-float-negative-infinity))
+	((rationalp z)
+	 (let ((magnitude (log-of-positive-rational (abs z))))
+	   (if (minusp z) (complex magnitude pi) magnitude)))
+	(t (host-call "log" z))))
+
+(defguile "log" (z) (guile-log "log" z))
+(defguile "log10" (z)
+  (let ((l (guile-log "log10" z)))
+    (if (or (nan-p l) (and (floatp l) (sb-ext:float-infinity-p l)))
+	l
+	(/ l (log 10d0)))))
+
+(defun sqrt-of-nonnegative (x)
+  "The square root of X, a nonnegative real: exact if X is an exact
+square, else the nearest double, however big or small X is."
+  (cond ((floatp x)
+	 (if (and (plusp x) (< x least-positive-normalized-double-float))
+	     (/ (sqrt (* x (expt 2d0 108))) (expt 2d0 54))
+	     (sqrt x)))
+	(t (let* ((n (numerator x)) (d (denominator x))
+		  (rn (isqrt n)) (rd (isqrt d)))
+	     (if (and (= (* rn rn) n) (= (* rd rd) d))
+		 (/ rn rd)
+		 ;; sqrt (n/d) = isqrt (n 4^s / d) / 2^s, with 64 bits or so
+		 (let* ((s (max 0 (ceiling (- 128 (- (integer-length n) (integer-length d))) 2)))
+			(q (floor (ash n (* 2 s)) d)))
+		   (scale-float (coerce (isqrt q) 'double-float) (- s))))))))
+
+(defguile "sqrt" (z)
+  (cond ((nan-p z) z)
+	((and (realp z) (or (plusp z) (zerop z))) (sqrt-of-nonnegative z))
+	((realp z)
+	 (let ((root (sqrt-of-nonnegative (- z))))
+	   (complex 0d0 (coerce root 'double-float))))
+	(t (host-call "sqrt" z))))
+
+(defguile "/" (x &rest ys)
+  (when (if ys (some #'exact-zero-p ys) (exact-zero-p x))
+    (numerical-overflow "divide"))
+  (apply #'host-call "/" x ys))
+
+(defguile "inexact->exact" (z)
+  (when (or (nan-p z) (and (floatp z) (sb-ext:float-infinity-p z)))
+    (out-of-range "inexact->exact" z))
+  (host-call "exact" z))
+
+(defguile "string->number" (string &optional (radix 10))
+  (guile-string->number string radix))
+
+(defun guile-string->number (string radix)
+  (unless (stringp string) (wrong-type "string->number" 1 string))
+  ;; R5RS's # for a digit not known ("2#" is 20.0), which Guile still
+  ;; reads: each # after a digit is a 0, no digit follows one in the
+  ;; same digits ("5#.0" isn't a number), and the number is inexact
+  (let ((digits (let ((s (copy-seq string)) (after-digit nil) (hashed nil))
+		  (dotimes (i (length s) s)
+		    (let ((c (char s i)))
+		      (cond ((digit-char-p c radix)
+			     (when hashed (return-from guile-string->number ps:false))
+			     (setq after-digit t))
+			    ((and (char= c #\#) after-digit) (setf (char s i) #\0 hashed t))
+			    ((char= c #\.))
+			    (t (setq after-digit nil hashed nil))))))))
+    (if (string= digits string)
+	(let ((n (host-call "string->number" string radix)))
+	  ;; an exponent past the range of doubles
+	  (when (and (floatp n) (sb-ext:float-infinity-p n) (not (search "inf" string :test #'char-equal)))
+	    (out-of-range "string->number" string))
+	  n)
+	(let ((n (host-call "string->number" digits radix)))
+	  (cond ((not (numberp n)) ps:false)
+		((search "#e" string :test #'char-equal) n) ; exact, as asked
+		((rationalp n) (coerce n 'double-float))
+		(t n))))))
+
+(defguile "make-rectangular" (re im)
+  (unless (realp re) (wrong-type "make-rectangular" 1 re))
+  (unless (realp im) (wrong-type "make-rectangular" 2 im))
+  (if (exact-zero-p im)
+      re
+      (complex (coerce re 'double-float) (coerce im 'double-float))))
+(defguile "make-polar" (magnitude angle)
+  (cond ((exact-zero-p magnitude) 0)
+	((exact-zero-p angle) magnitude)
+	(t (host-call "make-polar" magnitude angle))))
+
+(defun real-argument (who x)
+  (unless (realp x) (wrong-type who 1 x))
+  x)
+(defguile "finite?" (x)
+  (real-argument "finite?" x)
+  (bool (not (and (floatp x) (or (nan-p x) (sb-ext:float-infinity-p x))))))
+(defguile "nan?" (x) (real-argument "nan?" x) (bool (nan-p x)))
 (defguile "sinh" (x) (sinh x))
 (defguile "cosh" (x) (cosh x))
 (defguile "tanh" (x) (tanh x))
 (defguile "asinh" (x) (asinh x))
 (defguile "acosh" (x) (acosh x))
 (defguile "atanh" (x) (atanh x))
-(defguile "inf?" (x) (bool (and (floatp x) (sb-ext:float-infinity-p x))))
+(defguile "inf?" (x)
+  (real-argument "inf?" x)
+  (bool (and (floatp x) (sb-ext:float-infinity-p x))))
 
 (defvar *guile-random-state* (make-random-state t))
 (defguile "random" (n &optional (state *guile-random-state*))
@@ -576,8 +725,8 @@ less than 0.0."
 	nan
 	(let ((best (reduce (lambda (a b)
 			      (cond ((funcall test b a) b)
-				    ((and (= a b) (floatp a) (floatp b)
-					  (funcall test (float-sign b) (float-sign a)))
+				    ((and (= a b) (or (floatp a) (floatp b))
+					  (funcall test (float-sign (float b 1d0)) (float-sign (float a 1d0))))
 				     b)
 				    (t a)))
 			    args)))
@@ -605,7 +754,7 @@ less than 0.0."
 
 (defguile "numerator" (x)
   (cond ((rationalp x) (numerator x))
-	((or (sb-ext:float-infinity-p x) (nan-p x)) x)
+	((or (sb-ext:float-infinity-p x) (nan-p x) (zerop x)) x)
 	(t (float (numerator (rational x)) x))))
 (defguile "denominator" (x)
   (cond ((rationalp x) (denominator x))

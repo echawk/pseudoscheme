@@ -486,10 +486,15 @@ follow an exponent marker."
 
 (defun parse-scheme-number (string &optional (radix 10))
   "The number STRING denotes, or NIL (STRING->NUMBER)."
-  (let ((start 0) (end (length string)) (exactness nil) (radix radix))
+  (let ((start 0) (end (length string)) (exactness nil) (radix radix) (radix-prefix nil))
     (loop while (and (< (1+ start) end) (char= (char string start) #\#))
 	  do (case (char-downcase (char string (1+ start)))
-	       (#\x (setq radix 16)) (#\b (setq radix 2)) (#\o (setq radix 8)) (#\d (setq radix 10))
+	       ((#\x #\b #\o #\d)
+		;; one radix prefix at most
+		(when radix-prefix (return-from parse-scheme-number nil))
+		(setq radix-prefix t
+		      radix (ecase (char-downcase (char string (1+ start)))
+			      (#\x 16) (#\b 2) (#\o 8) (#\d 10))))
 	       (#\e (if exactness (return-from parse-scheme-number nil) (setq exactness :exact)))
 	       (#\i (if exactness (return-from parse-scheme-number nil) (setq exactness :inexact)))
 	       (t (return-from parse-scheme-number nil)))
