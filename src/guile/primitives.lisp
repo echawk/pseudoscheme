@@ -567,13 +567,19 @@ less than 0.0."
 	((nan-p x) x)
 	(t (float (denominator (rational x)) x))))
 
+(defun proper-list-p (x)
+  "Whether X is a finite list ending in () or Emacs Lisp's nil."
+  (loop for slow = x then (cdr slow)
+	for fast = x then (cddr fast)
+	for first = t then nil
+	do (cond ((or (null fast) (eq fast *elisp-nil*)) (return t))
+		 ((not (consp fast)) (return nil))
+		 ((or (null (cdr fast)) (eq (cdr fast) *elisp-nil*)) (return t))
+		 ((not (consp (cdr fast))) (return nil))
+		 ((and (not first) (eq slow fast)) (return nil)))))
+
 (defun check-proper-list (who pos x)
-  ;; a list may end with Emacs Lisp's nil
-  (unless (or (eq x *elisp-nil*)
-	      (and (listp x)
-		   (handler-case (progn (list-length (ldiff x (last x))) t) (error () nil))
-		   (member (cdr (last x)) (list nil *elisp-nil*))))
-    (wrong-type who pos x)))
+  (unless (proper-list-p x) (wrong-type who pos x)))
 
 (defguile "append!" (&rest lists)
   (let ((lists (remove '() lists :end (max 0 (1- (length lists))))))
