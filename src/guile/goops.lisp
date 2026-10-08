@@ -200,6 +200,11 @@ applicable), and what is an instance of each here.")
     "list-tail" "vector-ref" "vector-set!" "vector-length")
   "The primitives that libguile defines with SCM_PRIMITIVE_GENERIC, roughly.")
 
+(defun goops-generic-primitive-p (name)
+  "Whether GOOPS is loaded and NAME's root variable is one that it makes
+dispatch to a generic: a primcall of NAME is then a call through it."
+  (and *goops-module* (member name *primitive-generic-names* :test #'string=) t))
+
 (defvar *primitive-generic-functions* nil
   "The root values of *PRIMITIVE-GENERIC-NAMES*, and the names: (function . name).")
 
@@ -222,7 +227,8 @@ fails on its arguments; return the generic."
 			  (funcall (goops-value "make") (goops-class "<generic>")
 				   :name (ssym name))))
 	     (dispatching (lambda (&rest args)
-			    (handler-case (apply f args)
+			    (handler-case (let ((*dispatching-primitive* name)) (apply f args))
+			      (wrong-type-dispatch () (apply generic args))
 			      ((or type-error guile-throw) (c)
 				(if (and (typep c 'guile-throw)
 					 (not (string= (ps:scheme-symbol-name (guile-throw-key c)) "wrong-type-arg")))

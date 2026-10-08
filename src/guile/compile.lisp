@@ -187,6 +187,9 @@ name and behaviour: a primcall of one compiles to a call of the host's.")
   (let* ((string (ps:scheme-symbol-name name))
 	 (rename (cdr (assoc string *primcall-renames* :test #'string=))))
     (cond (rename (core rename))
+	  ((goops-generic-primitive-p string)
+	   ;; GOOPS may give it methods, by rebinding its root variable
+	   (root-reference name))
 	  ((member string *open-primitives* :test #'string=) (core string))
 	  ((member string '("wind" "unwind" "push-fluid" "pop-fluid" "push-dynamic-state"
 			    "pop-dynamic-state")
@@ -194,7 +197,25 @@ name and behaviour: a primcall of one compiles to a call of the host's.")
 	   ;; only boot-9's dynamic-wind, with-fluid* and with-dynamic-state
 	   ;; use these, and they are replaced (BOOT-OVERRIDES)
 	   (list (core "%guile-unsupported") (quoted name)))
+	  ((and (not (obarray-variable name)) (primitive-module string))
+	   (list (core "%guile-ref")
+		 (quoted (make-site (mapcar #'ssym (primitive-module string)) name t :module))))
 	  (t (root-reference name)))))
+
+(defun primitive-module (name)
+  "The module that exports primitive NAME (a string), if not (guile): as
+(language tree-il primitives) has it, whose passes make primcalls of
+references to these."
+  (flet ((prefix-p (prefix) (and (>= (length name) (length prefix))
+				 (string= prefix name :end2 (length prefix)))))
+    (cond ((or (prefix-p "bytevector") (member name '("string->utf8" "utf8->string") :test #'string=))
+	   '("rnrs" "bytevectors"))
+	  ((or (prefix-p "make-atomic-box") (prefix-p "atomic-box")) '("ice-9" "atomic"))
+	  ((string= name "current-thread") '("ice-9" "threads"))
+	  ((string= name "class-of") '("oop" "goops"))
+	  ((some (lambda (type) (prefix-p (format nil "~Avector-" type)))
+		 '("u8" "s8" "u16" "s16" "u32" "s32" "u64" "s64" "f32" "f64"))
+	   '("srfi" "srfi-4")))))
 
 (defun root-reference (name)
   "A reference to NAME in the (guile) module."

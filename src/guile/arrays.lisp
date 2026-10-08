@@ -510,3 +510,9 @@ of SOURCES, which must have them."
     (wrong-type "vector->list" 1 v))
   (let ((list (array->list* v)))
     (subseq list start end)))
+
+;; (rnrs bytevectors) exports uniform-array->bytevector, which isn't in
+;; the root module: libguile defines it in that module's extension.
+(setf (gethash "uniform-array->bytevector" *extension-primitives*)
+      (gethash "uniform-array->bytevector" *guile-primitives*))
+(remhash "uniform-array->bytevector" *guile-primitives*)

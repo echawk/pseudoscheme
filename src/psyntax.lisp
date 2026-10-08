@@ -481,6 +481,25 @@ CANONICAL-LAMBDA)."
 				 (cddr key))))))
 	    (apply maker constants))))))
 
+(defun eval-compiled-or-interpreted (form)
+  "EVAL FORM, or, if SBCL's compiler fails on it (a procedure too big for
+one code object, past arm64's branch and constant reach), evaluate it
+with SBCL's interpreter: nothing of it has run when compiling fails."
+  #+sbcl
+  (let ((form form))
+    (multiple-value-bind (values failure)
+	(catch 'compile-failed
+	  (handler-bind ((error (lambda (c)
+				  (when (and (boundp 'sb-c::*compilation*) sb-c::*compilation*
+					     (not (typep c 'sb-int:simple-program-error)))
+				    (throw 'compile-failed (values nil t))))))
+	    (values (multiple-value-list (eval form)) nil)))
+      (if failure
+	  (let ((sb-ext:*evaluator-mode* :interpret))
+	    (eval form))
+	  (values-list values))))
+  #-sbcl (eval form))
+
 (defun host-eval-1 (form)
   "Translate and evaluate core FORM in *HOST*.  The CL compiler's
 style warnings about the generated code (an unknown arity, say) are
@@ -497,8 +516,8 @@ about psyntax's output, not the user's program, so they're muffled."
 		(if (and (consp form) (symbolp (car form))
 			 (string= (symbol-name (car form)) "BEGIN") (cdr form))
 		    (eval-top-level-forms (cdr form))
-		    (eval (translate-core form t))))))))
-	(eval (translate-core (open-top-level form) t)))))
+		    (eval-compiled-or-interpreted (translate-core form t))))))))
+	(eval-compiled-or-interpreted (translate-core (open-top-level form) t)))))
 
 (defparameter *inline-arithmetic-limit* 50000
   "The largest core form, in conses, compiled with +, - and * inline.")

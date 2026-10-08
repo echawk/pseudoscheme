@@ -911,7 +911,6 @@ read buffer, unread."
    (cons "unread-char" (lambda (c &optional port) (port-unread-char (in-port port "unread-char") c) c))
    (cons "unread-string" #'unread-string*)
    (cons "setvbuf" (lambda (port mode &optional size)
-		     (declare (ignore size))
 		     (let ((p (->port port "setvbuf")))
 		       ;; an open port with a descriptor or a custom one
 		       (unless (and (port-open-p p)
@@ -922,7 +921,17 @@ read buffer, unread."
 			     (let ((m (if (symbolp mode) (ps:scheme-symbol-name mode) mode)))
 			       (cond ((member m '("none" 0) :test #'equal) :none)
 				     ((member m '("line" 1) :test #'equal) :line)
-				     (t :full)))))
+				     (t :full))))
+		       ;; buffers of SIZE (or the default), as libguile's
+		       ;; setvbuf makes, replacing a custom port's natural sizes;
+		       ;; a read buffer holding input is kept
+		       (let ((n (cond ((eq (port-buffering p) :none) 1)
+				      ((and (integerp size) (plusp size)) size)
+				      (t +buffer-size+))))
+			 (unless (= n (length (port-wbuf p)))
+			   (setf (port-wbuf p) (make-octets n)))
+			 (when (and (= (port-rpos p) (port-rend p)) (/= n (length (port-rbuf p))))
+			   (setf (port-rbuf p) (make-octets n) (port-rpos p) 0 (port-rend p) 0))))
 		     *unspecified*))
    (cons "drain-input" (lambda (port)
 			 (let* ((p (->port port "drain-input"))

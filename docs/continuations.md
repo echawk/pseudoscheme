@@ -554,7 +554,12 @@ re-entry, which logs `(in out in body out)`, nested tags, and a loop of
   libraries are re-exports and syntax with almost no Scheme procedures
   of their own, and psyntax runs at expansion time. Otherwise it takes
   a program that mixes the modes on purpose: the compiled-library
-  cache keeps the two modes' code apart.
+  cache keeps the two modes' code apart. One exception is a top-level
+  form too big for SBCL to compile once transformed: past
+  `*cc-transform-limit*` conses (175,000) it is compiled as it is. The
+  transformation multiplies a procedure's size, and SBCL on arm64 can't
+  compile a code object much past a megabyte. Only Guile's compiler
+  passes (peval, the effects analysis) are that big.
 - **Threads**: frames are per thread (`*fstack*` is bound per base).
   Invoking a continuation in a thread other than the one that captured
   it is undefined.

@@ -116,8 +116,8 @@
 		    (handler-bind ((warning #'muffle-warning))
 		      (if psx::*full-continuations*
 			  (psx::call-with-full-policy
-			   (lambda () (psx::call-with-continuation-base (lambda () (eval f)))))
-			  (eval f))))))
+			   (lambda () (psx::call-with-continuation-base (lambda () (psx::eval-compiled-or-interpreted f)))))
+			  (psx::eval-compiled-or-interpreted f))))))
     (values-list values)))
 
 (defun tree-il->core (tree)

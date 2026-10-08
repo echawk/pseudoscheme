@@ -901,21 +901,45 @@ that name, if the host has one."
 ;;; expanded, and the test suite's driver loads them.  It is the
 ;;; installed Guile's own table, asked of its guile program once.
 
-(defvar *instruction-list* :unknown)
+;;; So is intrinsic-list, which the assembler's tables also come from.
 
-(defun instruction-list ()
-  (when (eq *instruction-list* :unknown)
-    (setq *instruction-list*
-	  (or (ignore-errors
-	       (let ((text (uiop:run-program
-			    '("guile" "-c" "(use-modules (language bytecode)) (write (instruction-list))")
-			    :output :string :error-output nil)))
-		 (with-input-from-string (in text) (guile-read in))))
-	      '())))
-  *instruction-list*)
+(defvar *bytecode-tables* (make-hash-table :test 'equal))
+
+(defun bytecode-table (name)
+  "(language bytecode)'s NAME (a procedure of no arguments), as the
+installed Guile returns it; '() if there's no guile program."
+  (multiple-value-bind (table found) (gethash name *bytecode-tables*)
+    (if found
+	table
+	(setf (gethash name *bytecode-tables*)
+	      (or (ignore-errors
+		   (let ((text (uiop:run-program
+				(list "guile" "-c" (format nil "(use-modules (language bytecode)) (write (~A))" name))
+				:output :string :error-output nil)))
+		     (with-input-from-string (in text) (guile-read in))))
+		  '())))))
+
+(defun instruction-list () (bytecode-table "instruction-list"))
 
 (defextension "scm_init_instructions"
   (list (cons "instruction-list" #'instruction-list)))
+
+(defextension "scm_init_intrinsics"
+  (list (cons "intrinsic-list" (lambda () (bytecode-table "intrinsic-list")))))
+
+;;; (system vm program): there is no VM, so no procedure is a program
+;;; (Guile's callers, such as the arity analysis, then fall back to
+;;; procedure-minimum-arity), and none is primitive code.
+(defextension "scm_init_programs"
+  (flet ((no-program (p) (guile-error (ssym "wrong-type-arg") "program-code"
+				      "Wrong type argument in position ~A: ~S" (list 1 p) (list p))))
+    (list (cons "program?" (lambda (x) (declare (ignore x)) ps:false))
+	  (cons "program-code" #'no-program)
+	  (cons "primitive-code?" (lambda (x) (declare (ignore x)) ps:false))
+	  (cons "primitive-code-name" (lambda (x) (declare (ignore x)) ps:false))
+	  (cons "program-num-free-variables" #'no-program)
+	  (cons "program-free-variable-ref" (lambda (p i) (declare (ignore i)) (no-program p)))
+	  (cons "program-free-variable-set!" (lambda (p i x) (declare (ignore i x)) (no-program p))))))
 
 ;;; number->string as Guile writes numbers.  A float is written with the
 ;;; fewest digits, in any radix, that read back as the same float: the

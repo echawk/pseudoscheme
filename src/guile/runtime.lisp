@@ -49,7 +49,16 @@
   "Raise Guile exception KEY as scm-error does."
   (funcall (gethash "scm-error" *guile-primitives*) key subr message args rest))
 
+(defvar *dispatching-primitive* nil
+  "The name of the primitive a GOOPS primitive generic is calling: its
+wrong-type error is then a Lisp WRONG-TYPE-DISPATCH, so that the
+generic's methods are tried instead (src/guile/goops.lisp).")
+
+(define-condition wrong-type-dispatch (error) ())
+
 (defun wrong-type (subr pos obj)
+  (when (and *dispatching-primitive* (equal subr *dispatching-primitive*))
+    (error 'wrong-type-dispatch))
   (guile-error (ssym "wrong-type-arg") subr "Wrong type argument in position ~A: ~S"
 	       (list pos obj) (list obj)))
 
@@ -339,6 +348,10 @@ classes among them, are printed with it.")
       (guile-error (ssym "unbound-variable") "variable-ref" "Unbound variable: ~S" (list v)))
     x))
 (defguile "variable-set!" (v x) (setf (gvariable-value v) x) *unspecified*)
+;; What Guile's lowerer leaves of a toplevel definition or reference: the
+;; variable is known to be bound.
+(defguile "%variable-ref" (v) (gvariable-value v))
+(defguile "%variable-set!" (v x) (setf (gvariable-value v) x) *unspecified*)
 (defguile "variable-unset!" (v) (setf (gvariable-value v) +unbound+) *unspecified*)
 
 ;;; ------------------------------------------------------------------

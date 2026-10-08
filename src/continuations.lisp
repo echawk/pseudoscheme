@@ -202,7 +202,7 @@ ESTABLISH again when rebuilt."
 	  do (setq values
 		   (multiple-value-list
 		    (with-resume-frame (frame 'continue-top-level-forms rest)
-		      (eval (translate-core form t))))))
+		      (eval-compiled-or-interpreted (translate-core form t))))))
     (values-list values)))
 
 (defun continue-top-level-forms (value rest)
@@ -1507,6 +1507,14 @@ its own, of the chunk's free variables."
 	 (*downward-parameters* (find-downward-parameters)))
     (cc-transform-1 form)))
 
+(defparameter *cc-transform-limit* 175000
+  "The largest top-level form, in conses after the transformation, that
+is transformed.  The transformation multiplies a procedure's size (a
+site restores each of its live variables), and SBCL can't compile a
+code object past a megabyte on arm64; Guile's compiler passes (peval's
+procedure, a Scheme form of 46,000 conses, is 297,000 transformed) are
+left as they are, so continuations captured in them are escape-only.")
+
 (defun cc-transform-1 (form)
   (cond ((and (consp form) (keyword-p (car form) "DEFINE") (consp (cadr form)))
 	 ;; (define (f . formals) body ...), from the runtime's own sources
@@ -1522,10 +1530,13 @@ its own, of the chunk's free variables."
 	     `(,(sym "begin")
 	       (,(car form) ,(cadr form) (,(sym "quote") ,ps:false))
 	       ,(cc-transform-1 `(,(sym "set!") ,(cadr form) ,(caddr form))))))
-	(t (let ((form (prepare form)))
-	     (if (tail-simple-p form)
-		 (simple form)
-		 `(,(build-machine '() form)))))))
+	(t (let* ((prepared (prepare form))
+		  (transformed (if (tail-simple-p prepared)
+				   (simple prepared)
+				   `(,(build-machine '() prepared)))))
+	     (if (> (tree-size transformed) *cc-transform-limit*)
+		 form
+		 transformed)))))
 
 ;;; ------------------------------------------------------------------
 ;;; The host's side
