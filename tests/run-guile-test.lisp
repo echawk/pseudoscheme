@@ -33,6 +33,8 @@
 
 (setq psx::*full-continuations* t)
 (psg:boot)
+;; GUILE_TRACE=1: a backtrace for each Lisp error that becomes a Guile exception
+(when (uiop:getenv "GUILE_TRACE") (setq psg::*trace-lisp-errors* t))
 
 (defun guile-string (x)
   (with-output-to-string (s) (write-string (substitute #\/ #\\ (namestring x)) s)))

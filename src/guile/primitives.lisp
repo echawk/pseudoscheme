@@ -96,28 +96,66 @@
 (defun euclid (n d)
   (multiple-value-bind (q r) (floor n d)
     (if (minusp r) (values (1+ q) (- r d)) (values q r))))
-(defun euclidean (n d)
-  ;; remainder always >= 0
-  (if (plusp d) (floor n d) (ceiling n d)))
+;;; Guile's six integer divisions, each as KIND/, KIND-quotient and
+;;; KIND-remainder.  Exact operands give exact results; an inexact one
+;;; gives inexact results, infinities and NaNs going through as IEEE
+;;; arithmetic takes them (SBCL's FFLOOR and friends trap on those).
 
-(defguile "euclidean/" (n d) (euclidean n d))
-(defguile "euclidean-quotient" (n d) (values (euclidean n d)))
-(defguile "euclidean-remainder" (n d) (nth-value 1 (euclidean n d)))
-(defguile "ceiling/" (n d) (ceiling n d))
-(defguile "ceiling-quotient" (n d) (values (ceiling n d)))
-(defguile "ceiling-remainder" (n d) (nth-value 1 (ceiling n d)))
-(defguile "round/" (n d) (round n d))
-(defguile "round-quotient" (n d) (values (round n d)))
-(defguile "round-remainder" (n d) (nth-value 1 (round n d)))
-(defun centered (n d)
-  (multiple-value-bind (q r) (round n d)
-    (let ((half (/ (abs d) 2)))
-      (cond ((>= r half) (values (+ q (signum d)) (- r (abs d))))
-	    ((< r (- half)) (values (- q (signum d)) (+ r (abs d))))
-	    (t (values q r))))))
-(defguile "centered/" (n d) (centered n d))
-(defguile "centered-quotient" (n d) (values (centered n d)))
-(defguile "centered-remainder" (n d) (nth-value 1 (centered n d)))
+(defun float-round-to (kind x)
+  "X, a double, rounded to an integer as KIND rounds; an infinity or a
+NaN is itself."
+  (if (or (sb-ext:float-infinity-p x) (sb-ext:float-nan-p x))
+      x
+      (ecase kind
+	(:floor (ffloor x))
+	(:ceiling (fceiling x))
+	(:truncate (ftruncate x))
+	(:round (fround x)))))
+
+(defun integer-round-to (kind n d)
+  (ecase kind
+    (:floor (floor n d))
+    (:ceiling (ceiling n d))
+    (:truncate (truncate n d))
+    (:round (round n d))))
+
+(defun guile-division (kind n d)
+  "The quotient and remainder of N by D, the quotient rounded as KIND:
+:floor, :ceiling, :truncate, :round, :euclidean (remainder >= 0) or
+:centered (-|d|/2 <= remainder < |d|/2)."
+  (when (zerop d)
+    ;; exact or inexact, as Guile's
+    (guile-error (ssym "numerical-overflow") (format nil "~(~A~)/" kind) "Numerical overflow" '()))
+  (if (and (rationalp n) (rationalp d))
+      (let ((q (ecase kind
+		 ((:floor :ceiling :truncate :round) (values (integer-round-to kind n d)))
+		 (:euclidean (values (if (plusp d) (floor n d) (ceiling n d))))
+		 (:centered (if (plusp d)
+				(values (floor (+ (/ n d) 1/2)))
+				(values (ceiling (- (/ n d) 1/2))))))))
+	(values q (- n (* q d))))
+      (let* ((x (coerce n 'double-float))
+	     (y (coerce d 'double-float))
+	     (ratio (/ x y))
+	     (q (ecase kind
+		  ((:floor :ceiling :truncate :round) (float-round-to kind ratio))
+		  (:euclidean (float-round-to (if (plusp y) :floor :ceiling) ratio))
+		  (:centered (if (plusp y)
+				 (float-round-to :floor (+ ratio 0.5d0))
+				 (float-round-to :ceiling (- ratio 0.5d0)))))))
+	(values q (- x (* q y))))))
+
+(macrolet ((divisions (&rest kinds)
+	     `(progn
+		,@(loop for kind in kinds
+			for name = (string-downcase (symbol-name kind))
+			append `((defguile ,(format nil "~A/" name) (n d) (guile-division ,kind n d))
+				 (defguile ,(format nil "~A-quotient" name) (n d)
+				   (values (guile-division ,kind n d)))
+				 (defguile ,(format nil "~A-remainder" name) (n d)
+				   (nth-value 1 (guile-division ,kind n d))))))))
+  (divisions :floor :ceiling :truncate :round :euclidean :centered))
+
 (defguile "integer-expt" (n k) (expt n k))
 (defguile "modulo-expt" (n k m)
   (let ((result 1) (base (mod n m)))
@@ -425,6 +463,61 @@
 (defguile "defined?" (sym &optional (module ps:false))
   (let ((v (module-variable* (if (truthy module) module *current-module*) sym)))
     (bool (and v (not (eq (gvariable-value v) +unbound+))))))
+(defun all-adjacent (test args)
+  (loop for tail on args while (cdr tail) always (funcall test (car tail) (cadr tail))))
+(defguile "eq?" (&rest args) (bool (all-adjacent #'eq args)))
+(defguile "eqv?" (&rest args) (bool (all-adjacent #'eql args)))
+(defguile "equal?" (&rest args) (bool (all-adjacent #'ps:scheme-equal-p args)))
+
+(defun nan-p (x) (and (floatp x) (sb-ext:float-nan-p x)))
+
+(defun guile-extremum (name test args)
+  "max or min as Guile's: a NaN wins, inexactness spreads, and -0.0 is
+less than 0.0."
+  (unless args (guile-error (ssym "wrong-number-of-args") name "Wrong number of arguments" '()))
+  (dolist (x args) (unless (realp x) (wrong-type name 1 x)))
+  (let ((nan (find-if #'nan-p args)))
+    (if nan
+	nan
+	(let ((best (reduce (lambda (a b)
+			      (cond ((funcall test b a) b)
+				    ((and (= a b) (floatp a) (floatp b)
+					  (funcall test (float-sign b) (float-sign a)))
+				     b)
+				    (t a)))
+			    args)))
+	  (if (some #'floatp args) (coerce best 'double-float) best)))))
+
+(defguile "max" (&rest args) (guile-extremum "max" #'> args))
+(defguile "min" (&rest args) (guile-extremum "min" #'< args))
+
+(defun float-integer-op (name op n d)
+  "OP of N and D, integers; inexact if either is."
+  (flet ((integral-p (x)
+	   (or (integerp x)
+	       (and (floatp x) (not (sb-ext:float-infinity-p x)) (not (nan-p x))
+		    (= x (ftruncate x))))))
+    (unless (integral-p n) (wrong-type name 1 n))
+    (unless (integral-p d) (wrong-type name 2 d)))
+  (when (zerop d) (guile-error (ssym "numerical-overflow") name "Numerical overflow" '()))
+  (if (and (integerp n) (integerp d))
+      (funcall op n d)
+      (coerce (funcall op (round n) (round d)) 'double-float)))
+
+(defguile "quotient" (n d) (float-integer-op "quotient" (lambda (a b) (values (truncate a b))) n d))
+(defguile "remainder" (n d) (float-integer-op "remainder" #'rem n d))
+(defguile "modulo" (n d) (float-integer-op "modulo" #'mod n d))
+
+(defguile "numerator" (x)
+  (cond ((rationalp x) (numerator x))
+	((or (sb-ext:float-infinity-p x) (nan-p x)) x)
+	(t (float (numerator (rational x)) x))))
+(defguile "denominator" (x)
+  (cond ((rationalp x) (denominator x))
+	((sb-ext:float-infinity-p x) 1.0d0)
+	((nan-p x) x)
+	(t (float (denominator (rational x)) x))))
+
 (defguile "log2-binary-factors" (n)
   ;; the number of trailing zero bits; -1 for 0
   (if (zerop n) -1 (1- (integer-length (logand n (- n))))))
@@ -487,7 +580,7 @@
 (defguile "bind-textdomain-codeset" (&rest args) (declare (ignore args)) ps:false)
 (defguile "setlocale" (&rest args) (declare (ignore args)) "C")
 (defguile "%package-data-dir" () (namestring (uiop:pathname-parent-directory-pathname *guile-source-directory*)))
-(defguile "%library-dir" () "")
+(defguile "%library-dir" () (namestring *guile-source-directory*))	; guile-procedures.txt is here
 (defguile "%site-dir" () "")
 (defguile "%global-site-dir" () "")
 (defguile "%site-ccache-dir" () "")
@@ -759,3 +852,94 @@ that name, if the host has one."
 
 (defextension "scm_init_instructions"
   (list (cons "instruction-list" #'instruction-list)))
+
+;;; number->string as Guile writes numbers.  A float is written with the
+;;; fewest digits, in any radix, that read back as the same float: the
+;;; algorithm of Burger and Dybvig, "Printing Floating-Point Numbers
+;;; Quickly and Accurately" (PLDI 1996), with Guile's choices of when to
+;;; use an exponent (itself written in the radix).
+
+(defun shortest-float-digits (x radix out)
+  "Write X, a positive double, to OUT."
+  (multiple-value-bind (f e) (integer-decode-float x)
+    (let* ((odd (if (oddp f) 1 0))
+	   (even (- 1 odd))
+	   (min-normal (and (= f (ash 1 52)) (/= e -1074)))
+	   (mminus (if (minusp e) 1 (ash 1 e)))
+	   (mplus (if min-normal (* 2 mminus) mminus))
+	   (r (if (minusp e) (ash f (if min-normal 2 1)) (ash f (+ e (if min-normal 2 1)))))
+	   (s (if (minusp e) (ash 1 (- (if min-normal 2 1) e)) (if min-normal 4 2)))
+	   (k 0)
+	   (a (make-array 32 :element-type 'character :adjustable t :fill-pointer 0))
+	   (show-exp nil))
+      (flet ((cmp (a b) (signum (- a b)))
+	     (emit (c) (vector-push-extend c a)))
+	;; the smallest k with (r + m+)/s < radix^k (<= when f is odd)
+	(let ((hi (+ r mplus)))
+	  (loop while (>= (cmp hi s) odd) do (setq s (* s radix)) (incf k))
+	  (when (zerop k)
+	    (setq hi (* hi radix))
+	    (loop while (< (cmp hi s) odd)
+		  do (setq r (* r radix) mplus (* mplus radix) mminus (* mminus radix)
+			   hi (* hi radix))
+		     (decf k))))
+	(let ((expon (1- k)))
+	  (when (<= k 0)
+	    (if (<= k -3)
+		(setq show-exp t k 1)
+		(progn (emit #\0) (emit #\.) (loop repeat (- k) do (emit #\0)))))
+	  (loop
+	    (setq mplus (* mplus radix) mminus (* mminus radix))
+	    (multiple-value-bind (d rem) (floor (* r radix) s)
+	      (setq r rem)
+	      (let* ((hi (+ r mplus))
+		     (end-1 (< (cmp r mminus) even))
+		     (end-2 (< (cmp s hi) even)))
+		(cond ((or end-1 end-2)
+		       (setq r (* r 2))
+		       (cond ((not end-2))
+			     ((not end-1) (incf d))
+			     ((>= (cmp r s) (if (oddp d) 0 1)) (incf d)))
+		       (emit (char-downcase (digit-char d radix)))
+		       (when (zerop (decf k)) (emit #\.))
+		       (return))
+		      (t (emit (char-downcase (digit-char d radix)))
+			 (when (zerop (decf k)) (emit #\.)))))))
+	  (when (plusp k)
+	    (if (and (>= expon 7) (>= k 4) (>= expon k))
+		;; more than three zeroes before the point: an exponent
+		(let* ((k2 (- k expon))
+		       (at (+ (fill-pointer a) k2)))
+		  (emit #\Space)
+		  (replace a a :start1 (1+ at) :start2 at :end2 (1- (fill-pointer a)))
+		  (setf (char a at) #\.)
+		  (setq k k2 show-exp t))
+		(progn (loop repeat k do (emit #\0)) (emit #\.) (setq k 0))))
+	  (when (zerop k) (emit #\0))
+	  (write-string a out)
+	  (when show-exp
+	    (write-char #\e out)
+	    (write-string (string-downcase (write-to-string expon :base radix :radix nil)) out)))))))
+
+(defun guile-float-string (x radix)
+  (let ((x (coerce x 'double-float)))
+    (cond ((sb-ext:float-infinity-p x) (if (plusp x) "+inf.0" "-inf.0"))
+	  ((sb-ext:float-nan-p x) "+nan.0")
+	  ((zerop x) (if (minusp (float-sign x)) "-0.0" "0.0"))
+	  (t (with-output-to-string (out)
+	       (when (minusp x) (write-char #\- out) (setq x (- x)))
+	       (shortest-float-digits x radix out))))))
+
+(defguile "number->string" (n &optional (radix 10))
+  (cond ((floatp n) (guile-float-string n radix))
+	((complexp n)
+	 (let ((re (realpart n)) (im (imagpart n)))
+	   (concatenate 'string (guile-float-string re radix)
+			(if (and (not (minusp (float-sign (coerce im 'double-float))))
+				 (not (sb-ext:float-infinity-p (coerce im 'double-float)))
+				 (not (sb-ext:float-nan-p (coerce im 'double-float))))
+			    "+" "")
+			(guile-float-string im radix) "i")))
+	((integerp n) (string-downcase (write-to-string n :base radix :radix nil)))
+	((rationalp n) (string-downcase (write-to-string n :base radix :radix nil)))
+	(t (wrong-type "number->string" 1 n))))

@@ -249,7 +249,7 @@ version (src/continuations.lisp)."
 	     (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text))
 	     (message "wrong-number-of-args" ps:false "~A" (list text)))))
       (t (let ((text (remove #\Newline (princ-to-string c))))
-	   (if (search "isn't a pair" text)
+	   (if (or (search "isn't a pair" text) (search ": not a " text) (search ": not an " text))
 	       (message "wrong-type-arg" ps:false "Wrong type argument: ~A" (list text))
 	       (message "misc-error" ps:false "~A" (list text))))))))
 
