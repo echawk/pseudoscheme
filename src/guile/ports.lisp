@@ -1103,3 +1103,25 @@ end of file, or END: (delimiter-or-eof . count)."
 	(lambda (s &optional port (start 0) (end (length s)))
 	  (port-write-string (out-port port "write-string/partial") s start end) (- end start))))
   *unspecified*)
+
+;;; Source properties: with the positions read option, where the reader
+;;; read each datum that can have properties (not fixnums, characters,
+;;; symbols, keywords, booleans or ()), from a port that counts lines
+
+(defun record-source (port read)
+  (let ((p (and (gport-p port) (option-value *read-options* "positions") port)))
+    (if (null p)
+	(funcall read port)
+	(progn
+	  (skip-whitespace-and-comments p)
+	  (let* ((line (port-line* p)) (column (port-column* p))
+		 (x (funcall read p)))
+	    (when (or (consp x) (vectorp x) (garray-p x)
+		      (and (numberp x)
+			   (not (and (integerp x) (<= (- -1 +guile-fixnum-max+) x +guile-fixnum-max+)))))
+	      (setf (gethash x *source-properties*)
+		    (append (when (stringp (port-filename* p)) (list (cons (ssym "filename") (port-filename* p))))
+			    (list (cons (ssym "line") line) (cons (ssym "column") column)))))
+	    x)))))
+
+(setq *source-recorder* 'record-source)

@@ -721,7 +721,16 @@ a primitive, which (ice-9 documentation) finds its docstring by.")
 (defguile "set-source-property!" (x key value)
   (push (cons key value) (gethash x *source-properties*))
   *unspecified*)
-(defguile "supports-source-properties?" (x) (bool (consp x)))
+(defun source-propertiable-p (x)
+  "Guile's: a heap object that isn't a symbol or keyword (a fixnum,
+character, boolean or () is an immediate)."
+  (or (consp x) (vectorp x) (structure-object-p* x)
+      (and (numberp x)
+	   (not (and (integerp x) (<= (- (ash 1 61)) x (1- (ash 1 61))))))))
+
+(defun structure-object-p* (x) (typep x 'structure-object))
+
+(defguile "supports-source-properties?" (x) (bool (source-propertiable-p x)))
 (defguile "cons-source" (xorig x y) (declare (ignore xorig)) (cons x y))
 
 (defvar *object-properties* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq))

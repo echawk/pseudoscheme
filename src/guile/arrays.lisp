@@ -228,10 +228,14 @@
 
 (defun list->typed-array* (type shape list)
   (let* ((rank (if (integerp shape) shape (length shape)))
+	 ;; a shape's element is (lo hi), or a lower bound, the length the list's
+	 (lengths (labels ((lens (x r) (if (zerop r) '() (cons (if (listp x) (length x) 0)
+							       (lens (if (consp x) (car x) nil) (1- r))))))
+		    (lens list rank)))
 	 (bounds (if (integerp shape)
-		     (labels ((lens (x r) (if (zerop r) '() (cons (list 0 (1- (length x))) (lens (car x) (1- r))))))
-		       (lens list rank))
-		     (mapcar (lambda (b) (bound-pair b "list->typed-array")) shape)))
+		     (mapcar (lambda (n) (list 0 (1- n))) lengths)
+		     (loop for b in shape for n in lengths
+			   collect (if (integerp b) (list b (+ b n -1)) (bound-pair b "list->typed-array")))))
 	 (a (make-typed-array* type *unspecified* bounds)))
     (multiple-value-bind (root type offset dims) (array-view a "list->typed-array")
       (labels ((fill-cells (dims at x)

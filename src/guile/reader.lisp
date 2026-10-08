@@ -102,7 +102,16 @@ ending at !#.  True if handled; it always is."
 	ps:eof-object
 	(guile-read-1 port))))
 
+(defvar *source-recorder* nil
+  "NIL, or a function of a port and a function reading a datum from it
+that reads the datum and records where it was (ports.lisp).")
+
 (defun guile-read-1 (port)
+  (if *source-recorder*
+      (funcall *source-recorder* port #'guile-read-datum)
+      (guile-read-datum port)))
+
+(defun guile-read-datum (port)
   (let ((c (skip-whitespace-and-comments port)))
     (when (null c) (read-error port "unexpected end of file"))
     (readc port)
