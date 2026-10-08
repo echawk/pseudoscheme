@@ -495,6 +495,22 @@ not with Guile's behaviour.")
 			    (namestring *guile-source-directory*)))
     (def "%load-extensions" (list ".scm" ""))
     (loop for (name . value) in *locale-categories* do (def name value))
+    ;; open flags and errno values, the platform's (sb-posix knows them)
+    (dolist (name '("O_RDONLY" "O_WRONLY" "O_RDWR" "O_CREAT" "O_EXCL" "O_TRUNC" "O_APPEND"
+		    "O_NONBLOCK" "O_NOCTTY" "O_SYNC" "O_DIRECTORY" "O_NOFOLLOW"
+		    "EPERM" "ENOENT" "ESRCH" "EINTR" "EIO" "ENXIO" "E2BIG" "ENOEXEC" "EBADF" "ECHILD"
+		    "EAGAIN" "ENOMEM" "EACCES" "EFAULT" "EBUSY" "EEXIST" "EXDEV" "ENODEV" "ENOTDIR"
+		    "EISDIR" "EINVAL" "ENFILE" "EMFILE" "ENOTTY" "EFBIG" "ENOSPC" "ESPIPE" "EROFS"
+		    "EMLINK" "EPIPE" "EDOM" "ERANGE" "EWOULDBLOCK" "EINPROGRESS" "EALREADY" "ENOSYS"
+		    "ENOTEMPTY" "ELOOP" "ENAMETOOLONG" "ECONNREFUSED" "ECONNRESET" "ETIMEDOUT"
+		    "EADDRINUSE" "ENOTSOCK" "ENOTCONN" "EHOSTUNREACH"))
+      (let ((sym (find-symbol (substitute #\- #\_ name) "SB-POSIX")))
+	(when (and sym (boundp sym)) (def name (symbol-value sym)))))
+    (def "O_CLOEXEC" #+darwin #x1000000 #-darwin #o2000000)
+    (loop for (name value) in '(("F_DUPFD" 0) ("F_GETFD" 1) ("F_SETFD" 2) ("F_GETFL" 3) ("F_SETFL" 4)
+				("FD_CLOEXEC" 1)
+				("AT_SYMLINK_NOFOLLOW" #+darwin #x20 #-darwin #x100))
+	  do (def name value))
     (def "%load-compiled-path" '())
     (def "%load-compiled-extensions" (list ".go"))
     (def "%load-should-auto-compile" ps:false)

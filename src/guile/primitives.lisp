@@ -247,10 +247,21 @@ NaN is itself."
 ;;; ------------------------------------------------------------------
 ;;; Vectors
 
+(defun check-move (who from start end to at)
+  (unless (and (integerp start) (integerp end) (<= 0 start end (length from)))
+    (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list start) (list start)))
+  (unless (and (integerp at) (<= 0 at) (<= (+ at (- end start)) (length to)))
+    (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list at) (list at))))
+
+;; element by element, from the left or from the right, as Guile's
 (defguile "vector-move-left!" (from start end to at)
-  (replace to from :start1 at :start2 start :end2 end) *unspecified*)
+  (check-move "vector-move-left!" from start end to at)
+  (loop for i from start below end for j from at do (setf (aref to j) (aref from i)))
+  *unspecified*)
 (defguile "vector-move-right!" (from start end to at)
-  (replace to from :start1 at :start2 start :end2 end) *unspecified*)
+  (check-move "vector-move-right!" from start end to at)
+  (loop for i from (1- end) downto start for j downfrom (+ at (- end start 1)) do (setf (aref to j) (aref from i)))
+  *unspecified*)
 (defguile "vector-copy!" (to at from &optional (start 0) (end (length from)))
   (replace to from :start1 at :start2 start :end2 end) *unspecified*)
 (defguile "vector-fill!" (v x &optional (start 0) (end (length v)))
@@ -327,7 +338,24 @@ NaN is itself."
 (defguile "symlink" (old new) (sb-posix:symlink old new) *unspecified*)
 (defguile "readlink" (path) (sb-posix:readlink path))
 (defguile "chmod" (path mode) (sb-posix:chmod path mode) *unspecified*)
-(defguile "copy-file" (old new) (uiop:copy-file old new) *unspecified*)
+(defguile "copy-file" (old new &key copy-on-write)
+  (declare (ignore copy-on-write))
+  ;; by descriptors, so a failure is its errno
+  (let ((in (handler-case (sb-posix:open old sb-posix:o-rdonly)
+	      (sb-posix:syscall-error (e) (system-error "copy-file" (sb-posix:syscall-errno e))))))
+    (unwind-protect
+	 (let ((out (handler-case (sb-posix:open new (logior sb-posix:o-wronly sb-posix:o-creat sb-posix:o-trunc)
+						 (logand #o777 (sb-posix:stat-mode (sb-posix:fstat in))))
+		      (sb-posix:syscall-error (e) (system-error "copy-file" (sb-posix:syscall-errno e))))))
+	   (unwind-protect
+		(let ((buf (make-array 65536 :element-type '(unsigned-byte 8))))
+		  (sb-sys:with-pinned-objects (buf)
+		    (loop for n = (sb-unix:unix-read in (sb-sys:vector-sap buf) 65536)
+			  while (and n (plusp n))
+			  do (sb-unix:unix-write out buf 0 n))))
+	     (sb-posix:close out)))
+      (sb-posix:close in)))
+  *unspecified*)
 (defguile "access?" (path how)
   (bool (handler-case (progn (sb-posix:access path how) t) (sb-posix:syscall-error () nil))))
 (defguile "basename" (path &optional suffix)
@@ -365,7 +393,9 @@ NaN is itself."
 	  (logand (sb-posix:stat-mode st) #o7777)
 	  0 0 0))
 (defguile "stat" (path &optional (exception-on-error ps:true))
-  (handler-case (stat-vector (if (streamp path) (sb-posix:fstat (sb-sys:fd-stream-fd path)) (sb-posix:stat path)))
+  (handler-case (stat-vector (cond ((integerp path) (sb-posix:fstat path))
+				   ((streamp path) (sb-posix:fstat (port-fdes path "stat")))
+				   (t (sb-posix:stat path))))
     (sb-posix:syscall-error (e)
       (if (truthy exception-on-error)
 	  (system-error "stat" (sb-posix:syscall-errno e))
@@ -389,14 +419,23 @@ NaN is itself."
 (defguile "directory-stream?" (x) (bool (directory-stream-p x)))
 (defguile "rewinddir" (d) (declare (ignore d)) *unspecified*)
 
+(defun run-and-wait (prog args)
+  "Run PROG with ARGS on the current ports' descriptors; its wait status
+(that of an exit with 127 if it couldn't be run, as the shell's)."
+  (flush-all-ports)
+  (let ((pid (spawn-process prog args
+			    (port-fd-or *standard-input* sb-posix:o-rdonly)
+			    (port-fd-or *standard-output* sb-posix:o-wronly)
+			    (port-fd-or *error-output* sb-posix:o-wronly))))
+    (if (minusp pid)
+	(ash 127 8)
+	(nth-value 1 (sb-posix:waitpid pid 0)))))
+
 (defguile "system" (&optional (command ps:false))
   (if (truthy command)
-      (nth-value 2 (uiop:run-program (list "/bin/sh" "-c" command) :ignore-error-status t
-				     :output :interactive :error-output :interactive :input :interactive))
+      (run-and-wait "/bin/sh" (list "-c" command))
       ps:true))
-(defguile "system*" (&rest args)
-  (* 256 (nth-value 2 (uiop:run-program args :ignore-error-status t
-					:output :interactive :error-output :interactive :input :interactive))))
+(defguile "system*" (prog &rest args) (run-and-wait prog args))
 (defguile "status:exit-val" (status) (if (zerop (logand status #x7f)) (ash status -8) ps:false))
 (defguile "status:term-sig" (status) (let ((s (logand status #x7f))) (if (zerop s) ps:false s)))
 (defguile "status:stop-sig" (status) (declare (ignore status)) ps:false)
@@ -407,7 +446,13 @@ NaN is itself."
 (defguile "times" ()
   (vector (get-internal-real-time) (get-internal-run-time) 0 0 0))
 (defguile "uname" ()
-  (vector (software-type) (machine-instance) (software-version) "" (machine-type)))
+  ;; libc's: sysname nodename release version machine
+  (let ((width #+darwin 256 #-darwin 65))
+    (cffi:with-foreign-object (u :char (* 6 width))
+      (cffi:foreign-funcall "uname" :pointer u :int)
+      (coerce (loop for i below 5
+		    collect (cffi:foreign-string-to-lisp (cffi:inc-pointer u (* i width))))
+	      'simple-vector))))
 (defguile "isatty?" (port) (declare (ignore port)) ps:false)
 (defguile "kill" (pid sig) (sb-posix:kill pid sig) *unspecified*)
 (defguile "strerror" (n) (sb-int:strerror n))
@@ -685,7 +730,8 @@ that name, if the host has one."
 
 ;;; File descriptors and processes
 
-(defguile "pipe" ()
+(defguile "pipe" (&optional flags)
+  (declare (ignore flags))		; close-on-exec always; O_NONBLOCK not
   (multiple-value-bind (in out) (sb-posix:pipe)
     ;; close-on-exec (FD_CLOEXEC, 1), as Guile's: a child gets the ends it is given
     ;; (piped-process), not the others, which would keep a pipe open
@@ -707,11 +753,12 @@ that name, if the host has one."
 (defguile "sync" () *unspecified*)
 (defguile "fsync" (x) (declare (ignore x)) *unspecified*)
 (defguile "flock" (&rest args) (declare (ignore args)) *unspecified*)
-(defguile "mkstemp" (template &optional mode)
-  (declare (ignore mode))
+(defguile "mkstemp" (template &optional (mode "w+"))
   (multiple-value-bind (fd name) (sb-posix:mkstemp template)
-    (let ((p (fd-port fd "rw")))
-      (setf (gethash p *port-filenames*) name)
+    ;; Guile fills the template in place
+    (replace template name)
+    (let ((p (fd-port fd (if (stringp mode) mode "w+"))))
+      (setf (port-filename* p) name)
       p)))
 (setf (gethash "mkstemp!" *guile-primitives*) (gethash "mkstemp" *guile-primitives*))
 (defguile "mkdtemp" (template) (sb-posix:mkdtemp template))
@@ -735,12 +782,19 @@ that name, if the host has one."
       (append (funcall (gethash "string-split" *guile-primitives*) path #\:) tail)
       tail))
 (defguile "search-path" (path filename &optional (extensions '("")) require-exts)
-  (declare (ignore require-exts))
-  (or (loop for dir in path
-	    do (loop for ext in (if (listp extensions) extensions '(""))
-		     for f = (format nil "~A/~A~A" dir filename ext)
-		     when (probe-file f) do (return-from nil f)))
-      ps:false))
+  (let ((extensions (if (listp extensions) extensions '(""))))
+    (flet ((try (base)
+	     (loop for ext in (if (and (not (truthy require-exts))
+				       (some (lambda (e) (and (plusp (length e)) (uiop:string-suffix-p filename e)))
+					     extensions))
+				  '("")
+				  extensions)
+		   for f = (concatenate 'string base ext)
+		   when (and (probe-file f) (not (uiop:directory-exists-p f))) return f)))
+      (or (if (uiop:absolute-pathname-p filename)
+	      (try filename)
+	      (loop for dir in path thereis (try (format nil "~A/~A" (string-right-trim "/" dir) filename))))
+	  ps:false))))
 (defguile "procedure" (x)
   (if (typep x 'applicable-struct) (svref (astruct-slots x) 0) (wrong-type "procedure" 1 x)))
 
@@ -1031,10 +1085,11 @@ true (the predicate's value) if it matches."
   (or (and (gport-p port) (port-open-p port) (port-fd port))
       (sb-posix:open "/dev/null" null-mode)))
 
-(defun spawn-process (prog args in out err)
-  "The pid of PROG run with ARGS, its descriptors 0-2 IN, OUT and ERR."
-  (let ((argv (cons prog args))
-	(env (sb-ext:posix-environ)))
+(defun spawn-process (prog args in out err &key (environment (sb-ext:posix-environ)) (search t) argv0)
+  "The pid of PROG run with ARGS (after ARGV0, or PROG), its descriptors
+0-2 IN, OUT and ERR; looked for on PATH if SEARCH."
+  (let ((argv (cons (or argv0 prog) args))
+	(env environment))
     (flet ((string-array (strings)
 	     (let ((a (cffi:foreign-alloc :pointer :count (1+ (length strings)))))
 	       (loop for s in strings for i from 0
@@ -1049,9 +1104,13 @@ true (the predicate's value) if it matches."
 		 (loop for (fd target) in (list (list in 0) (list out 1) (list err 2))
 		       do (cffi:foreign-funcall "posix_spawn_file_actions_adddup2"
 						:pointer actions :int fd :int target :int))
-		 (let ((code (cffi:foreign-funcall "posix_spawnp" :pointer pid :string prog
-								  :pointer actions :pointer (cffi:null-pointer)
-								  :pointer c-argv :pointer c-env :int)))
+		 (let ((code (if search
+				 (cffi:foreign-funcall "posix_spawnp" :pointer pid :string prog
+								      :pointer actions :pointer (cffi:null-pointer)
+								      :pointer c-argv :pointer c-env :int)
+				 (cffi:foreign-funcall "posix_spawn" :pointer pid :string prog
+								     :pointer actions :pointer (cffi:null-pointer)
+								     :pointer c-argv :pointer c-env :int))))
 		   (if (zerop code)
 		       (cffi:mem-ref pid :int)
 		       (progn
@@ -1097,3 +1156,140 @@ true (the predicate's value) if it matches."
     (storage-condition ()
       (check-stack-limit "call-with-stack-overflow-handler" (funcall handler))
       (guile-error (ssym "stack-overflow") "call-with-stack-overflow-handler" "Stack overflow" '()))))
+
+;;; ------------------------------------------------------------------
+;;; More of libguile
+
+(defguile "integer->char" (n)
+  (unless (and (integerp n) (<= 0 n #x10ffff) (not (<= #xd800 n #xdfff)))
+    (guile-error (ssym "out-of-range") "integer->char" "Value out of range: ~S" (list n) (list n)))
+  (code-char n))
+
+(defguile "bitvector-set-bits!" (v bits)
+  (dotimes (i (min (length v) (length bits)) *unspecified*)
+    (when (= 1 (sbit bits i)) (setf (sbit v i) 1))))
+(defguile "bitvector-clear-bits!" (v bits)
+  (dotimes (i (min (length v) (length bits)) *unspecified*)
+    (when (= 1 (sbit bits i)) (setf (sbit v i) 0))))
+(defguile "bitvector-count-bits" (v bits)
+  (loop for i below (min (length v) (length bits)) count (and (= 1 (sbit v i)) (= 1 (sbit bits i)))))
+
+;;; random's vector procedures
+(defun random-normal (state)
+  ;; Box and Muller
+  (let ((u (- 1d0 (random 1d0 state))) (v (random 1d0 state)))
+    (* (sqrt (* -2 (log u))) (cos (* 2 pi v)))))
+
+(defun random-state-arg (state)
+  (if (random-state-p state) state *random-state*))
+
+(defun fill-vector (v function)
+  (multiple-value-bind (root type offset dims) (array-view v "random")
+    (declare (ignore root type offset))
+    (walk-indices dims (lambda (ix) (set-array-element v (funcall function) ix "random")))))
+
+(defguile "random:normal-vector!" (v &optional state)
+  (let ((state (random-state-arg state)))
+    (fill-vector v (lambda () (random-normal state))))
+  *unspecified*)
+(defun sphere-fill (v state scale)
+  (fill-vector v (lambda () (random-normal state)))
+  (let* ((xs (array->list* v))
+	 (norm (sqrt (reduce #'+ xs :key (lambda (x) (* x x)) :initial-value 0d0)))
+	 (k (if (zerop norm) 0d0 (/ (funcall scale (length xs)) norm)))
+	 (i 0))
+    (multiple-value-bind (root type offset dims) (array-view v "random")
+      (declare (ignore root type offset))
+      (walk-indices dims (lambda (ix) (set-array-element v (* k (nth i xs)) ix "random") (incf i))))))
+(defguile "random:hollow-sphere!" (v &optional state)
+  (sphere-fill v (random-state-arg state) (constantly 1d0))
+  *unspecified*)
+(defguile "random:solid-sphere!" (v &optional state)
+  (let ((state (random-state-arg state)))
+    (sphere-fill v state (lambda (n) (expt (random 1d0 state) (/ 1d0 (max n 1))))))
+  *unspecified*)
+
+;;; Weak vectors: each element held weakly (immediates as they are)
+(defstruct (weak-vector (:constructor %make-weak-vector (cells)) (:copier nil))
+  (cells #() :type simple-vector))
+(defmethod print-object ((w weak-vector) stream)
+  (format stream "#w~A" (with-output-to-string (s) (guile-write (coerce (weak-vector-elements w) 'simple-vector) s))))
+(defun weak-cell (x) (if (or (numberp x) (characterp x) (symbolp x)) x (sb-ext:make-weak-pointer x)))
+(defun weak-cell-value (c)
+  (if (sb-ext:weak-pointer-p c)
+      (multiple-value-bind (v alive) (sb-ext:weak-pointer-value c) (if alive v ps:false))
+      c))
+(defun weak-vector-elements (w) (map 'list #'weak-cell-value (weak-vector-cells w)))
+(defguile "make-weak-vector" (n &optional (fill ps:false))
+  (unless (and (integerp n) (>= n 0)) (wrong-type "make-weak-vector" 1 n))
+  (%make-weak-vector (make-array n :initial-element (weak-cell fill))))
+(defguile "list->weak-vector" (list)
+  (check-proper-list "list->weak-vector" 1 list)
+  (%make-weak-vector (map 'simple-vector #'weak-cell list)))
+(defguile "weak-vector" (&rest elements) (%make-weak-vector (map 'simple-vector #'weak-cell elements)))
+(defguile "weak-vector?" (x) (bool (weak-vector-p x)))
+(defguile "weak-vector-length" (w) (length (weak-vector-cells w)))
+(defguile "weak-vector-ref" (w i) (weak-cell-value (svref (weak-vector-cells w) i)))
+(defguile "weak-vector-set!" (w i x) (setf (svref (weak-vector-cells w) i) (weak-cell x)) *unspecified*)
+
+;;; module-reverse-lookup: the name a module binds to a variable
+(defguile "module-reverse-lookup" (module variable)
+  (unless (or (module-p* module) (eq module ps:false)) (wrong-type "module-reverse-lookup" 1 module))
+  (let ((obarray (if (module-p* module) (module-slot module +module-obarray+) *obarray*)))
+    (or (loop for (name . v) in (ghash-handles obarray) when (eq v variable) return name)
+	ps:false)))
+
+;;; POSIX odds and ends
+(defguile "ttyname" (port)
+  (let ((p (cffi:foreign-funcall "ttyname" :int (port-fdes port "ttyname") :pointer)))
+    (if (cffi:null-pointer-p p)
+	(system-error "ttyname" (sb-alien:extern-alien "errno" sb-alien:int))
+	(cffi:foreign-string-to-lisp p))))
+(defguile "utime" (obj &optional actime modtime actimens modtimens flags)
+  (declare (ignore actimens modtimens flags))
+  (let* ((now (- (get-universal-time) #.(encode-universal-time 0 0 0 1 1 1970 0)))
+	 (a (if (integerp actime) actime now)) (m (if (integerp modtime) modtime now))
+	 (path (if (stringp obj) obj (port-filename* (->port obj "utime")))))
+    (sb-posix:utimes path a m))
+  *unspecified*)
+
+;;; spawn: Guile 3.0.9's posix_spawn interface.  ARGS includes argv[0].
+(defguile "spawn" (program args &key (environment nil) (input nil) (output nil) (error nil)
+			   (search-path? ps:true))
+  (flet ((fd-of (port default who)
+	   (cond ((null port) (port-fd-or default (if (eq default *standard-input*) sb-posix:o-rdonly sb-posix:o-wronly)))
+		 ((and (gport-p port) (port-fd port)) (flush-output port) (port-fd port))
+		 (t (wrong-type "spawn" who port)))))
+    (flush-all-ports)
+    (let ((pid (spawn-process program (rest args)
+			      (fd-of input *standard-input* 3)
+			      (fd-of output *standard-output* 4)
+			      (fd-of error *error-output* 5)
+			      :argv0 (first args)
+			      :environment (if (listp environment) environment (sb-ext:posix-environ))
+			      :search (truthy search-path?))))
+      (when (minusp pid)
+	(guile-error (ssym "system-error") "spawn" "~A" (list "No such file or directory") (list 2)))
+      pid)))
+
+(defguile "fcntl" (object cmd &optional (value 0))
+  (let ((fd (if (integerp object) object (port-fdes object "fcntl"))))
+    (sb-posix:fcntl fd cmd value)))
+
+(defguile "sendfile" (out in count &optional offset)
+  ;; COUNT bytes of IN (from OFFSET, IN's position untouched, if given) to OUT
+  (let* ((in-port (if (integerp in) (fd-port in "r") (->port in "sendfile")))
+	 (out-port (if (integerp out) (fd-port out "w") (->port out "sendfile")))
+	 (saved (and offset (port-position in-port))))
+    (when offset (port-seek in-port offset 0))
+    (let ((bytes (get-bytes in-port count)))
+      (write-octets out-port bytes)
+      (flush-output out-port)
+      (when saved (port-seek in-port saved 0))
+      (length bytes))))
+
+(defguile "chmodat" (dir path mode &optional (flags 0))
+  (unless (and (gport-p dir) (port-open-p dir) (port-fd dir)) (wrong-type "chmodat" 1 dir))
+  (let ((r (cffi:foreign-funcall "fchmodat" :int (port-fd dir) :string path :unsigned-short mode :int flags :int)))
+    (unless (zerop r) (system-error "chmodat" (sb-alien:extern-alien "errno" sb-alien:int)))
+    *unspecified*))

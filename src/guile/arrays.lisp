@@ -445,8 +445,10 @@ of SOURCES, which must have them."
   (make-root (type-name type) length fill))
 (defguile "make-srfi-4-vector" (type length &optional (fill 0))
   (make-root (type-name type) length fill))
-(defguile "srfi-4-vector-type-size" (type)
-  (or (type-size (type-name type)) (wrong-type "srfi-4-vector-type-size" 1 type)))
+(defguile "srfi-4-vector-type-size" (v)
+  ;; of a SRFI 4 vector: its elements' size in bytes
+  (or (and (guile-array-p v) (type-size (nth-value 1 (array-view v "srfi-4-vector-type-size"))))
+      (wrong-type "srfi-4-vector-type-size" 1 v)))
 
 ;;; Writing an array as Guile does: #2((1 2) (3 4)), #1@1(a b), #0f64(9.0)
 

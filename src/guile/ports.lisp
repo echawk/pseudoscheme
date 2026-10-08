@@ -584,19 +584,45 @@ conversion strategy says."
       (setf (port-buffering port) :none))
     port))
 
+(defun scan-for-coding (text)
+  "The encoding a coding: (or coding=) declaration in TEXT names, if it
+is in a comment (after a ; on its line, or in a #! ... !# block), as
+Guile's scan; upper-cased; or NIL."
+  (loop for at = (search "coding" text) then (search "coding" text :start2 (1+ at))
+	while at
+	do (let ((i (+ at 6)))
+	     (when (and (< i (length text)) (member (char text i) '(#\: #\=)))
+	       (incf i)
+	       (loop while (and (< i (length text)) (member (char text i) '(#\Space #\Tab))) do (incf i))
+	       (let* ((end (or (position-if-not (lambda (c) (or (alphanumericp c) (find c "-_.+"))) text :start i)
+			       (length text)))
+		      (line-start (let ((nl (position #\Newline text :end at :from-end t))) (if nl (1+ nl) 0)))
+		      (block (let ((open (search "#!" text :end2 at)))
+			       (and open (not (search "!#" text :start2 open :end2 at))))))
+		 (when (and (> end i)
+			    (or (find #\; text :start line-start :end at) block))
+		   (return (string-upcase (subseq text i end)))))))))
+
 (defun file-coding (path)
   "The encoding a file's coding: comment names in its first lines, or NIL."
   (with-open-file (in path :element-type '(unsigned-byte 8) :if-does-not-exist nil)
     (when in
-      (let* ((buf (make-octets 500))
-	     (n (read-sequence buf in))
-	     (text (sb-ext:octets-to-string buf :end n :external-format :latin-1))
-	     (at (search "coding:" text)))
-	(when (and at (find #\; (subseq text 0 at)))
-	  (let* ((start (position-if-not (lambda (c) (member c '(#\Space #\Tab))) text :start (+ at 7)))
-		 (end (and start (position-if-not (lambda (c) (or (alphanumericp c) (find c "-_.")))
-						 text :start start))))
-	    (and start (> (or end n) start) (subseq text start end))))))))
+      (let* ((buf (make-octets 1024))
+	     (n (read-sequence buf in)))
+	(scan-for-coding (sb-ext:octets-to-string buf :end n :external-format :latin-1))))))
+
+(defun port-coding (port)
+  "The encoding the coding: declaration at PORT's next input names: its
+read buffer, unread."
+  (let ((p (->port port "file-encoding")))
+    (fill-input p)
+    (let ((end (min (port-rend p) (+ (port-rpos p) 1024))))
+      (or (scan-for-coding (sb-ext:octets-to-string (port-rbuf p) :start (port-rpos p) :end end
+								   :external-format :latin-1))
+	  ps:false))))
+
+(defguile "file-encoding" (port) (port-coding port))
+(defguile "%file-encoding" (port) (port-coding port))
 
 (defun open-file (filename mode &key (encoding ps:false) (guess-encoding ps:false) (buffering ps:false))
   (declare (ignore buffering))
