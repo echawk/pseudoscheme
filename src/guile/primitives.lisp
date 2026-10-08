@@ -1083,3 +1083,24 @@ true (the predicate's value) if it matches."
 	     (when (consp from) (sb-posix:close (cdr from)))
 	     (when (consp to) (sb-posix:close (car to)))
 	     pid)))))
+
+;;; call-with-stack-overflow-handler: Guile limits the stack THUNK may use
+;;; to LIMIT words, and calls HANDLER when it is reached.  Here the limit
+;;; is the control stack's own: on its exhaustion HANDLER is called (its
+;;; result checked as Guile checks it), and a non-local exit from it
+;;; leaves THUNK.  A handler that returns, asking for more stack, can't be
+;;; given it.  (SBCL recovers from an exhausted stack unless it runs with
+;;; --lose-on-corruption, which --script implies.)
+
+(defun check-stack-limit (who x)
+  (unless (integerp x) (wrong-type who 1 x))
+  (unless (< 0 x (ash 1 62))
+    (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list x) (list x)))
+  x)
+
+(defguile "call-with-stack-overflow-handler" (limit thunk handler)
+  (check-stack-limit "call-with-stack-overflow-handler" limit)
+  (handler-case (funcall thunk)
+    (storage-condition ()
+      (check-stack-limit "call-with-stack-overflow-handler" (funcall handler))
+      (guile-error (ssym "stack-overflow") "call-with-stack-overflow-handler" "Stack overflow" '()))))

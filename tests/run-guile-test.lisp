@@ -33,6 +33,9 @@
 
 (setq psx::*full-continuations* t)
 (psg:boot)
+;; --script implies --lose-on-corruption, which makes a stack overflow
+;; fatal; Guile's tests overflow on purpose (call-with-stack-overflow-handler)
+(setf (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int) 0)
 ;; GUILE_TRACE=1: a backtrace for each Lisp error that becomes a Guile exception
 (when (uiop:getenv "GUILE_TRACE") (setq psg::*trace-lisp-errors* t))
 ;; GUILE_TRACE_CACHE=1: which modules load from the compiled-file cache

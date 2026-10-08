@@ -221,7 +221,11 @@ name and behaviour: a primcall of one compiles to a call of the host's.")
 	   (compile-tree-il (node-field x 3))))
     (:toplevel-define
      (list (core "%guile-define!") (quoted *compile-module*) (quoted (node-field x 2))
-	   (compile-tree-il (node-field x 3))))
+	   (let ((value (node-field x 3)))
+	     ;; a procedure defined at top level is named, as Guile's are
+	     (if (eq (node-type value) :lambda)
+		 (with-lambda-meta (node-field value 1) (compile-lambda (node-field value 2)) t)
+		 (compile-tree-il value)))))
     (:conditional
      (list (core "if") (compile-test (node-field x 1)) (compile-tree-il (node-field x 2))
 	   (compile-tree-il (node-field x 3))))
@@ -239,7 +243,7 @@ name and behaviour: a primcall of one compiles to a call of the host's.")
 		     (setq x (node-field x 2)))
 	    (push (compile-tree-il x) forms)
 	    (cons (core "begin") (nreverse forms))))
-    (:lambda (compile-lambda (node-field x 2)))
+    (:lambda (with-lambda-meta (node-field x 1) (compile-lambda (node-field x 2))))
     (:let (let ((vals (mapcar #'compile-tree-il (node-field x 3)))
 		(vars (mapcar #'bind-lexical (node-field x 2))))
 	    (cons (list (core "lambda") vars (compile-tree-il (node-field x 4))) vals)))
@@ -292,6 +296,20 @@ comparisons can't return it."
 		 ((:toplevel-ref :module-ref) (predicate-name-p (node-field f 2))))))
       (:conditional (and (boolean-node-p (node-field x 2)) (boolean-node-p (node-field x 3))))
       (t nil))))
+
+(defun with-lambda-meta (meta lambda &optional named)
+  "LAMBDA, compiled, given the properties in META, the lambda's metadata
+alist, that procedure-documentation and procedure-name read: its
+documentation, and if NAMED its name."
+  (let ((props (loop for entry in (if (listp meta) meta '())
+		     when (and (consp entry) (symbolp (car entry))
+			       (let ((key (ps:scheme-symbol-name (car entry))))
+				 (or (string= key "documentation")
+				     (and named (string= key "name")))))
+		       collect entry)))
+    (if props
+	(list (core "%guile-with-meta") lambda (quoted props))
+	lambda)))
 
 (defun compile-lambda (case)
   (cond ((not (node-type case))
@@ -396,6 +414,9 @@ evaluated in the scope of those before it."
     (lambda (&rest args)
       (declare (ignore args))
       (error "Guile primitive ~A isn't supported here" (ps:scheme-symbol-name name))))
+  (psx:defhost "%guile-with-meta" (f props)
+    (setf (gethash f *procedure-properties*) (append props (gethash f *procedure-properties* '())))
+    f)
   (psx:defhost "%guile-arity-error" ()
     (guile-error (ssym "wrong-number-of-args") ps:false "Wrong number of arguments" '()))
   (psx:defhost "%guile-abort*" (tag args) (apply #'psx::abort-to-prompt tag args))
@@ -414,6 +435,7 @@ evaluated in the scope of those before it."
 	  finally (return +unbound+)))
   (psx::register-primitive-names
    '("%guile-ref" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
+     "%guile-with-meta"
      "%guile-nargs>=" "%guile-nargs-between" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
 
