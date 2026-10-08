@@ -21,7 +21,7 @@
 
 (defun make-octets (n) (make-array n :element-type '(unsigned-byte 8)))
 
-(defconstant +buffer-size+ 4096)
+(defconstant +buffer-size+ 1024 "As Guile's ports' (custom ports' read and write sizes show it).")
 
 (defclass gport (trivial-gray-streams:fundamental-binary-input-stream
 		 trivial-gray-streams:fundamental-binary-output-stream
@@ -49,6 +49,7 @@
    (codec :initform nil :accessor port-codec)
    (strategy :initarg :strategy :initform nil :accessor port-strategy)
    (bom-state :initform nil :accessor port-bom-state)	; for UTF-16 and UTF-32
+   (eof-pending :initform nil :accessor port-eof-pending)	; an end of file read, not yet returned twice
    (line :initform 0 :accessor port-line*)
    (column :initform 0 :accessor port-column*)
    (filename :initarg :filename :initform ps:false :accessor port-filename*)
@@ -75,6 +76,9 @@
 (defvar *open-output-ports* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "Output ports that may hold buffered bytes: flushed at exit.")
 
+(defvar *fd-ports* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Ports on file descriptors, for fdes->ports.")
+
 (defun flush-all-ports ()
   (loop for p being the hash-keys of *open-output-ports*
 	do (ignore-errors (flush-output p))))
@@ -97,10 +101,9 @@
 	  (t nil))))
 
 (defun external-format-of (name)
-  "An SBCL external format for the single-byte encoding NAME, or NIL."
-  (let ((kw (intern (string-upcase name) "KEYWORD")))
-    (and (ignore-errors (sb-ext:octets-to-string (make-octets 1) :external-format kw))
-	 kw)))
+  "An SBCL external format for the encoding NAME, or NIL."
+  (let ((kw (find-symbol (string-upcase name) "KEYWORD")))
+    (and kw (sb-impl::get-external-format kw) kw)))
 
 (defun encoding-codec (encoding)
   (cond ((string= encoding "UTF-8") :utf-8)
@@ -141,8 +144,11 @@
     (if (symbolp s) (ps:scheme-symbol-name s) "substitute")))
 
 (defun default-encoding ()
+  ;; #f is Latin-1, as Guile's: R6RS's binary ports are made so
   (let ((v (ignore-errors (fluid-value (root-value "%default-port-encoding")))))
-    (if (stringp v) (or (canonical-encoding v) "UTF-8") "UTF-8")))
+    (cond ((stringp v) (or (canonical-encoding v) "UTF-8"))
+	  ((eq v ps:false) "ISO-8859-1")
+	  (t "UTF-8"))))
 
 ;;; ------------------------------------------------------------------
 ;;; Bytes
@@ -160,8 +166,22 @@
 	(unless (port-input-p port)
 	  (wrong-type "read" 1 port))
 	(when (plusp (port-wend port)) (flush-output port))
-	(let ((n (funcall (port-read-fn port) (port-rbuf port) 0 (length (port-rbuf port)))))
-	  (setf (port-rpos port) 0 (port-rend port) n)
+	;; read after what is there (unread bytes may precede): at end of
+	;; file the buffer is left as it was, so a position in it still holds
+	(when (>= (port-rend port) (length (port-rbuf port)))
+	  (setf (port-rpos port) 0 (port-rend port) 0))
+	;; an end of file just read is reported again without reading
+	(when (port-eof-pending port)
+	  (setf (port-eof-pending port) nil)
+	  (return-from fill-input nil))
+	(let* ((start (port-rend port))
+	       (n (funcall (port-read-fn port) (port-rbuf port) start
+			   ;; an unbuffered port reads a byte at a time
+			   (if (eq (port-buffering port) :none)
+			       1
+			       (- (length (port-rbuf port)) start)))))
+	  (incf (port-rend port) n)
+	  (when (zerop n) (setf (port-eof-pending port) t))
 	  (plusp n)))))
 
 (defun port-read-byte (port)
@@ -220,12 +240,26 @@
 ;;; ------------------------------------------------------------------
 ;;; Characters
 
+(defconstant +eilseq+ #+darwin 92 #-darwin 84)
+
+(defvar *bad-input-start* nil
+  "The read position before the character being decoded: an error puts
+the bytes back, so that they can be read again (as U+FFFD, say).")
+
 (defun decoding-error (port)
-  (guile-error (ssym "decoding-error") "scm_getc" "input decoding error" '() (list port)))
+  ;; Guile's arguments: subr, message, errno, port
+  (call-throw (ssym "decoding-error") (list "scm_getc" "input decoding error" +eilseq+ port)))
 
 (defun bad-input (port)
-  "A byte sequence that isn't a character: U+FFFD, or an error."
-  (if (string= (strategy port) "error") (decoding-error port) (code-char #xfffd)))
+  "A byte sequence that isn't a character: U+FFFD under the substitute
+strategy, else (error and escape alike, as Guile's) an error, the
+sequence left unread."
+  (if (string= (strategy port) "substitute")
+      (code-char #xfffd)
+      (progn
+	(when (and *bad-input-start* (<= *bad-input-start* (port-rpos port)))
+	  (setf (port-rpos port) *bad-input-start*))
+	(decoding-error port))))
 
 (defun read-utf-8 (port b0)
   (let ((n (cond ((< b0 #x80) 0) ((< b0 #xc2) -1) ((< b0 #xe0) 1) ((< b0 #xf0) 2) ((< b0 #xf5) 3) (t -1))))
@@ -280,15 +314,26 @@ there is one, at the start; big-endian otherwise."
 
 (defun port-read-char (port)
   "The next character from PORT, or :EOF."
-  (let ((codec (codec port)))
+  (fill-input port)
+  (let ((codec (codec port))
+	(*bad-input-start* (port-rpos port)))
     (case codec
-      (:utf-16 (read-wide port 2 (eq (bom-endianness port 2) :big)))
-      (:utf-32 (read-wide port 4 (eq (bom-endianness port 4) :big)))
+      (:utf-16 (read-wide port 2 (not (eq (bom-endianness port 2) :little))))
+      (:utf-32 (read-wide port 4 (not (eq (bom-endianness port 4) :little))))
       (:utf-16be (read-wide port 2 t))
       (:utf-16le (read-wide port 2 nil))
       (:utf-32be (read-wide port 4 t))
       (:utf-32le (read-wide port 4 nil))
-      (t (let ((b (port-read-byte port)))
+      (t (when (and (eq codec :utf-8) (null (port-bom-state port)))
+	   ;; a byte-order mark at the start of a stream is dropped, once
+	   (setf (port-bom-state port) :done)
+	   (when (and (fill-input port) (>= (- (port-rend port) (port-rpos port)) 3)
+		      (= (aref (port-rbuf port) (port-rpos port)) #xef)
+		      (= (aref (port-rbuf port) (+ 1 (port-rpos port))) #xbb)
+		      (= (aref (port-rbuf port) (+ 2 (port-rpos port))) #xbf))
+	     (incf (port-rpos port) 3)
+	     (setq *bad-input-start* (port-rpos port))))
+	 (let ((b (port-read-byte port)))
 	   (cond ((eq b :eof) :eof)
 		 ((eq codec :utf-8) (read-utf-8 port b))
 		 ((eq codec :latin-1) (code-char b))
@@ -342,8 +387,9 @@ conversion strategy says."
 						   (format nil "\\u~(~4,'0X~)" code))
 						  (t (format nil "\\U~(~6,'0X~)" code)))
 					    :external-format :latin-1)))
-		(t (guile-error (ssym "encoding-error") "scm_putc"
-				"conversion to port encoding failed" '() (list port char))))))))
+		;; Guile's arguments: subr, message, errno, port, character
+		(t (call-throw (ssym "encoding-error")
+			       (list "scm_putc" "conversion to port encoding failed" +eilseq+ port char))))))))
 
 (defun track-char (port char)
   (case char
@@ -351,9 +397,20 @@ conversion strategy says."
     (#\Tab (setf (port-column* port) (* 8 (1+ (floor (port-column* port) 8)))))
     (#\Backspace (when (plusp (port-column* port)) (decf (port-column* port))))
     (#\Return (setf (port-column* port) 0))
+    (#\Bel)				; the bell takes no column, as in Guile
     (t (incf (port-column* port)))))
 
+(defun write-bom (port)
+  "At the start of a UTF-16 or UTF-32 stream, a big-endian byte-order
+mark, as Guile writes."
+  (when (and (null (port-bom-state port)) (member (codec port) '(:utf-16 :utf-32)))
+    (setf (port-bom-state port) :big)
+    (write-octets port (if (eq (codec port) :utf-16)
+			   (make-array 2 :element-type '(unsigned-byte 8) :initial-contents '(#xfe #xff))
+			   (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(0 0 #xfe #xff))))))
+
 (defun port-write-char (port char)
+  (write-bom port)
   (write-octets port (encode-char port char))
   (track-char port char)
   (when (and (eq (port-buffering port) :line) (char= char #\Newline))
@@ -388,9 +445,16 @@ conversion strategy says."
   nil)
 
 (defmethod trivial-gray-streams:stream-peek-char ((p gport))
-  (let ((c (port-read-char p)))
+  ;; read, then put the read position back where it was: the very bytes,
+  ;; a bad sequence included
+  (fill-input p)
+  (let* ((start (port-rpos p))
+	 (buffer (port-rbuf p))
+	 (c (port-read-char p)))
     (unless (eq c :eof)
-      (unread-octets p (if (encodable-p c (codec p)) (char-octets c (codec p)) (char-octets c :utf-8))))
+      (if (and (eq buffer (port-rbuf p)) (<= start (port-rpos p)))
+	  (setf (port-rpos p) start)
+	  (unread-octets p (if (encodable-p c (codec p)) (char-octets c (codec p)) (char-octets c :utf-8)))))
     c))
 
 (defmethod trivial-gray-streams:stream-read-char-no-hang ((p gport))
@@ -474,8 +538,10 @@ conversion strategy says."
 	(flush-output port)
 	(let ((pending (- (port-rend port) (port-rpos port))))
 	  (setf (port-rpos port) 0 (port-rend port) 0)
-	  (prog1 (funcall (port-seek-fn port) (if (= whence 1) (- offset pending) offset) whence)
-	    (setf (port-bom-state port) nil))))))
+	  (let ((pos (funcall (port-seek-fn port) (if (= whence 1) (- offset pending) offset) whence)))
+	    ;; a byte-order mark is looked for again only at the start
+	    (setf (port-bom-state port) (if (eql pos 0) nil :done))
+	    pos)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Backends
@@ -488,7 +554,8 @@ conversion strategy says."
 ;;; Bytes in memory: string and bytevector ports
 
 (defstruct (memory (:constructor make-memory (octets &optional (length (length octets)))))
-  octets length (position 0))
+  octets length (position 0)
+  (string-p nil))			; a string port's (setvbuf refuses those)
 
 (defun memory-backend (memory)
   (list :read (lambda (buf start count)
@@ -521,7 +588,9 @@ conversion strategy says."
 
 (defun open-input-string* (string)
   (unless (stringp string) (wrong-type "open-input-string" 1 string))
-  (memory-port (sb-ext:string-to-octets string :external-format :utf-8) :input t))
+  (let ((p (memory-port (sb-ext:string-to-octets string :external-format :utf-8) :input t)))
+    (setf (memory-string-p (port-data p)) t)
+    p))
 
 (defun memory-port (octets &key input output (encoding "UTF-8"))
   "A port on OCTETS; an output-only one starts empty, OCTETS its space."
@@ -530,10 +599,12 @@ conversion strategy says."
 	   (memory-backend m))))
 
 (defun open-output-string* ()
-  (memory-port (make-octets 64) :output t))
+  (let ((p (memory-port (make-octets 64) :output t)))
+    (setf (memory-string-p (port-data p)) t)
+    p))
 
 (defun port-output-string (port)
-  (unless (and (gport-p port) (memory-p (port-data port)))
+  (unless (and (gport-p port) (memory-p (port-data port)) (port-open-p port))
     (wrong-type "get-output-string" 1 port))
   (let ((octets (memory-contents port)))
     (if (string= (port-encoding-name port) "UTF-8")
@@ -582,6 +653,7 @@ conversion strategy says."
 				  (fd-backend fd))))
     (when (and (find #\0 mode) (find #\b mode))
       (setf (port-buffering port) :none))
+    (setf (gethash port *fd-ports*) t)
     port))
 
 (defun scan-for-coding (text)
@@ -630,6 +702,8 @@ read buffer, unread."
   (let* ((mode (if (symbolp mode) (ps:scheme-symbol-name mode) mode))
 	 (base (find-if (lambda (c) (find c "rwa")) mode))
 	 (plus (find #\+ mode)))
+    (when (some (lambda (c) (> (char-code c) 255)) mode)
+      (guile-error (ssym "out-of-range") "open-file" "Value out of range: ~S" (list mode) (list mode)))
     (unless (and base (every (lambda (c) (find c "rwab+0l")) mode))
       (guile-error (ssym "misc-error") "open-file" "Invalid mode string: ~S" (list mode)))
     (let ((flags (logior (case base
@@ -642,8 +716,9 @@ read buffer, unread."
 		       (list (sb-int:strerror errno) filename) (list errno)))
 	(fd-port fd mode
 		 :filename filename
-		 :encoding (cond ((stringp encoding) encoding)
-				 ((and (truthy guess-encoding) (find #\r mode)) (file-coding filename))))))))
+		 ;; a coding declaration, guessed, takes precedence
+		 :encoding (or (and (truthy guess-encoding) (find #\r mode) (file-coding filename))
+			       (and (stringp encoding) encoding)))))))
 
 ;;; Lisp streams as ports
 
@@ -739,7 +814,7 @@ read buffer, unread."
   (let ((c (trivial-gray-streams:stream-peek-char (in-port port "peek-char"))))
     (if (eq c :eof) ps:eof-object c)))
 
-(defun unread-string* (string port)
+(defun unread-string* (string &optional port)
   (let ((p (in-port port "unread-string")))
     (loop for i from (1- (length string)) downto 0 do (port-unread-char p (char string i))))
   *unspecified*)
@@ -838,6 +913,10 @@ read buffer, unread."
    (cons "setvbuf" (lambda (port mode &optional size)
 		     (declare (ignore size))
 		     (let ((p (->port port "setvbuf")))
+		       ;; an open port with a descriptor or a custom one
+		       (unless (and (port-open-p p)
+				    (not (and (memory-p (port-data p)) (memory-string-p (port-data p)))))
+			 (wrong-type "setvbuf" 1 port))
 		       (flush-output p)
 		       (setf (port-buffering p)
 			     (let ((m (if (symbolp mode) (ps:scheme-symbol-name mode) mode)))
@@ -854,15 +933,21 @@ read buffer, unread."
 			       (loop for c = (port-read-char in) until (eq c :eof) do (write-char c s)))))))
    (cons "char-ready?" (lambda (&optional port)
 			 (bool (trivial-gray-streams:stream-listen (in-port port "char-ready?")))))
-   (cons "seek" (lambda (port offset whence) (port-seek (->port port "seek") offset whence)))
+   (cons "seek" (lambda (port offset whence)
+		  (if (integerp port)
+		      (multiple-value-bind (pos errno) (sb-unix:unix-lseek port offset whence)
+			(or pos (port-system-error "seek" errno)))
+		      (port-seek (->port port "seek") offset whence))))
    (cons "SEEK_SET" 0) (cons "SEEK_CUR" 1) (cons "SEEK_END" 2)
    (cons "truncate-file" (lambda (obj &optional length)
-			   (if (stringp obj)
-			       (sb-posix:truncate obj length)
+			   (cond
+			     ((stringp obj) (sb-posix:truncate obj (or length 0)))
+			     ((integerp obj) (sb-posix:ftruncate obj (or length 0)))
+			     (t
 			       (let ((p (->port obj "truncate-file")))
 				 (flush-output p)
 				 (funcall (or (port-truncate-fn p) (wrong-type "truncate-file" 1 obj))
-					  (or length (port-position p)))))
+					  (or length (port-position p))))))
 			   *unspecified*))
    (cons "port-line" (lambda (p) (port-line* (->port p "port-line"))))
    (cons "set-port-line!" (lambda (p n) (setf (port-line* (->port p "set-port-line!")) n) *unspecified*))
@@ -881,16 +966,28 @@ read buffer, unread."
 			     (make-port :kind "void" :input (and (find #\r mode) t) :output (and (find #\w mode) t)
 					:read (lambda (buf start count) (declare (ignore buf start count)) 0)
 					:write (lambda (buf start count) (declare (ignore buf start)) count)))))
-   ;; (ice-9 ports internal): ports' buffers, for (ice-9 suspendable-ports)
+   ;; (ice-9 ports internal): what R6RS's ports and the custom textual
+   ;; ports ask of the buffers (their sizes); the rest are absent
+   (list (cons "port-read-buffering"
+	       (lambda (p) (if (eq (port-buffering (->port p "port-read-buffering")) :none) 1 +buffer-size+)))
+	 (cons "port-write-buffer"
+	       (lambda (p) (vector (make-octets (if (eq (port-buffering (->port p "port-write-buffer")) :none)
+						    1 +buffer-size+))
+				   0 0 ps:false 0)))
+	 (cons "port-read-buffer"
+	       (lambda (p) (vector (make-octets (if (eq (port-buffering (->port p "port-read-buffer")) :none)
+						    1 +buffer-size+))
+				   0 0 ps:false 0)))
+	 (cons "port-line-buffered?" (lambda (p) (bool (eq (port-buffering (->port p "port-line-buffered?")) :line)))))
    (mapcar (lambda (name)
 	     (cons name (lambda (&rest args)
 			  (declare (ignore args))
 			  (error "~A: port buffers aren't available here" name))))
-	   '("port-read-buffer" "port-write-buffer" "port-auxiliary-write-buffer"
-	     "port-line-buffered?" "expand-port-read-buffer!" "port-read" "port-write"
+	   '("port-auxiliary-write-buffer"
+	     "expand-port-read-buffer!" "port-read" "port-write"
 	     "port-clear-stream-start-for-bom-read" "port-clear-stream-start-for-bom-write"
 	     "specialize-port-encoding!" "port-decode-char" "port-encode-char"
-	     "port-encode-chars" "port-random-access?" "port-read-buffering" "port-poll"
+	     "port-encode-chars" "port-random-access?" "port-poll"
 	     "port-read-wait-fd" "port-write-wait-fd"))))
 
 (defextension "scm_init_ice_9_fports"
@@ -930,13 +1027,20 @@ read buffer, unread."
 							    (port-close-fn port) (getf b :close)))
 						    ps:true)))))
 	(cons "fdes->ports" (lambda (fd)
-			      (loop for p being the hash-keys of *open-output-ports*
-				    when (eql (port-fd p) fd) collect p)))))
+			      (loop for p being the hash-keys of *fd-ports*
+				    when (and (port-open-p p) (eql (port-fd p) fd)) collect p)))))
 
 ;;; (rnrs io ports) and (ice-9 binary-ports): scm_init_r6rs_ports
 
 (defun get-bytes (port n)
   "Up to N bytes from PORT, as a bytevector: fewer at end of file."
+  (when (and (eq (port-buffering port) :none) (= (port-rpos port) (port-rend port)) (plusp n)
+	     (port-read-fn port))
+    ;; unbuffered: one read of what is asked for, as Guile's
+    (when (plusp (port-wend port)) (flush-output port))
+    (let* ((out (make-octets n))
+	   (got (funcall (port-read-fn port) out 0 n)))
+      (return-from get-bytes (if (= got n) out (subseq out 0 got)))))
   (let ((out (make-octets n)) (i 0))
     (loop while (and (< i n) (fill-input port))
 	  do (let ((k (min (- n i) (- (port-rend port) (port-rpos port)))))
@@ -1029,7 +1133,10 @@ read buffer, unread."
   (let ((port nil))
     (setq port
 	  (make-port :kind "custom" :input (truthy input) :output (truthy output)
-		     :encoding (if (stringp encoding) encoding "UTF-8")
+		     :encoding (cond ((stringp encoding) encoding)
+				     ((and (symbolp encoding) (not (eq encoding ps:false)))
+				      (ps:scheme-symbol-name encoding))
+				     (t "UTF-8"))
 		     :data data
 		     :buffering :full
 		     :read (lambda (buf start count)
@@ -1043,6 +1150,16 @@ read buffer, unread."
 		     :truncate (lambda (length)
 				 (funcall (custom-dispatcher "custom-port-truncate") port data length))))
     (when (and (symbolp strategy) (not (eq strategy ps:false))) (setf (port-strategy port) strategy))
+    ;; the buffer sizes the port's get-natural-buffer-sizes asks for (a soft
+    ;; port's write size is 1: each write reaches it at once)
+    (let ((sizes (custom-dispatcher "custom-port-get-natural-buffer-sizes")))
+      (when sizes
+	(multiple-value-bind (read-size write-size)
+	    (funcall sizes port data +buffer-size+ +buffer-size+)
+	  (when (and (integerp read-size) (plusp read-size))
+	    (setf (port-rbuf port) (make-octets read-size)))
+	  (when (and (integerp write-size) (plusp write-size))
+	    (setf (port-wbuf port) (make-octets write-size))))))
     port))
 
 (defextension "scm_init_custom_ports"
