@@ -1049,7 +1049,10 @@ that name, if the host has one."
 		(let ((size (if size-p size (- (length bv) offset))))
 		  (unless (and (integerp size) (<= 0 size (- (length bv) offset)))
 		    (out-of-range "bytevector-slice" size))
-		  (subseq bv offset (+ offset size)))))
+		  ;; sharing BV's bytes, as Guile's (its linker writes each
+		  ;; section of an image through a slice)
+		  (make-array size :element-type '(unsigned-byte 8)
+				   :displaced-to bv :displaced-index-offset offset))))
 	;; Guile's checks of the size, before the host's
 	(cons "bytevector->sint-list" (lambda (bv endianness size) (integer-list-size-check "bytevector->sint-list" bv size)
 					(funcall (psx:host-ref "bytevector->sint-list") bv endianness size)))
@@ -1692,8 +1695,8 @@ true (the predicate's value) if it matches."
   (handler-case (funcall (gethash (cons "(srfi 14)" "char-set-ref") *library-values*) cs cursor)
     (error () (wrong-type "char-set-ref" 2 cursor))))
 
-;;; (system vm loader): there is no VM to load bytecode into, but an ELF
-;;; image is checked as libguile's loader checks it first.
+;;; (system vm loader): an ELF image is checked as libguile's loader
+;;; checks it, then loaded on the VM.
 
 (defun load-thunk-from-memory (bv)
   (flet ((fail (message) (guile-error (ssym "misc-error") "load-thunk-from-memory" message '())))
@@ -1705,10 +1708,15 @@ true (the predicate's value) if it matches."
     (unless (= (aref bv 5) #+little-endian 1 #+big-endian 2)
       (fail "ELF file does not have native byte order"))
     (unless (member (aref bv 7) '(0 255)) (fail "ELF file does not have the expected OS ABI"))
-    (fail "can't load bytecode: there is no Guile VM here")))
+    ;; the image's code runs on the VM (src/guile/vm.lisp)
+    (load-image (if (typep bv '(simple-array (unsigned-byte 8) (*))) bv (coerce bv '(simple-array (unsigned-byte 8) (*)))))))
 
 (defextension "scm_init_loader"
-  (list (cons "load-thunk-from-memory" #'load-thunk-from-memory)))
+  (list (cons "load-thunk-from-memory" #'load-thunk-from-memory)
+	(cons "load-thunk-from-file"
+	      (lambda (file)
+		(unless (stringp file) (wrong-type "load-thunk-from-file" 1 file))
+		(load-thunk-from-memory (read-file-bytes file))))))
 
 ;; SRFI 13's string-join, with libguile's error for joining nothing with
 ;; the strict-infix grammar

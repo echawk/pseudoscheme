@@ -7,7 +7,9 @@
 
 (in-package "PSEUDOSCHEME-R6RS")
 
-(deftype octets () '(simple-array (unsigned-byte 8) (*)))
+(deftype octets ()
+  ;; any octet vector: a slice (Guile's bytevector-slice) is displaced
+  '(array (unsigned-byte 8) (*)))
 
 (defun check-bv (who x)
   (unless (typep x 'octets) (r6rs-assertion-violation who "not a bytevector" x))

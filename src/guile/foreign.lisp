@@ -16,6 +16,13 @@
 
 (in-package "PSEUDOSCHEME-GUILE")
 
+(defvar *bytevector-address-hook* nil
+  "A function giving a bytevector's address, or NIL: the VM's, for the
+images it loaded (src/guile/vm.lisp).")
+(defvar *address-object-hook* nil
+  "A function giving the object at an address, or NIL: the VM's, for the
+static objects of its images.")
+
 (defstruct (gpointer (:constructor %make-gpointer (address &optional backing (offset 0)))
 		     (:copier nil))
   address				; for foreign memory
@@ -156,13 +163,18 @@ go as %default-port-conversion-strategy says."
     (cons "scm->pointer" (lambda (x) (make-pointer* (object-address x))))
     (cons "pointer->scm" (lambda (p)
 			   (multiple-value-bind (x found) (gethash (pointer-address* p) *address-objects*)
-			     (if found x (wrong-type "pointer->scm" 1 p)))))
+			     (cond (found x)
+				   ((and *address-object-hook* (funcall *address-object-hook* (pointer-address* p))))
+				   (t (wrong-type "pointer->scm" 1 p))))))
     (cons "set-pointer-finalizer!" (lambda (p finalizer)
 				     (set-pointer-finalizer (check-pointer "set-pointer-finalizer!" p) finalizer)
 				     *unspecified*))
     (cons "bytevector->pointer" (lambda (bv &optional (offset 0))
 				  (unless (typep bv 'ps-r6rs::octets) (wrong-type "bytevector->pointer" 1 bv))
-				  (%make-gpointer nil bv offset)))
+				  (let ((base (and *bytevector-address-hook* (funcall *bytevector-address-hook* bv))))
+				    (if base
+					(make-pointer* (+ base offset))
+					(%make-gpointer nil bv offset)))))
     (cons "pointer->bytevector" #'pointer->bytevector)
     (cons "dereference-pointer" (lambda (p)
 				  (check-non-null "dereference-pointer" p)

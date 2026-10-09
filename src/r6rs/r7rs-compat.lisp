@@ -54,7 +54,7 @@
 (defprim "get-output-bytevector" (port)
   (unless (typep port 'bytevector-output-port)
     (r6rs-assertion-violation "get-output-bytevector" "not a bytevector output port" port))
-  (prog1 (coerce (buffer port) 'octets)))
+  (prog1 (coerce (buffer port) '(simple-array (unsigned-byte 8) (*)))))
 
 (defprim "open-binary-input-file" (name)
   (open-file "open-binary-input-file" name :input '() nil))

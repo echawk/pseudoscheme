@@ -123,7 +123,9 @@
 ;;; ------------------------------------------------------------------
 ;;; Bytevectors (R7RS 6.9).  CL has these natively.
 
-(deftype bytevector () '(simple-array (unsigned-byte 8) (*)))
+(deftype bytevector ()
+  ;; any octet vector: a slice (Guile's bytevector-slice) is displaced
+  '(array (unsigned-byte 8) (*)))
 
 (defun check-bytevector (who x)
   (unless (typep x 'bytevector)

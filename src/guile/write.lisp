@@ -152,7 +152,13 @@ INITIAL): letters, marks, numbers, punctuation and symbols."
 	  (format nil "(~{~A~^ ~})" (nreverse parts)))
 	"_")))
 
+(defvar *write-program-hook* nil
+  "A function writing a compiled program (src/guile/vm.lisp) and returning
+true, or NIL.")
+
 (defun write-procedure (f stream)
+  (when (and *write-program-hook* (funcall *write-program-hook* f stream))
+    (return-from write-procedure))
   (let ((name (funcall (gethash "procedure-name" *guile-primitives*) f)))
     (if (and name (not (eq name ps:false)))
 	(format stream "#<procedure ~A ~A>"

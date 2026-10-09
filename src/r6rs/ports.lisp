@@ -114,7 +114,7 @@
   (vector-push-extend byte (buffer s)) byte)
 
 (defun take-bytes (s)
-  (prog1 (coerce (buffer s) 'octets) (setf (fill-pointer (buffer s)) 0)))
+  (prog1 (coerce (buffer s) '(simple-array (unsigned-byte 8) (*))) (setf (fill-pointer (buffer s)) 0)))
 
 ;;; Custom ports (8.2.10)
 

@@ -26,6 +26,7 @@
 
 (defstruct (vm-image (:constructor %make-vm-image))
   bytes					; the image, (unsigned-byte 8)
+  (base 0)				; its address, as (system vm program) sees it
   cells					; one per 8 bytes: raw bits, or a Lisp object stored there
   (objects (make-hash-table))		; byte address -> the object decoded there
   elf)
@@ -39,7 +40,20 @@
 	      for at = (+ (* 8 i) k)
 	      do (setq v (logior (ash v 8) (if (< at (length bytes)) (aref bytes at) 0))))
 	(setf (svref cells i) v)))
-    (%make-vm-image :bytes bytes :cells cells)))
+    (register-image (%make-vm-image :bytes bytes :cells cells))))
+
+(defvar *vm-images* '() "The images loaded, newest first.")
+(defvar *vm-images-lock* (sb-thread:make-mutex :name "VM images"))
+(defvar *next-image-base* (ash 1 40))
+
+(defun register-image (image)
+  "Give IMAGE an address range of its own, and remember it."
+  (sb-thread:with-mutex (*vm-images-lock*)
+    (setf (vm-image-base image) *next-image-base*)
+    (incf *next-image-base* (* (ceiling (+ (length (vm-image-bytes image)) 1) (ash 1 24)) (ash 1 24)))
+    (push image *vm-images*))
+  image)
+
 
 (defstruct (code-pointer (:constructor make-code-pointer (image word)))
   "A bytecode address: an image and a 32-bit word index in it."
@@ -56,6 +70,14 @@
 (defconstant +scm-undefined+ 2308)
 (defconstant +scm-eof+ 2564)
 (defconstant +fixnum-bits+ 62)
+
+(defparameter +bytevector-element-types+
+  #(nil nil nil "vu8" "u8" "s8" "u16" "s16" "u32" "s32" "u64" "s64" "f32" "f64" "c32" "c64")
+  "A bytevector header's element type (bits 7 up), as Guile's array types.")
+
+(defun bytevector-header (bv)
+  (let ((type (or (gethash bv *bytevector-types*) "vu8")))
+    (logior #x8000 (ash (or (position type +bytevector-element-types+ :test #'equal) 3) 7) 77)))
 
 (defun scm-from-bits (bits &optional image)
   "The Scheme value whose SCM bits are BITS, an immediate, or a pointer
@@ -147,8 +169,12 @@ its type)."
 		 (61 (make-syntax-object (scm 1) (scm 2) (scm 3) (scm 4)))
 		 (77 (let* ((n (raw 1))
 			    (contents (raw 2))
-			    (bytes (vm-image-bytes image)))
-		       (subseq bytes contents (+ contents n))))
+			    (bytes (subseq (vm-image-bytes image) contents (+ contents n)))
+			    (type (svref +bytevector-element-types+ (ldb (byte 8 7) word0))))
+		       ;; a SRFI 4 vector is a bytevector of its element type
+		       (when (and type (string/= type "vu8"))
+			 (setf (gethash bytes *bytevector-types*) type))
+		       bytes))
 		 (otherwise (vm-error "static object of type ~D at ~X not decoded yet" tc7 address)))))))))
 
 (defun decode-static-string (image stringbuf start length)
@@ -476,7 +502,7 @@ values in the frame, and return from it."
 	     ((integerp x) 279)
 	     ((rationalp x) 1047)
 	     ((complexp x) 791)
-	     ((typep x 'ps-r6rs::octets) 77)
+	     ((typep x 'ps-r6rs::octets) (bytevector-header x))
 	     ((functionp x) 69)
 	     (t 0)))))
 
@@ -522,7 +548,7 @@ values in the frame, and return from it."
 		(vm-error "reading word ~D of ~S isn't supported yet" i x)))
     (vm-stringbuf (ecase i (1 (length (vm-stringbuf-string x)))))
     ;; a bytevector: its length, and a pointer to its contents
-    ((simple-array (unsigned-byte 8) (*))
+    (ps-r6rs::octets
      (ecase i (1 (length x)) (2 (make-vm-pointer x 0))))
     (t (cond ((and (vtable-p x) (member i '(2 6 7))) (vtable-word x i))
 	     ((struct-p x) (svref (struct-slots-of x) (- i 1)))
@@ -840,7 +866,7 @@ thunk."
 
 (defun pointer-bytes (p who)
   (let ((base (vm-pointer-base p)))
-    (unless (typep base '(simple-array (unsigned-byte 8) (*)))
+    (unless (typep base 'ps-r6rs::octets)
       (vm-error "~A of a pointer to ~S isn't supported" who base))
     base))
 
@@ -1171,3 +1197,120 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
 (defguile "symbol-hash" (symbol)
   (unless (and (symbolp symbol) symbol (not (keywordp symbol))) (wrong-type "symbol-hash" 1 symbol))
   (guile-symbol-hash symbol))
+
+;;; ------------------------------------------------------------------
+;;; Introspection: (system vm program), (system vm loader)'s mapped
+;;; images, (language bytecode)'s builtins
+;;;
+;;; A program's code is an address: its image's base plus the byte
+;;; offset.  Guile's (system vm debug) finds the image an address is in
+;;; with find-mapped-elf-image, and reads names, arities, docstrings and
+;;; sources from its side tables.
+
+(defun code-address (code)
+  (+ (vm-image-base (code-pointer-image code)) (* 4 (code-pointer-word code))))
+
+(defun image-at (address)
+  (find-if (lambda (image)
+	     (<= (vm-image-base image) address (+ (vm-image-base image) (length (vm-image-bytes image)))))
+	   *vm-images*))
+
+(defun check-program (who p)
+  (unless (typep p 'vm-program) (wrong-type who 1 p))
+  p)
+
+(defextension "scm_init_programs"
+  (list (cons "program?" (lambda (x) (bool (typep x 'vm-program))))
+	(cons "program-code" (lambda (p) (code-address (program-code (check-program "program-code" p)))))
+	(cons "primitive-code?" (lambda (x) (declare (ignore x)) ps:false))
+	(cons "primitive-code-name" (lambda (x) (declare (ignore x)) ps:false))
+	(cons "program-num-free-variables"
+	      (lambda (p) (length (program-free (check-program "program-num-free-variables" p)))))
+	(cons "program-free-variable-ref"
+	      (lambda (p i) (svref (program-free (check-program "program-free-variable-ref" p)) i)))
+	(cons "program-free-variable-set!"
+	      (lambda (p i x) (setf (svref (program-free (check-program "program-free-variable-set!" p)) i) x)
+		*unspecified*))))
+
+(defextension "scm_init_loader"
+  (list (cons "load-thunk-from-memory" #'load-thunk-from-memory)
+	(cons "load-thunk-from-file"
+	      (lambda (file)
+		(unless (stringp file) (wrong-type "load-thunk-from-file" 1 file))
+		(load-thunk-from-memory (read-file-bytes file))))
+	(cons "find-mapped-elf-image"
+	      (lambda (address)
+		(let ((image (and (integerp address) (image-at address))))
+		  (if image (vm-image-bytes image) ps:false))))
+	(cons "all-mapped-elf-images" (lambda () (mapcar #'vm-image-bytes *vm-images*)))))
+
+(defparameter *builtins* #("apply" "values" "abort-to-prompt" "call-with-values"
+			   "call-with-current-continuation"))
+
+(defextension "scm_init_vm_builtins"
+  (list (cons "builtin-name->index"
+	      (lambda (name) (or (position (ps:scheme-symbol-name name) *builtins* :test #'string=) ps:false)))
+	(cons "builtin-index->name"
+	      (lambda (i) (if (and (integerp i) (< -1 i (length *builtins*))) (ssym (svref *builtins* i)) ps:false)))))
+
+;;; A program's name, documentation, properties and arity come from its
+;;; image's debugging information, which (system vm program) reads.
+
+(defun program-procedure (name)
+  (let ((m (resolve-module* (list (ssym "system") (ssym "vm") (ssym "program")))))
+    (and m (let ((v (module-variable* m (ssym name))))
+	     (and v (not (eq (gvariable-value v) +unbound+)) (gvariable-value v))))))
+
+(defmacro wrap-for-programs (primitive (p &rest args) &body body)
+  "Make PRIMITIVE's value, given a vm-program, BODY's."
+  (let ((old (gensym "OLD")))
+    `(let ((,old (gethash ,primitive *guile-primitives*)))
+       (setf (gethash ,primitive *guile-primitives*)
+	     (lambda (,p ,@args)
+	       (if (typep ,p 'vm-program)
+		   (progn ,@body)
+		   (funcall ,old ,p ,@args)))))))
+
+(wrap-for-programs "procedure-name" (p)
+  (let ((entry (assoc (ssym "name") (gethash p *procedure-properties* '()))))
+    (cond (entry (cdr entry))
+	  ((program-procedure "program-name") (funcall (program-procedure "program-name") p))
+	  (t ps:false))))
+(wrap-for-programs "procedure-documentation" (p)
+  (let ((entry (assoc (ssym "documentation") (gethash p *procedure-properties* '()))))
+    (cond (entry (cdr entry))
+	  ((program-procedure "program-documentation") (funcall (program-procedure "program-documentation") p))
+	  (t ps:false))))
+(wrap-for-programs "procedure-properties" (p)
+  (let ((own (gethash p *procedure-properties* '()))
+	(from-image (if (program-procedure "program-properties")
+			(funcall (program-procedure "program-properties") p)
+			'())))
+    (append own (if (listp from-image) from-image '()))))
+(wrap-for-programs "procedure-minimum-arity" (p)
+  (if (program-procedure "program-minimum-arity")
+      (funcall (program-procedure "program-minimum-arity") p)
+      (list 0 0 ps:true)))
+
+;; Guile's (system vm debug) takes an image's address from its bytevector,
+;; and objects at addresses in it with pointer->scm
+(setq *bytevector-address-hook*
+      (lambda (bv)
+	(let ((image (find bv *vm-images* :key #'vm-image-bytes :test #'eq)))
+	  (and image (vm-image-base image)))))
+(setq *address-object-hook*
+      (lambda (address)
+	(let ((image (image-at address)))
+	  (and image (zerop (mod (- address (vm-image-base image)) 8))
+	       (image-object image (- address (vm-image-base image)))))))
+
+;; A program is written as Guile's printer writes it, by (system vm
+;; program)'s print-program: its name and its arguments, from its image
+(setq *write-program-hook*
+      (lambda (f stream)
+	(let ((print (and (typep f 'vm-program) (program-procedure "print-program"))))
+	  (when print
+	    (let ((port (stream-port stream)))
+	      (funcall print f port)
+	      (finish-output port))
+	    t))))

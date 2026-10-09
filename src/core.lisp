@@ -432,8 +432,8 @@ Guile mode compares its structs with it.")
 					   (aref (the simple-vector obj2) i)))
 			 (return nil)))))))
 	;; R7RS bytevectors
-	((typep obj1 '(simple-array (unsigned-byte 8) (*)))
-	 (and (typep obj2 '(simple-array (unsigned-byte 8) (*)))
+	((typep obj1 '(array (unsigned-byte 8) (*)))	; a slice is displaced
+	 (and (typep obj2 '(array (unsigned-byte 8) (*)))
 	      (equalp obj1 obj2)
 	      (or (null *bytevector-type*)
 		  (equal (funcall *bytevector-type* obj1) (funcall *bytevector-type* obj2)))))
