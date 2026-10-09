@@ -72,6 +72,7 @@ element).")
 	(params (ps-r7rs::thread-parameters-snapshot)))
     (sb-thread:make-thread
      (lambda ()
+       (psx::with-thread-state
        (let ((*standard-output* out) (*standard-input* in) (*error-output* err)
 	     (*current-module* module)
 	     (ps-r7rs::*thread-parameters* params))
@@ -89,7 +90,7 @@ element).")
 		 (storage-condition ()
 		   (with-guile-errors
 		     (guile-error (ssym "stack-overflow") ps:false "Stack overflow" '()))))
-	     (error (c) (uncaught c))))))
+	     (error (c) (uncaught c)))))))
      :name "guile thread")))
 
 (defextension "scm_init_ice_9_threads"

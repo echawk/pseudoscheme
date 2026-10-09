@@ -62,13 +62,61 @@ continuation throws.")
   "While a re-entered continuation throws to the base: the winders it
 shares with the current continuation, whose afters don't run.")
 
-(defmacro with-frame ((frame) &body body)
-  "Run BODY with FRAME (a vector, already allocated) pushed on *FSTACK*."
-  (let ((cell (gensym "CELL")))
+(defconstant +binding-stack-deep+ (* 512 1024)
+  "Bytes of binding stack in use past which a frame isn't pushed by
+binding *FSTACK*: SBCL's binding stack is of fixed size (about a
+megabyte), while recursion may go as deep as the control stack allows.")
+
+(defmacro binding-stack-deep-p ()
+  #+sbcl `(> (sb-sys:sap- (sb-kernel:binding-stack-pointer-sap)
+			  (sb-vm::current-thread-offset-sap sb-vm::thread-binding-stack-start-slot))
+	     +binding-stack-deep+)
+  #-sbcl nil)
+
+(defmacro with-pushed-frame ((frame) &body body)
+  "Run BODY with FRAME (a vector, already allocated) pushed on *FSTACK*.
+*FSTACK* is bound, which is cheap, until the binding stack is deep; then
+CALL-WITH-ASSIGNED-FSTACK pushes it, taking only control stack.  That
+is out of line: an UNWIND-PROTECT in a component makes SBCL compile all
+of the component's functions more slowly.  Every thread that runs Scheme
+binds *FSTACK* once (WITH-THREAD-STATE)."
+  (let ((cell (gensym "CELL")) (thunk (gensym "BODY")))
     `(let ((,cell (cons ,frame *fstack*)))
        (declare (dynamic-extent ,cell))
-       (let ((*fstack* ,cell))
-	 ,@body))))
+       (if (binding-stack-deep-p)
+	   (flet ((,thunk () ,@body))
+	     (declare (dynamic-extent #',thunk))
+	     (call-with-assigned-fstack ,cell #',thunk))
+	   (let ((*fstack* ,cell))
+	     ,@body)))))
+
+(defun call-with-assigned-fstack (cell thunk)
+  "Call THUNK with *FSTACK* assigned CELL, restored however THUNK is left."
+  (declare (function thunk))
+  (let ((old *fstack*))
+    (unwind-protect
+	 (progn (setq *fstack* cell)
+		(funcall thunk))
+      (setq *fstack* old))))
+
+(defmacro with-frame ((frame) &body body)
+  "Run BODY with FRAME (a vector, already allocated) pushed on *FSTACK*."
+  `(with-pushed-frame (,frame) ,@body))
+
+(defmacro with-thread-state (&body body)
+  "Run BODY with the thread's own continuation state: what a thread that
+runs Scheme code starts with."
+  `(let ((*fstack* '()) (*winders* '()) (*base-tag* nil) (*shared-winders* '()))
+     ,@body))
+
+;; threads made with bordeaux-threads (SRFI 18's, Chez's) bind them too,
+;; through either version's default bindings
+(dolist (package '("BORDEAUX-THREADS" "BORDEAUX-THREADS-2"))
+  (let ((var (and (find-package package) (find-symbol "*DEFAULT-SPECIAL-BINDINGS*" package))))
+    (when (and var (boundp var))
+      (dolist (s '(*fstack* *winders* *base-tag* *shared-winders*))
+	(unless (assoc s (symbol-value var))
+	  (setf (symbol-value var) (acons s nil (symbol-value var))))))))
 
 (defun call-with-frame (thunk k)
   "Call THUNK with a frame whose continuation is K, a Lisp function."
@@ -507,12 +555,10 @@ SRFI 226's sample implementation tells tail calls so."
 
 (defmacro %site (frame call)
   "Make CALL with FRAME, a (vector ...) form, pushed: both on the stack."
-  (let ((f (gensym "FRAME")) (cell (gensym "CELL")))
-    `(let* ((,f ,frame)
-	    (,cell (cons ,f *fstack*)))
-       (declare (dynamic-extent ,f ,cell))
-       (let ((*fstack* ,cell))
-	 ,call))))
+  (let ((f (gensym "FRAME")))
+    `(let ((,f ,frame))
+       (declare (dynamic-extent ,f))
+       (with-pushed-frame (,f) ,call))))
 
 (defmacro %machine (entry dispatch &rest statements)
   "A machine's body: STATEMENTS (expressions, and quoted symbols as

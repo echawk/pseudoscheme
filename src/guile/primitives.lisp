@@ -961,6 +961,9 @@ Guile's ((seconds . microseconds) (seconds . microseconds))."
 ;;; *after-gc-hooks*, in whichever thread SBCL runs them)
 
 (defun run-after-gc-hook ()
+  (psx::with-thread-state (run-after-gc-hook-1)))
+
+(defun run-after-gc-hook-1 ()
   (let ((hook *after-gc-hook*))
     (when (and hook (hook-procedures hook))
       (dolist (p (hook-procedures hook))
