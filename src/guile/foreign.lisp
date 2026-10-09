@@ -19,6 +19,10 @@
 (defvar *bytevector-address-hook* nil
   "A function giving a bytevector's address, or NIL: the VM's, for the
 images it loaded (src/guile/vm.lisp).")
+(defvar *address-dereference-hook* nil
+  "NIL, or a function of an address: the object stored in the word there,
+and true, if the address is in memory that isn't real (a VM image's).")
+
 (defvar *address-object-hook* nil
   "A function giving the object at an address, or NIL: the VM's, for the
 static objects of its images.")
@@ -178,9 +182,14 @@ go as %default-port-conversion-strategy says."
     (cons "pointer->bytevector" #'pointer->bytevector)
     (cons "dereference-pointer" (lambda (p)
 				  (check-non-null "dereference-pointer" p)
-				  (make-pointer* (psffi:call-with-address
-						  (pointer-place p)
-						  (lambda (a) (psffi:mem-ref :pointer a))))))
+				  (multiple-value-bind (object found)
+				      (and *address-dereference-hook*
+					   (funcall *address-dereference-hook* (pointer-address* p)))
+				    (if found
+					(make-pointer* (object-address object))
+					(make-pointer* (psffi:call-with-address
+							(pointer-place p)
+							(lambda (a) (psffi:mem-ref :pointer a))))))))
     (cons "string->pointer" (lambda (string &optional encoding)
 			      (%make-gpointer nil (encode-string "string->pointer" string (encoding-name encoding)))))
     (cons "pointer->string" (lambda (p &optional (length -1) encoding)

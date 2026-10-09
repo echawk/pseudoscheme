@@ -127,6 +127,11 @@ root).
     tests/run-guile-test.lisp does this.
   - Bytecode from Guile's compiler running here runs on the VM:
     rtl.test and rtl-compilation.test pass.
+- **`compile`:** to `value` goes through bytecode, run by the VM, as
+  Guile's does (PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp compiles it with the
+  host instead). `eval` and `load` compile to Lisp. Data read from a
+  loaded file have source properties (line and column), as Guile's
+  reader gives them, so `program-sources` finds them.
 - **How the heap ABI is met:**
   - A type's word layout is learned from the compiled code that uses it,
     and from observing a real Guile (a bytevector's header, a symbol's
@@ -146,8 +151,10 @@ root).
     `subr-call`, `foreign-call`, `halt`, `return-from-interrupt`
     (here `call/cc` and the rest are runtime procedures, which VM code
     calls), and `pointer-set!/immediate`.
-  - `compile` to `value` through bytecode, for the tests that inspect
-    what it returns (compiler.test's program-sources).
+  - Re-entering a composable continuation whose prompt's body is a
+    nested run of the machine (control.test's "nested prompts" at -O2):
+    the body's end comes back as an extent exit, not as the values `k`
+    returns.
 
 ## Frames and stacks
 

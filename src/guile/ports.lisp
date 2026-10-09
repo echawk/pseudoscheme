@@ -1302,10 +1302,26 @@ end of file, or END: (delimiter-or-eof . count)."
 ;;; read each datum that can have properties (not fixnums, characters,
 ;;; symbols, keywords, booleans or ()), from a port that counts lines
 
+(defun recordable-p (x)
+  (or (consp x) (vectorp x) (garray-p x)
+      (and (numberp x)
+	   (not (and (integerp x) (<= (- -1 +guile-fixnum-max+) x +guile-fixnum-max+))))))
+
 (defun record-source (port read)
   (let ((p (and (gport-p port) (option-value *read-options* "positions") port)))
     (if (null p)
-	(funcall read port)
+	(if (and *load-text* (eq port (first *load-text*)))
+	    ;; a file being loaded: where in its text
+	    (progn
+	      (skip-whitespace-and-comments port)
+	      (multiple-value-bind (line column) (text-line-column (fourth *load-text*) (file-position port))
+		(let ((x (funcall read port)))
+		  (when (and (recordable-p x) (not (gethash x *source-properties*)))
+		    (setf (gethash x *source-properties*)
+			  (list (cons (ssym "filename") (third *load-text*))
+				(cons (ssym "line") line) (cons (ssym "column") column))))
+		  x)))
+	    (funcall read port))
 	(progn
 	  (skip-whitespace-and-comments p)
 	  (let* ((line (port-line* p)) (column (port-column* p))

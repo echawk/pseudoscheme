@@ -140,10 +140,17 @@ its type)."
   (remhash address (vm-image-objects image))
   (setf (svref (vm-image-cells image) (floor address 8)) value))
 
+(defstruct (stored-integer (:constructor store-integer (value)))
+  "An integer object stored in an image's cell (static-set!), which raw
+bits there would otherwise be taken for."
+  value)
+
 (defun image-scm (image address)
   "The SCM value in the cell at ADDRESS."
   (let ((cell (image-cell image address)))
-    (if (integerp cell) (scm-from-bits cell image) cell)))
+    (cond ((integerp cell) (scm-from-bits cell image))
+	  ((stored-integer-p cell) (stored-integer-value cell))
+	  (t cell))))
 
 (defun image-object (image address)
   "The object whose memory is at ADDRESS in IMAGE, decoded once."
@@ -155,7 +162,7 @@ its type)."
     (flet ((raw (i) (let ((c (image-cell image (+ address (* 8 i)))))
 		      (if (integerp c) c (vm-error "expected raw word at ~X" (+ address (* 8 i))))))
 	   (scm (i) (image-scm image (+ address (* 8 i)))))
-      (cond ((not (integerp word0)) (cons word0 (scm 1))) ; a pair whose car was stored
+      (cond ((not (integerp word0)) (cons (scm 0) (scm 1))) ; a pair whose car was stored
 	    ((zerop (logand word0 1)) (cons (scm 0) (scm 1))) ; a pair
 	    (t
 	     (let ((tc7 (logand word0 #x7f)))
@@ -177,6 +184,21 @@ its type)."
 		       (when (and type (string/= type "vu8"))
 			 (setf (gethash bytes *bytevector-types*) type))
 		       bytes))
+		 ;; an array: its root, base offset, and each dimension's
+		 ;; lower and upper bounds and increment
+		 (93 (let* ((rank (ash word0 -17))
+			    (root (scm 1))
+			    (dims (loop for d below rank
+					collect (list (sign-extend (raw (+ 3 (* 3 d))) 64)
+						      (sign-extend (raw (+ 4 (* 3 d))) 64)
+						      (sign-extend (raw (+ 5 (* 3 d))) 64)))))
+		       (%make-garray root (root-type root) (raw 2) dims)))
+		 ;; a bitvector: its length in bits, and its 32-bit words of
+		 ;; bits, least significant first
+		 (95 (let* ((n (raw 1)) (data (raw 2)) (bytes (vm-image-bytes image))
+			    (v (make-array n :element-type 'bit)))
+		       (dotimes (i n v)
+			 (setf (sbit v i) (ldb (byte 1 (mod i 8)) (aref bytes (+ data (floor i 8))))))))
 		 (otherwise (vm-error "static object of type ~D at ~X not decoded yet" tc7 address)))))))))
 
 (defun decode-static-string (image stringbuf start length)
@@ -304,8 +326,9 @@ prompt it was captured up to (relative to the activation).")
   (let* ((vm (current-vm))
 	 (activation (svref frame 2))
 	 (kind (svref frame 3)) (nested (svref frame 4))
-	 (stack-copy (svref frame 7)))
-    (when (and stack-copy (not (eq (vm-activation-restored activation) reentry)))
+	 (stack-copy (svref frame 7))
+	 (restoring (and stack-copy (not (eq (vm-activation-restored activation) reentry)))))
+    (when restoring
       ;; the activation's stack, above what is there now
       (let ((base (+ (vm-sp vm) 3)))
 	(ensure-stack vm (+ base (length stack-copy) 1))
@@ -315,7 +338,8 @@ prompt it was captured up to (relative to the activation).")
 	      (vm-activation-restored activation) reentry
 	      (vm-fp vm) (+ base (svref frame 5))
 	      (vm-sp vm) (+ base (svref frame 6)))))
-    (let ((delimit (and *vm-delimit* (eq (car *vm-delimit*) activation) (cdr *vm-delimit*))))
+    ;; once, as the activation's stack is restored (its innermost frame)
+    (let ((delimit (and restoring *vm-delimit* (eq (car *vm-delimit*) activation) (cdr *vm-delimit*))))
       (when delimit
 	;; a composable continuation: the frame that returns to the
 	;; prompt's returns to Lisp instead, with its values
@@ -612,7 +636,8 @@ values in the frame, and return from it."
   (setf (vm-slot vm dst) (image-scm image (* 4 (+ ip offset))))
   next)
 (defop "static-set!" (src offset)
-  (setf (image-cell image (* 4 (+ ip offset))) (vm-slot vm src))
+  (let ((v (vm-slot vm src)))
+    (setf (image-cell image (* 4 (+ ip offset))) (if (integerp v) (store-integer v) v)))
   next)
 (defop "static-patch!" (dst-offset src-offset)
   (setf (image-cell image (* 4 (+ ip dst-offset))) (* 4 (+ ip src-offset)))
@@ -674,6 +699,11 @@ values in the frame, and return from it."
 
 (defun realize (vm raw header)
   "RAW, whose word 0 is now HEADER, as the Lisp object it is."
+  (when (= (logand header #x7f) 23)
+    ;; a number: a flonum is its double, stored through a pointer to its
+    ;; word 1 (f64-set!), when it becomes the Lisp double
+    (setf (svref (raw-object-words raw) 0) header)
+    (return-from realize raw))
   (let* ((words (raw-object-words raw))
 	 (object
 	   (case (logand header #x7f)
@@ -937,7 +967,12 @@ root's variable of NAME as last looked up, while the root is the same."
 
 (defintrinsic "add" (a b) (fixnum-or-root (a b) (+ a b) "+"))
 (defintrinsic "add/immediate" (a b) (fixnum-or-root (a b) (+ a b) "+"))
-(defintrinsic "sub" (a b) (fixnum-or-root (a b) (- a b) "-"))
+(defintrinsic "sub" (a b)
+  ;; (- x) compiles to exact 0 minus x, which is x negated, as Guile's is:
+  ;; (- 0.0) is -0.0
+  (if (eql a 0)
+      (funcall (root-procedure "-") 0 b)
+      (fixnum-or-root (a b) (- a b) "-")))
 (defintrinsic "sub/immediate" (a b) (fixnum-or-root (a b) (- a b) "-"))
 (defintrinsic "mul" (a b) (fixnum-or-root (a b) (* a b) "*"))
 (defintrinsic "div" (a b) (funcall (root-procedure "/") a b))
@@ -1135,10 +1170,17 @@ thunk."
 	   (ldb (byte 32 0) (sb-kernel:single-float-bits (coerce (vm-slot vm val) 'single-float))))
   next)
 (defop "f64-set!" (ptr idx val)
-  (let ((d (coerce (vm-slot vm val) 'double-float)))
-    (raw-set (vm-slot vm ptr) (vm-slot vm idx) 8
-	     (logior (ash (ldb (byte 32 0) (sb-kernel:double-float-high-bits d)) 32)
-		     (sb-kernel:double-float-low-bits d))))
+  (let ((d (coerce (vm-slot vm val) 'double-float)) (p (vm-slot vm ptr)))
+    (if (raw-object-p (vm-pointer-base p))
+	;; a flonum's box being filled: now the double it is
+	(let ((raw (vm-pointer-base p)))
+	  (unless (and (eql (svref (raw-object-words raw) 0) 535)
+		       (= (+ (vm-pointer-offset p) (vm-slot vm idx)) 8))
+	    (vm-error "f64-set! into ~S isn't supported" raw))
+	  (replace-in-frame vm raw d))
+	(raw-set p (vm-slot vm idx) 8
+		 (logior (ash (ldb (byte 32 0) (sb-kernel:double-float-high-bits d)) 32)
+			 (sb-kernel:double-float-low-bits d)))))
   next)
 
 (defop "pointer-ref/immediate" (dst obj i)
@@ -1152,6 +1194,7 @@ thunk."
   (let ((x (vm-slot vm obj)))
     (setf (vm-slot vm dst)
 	  (cond ((and (vm-stringbuf-p x) (= i 2)) (make-vm-pointer (vm-stringbuf-string x) 0))
+		((raw-object-p x) (make-vm-pointer x (* 8 i)))
 		(t (vm-error "tail-pointer-ref/immediate ~D of ~S isn't supported yet" i x)))))
   next)
 
@@ -1288,17 +1331,23 @@ thunk."
 (defintrinsic "s64->f64" (x) (coerce (s64 x) 'double-float))
 (defintrinsic "expand-stack" (&rest args) (declare (ignore args)) nil)
 
-(defun conversion-error (who x)
-  (guile-error (ssym "wrong-type-arg") who "Wrong type argument in position 1: ~S" (list x) (list x)))
+(defun conversion-error (who x &optional low high)
+  "Converting X failed: out of LOW to HIGH if it's an integer that isn't
+within them, else of the wrong type."
+  (if (and low (integerp x))
+      (guile-error (ssym "out-of-range") ps:false "Value out of range ~S to< ~S: ~S"
+		   (list low high x) (list x))
+      (guile-error (ssym "wrong-type-arg") who "Wrong type argument in position 1: ~S" (list x) (list x))))
 
 (defintrinsic "scm->f64" (x)
   (if (realp x) (coerce x 'double-float) (conversion-error "scm->f64" x)))
 (defintrinsic "scm->u64" (x)
-  (if (and (integerp x) (<= 0 x (1- (ash 1 64)))) x (conversion-error "scm->u64" x)))
+  (if (and (integerp x) (<= 0 x (1- (ash 1 64)))) x (conversion-error "scm->u64" x 0 (1- (ash 1 64)))))
 (defintrinsic "scm->u64/truncate" (x)
   (if (integerp x) (u64 x) (conversion-error "scm->u64/truncate" x)))
 (defintrinsic "scm->s64" (x)
-  (if (and (integerp x) (<= (- (ash 1 63)) x (1- (ash 1 63)))) x (conversion-error "scm->s64" x)))
+  (if (and (integerp x) (<= (- (ash 1 63)) x (1- (ash 1 63)))) x
+      (conversion-error "scm->s64" x (- (ash 1 63)) (1- (ash 1 63)))))
 (defintrinsic "u64->scm" (x) x)
 (defintrinsic "s64->scm" (x) x)
 
@@ -1533,6 +1582,12 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
       (lambda (bv)
 	(let ((image (find bv *vm-images* :key #'vm-image-bytes :test #'eq)))
 	  (and image (vm-image-base image)))))
+(setq *address-dereference-hook*
+      (lambda (address)
+	(let ((image (image-at address)))
+	  (if (and image (zerop (mod (- address (vm-image-base image)) 8)))
+	      (values (image-scm image (- address (vm-image-base image))) t)
+	      (values nil nil)))))
 (setq *address-object-hook*
       (lambda (address)
 	(let ((image (image-at address)))

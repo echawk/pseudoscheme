@@ -397,13 +397,34 @@ evaluator does.")
 	   (setq i (or (position #\Newline text :start i) (length text))))
 	  (t (return i)))))
 
+(defvar *load-text* nil
+  "While a file's forms are read: (stream text filename line-starts), so
+that the reader records where in it each datum is (record-source).")
+
+(defun line-starts (text)
+  "The index each line of TEXT starts at."
+  (let ((starts (make-array 64 :adjustable t :fill-pointer 0)))
+    (vector-push-extend 0 starts)
+    (loop for i from 0 below (length text)
+	  when (char= (char text i) #\Newline) do (vector-push-extend (1+ i) starts))
+    starts))
+
+(defun text-line-column (starts offset)
+  "The line (from 0) and column OFFSET is at, by STARTS (LINE-STARTS)."
+  (let ((lo 0) (hi (1- (length starts))))
+    (loop while (< lo hi)
+	  do (let ((mid (ceiling (+ lo hi) 2)))
+	       (if (<= (aref starts mid) offset) (setq lo mid) (setq hi (1- mid)))))
+    (values lo (- offset (aref starts lo)))))
+
 (defun load-forms (filename text position scanned line line-start kept value)
   "Read and evaluate the forms of TEXT, FILENAME's, from POSITION; LINE and
 LINE-START are where SCANNED, before POSITION, is.  The last form's value.
 Each form is evaluated in a frame that goes on with the rest of the file,
 so that a continuation captured in it, re-entered, does (as Guile's
 primitive-load, written in Scheme, does)."
-  (let ((stream (make-string-input-stream text)))
+  (let* ((stream (make-string-input-stream text))
+	 (*load-text* (list stream text filename (line-starts text))))
     (file-position stream position)
     (loop for start = (top-level-form-start text (file-position stream))
 	  for form = (progn
@@ -667,6 +688,10 @@ not with Guile's behaviour.")
     (def "module-transformer" (lambda (m) (if (module-p* m) (module-slot m +module-transformer+) ps:false)))
     (def "define!" (lambda (name value) (define-in-module *current-module* name value)))
     (def "primitive-eval" #'primitive-eval)
+    ;; compile's `value' through bytecode, run by the VM, as Guile's is;
+    ;; or (PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp) by the host's compiler
+    (def "%compile-value-via-bytecode?"
+	 (lambda () (bool (not (equal (uiop:getenv "PSEUDOSCHEME_GUILE_COMPILE_VALUE") "lisp")))))
     (def "%eval-tree-il" (lambda (tree module)
 			   (let ((*current-module* (if (module-p* module) module *current-module*)))
 			     (eval-tree-il tree))))
@@ -722,6 +747,8 @@ not with Guile's behaviour.")
   (unless *booted*
     (pseudoscheme-api::ensure-psyntax)
     (setq *guile-source-directory* (find-guile-sources))
+    ;; Guile's native bytevector accessors take unaligned indexes
+    (setq ps-r6rs::*native-alignment* nil)
     (install-compiler-primitives)
     (install-root-bindings)
     (let ((start (get-internal-real-time)))

@@ -996,6 +996,12 @@ fails over and over (boot-9 half loaded)."
 (defguile "noop" (&rest args) (if args (first args) ps:false))
 (defguile "1+" (x) (ps:scheme+ x 1))
 (defguile "1-" (x) (ps:scheme- x 1))
+(defguile "-" (x &rest more)
+  ;; exact 0 minus a flonum zero is it negated, as Guile's: (- 0 0.0) is
+  ;; -0.0, which peval folds (- 0.0) into
+  (cond ((null more) (ps:scheme- x))
+	((and (null (cdr more)) (eql x 0) (floatp (car more)) (zerop (car more))) (- (car more)))
+	(t (apply #'ps:scheme- x more))))
 (defguile "self-evaluating?" (x)
   (bool (not (or (consp x) (null x) (and (symbolp x) (ps:scheme-symbol-p x) (not (keywordp x)))))))
 (defguile "nil?" (x) (bool (or (null x) (eq x ps:false) (eq x *elisp-nil*))))

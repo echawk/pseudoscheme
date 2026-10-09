@@ -1,6 +1,8 @@
 ;;; (language tree-il spec) for Pseudoscheme.  Guile's goes from Tree-IL
-;;; to CPS or bytecode, for its VM; here Tree-IL goes to `value' directly,
-;;; compiled to native code by the host (%eval-tree-il).  Compiling to CPS
+;;; to CPS or bytecode, for its VM, and so does this one, to `value' too
+;;; (the bytecode loaded and run by the VM); or, if
+;;; %compile-value-via-bytecode? says not, Tree-IL goes to `value'
+;;; directly, compiled to native code by the host (%eval-tree-il).  Compiling to CPS
 ;;; or bytecode, as Guile's tests of its compiler do, chooses Guile's own
 ;;; passes, as Guile's spec does; and Tree-IL is analyzed (for warnings)
 ;;; by Guile's own analyzer.  Guile's lowerer (peval and the rest) runs
@@ -39,9 +41,12 @@
 (define (choose-compiler target optimization-level opts)
   (define (load-compiler compiler)
     (module-ref (resolve-interface `(language tree-il ,compiler)) compiler))
-  (set! lowering-for-guile? (not (eq? (language-name target) 'value)))
+  (define via-host?
+    (and (eq? (language-name target) 'value)
+         (not (%compile-value-via-bytecode?))))
+  (set! lowering-for-guile? (not via-host?))
   (cond
-   ((eq? (language-name target) 'value)
+   (via-host?
     (cons 'value compile-value))
    ((let ((cps? (memq #:cps? opts)))
       (if cps? (cadr cps?) (<= 2 optimization-level)))

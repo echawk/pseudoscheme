@@ -7,7 +7,7 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
-`vendor/guile-test-suite/`), **42,170 tests pass** so far. See "Where it
+`vendor/guile-test-suite/`), **42,179 tests pass** so far. See "Where it
 stands" below. Emacs Lisp has started: Guile's elisp compiler runs, and
 `(compile '(defun ...) #:from 'elisp)` works. It is future work.
 
@@ -457,10 +457,10 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 42,170 |
-| fail | 191 | 72 |
-| error (an exception where a result was expected) | 465 | 103 |
-| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 84 / 10 / 7 / 4 |
+| pass | 5,982 | 42,179 |
+| fail | 191 | 66 |
+| error (an exception where a result was expected) | 465 | 99 |
+| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 85 / 10 / 7 / 4 |
 | files that crashed or hit the time limit | 32 | 0 |
 
 The biggest files pass entirely or nearly: `numbers` (28,987 of

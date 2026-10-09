@@ -95,6 +95,8 @@ microseconds)) as seconds from now, or NIL for none."
 	(sb-thread:condition-notify (gcondvar-queue c))))
   ps:true)
 
+(defvar *vm*)				; vm.lisp: each thread's VM
+
 (defparameter *guile-thread-stack-size* (* 256 1024 1024)
   "The control stack of a thread Guile code makes: Guile's grow, so its
 code may recurse deeply in a thread (par-map's futures nest one per
@@ -113,7 +115,9 @@ element).")
        (psx::with-thread-state
        (let ((*standard-output* out) (*standard-input* in) (*error-output* err)
 	     (*current-module* module)
-	     (ps-r7rs::*thread-parameters* params))
+	     (ps-r7rs::*thread-parameters* params)
+	     ;; a VM of its own (vm.lisp), made when first needed
+	     (*vm* nil))
 	 ;; an exhausted stack (SBCL's binding stack is of fixed size) is a
 	 ;; Guile stack-overflow, once unwound, rather than the end of the
 	 ;; process
