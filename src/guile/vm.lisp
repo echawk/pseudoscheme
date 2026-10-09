@@ -29,6 +29,7 @@
   (base 0)				; its address, as (system vm program) sees it
   cells					; one per 8 bytes: raw bits, or a Lisp object stored there
   (objects (make-hash-table))		; byte address -> the object decoded there
+  (decoded nil)				; word index -> #(handler operands next op), as run
   elf)
 
 (defun make-vm-image (bytes)
@@ -283,12 +284,18 @@ extent-exit of the instruction that ends the extent."
 	(image (code-pointer-image code))
 	(ip (code-pointer-word code)))
     (loop
-      (let ((bytes (vm-image-bytes image)))
-	(multiple-value-bind (op operands next) (decode-instruction bytes ip)
+      (let* ((decoded (or (vm-image-decoded image)
+			  (setf (vm-image-decoded image)
+				(make-array (ceiling (length (vm-image-bytes image)) 4) :initial-element nil))))
+	     (entry (or (svref decoded ip)
+			(setf (svref decoded ip)
+			      (multiple-value-bind (op operands next) (decode-instruction (vm-image-bytes image) ip)
+				(vector (svref dispatch (vm-op-opcode op)) operands next op))))))
+	(let ((operands (svref entry 1)) (next (svref entry 2)))
 	  (when *vm-trace*
-	    (format *trace-output* "~&;; ~5D ~A ~{~S~^ ~}  fp ~D sp ~D~%" ip (vm-op-name op) operands
+	    (format *trace-output* "~&;; ~5D ~A ~{~S~^ ~}  fp ~D sp ~D~%" ip (vm-op-name (svref entry 3)) operands
 		    (vm-fp vm) (vm-sp vm)))
-	  (let ((to (funcall (svref dispatch (vm-op-opcode op)) vm image ip operands next)))
+	  (let ((to (funcall (the function (svref entry 0)) vm image ip operands next)))
 	    (etypecase to
 	      (fixnum (setq ip to))
 	      (code-pointer (setq image (code-pointer-image to) ip (code-pointer-word to)))

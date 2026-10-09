@@ -104,3 +104,40 @@ root).
    `coverage`, `eval` stacks), then frames and stacks for backtraces.
 9. Later: translating bytecode to Lisp for SBCL to compile, with the
    interpreter kept as the reference.
+
+## Where it stands
+
+- **Done:**
+  - The ELF reader and the decoder, which agree with Guile's
+    disassembler on the installed `.go` files.
+  - The machine: calls, tail calls, returns, the prologues (optional,
+    rest and keyword arguments), unboxed arithmetic, comparisons and
+    branches, the heap by words, static data and its relocations,
+    intrinsics, prompts, `dynamic-wind`, fluids and dynamic states.
+  - Loading images: `load-thunk-from-memory` and `load-thunk-from-file`.
+  - Introspection through Guile's own `(system vm debug)`: names,
+    arities, docstrings, properties, the writer.
+- **Checked:**
+  - 102 of the installed `ice-9` and `srfi` modules load from their
+    `.go` files.
+  - With a module so loaded, its test file gives the same results as
+    from source: srfi-1 (1,902 tests), srfi-9, 11, 19, 26, 31, 34, 35,
+    37, 41, 43, 45, 60, 64, 67, 69, 171; ice-9 format, getopt-long,
+    match, optargs, q, regex, vlist. `GUILE_VM_PRELOAD` in
+    tests/run-guile-test.lisp does this.
+  - Bytecode from Guile's compiler running here runs on the VM:
+    rtl.test and rtl-compilation.test pass.
+- **How the heap ABI is met:**
+  - A type's word layout is learned from the compiled code that uses it,
+    and from observing a real Guile (a bytevector's header, a symbol's
+    hash), not from libguile's sources.
+  - Symbol hashes are the installed Guile's, asked of it once per name.
+    Compiled `case` dispatches on symbols by hash.
+- **Left:**
+  - `capture-continuation`, `continuation-call`, `compose-continuation`
+    (call/cc and reified partial continuations in VM code).
+  - The trampolines (`subr-call`, `foreign-call`) and `halt`.
+  - Frames and stacks for backtraces.
+  - `compile` to `value` through bytecode, for the tests that inspect
+    what it returns (compiler.test's program-sources).
+  - Speed: an instruction is decoded on every execution.

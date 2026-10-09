@@ -7,7 +7,7 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
-`vendor/guile-test-suite/`), **41,624 tests pass** so far. See "Where it
+`vendor/guile-test-suite/`), **41,993 tests pass** so far. See "Where it
 stands" below. Emacs Lisp has started: Guile's elisp compiler runs, and
 `(compile '(defun ...) #:from 'elisp)` works. It is future work.
 
@@ -453,14 +453,14 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 41,624 |
-| fail | 191 | 90 |
-| error (an exception where a result was expected) | 465 | 186 |
-| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 95 / 49 / 7 / 4 |
-| files that crashed or hit the time limit | 32 | 3 |
+| pass | 5,982 | 41,993 |
+| fail | 191 | 73 |
+| error (an exception where a result was expected) | 465 | 100 |
+| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 94 / 15 / 7 / 4 |
+| files that crashed or hit the time limit | 32 | 1 |
 
-(`compiler` hit the time limit in that run, six files at a time; on
-its own it takes under two minutes and 39 of its tests pass.)
+(That run lacked the `threads` feature, provided again since: srfi-18
+adds 61 passes, and threads.test hits the time limit.)
 
 The biggest files pass entirely or nearly: `numbers` (28,987 of
 28,991), `srfi-1` (1,902), `regexp` (1,089), `srfi-67` (902), `r4rs`
@@ -473,11 +473,10 @@ The biggest files pass entirely or nearly: `numbers` (28,987 of
 
 What fails now, by cause:
 
-- **Guile's VM** (`rtl`, `rtl-compilation`, part of `compiler`,
-  `cross-compilation`, `coverage`, `dwarf`, `types`, `statprof`, part
-  of `eval`): these load the bytecode Guile's compiler makes, or test
-  frames and stacks, which aren't here. Guile's compiler passes
-  themselves run (peval, the analyses, CPS and bytecode generation).
+- **Guile's VM** (docs/guile-vm.md) runs Guile's bytecode: `rtl`,
+  `rtl-compilation` and `dwarf` pass. Left: frames and stacks
+  (`coverage`, `statprof`, part of `eval`), `types`, continuations
+  captured in bytecode.
 - **libguile's internals**: immutable literal strings, copy-on-write
   shared substrings (`substring/shared` copies), guardians (SBCL can't
   give back a collected object), GC behaviour (`strings`, `guardians`,
@@ -499,7 +498,7 @@ What fails now, by cause:
 | stacks, frames, backtraces | Guile's VM's | none: `make-stack` is #f |
 | locales | the C library's | the C library's (newlocale); case mapping is SBCL's Unicode |
 | stack overflow handlers | a limit in words | the control stack's own limit |
-| recursion depth | memory | about 60,000 non-tail calls in a thread other than the main one: each binds `*fstack*` (full continuations), and SBCL's binding stack is of fixed size. So the `threads` feature isn't provided (threads.test's `par-map` nests 10,000 futures) |
+| recursion depth | memory | about 60,000 non-tail calls in a thread other than the main one: each binds `*fstack*` (full continuations), and SBCL's binding stack is of fixed size. threads.test's `par-map` of 10,000 elements nests that many futures in a worker thread, and doesn't finish |
 
 ### Emacs Lisp (future work)
 
