@@ -362,3 +362,40 @@ a prompt is."
 
 (defun lisp-frame-at (ip)
   (and (integerp ip) (minusp ip) (gethash ip *lisp-frame-ips*)))
+;;; Backtraces: printed by (system repl debug)'s print-frames, as Guile's
+
+(defun repl-debug-procedure (name)
+  (let ((m (resolve-module* (list (ssym "system") (ssym "repl") (ssym "debug")))))
+    (and m (let ((v (module-variable* m (ssym name))))
+	     (and v (not (eq (gvariable-value v) +unbound+)) (gvariable-value v))))))
+
+(defun given (x) (and x (not (eq x ps:false)) (not (eq x +unbound+))))
+
+(defguile "display-backtrace" (stack port &optional first depth highlights)
+  (declare (ignore highlights))
+  (check-stack "display-backtrace" stack)
+  (let* ((frames (gstack-frames stack))
+	 (first (if (given first) first 0))
+	 (frames (subseq frames (min first (length frames))))
+	 (frames (if (given depth) (subseq frames 0 (min depth (length frames))) frames))
+	 (print-frames (repl-debug-procedure "print-frames")))
+    (if print-frames
+	(funcall print-frames frames port)
+	(loop for g across frames for i from 0
+	      do (format port "~&~3D ~A~%" i (with-output-to-string (s) (guile-write (gframe-locals g) s)))))
+    *unspecified*))
+
+(defguile "backtrace" (&optional highlights)
+  (declare (ignore highlights))
+  ;; without make-stack's frame and its own
+  (let ((stack (funcall (gethash "make-stack" *guile-primitives*) ps:true 2)))
+    (funcall (gethash "display-backtrace" *guile-primitives*) stack
+	     *standard-output*)
+    *unspecified*))
+
+(defguile "display-application" (frame &optional port indent)
+  (declare (ignore indent))
+  (let ((port (if (given port) port *standard-output*))
+	(repr (frame-module-procedure "frame-call-representation")))
+    (guile-write (if repr (funcall repr frame) (coerce (gframe-locals frame) 'list)) port)
+    *unspecified*))
