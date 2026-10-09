@@ -514,13 +514,39 @@ values in the frame, and return from it."
 		     (3 (syntax-object-module x)) (4 (syntax-object-sourcev x))))
     ;; a string: its buffer, start and length
     (string (ecase i (1 (make-vm-stringbuf x)) (2 0) (3 (length x))))
+    ;; a symbol: its name's buffer and its hash
+    (symbol (if (and x (not (keywordp x)))
+		(ecase i
+		  (1 (make-vm-stringbuf (ps:scheme-symbol-name x)))
+		  (2 (guile-symbol-hash x)))
+		(vm-error "reading word ~D of ~S isn't supported yet" i x)))
     (vm-stringbuf (ecase i (1 (length (vm-stringbuf-string x)))))
     ;; a bytevector: its length, and a pointer to its contents
     ((simple-array (unsigned-byte 8) (*))
      (ecase i (1 (length x)) (2 (make-vm-pointer x 0))))
-    (t (if (struct-p x)
-	   (svref (struct-slots-of x) (- i 1))
-	   (vm-error "reading word ~D of ~S isn't supported yet" i x)))))
+    (t (cond ((and (vtable-p x) (member i '(2 6 7))) (vtable-word x i))
+	     ((struct-p x) (svref (struct-slots-of x) (- i 1)))
+	     (t (vm-error "reading word ~D of ~S isn't supported yet" i x))))))
+
+(defvar *unboxed-field-maps* (make-hash-table :test 'eq :weakness :key :synchronized t))
+
+(defun vtable-word (vtable i)
+  "Words of VTABLE compiled code reads: its flags (validated, as Guile's
+are once made), its field count, and the bitmap of its unboxed fields."
+  (ecase i
+    (2 (logior (vtable-flags vtable) 1))
+    (6 (vtable-nfields vtable))
+    (7 (make-vm-pointer
+	(or (gethash vtable *unboxed-field-maps*)
+	    (setf (gethash vtable *unboxed-field-maps*)
+		  (let* ((layout (ps:scheme-symbol-name (svref (struct-slots-of vtable) +vtable-index-layout+)))
+			 (n (floor (length layout) 2))
+			 (bits (make-array (* 4 (ceiling (max n 1) 32)) :element-type '(unsigned-byte 8)
+										  :initial-element 0)))
+		    (dotimes (j n bits)
+		      (when (char= (char layout (* 2 j)) #\u)
+			(setf (ldb (byte 1 (mod j 8)) (aref bits (floor j 8))) 1))))))
+	0))))
 
 (defun heap-set (x i value)
   (typecase x
@@ -872,6 +898,7 @@ thunk."
   (let ((x (vm-slot vm obj)))
     (setf (vm-slot vm dst)
 	  (cond ((and (typep x 'ps-r6rs::octets) (= i 2)) (make-vm-pointer x 0))
+		((and (vtable-p x) (= i 7)) (vtable-word x 7))
 		(t (vm-error "pointer-ref/immediate ~D of ~S isn't supported yet" i x)))))
   next)
 (defop "tail-pointer-ref/immediate" (dst obj i)
@@ -1123,3 +1150,24 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
 	(let ((libdir (string-trim '(#\Newline) (uiop:run-program '("guile" "-c" "(display (car %load-compiled-path))")
 								  :output :string :ignore-error-status t))))
 	  (format nil "~A/~A.go" libdir name)))))
+
+;;; Symbol hashes.  Compiled code dispatches on symbols by their hash
+;;; (`case' becomes a jump table on its low bits), so a symbol's hash
+;;; must be the installed Guile's: it is asked of guile, once per name.
+
+(defvar *symbol-hashes* (make-hash-table :test 'equal :synchronized t))
+
+(defun guile-symbol-hash (symbol)
+  (let ((name (ps:scheme-symbol-name symbol)))
+    (or (gethash name *symbol-hashes*)
+	(setf (gethash name *symbol-hashes*)
+	      (let ((text (uiop:run-program
+			   (list "guile" "-c"
+				 (format nil "(write (symbol-hash (string->symbol ~A)))"
+					 (with-output-to-string (s) (guile-write name s))))
+			   :output :string :error-output nil :ignore-error-status t)))
+		(or (ignore-errors (parse-integer text)) (sxhash name)))))))
+
+(defguile "symbol-hash" (symbol)
+  (unless (and (symbolp symbol) symbol (not (keywordp symbol))) (wrong-type "symbol-hash" 1 symbol))
+  (guile-symbol-hash symbol))
