@@ -31,6 +31,7 @@
   (objects (make-hash-table))		; byte address -> the object decoded there
   (decoded nil)				; word index -> #(handler operands next op), as run
   (jit nil)				; word index -> entry count, or compiled code (vm-jit.lisp)
+  (pointers nil)			; word index -> its code-pointer, once made
   elf)
 
 (defun make-vm-image (bytes)
@@ -57,9 +58,22 @@
   image)
 
 
-(defstruct (code-pointer (:constructor make-code-pointer (image word)))
+(defstruct (code-pointer (:constructor %make-code-pointer (image word)))
   "A bytecode address: an image and a 32-bit word index in it."
   image word)
+
+(defun make-code-pointer (image word)
+  "The code pointer to WORD of IMAGE: one per address, made once (a call
+pushes its return address, which would otherwise be a new one each time)."
+  (declare (fixnum word))
+  (let ((pointers (or (vm-image-pointers image)
+		      (setf (vm-image-pointers image)
+			    (make-array (ceiling (length (vm-image-bytes image)) 4) :initial-element nil)))))
+    (declare (simple-vector pointers))
+    (if (< -1 word (length pointers))
+	(or (svref pointers word)
+	    (setf (svref pointers word) (%make-code-pointer image word)))
+	(%make-code-pointer image word))))
 
 ;;; ------------------------------------------------------------------
 ;;; SCM bits: immediates as Guile encodes them
@@ -228,12 +242,17 @@ bits there would otherwise be taken for."
 
 (defun current-vm () (or *vm* (setq *vm* (%make-vm))))
 
+(defun grow-stack (vm height)
+  (let* ((stack (vm-stack vm))
+	 (new (make-array (max (* 2 (length stack)) (+ height 1024)) :initial-element ps:false)))
+    (replace new stack)
+    (setf (vm-stack vm) new)))
+
+(declaim (inline ensure-stack))
 (defun ensure-stack (vm height)
-  (let ((stack (vm-stack vm)))
-    (when (>= height (length stack))
-      (let ((new (make-array (max (* 2 (length stack)) (+ height 1024)) :initial-element ps:false)))
-	(replace new stack)
-	(setf (vm-stack vm) new)))))
+  (declare (fixnum height))
+  (when (>= height (length (vm-stack vm)))
+    (grow-stack vm height)))
 
 (defmacro local (i) `(svref stack (+ fp 1 ,i)))
 (defmacro sp-slot (j) `(svref stack (- sp ,j)))
@@ -488,9 +507,12 @@ extent-exit of the instruction that ends the extent."
 (defun vm-slot (vm j) (svref (vm-stack vm) (- (vm-sp vm) j)))
 (defun (setf vm-slot) (value vm j) (setf (svref (vm-stack vm) (- (vm-sp vm) j)) value))
 
+(declaim (inline set-frame-size))
 (defun set-frame-size (vm n &optional fill)
   "Make the frame N locals; new locals hold FILL (unless it is NIL)."
+  (declare (fixnum n))
   (let ((old (vm-sp vm)) (new (+ (vm-fp vm) n)))
+    (declare (fixnum old new))
     (ensure-stack vm (+ new 1))
     (when (and fill (> new old))
       (fill (vm-stack vm) fill :start (+ old 1) :end (+ new 1)))
@@ -1046,12 +1068,17 @@ interface if PUBLIC)."
 (defconstant +dt-init+ 12)
 (defconstant +dt-guile-entry+ #x37146002)
 
+(defvar *image-loaded-hook* nil
+  "NIL, or a function of an image just loaded, before any of its code
+runs (vm-jit.lisp's ahead-of-time translation).")
+
 (defun load-image (bytes)
   "Load the ELF image in BYTES: run its init thunk, and return its entry
 thunk."
   (let* ((elf (parse-elf bytes))
 	 (image (make-vm-image bytes)))
     (setf (vm-image-elf image) elf)
+    (when *image-loaded-hook* (funcall *image-loaded-hook* image))
     (flet ((thunk (address) (make-vm-program (make-code-pointer image (floor address 4)) 0)))
       (let ((init (dynamic-entry elf +dt-init+))
 	    (entry (or (dynamic-entry elf +dt-guile-entry+) (elf-error "ELF file has no entry thunk"))))
