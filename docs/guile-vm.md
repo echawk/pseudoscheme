@@ -102,8 +102,8 @@ root).
    installed Guile's own compiled modules.
 8. Guile's VM tests (`rtl`, `rtl-compilation`, `vm`, `compiler`,
    `coverage`, `eval` stacks), then frames and stacks for backtraces.
-9. Later: translating bytecode to Lisp for SBCL to compile, with the
-   interpreter kept as the reference.
+9. Translating bytecode to Lisp for SBCL to compile, with the
+   interpreter kept as the reference (below).
 
 ## Where it stands
 
@@ -149,4 +149,44 @@ root).
   - Frames and stacks for backtraces.
   - `compile` to `value` through bytecode, for the tests that inspect
     what it returns (compiler.test's program-sources).
-  - Speed: an instruction is decoded on every execution.
+
+## Translation to Lisp
+
+src/guile/vm-jit.lisp. The interpreter counts the jumps to each
+instruction; at 20, the region from there to the end of its code (until
+an instruction that doesn't fall through, with no jump pending past it)
+becomes one Lisp function, compiled by SBCL:
+
+- A `tagbody` with a tag per instruction. Each instruction is its
+  handler's own source (`defop` keeps it) with the operands as
+  constants, so SBCL folds the decoding away. Falling through, or a
+  jump to a constant target in the region, is a `go`.
+- Any other target, such as a call's return into the region, comes back
+  in through a `case` on the IP. So the function can be entered at any
+  instruction it holds, and a call or return within the image stays in
+  it.
+- Anything else (another image, a return to Lisp, the end of a dynamic
+  extent) is returned to the interpreter, which goes on from there.
+
+Since the handlers are the same, so are the semantics, continuations
+included. The translation emits only portable Common Lisp; SBCL's VOPs
+(pvk.ca's "assembly code breadboard") would be a further, SBCL- and
+x86-64-specific step.
+
+- `PSEUDOSCHEME_GUILE_JIT=0` turns it off.
+- `PSEUDOSCHEME_GUILE_JIT_THRESHOLD=0` translates all code run. rtl,
+  rtl-compilation, the continuation cases and srfi-1, match and format
+  over their `.go` modules all pass so.
+
+On the installed Guile's compiled code (milliseconds; Guile 3.0.11 for
+comparison):
+
+| | interpreter before | interpreter | translated | Guile VM | Guile JIT |
+|---|---|---|---|---|---|
+| fib 25 | 84 | 59 | 23 | 5.7 | 0.7 |
+| loop 10^6 | 225 | 99 | 22 | | |
+| tak 18 12 6 | 17 | 14 | 5 | | |
+| vector sum 10^6 | 419 | 294 | 73 | | |
+
+("Interpreter before" is without the fixnum fast paths and the cached
+lookup of the runtime's procedures that intrinsics call.)

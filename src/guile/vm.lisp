@@ -30,6 +30,7 @@
   cells					; one per 8 bytes: raw bits, or a Lisp object stored there
   (objects (make-hash-table))		; byte address -> the object decoded there
   (decoded nil)				; word index -> #(handler operands next op), as run
+  (jit nil)				; word index -> entry count, or compiled code (vm-jit.lisp)
   elf)
 
 (defun make-vm-image (bytes)
@@ -356,13 +357,17 @@ prompt it was captured up to (relative to the activation).")
 ;;; code-pointer, or a list of values when a frame returns to Lisp.
 
 (defvar *vm-handlers* (make-hash-table :test 'equal))
+(defvar *vm-op-sources* (make-hash-table :test 'equal)
+  "Instruction name -> (operands . body), its handler's source, which the
+translation to Lisp (vm-jit.lisp) puts in line.")
 (defvar *vm-dispatch* nil "Opcode -> handler.")
 
 (defmacro defop (name operands &body body)
   "Define instruction NAME's handler.  OPERANDS name its operands, in the
 order of its fields; FP, SP and STACK are the machine's."
   (let ((ops (gensym "OPERANDS")))
-    `(setf (gethash ,name *vm-handlers*)
+    `(setf (gethash ,name *vm-op-sources*) '(,operands ,@body)
+	   (gethash ,name *vm-handlers*)
 	   (lambda (vm image ip ,ops next)
 	     (declare (ignorable vm image ip next))
 	     (destructuring-bind ,operands ,ops
@@ -408,33 +413,47 @@ extent-exit of the instruction that ends the extent."
   (let ((*vm-activation* activation) (*vm-nested* nested))
     (run-vm-1 vm code nested)))
 
+(defvar *vm-jit*)
+(declaim (ftype function jit-entry))
+
 (defun run-vm-1 (vm code nested)
   (let ((dispatch (vm-dispatch-table))
 	(image (code-pointer-image code))
-	(ip (code-pointer-word code)))
+	(ip (code-pointer-word code))
+	(jumped t))			; IP wasn't reached by falling through
     (loop
-      (let* ((decoded (or (vm-image-decoded image)
-			  (setf (vm-image-decoded image)
-				(make-array (ceiling (length (vm-image-bytes image)) 4) :initial-element nil))))
-	     (entry (or (svref decoded ip)
-			(setf (svref decoded ip)
-			      (multiple-value-bind (op operands next) (decode-instruction (vm-image-bytes image) ip)
-				(vector (svref dispatch (vm-op-opcode op)) operands next op))))))
-	(let ((operands (svref entry 1)) (next (svref entry 2)))
-	  (when *vm-trace*
-	    (format *trace-output* "~&;; ~5D ~A ~{~S~^ ~}  fp ~D sp ~D~%" ip (vm-op-name (svref entry 3)) operands
-		    (vm-fp vm) (vm-sp vm)))
-	  (let ((to (funcall (the function (svref entry 0)) vm image ip operands next)))
-	    (etypecase to
-	      (fixnum (setq ip to))
-	      (code-pointer (setq image (code-pointer-image to) ip (code-pointer-word to)))
-	      (list (return to))
-	      (extent-exit
-	       (unless nested (vm-error "a dynamic extent ended that wasn't begun"))
-	       (return to)))))))))
+      (let ((to
+	      (let ((translation (and jumped *vm-jit* (not *vm-trace*) (jit-entry image ip))))
+		(if translation
+		    ;; vm-jit.lisp
+		    (funcall (the function translation) vm image ip)
+		    (let* ((decoded (or (vm-image-decoded image)
+					(setf (vm-image-decoded image)
+					      (make-array (ceiling (length (vm-image-bytes image)) 4)
+							  :initial-element nil))))
+			   (entry (or (svref decoded ip)
+				      (setf (svref decoded ip)
+					    (multiple-value-bind (op operands next)
+						(decode-instruction (vm-image-bytes image) ip)
+					      (vector (svref dispatch (vm-op-opcode op)) operands next op))))))
+		      (let ((operands (svref entry 1)) (next (svref entry 2)))
+			(when *vm-trace*
+			  (format *trace-output* "~&;; ~5D ~A ~{~S~^ ~}  fp ~D sp ~D~%" ip
+				  (vm-op-name (svref entry 3)) operands (vm-fp vm) (vm-sp vm)))
+			(let ((to (funcall (the function (svref entry 0)) vm image ip operands next)))
+			  (setq jumped (not (eql to next)))
+			  to)))))))
+	(etypecase to
+	  (fixnum (setq ip to))
+	  (code-pointer (setq image (code-pointer-image to) ip (code-pointer-word to) jumped t))
+	  (list (return to))
+	  (extent-exit
+	   (unless nested (vm-error "a dynamic extent ended that wasn't begun"))
+	   (return to)))))))
 
 ;;; Locals
 
+(declaim (inline vm-local (setf vm-local) vm-slot (setf vm-slot) frame-size))
 (defun vm-local (vm i) (svref (vm-stack vm) (+ (vm-fp vm) 1 i)))
 (defun (setf vm-local) (value vm i) (setf (svref (vm-stack vm) (+ (vm-fp vm) 1 i)) value))
 (defun vm-slot (vm j) (svref (vm-stack vm) (- (vm-sp vm) j)))
@@ -834,13 +853,21 @@ are once made), its field count, and the bitmap of its unboxed fields."
 (defop "f64=?" (a b) (compare (= (vm-slot vm a) (vm-slot vm b)) :equal))
 (defop "f64<?" (a b)
   (let ((x (vm-slot vm a)) (y (vm-slot vm b)))
-    (setf (vm-compare vm) (cond ((or (nan-p x) (nan-p y)) :invalid) ((< x y) :less) (t :none))))
+    (setf (vm-compare vm) (cond ((and (typep x 'fixnum) (typep y 'fixnum)) (if (< x y) :less :none))
+				((or (nan-p x) (nan-p y)) :invalid)
+				((< x y) :less)
+				(t :none))))
   next)
-(defop "=?" (a b) (compare (= (vm-slot vm a) (vm-slot vm b)) :equal))
+(defop "=?" (a b)
+  (let ((x (vm-slot vm a)) (y (vm-slot vm b)))
+    (compare (if (and (typep x 'fixnum) (typep y 'fixnum)) (= x y) (= x y)) :equal)))
 (defop "heap-numbers-equal?" (a b) (compare (= (vm-slot vm a) (vm-slot vm b)) :equal))
 (defop "<?" (a b)
   (let ((x (vm-slot vm a)) (y (vm-slot vm b)))
-    (setf (vm-compare vm) (cond ((or (nan-p x) (nan-p y)) :invalid) ((< x y) :less) (t :none))))
+    (setf (vm-compare vm) (cond ((and (typep x 'fixnum) (typep y 'fixnum)) (if (< x y) :less :none))
+				((or (nan-p x) (nan-p y)) :invalid)
+				((< x y) :less)
+				(t :none))))
   next)
 
 (defmacro branch (test) `(if ,test (+ ip offset) next))
@@ -879,11 +906,35 @@ are once made), its field count, and the bitmap of its unboxed fields."
 
 (defun root-procedure (name) (or (root-value name) (vm-error "no ~A" name)))
 
-(defintrinsic "add" (a b) (funcall (root-procedure "+") a b))
-(defintrinsic "add/immediate" (a b) (funcall (root-procedure "+") a b))
-(defintrinsic "sub" (a b) (funcall (root-procedure "-") a b))
-(defintrinsic "sub/immediate" (a b) (funcall (root-procedure "-") a b))
-(defintrinsic "mul" (a b) (funcall (root-procedure "*") a b))
+(defun root-procedure-cached (cell name)
+  "ROOT-PROCEDURE of NAME, by way of CELL, (obarray . variable): the
+root's variable of NAME as last looked up, while the root is the same."
+  (declare (cons cell))
+  (let ((v (if (eq (car cell) *obarray*)
+	       (cdr cell)
+	       (let ((v (obarray-variable (ssym name))))
+		 (when v (setf (cdr cell) v (car cell) *obarray*))
+		 v))))
+    (let ((value (and v (gvariable-value v))))
+      (if (or (null value) (eq value +unbound+)) (vm-error "no ~A" name) value))))
+
+(define-compiler-macro root-procedure (&whole form name)
+  ;; a name known now: its variable looked up once (per root)
+  (if (stringp name)
+      `(root-procedure-cached (load-time-value (cons nil nil)) ,name)
+      form))
+
+;;; Arithmetic on fixnums is Lisp's; the rest is the runtime's.
+(defmacro fixnum-or-root ((a b) fixnum-form root-name)
+  `(if (and (typep ,a 'fixnum) (typep ,b 'fixnum))
+       ,fixnum-form
+       (funcall (root-procedure ,root-name) ,a ,b)))
+
+(defintrinsic "add" (a b) (fixnum-or-root (a b) (+ a b) "+"))
+(defintrinsic "add/immediate" (a b) (fixnum-or-root (a b) (+ a b) "+"))
+(defintrinsic "sub" (a b) (fixnum-or-root (a b) (- a b) "-"))
+(defintrinsic "sub/immediate" (a b) (fixnum-or-root (a b) (- a b) "-"))
+(defintrinsic "mul" (a b) (fixnum-or-root (a b) (* a b) "*"))
 (defintrinsic "div" (a b) (funcall (root-procedure "/") a b))
 (defintrinsic "quo" (a b) (funcall (root-procedure "quotient") a b))
 (defintrinsic "rem" (a b) (funcall (root-procedure "remainder") a b))
