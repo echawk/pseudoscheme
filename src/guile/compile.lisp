@@ -282,11 +282,27 @@ references to these."
      (list* (core "apply") (core "abort-to-prompt") (compile-tree-il (node-field x 1))
 	    (append (mapcar #'compile-tree-il (node-field x 2))
 		    (list (compile-tree-il (node-field x 3))))))
-    (:letrec (compile-letrec (node-field x 3) (node-field x 4) (node-field x 5)))))
+    (:letrec (compile-letrec (node-field x 3) (node-field x 4) (node-field x 5)
+			     (eq (node-field x 1) ps:false)))))
 
-(defun compile-letrec (gensyms vals body)
+(defun compile-letrec (gensyms vals body &optional parallel)
   ;; as psyntax's letrec* for the translator: ((lambda (v ...) (set! v e) ... body) #f ...),
-  ;; which src/psyntax.lisp makes a LABELS when the e are lambdas
+  ;; which src/psyntax.lisp makes a LABELS when the e are lambdas.  A
+  ;; letrec (PARALLEL) whose inits aren't all lambdas evaluates them all
+  ;; before assigning any, so that an init returning twice (by a
+  ;; continuation) assigns every variable again (R7RS 4.2.2).
+  (when (and parallel (cdr vals) (notevery (lambda (v) (eq (node-type v) :lambda)) vals))
+    (let* ((vars (mapcar #'bind-lexical gensyms))
+	   (temps (mapcar (lambda (v) (declare (ignore v)) (fresh-lexical)) vars))
+	   (vals (mapcar #'compile-tree-il vals)))
+      (return-from compile-letrec
+	(cons (list (core "lambda") vars
+		    (cons (list (core "lambda") temps
+				(list* (core "begin")
+				       (append (mapcar (lambda (v tmp) (list (core "set!") v tmp)) vars temps)
+					       (list (compile-tree-il body)))))
+			  vals))
+	      (mapcar (constantly (quoted ps:false)) vars)))))
   (let* ((vars (mapcar #'bind-lexical gensyms))
 	 (vals (mapcar #'compile-tree-il vals)))
     (cons (list (core "lambda") vars
@@ -567,7 +583,7 @@ evaluated in the scope of those before it."
 			  (pre-let '() (cddr x))
 			  (pre-let (list (car (cadr x)))
 				   (list (list* (ssym "let*") (cdr (cadr x)) (cddr x))))))
-		     ((or (is "letrec") (is "letrec*")) (pre-letrec (cadr x) (cddr x)))
+		     ((or (is "letrec") (is "letrec*")) (pre-letrec (cadr x) (cddr x) (is "letrec*")))
 		     ((is "and") (cond ((null (cdr x)) (make-node "const" ps:false ps:true))
 				       ((null (cddr x)) (pre-x (cadr x)))
 				       (t (make-node "conditional" ps:false (pre-x (cadr x))
@@ -639,11 +655,11 @@ evaluated in the scope of those before it."
     (let ((*pre-env* (append (mapcar #'cons names gensyms) *pre-env*)))
       (make-node "let" ps:false names gensyms vals (pre-body body)))))
 
-(defun pre-letrec (bindings body)
+(defun pre-letrec (bindings body &optional (in-order t))
   (let* ((names (mapcar #'car bindings))
 	 (gensyms (mapcar #'pre-gensym names)))
     (let ((*pre-env* (append (mapcar #'cons names gensyms) *pre-env*)))
-      (make-node "letrec" ps:false ps:true names gensyms
+      (make-node "letrec" ps:false (if in-order ps:true ps:false) names gensyms
 		 (mapcar (lambda (b) (named (car b) (pre-x (cadr b)))) bindings)
 		 (pre-body body)))))
 

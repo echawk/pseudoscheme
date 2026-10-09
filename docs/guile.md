@@ -7,7 +7,7 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
-`vendor/guile-test-suite/`), **41,993 tests pass** so far. See "Where it
+`vendor/guile-test-suite/`), **42,160 tests pass** so far. See "Where it
 stands" below. Emacs Lisp has started: Guile's elisp compiler runs, and
 `(compile '(defun ...) #:from 'elisp)` works. It is future work.
 
@@ -115,7 +115,11 @@ libguile is:
   `make-syntax-transformer`, and `macroexpand` hooks.
 - **Fluids and dynamic states** (`make-fluid`, `fluid-ref`,
   `with-fluids`, `with-dynamic-state`), which Guile's parameters are
-  built on. They are Lisp special variables, per thread.
+  built on. A fluid's value is per thread. A dynamic state is a table of
+  every fluid's value, which `with-dynamic-state` makes the thread's for
+  its extent; thread-local fluids (`%exception-handler` among them) stay
+  out of it, as in Guile.
+- **Atomic boxes** (`(ice-9 atomic)`), by compare-and-swap.
 - **Prompts:** `make-prompt-tag`, `call-with-prompt`,
   `abort-to-prompt`, and `%exception-handler`. See stage 4.
 - **Evaluation:** `primitive-eval`, `primitive-load`,
@@ -453,14 +457,15 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 41,993 |
-| fail | 191 | 73 |
-| error (an exception where a result was expected) | 465 | 100 |
-| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 94 / 15 / 7 / 4 |
-| files that crashed or hit the time limit | 32 | 1 |
+| pass | 5,982 | 42,160 |
+| fail | 191 | 75 |
+| error (an exception where a result was expected) | 465 | 110 |
+| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 84 / 10 / 7 / 4 |
+| files that crashed or hit the time limit | 32 | 0 |
 
-(That run lacked the `threads` feature, provided again since: srfi-18
-adds 61 passes, and threads.test hits the time limit.)
+(The last full run, with four files rerun alone that had hit the time
+limit while the module cache was rebuilt, and r5rs_pitfall and tree-il
+rerun after fixes.)
 
 The biggest files pass entirely or nearly: `numbers` (28,987 of
 28,991), `srfi-1` (1,902), `regexp` (1,089), `srfi-67` (902), `r4rs`

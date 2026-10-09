@@ -286,8 +286,8 @@ DIGITS is NIL)."
 
 (defun read-hash-alpha (c port)
   (let* ((token (concatenate 'string (string c) (read-token port))))
-    (cond ((member token '("t" "true") :test #'string=) ps:true)
-	  ((member token '("f" "false") :test #'string=) ps:false)
+    (cond ((member token '("t" "true") :test #'string-equal) ps:true)
+	  ((member token '("f" "false") :test #'string-equal) ps:false)
 	  ((string= token "nil") *elisp-nil*)
 	  ((string= token "eof") ps:eof-object)
 	  ((and (string= token "vu8") (eql (peekc port) #\())

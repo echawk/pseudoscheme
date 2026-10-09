@@ -159,6 +159,8 @@ true, or NIL.")
 (defun write-procedure (f stream)
   (when (and *write-program-hook* (funcall *write-program-hook* f stream))
     (return-from write-procedure))
+  (when (psx::continuation-procedure-p f)
+    (return-from write-procedure (format stream "#<continuation ~A>" (object-address-string f))))
   (let ((name (funcall (gethash "procedure-name" *guile-primitives*) f)))
     (if (and name (not (eq name ps:false)))
 	(format stream "#<procedure ~A ~A>"

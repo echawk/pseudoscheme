@@ -231,8 +231,121 @@ its type)."
       (loop for a in args for i from 1 do (setf (local i) a))
       (setf (vm-fp vm) fp (vm-sp vm) (+ fp 1 (length args))))
     (unwind-protect
-	 (values-list (run-vm vm (program-code program)))
+	 (values-list (run-vm vm (program-code program) nil (make-vm-activation fp)))
       (setf (vm-fp vm) saved-fp (vm-sp vm) saved-sp))))
+
+;;; ------------------------------------------------------------------
+;;; Continuations through the machine
+;;;
+;;; When a run of the machine calls out to Lisp (a procedure not
+;;; compiled to bytecode, a dynamic extent's establishment, an abort), it
+;;; pushes a :VM frame on the runtime's frame stack (src/continuations.lisp):
+;;;
+;;;    #(:vm promoted activation kind nested fp sp)
+;;;
+;;; KIND is :call (the call's values return to the frame at FP) or
+;;; :extent (its value is the extent-exit to go on at).  Capturing a
+;;; continuation copies the innermost such frame of each activation with
+;;; the activation's stack, from its boundary frame up to SP:
+;;;
+;;;    #(:vm promoted activation kind nested fp sp stack :copy)
+;;;
+;;; heights relative to the activation's base; the others need none, the
+;;; innermost having the later state of the same stack.  Re-entering
+;;; restores that stack once, above the machine's current SP (the
+;;; activation's base moves there), and runs the machine on from the
+;;; frame; the activation's outer frames then go on from where it is.
+
+(defmacro with-vm-frame ((vm kind) &body body)
+  (let ((frame (gensym "FRAME")))
+    `(let ((,frame (vector :vm nil *vm-activation* ,kind *vm-nested* (vm-fp ,vm) (vm-sp ,vm))))
+       (declare (dynamic-extent ,frame))
+       (psx::with-frame (,frame) ,@body))))
+
+(defun copy-vm-frame (frame inside)
+  (if (= (length frame) 9)
+      (copy-seq frame)			; a copy already
+      (let* ((activation (svref frame 2))
+	     (base (vm-activation-base activation))
+	     (innermost (notany (lambda (f) (and (vectorp f) (eq (svref f 0) :vm) (eq (svref f 2) activation)))
+				inside))
+	     (fp (svref frame 5)) (sp (svref frame 6)))
+	(vector :vm nil activation (svref frame 3) (svref frame 4) (- fp base) (- sp base)
+		(and innermost (subseq (vm-stack (current-vm)) (- base 2) (1+ sp)))
+		:copy))))
+
+(defvar *vm-delimit* nil
+  "While a composable continuation is rebuilt: (activation . fp) of the
+prompt it was captured up to (relative to the activation).")
+
+(defvar *vm-reentries* '()
+  "While continuations are rebuilt: activation -> the re-entry restoring it.")
+
+(defun resume-vm-frame (frame inner)
+  (if (eq (svref frame 0) :vm-prompt)
+      (if (eq frame psx::*outermost-composed*)
+	  ;; the frames inside, a composable continuation, end here
+	  (let ((*vm-delimit* (cons (svref frame 2) (svref frame 3))))
+	    (funcall inner))
+	  (psx::with-frame (frame) (funcall inner)))
+      (resume-vm-frame-1 frame inner)))
+
+(defun resume-vm-frame-1 (frame inner)
+  (let* ((activation (svref frame 2))
+	 (*vm-reentries* (if (assoc activation *vm-reentries*)
+			     *vm-reentries*
+			     (acons activation (list :reentry) *vm-reentries*)))
+	 (reentry (cdr (assoc activation *vm-reentries*))))
+    (multiple-value-call (lambda (&rest values) (continue-vm-frame frame values reentry))
+      (psx::with-frame (frame) (funcall inner)))))
+
+(defun continue-vm-frame (frame values reentry)
+  (let* ((vm (current-vm))
+	 (activation (svref frame 2))
+	 (kind (svref frame 3)) (nested (svref frame 4))
+	 (stack-copy (svref frame 7)))
+    (when (and stack-copy (not (eq (vm-activation-restored activation) reentry)))
+      ;; the activation's stack, above what is there now
+      (let ((base (+ (vm-sp vm) 3)))
+	(ensure-stack vm (+ base (length stack-copy) 1))
+	(replace (vm-stack vm) stack-copy :start1 (- base 2))
+	(setf (vm-activation-outer activation) (list (vm-fp vm) (vm-sp vm) (vm-activation-base activation))
+	      (vm-activation-base activation) base
+	      (vm-activation-restored activation) reentry
+	      (vm-fp vm) (+ base (svref frame 5))
+	      (vm-sp vm) (+ base (svref frame 6)))))
+    (let ((delimit (and *vm-delimit* (eq (car *vm-delimit*) activation) (cdr *vm-delimit*))))
+      (when delimit
+	;; a composable continuation: the frame that returns to the
+	;; prompt's returns to Lisp instead, with its values
+	(let ((prompt-fp (+ (vm-activation-base activation) delimit))
+	      (stack (vm-stack vm)))
+	  (loop with f = (vm-fp vm)
+		for caller = (- f (svref stack (- f 2)))
+		until (<= caller prompt-fp)
+		do (setq f caller)
+		finally (setf (svref stack (- f 1)) :boundary)))
+	(setq nested nil)))
+    (let ((to (ecase kind
+		(:call (set-frame-size vm (length values))
+		 (loop for v in values for i from 0 do (setf (vm-local vm i) v))
+		 (return-from-frame vm))
+		(:extent (extent-exit-location (car values))))))
+      (if nested
+	  (if (listp to) (vm-error "a dynamic extent's body returned") (run-vm vm to t activation))
+	  (unwind-protect
+	       (values-list (if (listp to) to (run-vm vm to nil activation)))
+	    ;; what was below the activation's stack when it was restored
+	    (let ((outer (and (eq (vm-activation-restored activation) reentry)
+			      (vm-activation-outer activation))))
+	      (when outer
+		(setf (vm-fp vm) (first outer) (vm-sp vm) (second outer)
+		      ;; it may be running still, below (a composable
+		      ;; continuation called from a handler in it)
+		      (vm-activation-base activation) (third outer)))))))))
+
+(setq psx::*frame-copier* 'copy-vm-frame
+      psx::*frame-resumer* 'resume-vm-frame)
 
 ;;; ------------------------------------------------------------------
 ;;; Instructions
@@ -275,11 +388,27 @@ order of its fields; FP, SP and STACK are the machine's."
 to go on."
   location)
 
-(defun run-vm (vm code &optional nested)
+(defstruct (vm-activation (:constructor make-vm-activation (base)))
+  "A call of a compiled program from Lisp (VM-APPLY): its frames are on
+the VM's stack from BASE, the height of its boundary frame.  Heights
+the Lisp side keeps for it are relative to BASE, which moves when a
+continuation captured in it is re-entered."
+  base
+  (restored nil)			; the re-entry that last restored it
+  (outer nil))				; (fp sp base) before it was restored
+
+(defvar *vm-activation* nil "The activation the machine is running.")
+(defvar *vm-nested* nil "Whether the run is a dynamic extent's body.")
+
+(defun run-vm (vm code &optional nested (activation *vm-activation*))
   "Run from CODE, a code-pointer, until a frame returns to Lisp: the
 values it returns.  If NESTED, the run is a dynamic extent's body (a
 prompt's, a dynamic-wind's, a fluid binding's), and ends with the
 extent-exit of the instruction that ends the extent."
+  (let ((*vm-activation* activation) (*vm-nested* nested))
+    (run-vm-1 vm code nested)))
+
+(defun run-vm-1 (vm code nested)
   (let ((dispatch (vm-dispatch-table))
 	(image (code-pointer-image code))
 	(ip (code-pointer-word code)))
@@ -339,7 +468,7 @@ values in the frame, and return from it."
 	 (args (loop for i from 1 below n collect (vm-local vm i)))
 	 (values (multiple-value-list
 		  (if (functionp f)
-		      (apply f args)
+		      (with-vm-frame (vm :call) (apply f args))
 		      (guile-error (ssym "wrong-type-arg") ps:false "Wrong type to apply: ~S"
 				   (list f) (list f))))))
     (set-frame-size vm (length values))
@@ -498,6 +627,7 @@ values in the frame, and return from it."
     (simple-vector (logior (ash (length x) 8) 13))
     (vm-program (logior (ash (length (program-free x)) 16) 69))
     (gvariable 7)
+    (atomic-box 55)
     (string 21)
     (vm-stringbuf (logior 39 (if (wide-string-p* (vm-stringbuf-string x)) #x400 0)))
     (syntax-object 61)
@@ -526,6 +656,7 @@ values in the frame, and return from it."
 	     (69 (make-vm-program nil (ash header -16)))
 	     (13 (make-array (ash header -8) :initial-element ps:false))
 	     (7 (make-gvariable))
+	     (55 (make-atomic-box ps:false))
 	     (t (vm-error "allocating objects of type ~D isn't supported yet" (logand header #x7f))))))
     ;; words already written (before the header) go to their fields
     (loop for i from 1 below (length words)
@@ -541,6 +672,7 @@ values in the frame, and return from it."
     (simple-vector (svref x (- i 1)))
     (vm-program (if (= i 1) (program-code x) (svref (program-free x) (- i 2))))
     (gvariable (gvariable-value x))
+    (atomic-box (ecase i (1 (atomic-box-value x))))
     (raw-object (svref (raw-object-words x) i))
     (syntax-object (ecase i
 		     (1 (syntax-object-expression x)) (2 (syntax-object-wrap x))
@@ -589,6 +721,7 @@ are once made), its field count, and the bitmap of its unboxed fields."
 		    (setf (program-code x) value)
 		    (setf (svref (program-free x) (- i 2)) value)))
     (gvariable (setf (gvariable-value x) value))
+    (atomic-box (ecase i (1 (setf (atomic-box-value x) value))))
     (raw-object (setf (svref (raw-object-words x) i) value))
     (t (if (struct-p x)
 	   (setf (svref (struct-slots-of x) (- i 1)) value)
@@ -644,6 +777,31 @@ are once made), its field count, and the bitmap of its unboxed fields."
 (defop "scm-ref" (dst obj i) (setf (vm-slot vm dst) (heap-ref (vm-slot vm obj) (vm-slot vm i))) next)
 (defop "scm-set!/immediate" (obj i val) (scm-store vm (vm-slot vm obj) i (vm-slot vm val)) next)
 (defop "scm-set!" (obj i val) (scm-store vm (vm-slot vm obj) (vm-slot vm i) (vm-slot vm val)) next)
+(defun atomic-box-at (vm obj i)
+  (let ((box (vm-slot vm obj)))
+    (unless (and (atomic-box-p box) (= i 1)) (vm-error "atomic access to word ~D of ~S" i box))
+    box))
+(defop "atomic-scm-ref/immediate" (dst obj i)
+  (let ((box (atomic-box-at vm obj i)))
+    (sb-thread:barrier (:read))
+    (setf (vm-slot vm dst) (atomic-box-value box)))
+  next)
+(defop "atomic-scm-set!/immediate" (obj i val)
+  ;; a fresh box is still words: its header is written, so it's a box
+  (let ((box (vm-slot vm obj)))
+    (if (atomic-box-p box)
+	(setf (atomic-box-value box) (vm-slot vm val))
+	(scm-store vm box i (vm-slot vm val))))
+  (sb-thread:barrier (:write))
+  next)
+(defop "atomic-scm-swap!/immediate" (dst obj i val)
+  (setf (vm-slot vm dst) (atomic-box-swap (atomic-box-at vm obj i) (vm-slot vm val)))
+  next)
+(defop "atomic-scm-compare-and-swap!/immediate" (dst obj i expected desired)
+  (setf (vm-slot vm dst)
+	(atomic-box-cas (atomic-box-at vm obj i) (vm-slot vm expected) (vm-slot vm desired)))
+  next)
+
 (defop "word-ref/immediate" (dst obj i)
   (let ((x (vm-slot vm obj)))
     (setf (vm-slot vm dst) (if (= i 0) (heap-header x) (heap-ref x i))))
@@ -1118,8 +1276,9 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
 (defun extent-step (vm image next result)
   "Where to go after an intrinsic call that returned RESULT."
   (cond ((extent-push-p result)
-	 (let ((exit (funcall (extent-push-establish result)
-			      (lambda () (run-vm vm (make-code-pointer image next) t)))))
+	 (let ((exit (with-vm-frame (vm :extent)
+		       (funcall (extent-push-establish result)
+				(lambda () (run-vm vm (make-code-pointer image next) t))))))
 	   (extent-exit-location exit)))
 	((eq result :pop-extent) (make-extent-exit (make-code-pointer image next)))
 	(t next)))
@@ -1141,25 +1300,37 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
 (defintrinsic "pop-dynamic-state" () :pop-extent)
 
 (defop "prompt" (tag escape-only proc-slot handler)
-  (let ((saved-fp fp) (saved-sp sp)
-	(handler-at (make-code-pointer image (+ ip handler))))
+  (let* ((activation *vm-activation*)
+	 ;; relative to the activation, which a re-entered continuation moves
+	 (saved-fp (- fp (vm-activation-base activation)))
+	 (saved-sp (- sp (vm-activation-base activation)))
+	 (handler-at (make-code-pointer image (+ ip handler))))
     (extent-exit-location
+     (with-vm-frame (vm :extent)
      (psx::call-with-prompt
       (vm-slot vm tag)
-      (lambda () (run-vm vm (make-code-pointer image next) t))
+      (lambda ()
+	;; just inside the prompt: where a composable continuation captured
+	;; up to it ends (the frame that returns to this one)
+	(let ((marker (vector :vm-prompt nil activation saved-fp)))
+	  (declare (dynamic-extent marker))
+	  (psx::with-frame (marker) (run-vm vm (make-code-pointer image next) t))))
       (lambda (k &rest values)
 	;; as if returned from a call with the procedure in PROC-SLOT
-	(setf (vm-fp vm) saved-fp (vm-sp vm) saved-sp)
+	(let ((vm (current-vm)) (base (vm-activation-base activation)))
+	  (setf (vm-fp vm) (+ base saved-fp) (vm-sp vm) (+ base saved-sp)))
 	(let ((all (cons k values)))
-	  (set-frame-size vm (+ proc-slot 1 (length all)))
-	  (loop for v in all for i from (+ proc-slot 1) do (setf (vm-local vm i) v)))
-	(make-extent-exit handler-at))))))
+	  ;; a call's values start at its procedure's local
+	  (set-frame-size vm (+ proc-slot (length all)))
+	  (loop for v in all for i from proc-slot do (setf (vm-local vm i) v)))
+	(make-extent-exit handler-at)))))))
 
 (defop "abort" ()
   ;; a tail call of abort-to-prompt: the tag in local 1, the values after
   (let* ((n (frame-size vm))
 	 (args (loop for i from 1 below n collect (vm-local vm i)))
-	 (values (multiple-value-list (apply (root-procedure "abort-to-prompt") args))))
+	 (values (multiple-value-list (with-vm-frame (vm :call)
+					(apply (root-procedure "abort-to-prompt") args)))))
     (set-frame-size vm (length values))
     (loop for v in values for i from 0 do (setf (vm-local vm i) v))
     (return-from-frame vm)))

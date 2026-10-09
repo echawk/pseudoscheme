@@ -633,14 +633,30 @@ the table's own, which hash-ref and the rest see too."
 		  (:copier nil))
   (outer '())
   (default ps:false)
-  (special nil))			; a Lisp special variable that holds the value
+  (special nil)				; a Lisp special variable that holds the value
+  (thread-local nil))			; not part of dynamic states
 
 (defmethod print-object ((f fluid) stream)
   (format stream "#<fluid ~(~X~)>" (logand (sb-kernel:get-lisp-obj-address f) #xffffffffff)))
 
-(defun make-fluid* (&optional (default ps:false))
+(defvar *fluids* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Every fluid but the thread-local ones, for the snapshots that are
+dynamic states.")
+
+(defun make-fluid* (&optional (default ps:false) thread-local)
   (let ((f (%make-fluid default nil)))
-    (setf (fluid-default f) default)
+    (setf (fluid-default f) default
+	  (fluid-thread-local f) thread-local)
+    ;; a thread-local fluid's value is a special variable's, per thread
+    ;; and outside the parameter tables that dynamic states swap
+    (if thread-local
+	(let ((symbol (gensym "THREAD-LOCAL-FLUID"))
+	      (outer (gensym "THREAD-LOCAL-FLUID-OUTER")))
+	  (setf (symbol-value symbol) default
+		(symbol-value outer) '()
+		(fluid-special f) symbol
+		(fluid-outer f) outer))	; the special that holds the outer values
+	(setf (gethash f *fluids*) t))
     f))
 
 (declaim (inline fluid-value))
@@ -651,6 +667,9 @@ the table's own, which hash-ref and the rest see too."
       (setf (symbol-value (fluid-special f)) v)
       (setf (ps-r7rs::parameter-state-value f) v)))
 
+(defun fluid-outer-values (f)
+  (if (fluid-thread-local f) (symbol-value (fluid-outer f)) (fluid-outer f)))
+
 (defun call-with-fluid (fluid value thunk)
   ;; Leaving the extent keeps the binding's value in VALUE: re-entering
   ;; it (by a continuation) binds the fluid to that, as Guile's dynamic
@@ -659,9 +678,14 @@ the table's own, which hash-ref and the rest see too."
     (if symbol
 	(funcall ps-r7rs::*call-in-extent*
 		 (lambda (inner)
-		   (progv (list symbol) (list value)
-		     (unwind-protect (funcall inner)
-		       (setq value (symbol-value symbol)))))
+		   (multiple-value-bind (symbols values)
+		       (if (fluid-thread-local fluid)
+			   (values (list symbol (fluid-outer fluid))
+				   (list value (cons (symbol-value symbol) (fluid-outer-values fluid))))
+			   (values (list symbol) (list value)))
+		     (progv symbols values
+		       (unwind-protect (funcall inner)
+			 (setq value (symbol-value symbol))))))
 		 thunk)
 	(funcall ps-r7rs::*call-in-extent*
 		 (lambda (inner)
@@ -679,9 +703,9 @@ the table's own, which hash-ref and the rest see too."
 
 (defguile "make-fluid" (&optional (default ps:false)) (make-fluid* default))
 (defguile "make-unbound-fluid" () (make-fluid* +unbound+))
-(defguile "make-thread-local-fluid" (&optional (default ps:false)) (make-fluid* default))
+(defguile "make-thread-local-fluid" (&optional (default ps:false)) (make-fluid* default t))
 (defguile "fluid?" (x) (bool (fluid-p x)))
-(defguile "fluid-thread-local?" (x) (declare (ignore x)) ps:false)
+(defguile "fluid-thread-local?" (x) (check-fluid "fluid-thread-local?" x) (bool (fluid-thread-local x)))
 (defguile "fluid-ref" (f)
   (check-fluid "fluid-ref" f)
   (let ((v (fluid-value f)))
@@ -694,7 +718,7 @@ the table's own, which hash-ref and the rest see too."
     (guile-error (ssym "out-of-range") "fluid-ref*" "Value out of range: ~S" (list depth) (list depth)))
   (if (zerop depth)
       (fluid-value f)
-      (let ((tail (nthcdr (1- depth) (fluid-outer f))))
+      (let ((tail (nthcdr (1- depth) (fluid-outer-values f))))
 	(if tail (car tail) (fluid-default f)))))
 (defguile "fluid-set!" (f v) (check-fluid "fluid-set!" f) (setf (fluid-value f) v) *unspecified*)
 (defguile "fluid-unset!" (f) (setf (fluid-value f) +unbound+) *unspecified*)
@@ -707,16 +731,35 @@ the table's own, which hash-ref and the rest see too."
 		       (lambda () (funcall (gethash "with-fluids*" *guile-primitives*)
 					   (cdr fluids) (cdr values) thunk)))))
 
-;;; Dynamic states: a snapshot of every fluid's value.  Only the
-;;; procedures; with-dynamic-state sets the values for its extent.
+;;; Dynamic states: a table of every fluid's (and parameter's) value,
+;;; which with-dynamic-state makes the thread's parameter table
+;;; (src/r7rs/rts.lisp) for its extent.  Setting a fluid there sets it in
+;;; the state, and re-entering the extent by a continuation sees that.
 
 (defstruct (dynamic-state (:constructor make-dynamic-state (values)) (:copier nil))
   values)
 
-(defguile "current-dynamic-state" () (make-dynamic-state '()))
+(defun current-dynamic-state* ()
+  (let ((table (ps-r7rs::thread-parameters-snapshot)))
+    (maphash (lambda (f _) (declare (ignore _))
+	       (unless (fluid-special f)
+		 (setf (gethash f table) (fluid-value f))))
+	     *fluids*)
+    (make-dynamic-state table)))
+
+(defguile "current-dynamic-state" () (current-dynamic-state*))
 (defguile "dynamic-state?" (x) (bool (dynamic-state-p x)))
-(defguile "set-current-dynamic-state" (s) (declare (ignore s)) (make-dynamic-state '()))
-(defguile "with-dynamic-state" (state thunk) (declare (ignore state)) (funcall thunk))
+(defguile "set-current-dynamic-state" (s)
+  (unless (dynamic-state-p s) (wrong-type "set-current-dynamic-state" 1 s))
+  (prog1 (current-dynamic-state*)
+    (setq ps-r7rs::*thread-parameters* (dynamic-state-values s))))
+(defguile "with-dynamic-state" (state thunk)
+  (unless (dynamic-state-p state) (wrong-type "with-dynamic-state" 1 state))
+  (funcall ps-r7rs::*call-in-extent*
+	   (lambda (inner)
+	     (let ((ps-r7rs::*thread-parameters* (dynamic-state-values state)))
+	       (funcall inner)))
+	   thunk))
 
 ;;; ------------------------------------------------------------------
 ;;; Syntax objects and macros
@@ -1091,7 +1134,20 @@ and whether it takes more; NIL if that isn't known."
   (if argp (options-interface *print-options* arg) (options-interface *print-options*)))
 (defguile "call-with-blocked-asyncs" (thunk) (funcall thunk))
 (defguile "call-with-unblocked-asyncs" (thunk) (funcall thunk))
-(defguile "with-continuation-barrier" (thunk) (funcall thunk))
+(defguile "with-continuation-barrier" (thunk)
+  ;; as Guile's: continuations can't leave or enter the call's extent, and
+  ;; a throw it doesn't catch is reported to the error port, and #f returned
+  (let ((frame (vector :barrier nil "with-continuation-barrier" :escapes)))
+    (declare (dynamic-extent frame))
+    (psx::with-frame (frame)
+      (funcall (root-value "catch") ps:true thunk
+	       (lambda (key &rest args)
+		 (let ((print (root-value "print-exception"))
+		       (port (funcall (root-value "current-error-port"))))
+		   (if print
+		       (funcall print port ps:false key args)
+		       (format port "Throw to key ~A~%" key)))
+		 ps:false)))))
 (defguile "%get-stack-size" () 0)
 (defguile "get-internal-real-time" () (get-internal-real-time))
 (defguile "get-internal-run-time" () (get-internal-run-time))

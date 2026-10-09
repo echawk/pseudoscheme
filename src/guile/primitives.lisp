@@ -1537,7 +1537,10 @@ true (the predicate's value) if it matches."
 
 (defguile "call-with-stack-overflow-handler" (limit thunk handler)
   (check-stack-limit "call-with-stack-overflow-handler" limit)
-  (handler-case (funcall thunk)
+  ;; deep recursion (past the binding stack, src/continuations.lisp) stops
+  ;; at 64 MB more of control stack, short of the stack's own end
+  (handler-case (let ((psx::*stack-limit* (cons (sb-sys:sap-int (sb-vm::current-sp)) (* 64 1024 1024))))
+		  (funcall thunk))
     (storage-condition ()
       (check-stack-limit "call-with-stack-overflow-handler" (funcall handler))
       (guile-error (ssym "stack-overflow") "call-with-stack-overflow-handler" "Stack overflow" '()))))

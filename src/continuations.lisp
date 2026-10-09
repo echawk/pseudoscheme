@@ -73,6 +73,12 @@ megabyte), while recursion may go as deep as the control stack allows.")
 	     +binding-stack-deep+)
   #-sbcl nil)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defvar *compact-frames* nil
+    "True while compiling code that must be small: WITH-PUSHED-FRAME then
+expands to a call of CALL-WITH-PUSHED-FSTACK, not the push in line.  For
+a form whose code SBCL couldn't otherwise compile (src/guile/cache.lisp)."))
+
 (defmacro with-pushed-frame ((frame) &body body)
   "Run BODY with FRAME (a vector, already allocated) pushed on *FSTACK*.
 *FSTACK* is bound, which is cheap, until the binding stack is deep; then
@@ -81,18 +87,47 @@ is out of line: an UNWIND-PROTECT in a component makes SBCL compile all
 of the component's functions more slowly.  Every thread that runs Scheme
 binds *FSTACK* once (WITH-THREAD-STATE)."
   (let ((cell (gensym "CELL")) (thunk (gensym "BODY")))
-    `(let ((,cell (cons ,frame *fstack*)))
-       (declare (dynamic-extent ,cell))
-       (if (binding-stack-deep-p)
+    (when *compact-frames*
+      (return-from with-pushed-frame
+	`(let ((,cell (cons ,frame *fstack*)))
+	   (declare (dynamic-extent ,cell))
 	   (flet ((,thunk () ,@body))
 	     (declare (dynamic-extent #',thunk))
-	     (call-with-assigned-fstack ,cell #',thunk))
-	   (let ((*fstack* ,cell))
-	     ,@body)))))
+	     (call-with-pushed-fstack ,cell #',thunk)))))
+    ;; BODY once (code size matters: SBCL can't compile a code object
+    ;; much past a megabyte on arm64), called by either branch
+    `(let ((,cell (cons ,frame *fstack*)))
+       (declare (dynamic-extent ,cell))
+       (flet ((,thunk () ,@body))
+	 (declare (dynamic-extent #',thunk))
+	 (if (binding-stack-deep-p)
+	     (call-with-assigned-fstack ,cell #',thunk)
+	     (let ((*fstack* ,cell))
+	       (,thunk)))))))
+
+(defvar *stack-limit* nil
+  "NIL, or (start-address . bytes): how much control stack recursion may
+use from START-ADDRESS before CALL-WITH-ASSIGNED-FSTACK signals
+STACK-LIMIT-REACHED (Guile's call-with-stack-overflow-handler).")
+
+(define-condition stack-limit-reached (storage-condition) ()
+  (:report "Stack overflow"))
+
+(defun call-with-pushed-fstack (cell thunk)
+  "WITH-PUSHED-FRAME, out of line: call THUNK with CELL pushed on *FSTACK*."
+  (declare (function thunk))
+  (if (binding-stack-deep-p)
+      (call-with-assigned-fstack cell thunk)
+      (let ((*fstack* cell)) (funcall thunk))))
 
 (defun call-with-assigned-fstack (cell thunk)
   "Call THUNK with *FSTACK* assigned CELL, restored however THUNK is left."
   (declare (function thunk))
+  (when *stack-limit*
+    (let ((sp #+sbcl (sb-sys:sap-int (sb-vm::current-sp)) #-sbcl 0))
+      (when (> (abs (- sp (car *stack-limit*))) (cdr *stack-limit*))
+	(let ((*stack-limit* nil))	; handling it takes stack
+	  (error 'stack-limit-reached)))))
   (let ((old *fstack*))
     (unwind-protect
 	 (progn (setq *fstack* cell)
@@ -381,6 +416,17 @@ inside is re-entered (and so the continuation still works there)."
 			 (cons tag nil)	; its identity (CONTINUATION=)
 			 (throw tag (values-list values)))))))))
 
+(defun continuation-procedure-p (f)
+  "Whether F is a continuation FULL-CALL/CC or ESCAPE-CALL/CC made (as
+its function's name tells; asking it would call it)."
+  #+sbcl
+  (and (sb-kernel:closurep f)
+       (let ((name (sb-kernel:%fun-name (sb-kernel:%closure-fun f))))
+	 (and (consp name) (member (car name) '(flet lambda))
+	      (let ((in (member :in name)))
+		(and in (member (second in) '(full-call/cc escape-call/cc)))))))
+  #-sbcl nil)
+
 (defun guard-reraise (k thunk)
   "GUARD's re-raise when no clause matches: re-enter the handler's
 continuation K with THUNK, which re-raises there; or, where K can't be
@@ -394,6 +440,20 @@ re-entered (escape mode), call THUNK in the guard's own context."
 ;;; outside a frame doesn't change while the frame is on the stack, so a
 ;;; later capture copies only the frames pushed since, and shares the
 ;;; rest: repeated captures (generators, ctak) cost the new frames only.
+
+(defvar *frame-copier* nil
+  "NIL, or a function copying a frame of another kind than the ones here,
+(FRAME INNERMOST-OF-ITS-KIND-P): the Guile VM's :VM frames, which copy the
+VM's stack (src/guile/vm.lisp).")
+
+(defvar *frame-resumer* nil
+  "NIL, or a function resuming such a frame, as RESUME-FRAME does.")
+
+(defun copy-frame (frame seen)
+  "A copy of FRAME; SEEN is the frames inside it being copied too."
+  (if (and *frame-copier* (eq (svref frame 0) :vm))
+      (funcall *frame-copier* frame seen)
+      (copy-seq frame)))
 
 (defun capture-frames ()
   "Copies of the current frames, innermost first, and whether they reach
@@ -409,11 +469,15 @@ a base."
 	      (t (push frame new)))))
     ;; NEW is outermost first: copy each onto TAIL, and promote it
     (dolist (frame new)
-      (let ((copy (copy-seq frame)))
+      (let ((copy (copy-frame frame (cdr (member frame new)))))
 	(setq tail (cons copy tail))
 	(setf (svref copy 1) (cons complete tail)
 	      (svref frame 1) (svref copy 1))))
     (values tail complete)))
+
+(defvar *rewinding* '()
+  "While a continuation's frames are rebuilt: the winders being re-entered,
+whose befores run as their frames are rebuilt.")
 
 (defun resume-frame (frame inner)
   "Re-establish FRAME around INNER, a thunk computing what the frame's
@@ -421,7 +485,10 @@ call returns, then continue the frame."
   (let ((head (svref frame 0)))
     (case head
       (:k (multiple-value-call (svref frame 2) (with-frame (frame) (funcall inner))))
-      (:winder (winder-extent (svref frame 2) inner))
+      (:winder (let ((winder (svref frame 2)))
+		 (when (member winder *rewinding* :test #'eq)
+		   (funcall (car winder)))
+		 (winder-extent winder inner)))
       (:handler (handler-extent (car (svref frame 2)) (cdr (svref frame 2)) inner))
       (:handlers (handlers-extent (svref frame 2) inner))
       (:extent (call-in-extent (svref frame 2) inner))
@@ -431,6 +498,7 @@ call returns, then continue the frame."
 		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
       (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
 				 (svref frame 2)))
+      ((:vm :vm-prompt) (funcall *frame-resumer* frame inner))
       (t (let ((value (with-frame (frame) (funcall inner))))
 	   (apply head (svref frame 2) value frame (make-list (svref frame 3))))))))
 
@@ -451,26 +519,37 @@ outer ends, innermost first."
 
 (defun reenter (frames winders values shared)
   ;; Throwing to the base ran the afters of the winders that were active
-  ;; but for SHARED, which the continuation's WINDERS end with: run the
-  ;; befores of the others, outermost first.  Rebuilding the frames
-  ;; re-establishes them all.
-  (let ((outer shared))
-    (dolist (w (reverse (butlast winders (length shared))))
-      (let ((*winders* outer)) (funcall (car w)))
-      (push w outer)))
-  (rebuild-frames (reverse frames) values))
+  ;; but for SHARED, which the continuation's WINDERS end with.  The
+  ;; befores of the others run as their frames are rebuilt, outermost
+  ;; first, inside the frames outside them (a catch, say, that a before
+  ;; throws to).
+  (let ((*rewinding* (butlast winders (length shared))))
+    (rebuild-frames (reverse frames) values)))
+
+(defun check-no-barrier (here)
+  "Signal an error if a :BARRIER frame that blocks escapes too, #(:barrier
+promoted name :escapes), is pushed since HERE, a tail of *FSTACK*: a
+continuation can't leave such a barrier (Guile's
+with-continuation-barrier).  Other barriers only block re-entry."
+  (loop for s on *fstack*
+	until (eq s here)
+	when (and (vectorp (car s)) (eq (svref (car s) 0) :barrier)
+		  (> (length (car s)) 3) (eq (svref (car s) 3) :escapes))
+	  do (ps:scheme-error "a continuation can't cross the continuation barrier of ~A"
+			      (svref (car s) 2))))
 
 (defun full-call/cc (f)
   (multiple-value-bind (frames rebuildable) (capture-frames)
     (let ((winders *winders*)
 	  (live (list t))
+	  (here *fstack*)
 	  (tag (list 'continuation)))
       (flet ((k (&rest values)
 	       ;; asked its identity (CONTINUATION=)
 	       (when (and values (eq (car values) :pseudoscheme-continuation-query))
 		 (return-from k (cons frames winders)))
 	       (setq *shared-winders* '())
-	       (cond ((car live) (throw tag (values-list values)))
+	       (cond ((car live) (check-no-barrier here) (throw tag (values-list values)))
 		     ((and rebuildable *base-tag*)
 		      (let ((shared (shared-winders *winders* winders)))
 			(setq *shared-winders* shared)
@@ -507,30 +586,36 @@ the composable continuation and the abort's values."
     (when (and (vectorp frame) (eq (svref frame 0) :prompt) (eq (cdr (svref frame 2)) tag))
       (return frame))))
 
-(defun fresh-frame (frame)
+(defun fresh-frame (frame &optional (inside '()))
   "A copy of FRAME, unpromoted: what is outside it when it's rebuilt is
-another continuation than when it was captured."
-  (let ((copy (copy-seq frame)))
+another continuation than when it was captured.  INSIDE is the frames
+inside it being copied too."
+  (let ((copy (copy-frame frame inside)))
     (setf (svref copy 1) nil)
     copy))
+
+(defvar *outermost-composed* nil
+  "While a composable continuation's frames are rebuilt: the outermost,
+just inside the prompt it was captured up to.")
 
 (defun compose-continuation (frames winders values)
   "Rebuild FRAMES (innermost first) on top of the current continuation,
 running the befores of their WINDERS, outermost first, and return
 VALUES to the innermost."
-  (let ((outer *winders*))
-    (dolist (w (reverse winders))
-      (let ((*winders* outer)) (funcall (car w)))
-      (push w outer)))
-  (rebuild-frames (reverse (mapcar #'fresh-frame frames)) values))
+  (let* ((frames (reverse (mapcar #'fresh-frame frames)))
+	 (*outermost-composed* (car frames))
+	 ;; their befores run as their frames are rebuilt
+	 (*rewinding* winders))
+    (rebuild-frames frames values)))
 
 (defun abort-to-prompt (tag &rest values)
   (let ((prompt (find-prompt tag)))
     (unless prompt
       (ps:scheme-error "abort-to-prompt: no prompt with tag ~S in the current continuation" tag))
-    (let* ((frames (loop for frame in *fstack*
+    (let* ((frames (loop with inside = '()
+			 for frame in *fstack*
 			 until (eq frame prompt)
-			 collect (fresh-frame frame)))
+			 collect (prog1 (fresh-frame frame inside) (push frame inside))))
 	   (winders (ldiff *winders* (svref prompt 4)))
 	   (full *full-continuations*))
       (flet ((k (&rest values)

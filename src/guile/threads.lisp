@@ -123,3 +123,41 @@ element).")
    (cons "total-processor-count" (lambda () (or (ignore-errors (parse-integer (uiop:run-program '("sysctl" "-n" "hw.ncpu") :output :string) :junk-allowed t)) 1)))
    (cons "current-processor-count" (lambda () (or (ignore-errors (parse-integer (uiop:run-program '("sysctl" "-n" "hw.ncpu") :output :string) :junk-allowed t)) 1)))
    (cons "%make-transcoded-port" (lambda (port) port))))
+
+;;; Atomic boxes ((ice-9 atomic)'s C half): a cell whose updates are
+;;; atomic, compared by eq?.
+
+(defstruct (atomic-box (:constructor make-atomic-box (value)) (:copier nil))
+  (value nil :type t))
+
+(defmethod print-object ((b atomic-box) stream)
+  (format stream "#<atomic-box ~(~X~) value: " (logand (sb-kernel:get-lisp-obj-address b) #xffffffffff))
+  (guile-write (atomic-box-value b) stream)
+  (write-char #\> stream))
+
+(defun atomic-box-cas (box expected desired)
+  "Set BOX to DESIRED if it holds EXPECTED; its value before, either way."
+  (loop (let ((old (atomic-box-value box)))
+	  (unless (eq old expected) (return old))
+	  (when (eq (sb-ext:compare-and-swap (atomic-box-value box) old desired) old)
+	    (return old)))))
+
+(defun atomic-box-swap (box value)
+  (loop (let ((old (atomic-box-value box)))
+	  (when (eq (sb-ext:compare-and-swap (atomic-box-value box) old value) old)
+	    (return old)))))
+
+(defun check-atomic-box (who b) (unless (atomic-box-p b) (wrong-type who 1 b)))
+
+(defextension "scm_init_atomic"
+  (list (cons "make-atomic-box" #'make-atomic-box)
+	(cons "atomic-box?" (lambda (x) (bool (atomic-box-p x))))
+	(cons "atomic-box-ref" (lambda (b) (check-atomic-box "atomic-box-ref" b)
+				 (sb-thread:barrier (:read)) (atomic-box-value b)))
+	(cons "atomic-box-set!" (lambda (b v) (check-atomic-box "atomic-box-set!" b)
+				  (setf (atomic-box-value b) v) (sb-thread:barrier (:write)) *unspecified*))
+	(cons "atomic-box-swap!" (lambda (b v) (check-atomic-box "atomic-box-swap!" b) (atomic-box-swap b v)))
+	(cons "atomic-box-compare-and-swap!"
+	      (lambda (b expected desired)
+		(check-atomic-box "atomic-box-compare-and-swap!" b)
+		(atomic-box-cas b expected desired)))))

@@ -170,7 +170,7 @@ code to KEPT (a list in a cons, newest first)."
 			   (*standard-output* (make-broadcast-stream)))
 		       (multiple-value-bind (output warnings-p failure-p)
 			   (psx::call-with-full-policy
-			    (lambda () (compile-file lisp :output-file temp-fasl :verbose nil :print nil)))
+			    (lambda () (compile-cache-file lisp temp-fasl)))
 			 (declare (ignore warnings-p))
 			 (when (or failure-p (null output))
 			   (error "compiling ~A failed" source))))))
@@ -180,6 +180,24 @@ code to KEPT (a list in a cons, newest first)."
 	     (when *trace-cache* (format *trace-output* "~&;; not cached ~A: ~A~%" source e))))
       (ignore-errors (delete-file lisp))
       (ignore-errors (when (probe-file temp-fasl) (delete-file temp-fasl))))))
+
+(defun compile-cache-file (lisp fasl)
+  "COMPILE-FILE's values for LISP.  A form whose code is too big for SBCL
+(a branch past its reach, on arm64) is compiled again with
+PSX::*COMPACT-FRAMES*."
+  (flet ((try ()
+	   (multiple-value-prog1
+	       (with-compilation-unit (:override t)
+		 (handler-case (compile-file lisp :output-file fasl :verbose nil :print nil)
+		   (error () (values nil t t))))
+	     ;; compiling a big file leaves much garbage in older
+	     ;; generations, which a rebuild of the whole cache in one
+	     ;; process would otherwise run out of heap with
+	     #+sbcl (sb-ext:gc :full t))))
+    (multiple-value-bind (output warnings-p failure-p) (try)
+      (if (and output (not failure-p))
+	  (values output warnings-p failure-p)
+	  (let ((psx::*compact-frames* t)) (try))))))
 
 (defun load-cached (filename)
   "Load FILENAME's fasl if there is one: true if so."

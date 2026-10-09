@@ -133,10 +133,19 @@ root).
     hash), not from libguile's sources.
   - Symbol hashes are the installed Guile's, asked of it once per name.
     Compiled `case` dispatches on symbols by hash.
+  - Every instruction the installed Guile's 344 `.go` files use has a
+    handler; so do the atomic-box instructions, which only `(ice-9
+    atomic)` code compiled here uses.
+  - Continuations through VM code: `call/cc` and prompts capture the VM
+    stack's slices with the runtime's frames (src/continuations.lisp);
+    re-entry, generators and composable continuations give what Guile
+    gives.
 - **Left:**
-  - `capture-continuation`, `continuation-call`, `compose-continuation`
-    (call/cc and reified partial continuations in VM code).
-  - The trampolines (`subr-call`, `foreign-call`) and `halt`.
+  - The instructions only libguile's own generated code uses:
+    `capture-continuation`, `continuation-call`, `compose-continuation`,
+    `subr-call`, `foreign-call`, `halt`, `return-from-interrupt`
+    (here `call/cc` and the rest are runtime procedures, which VM code
+    calls), and `pointer-set!/immediate`.
   - Frames and stacks for backtraces.
   - `compile` to `value` through bytecode, for the tests that inspect
     what it returns (compiler.test's program-sources).
