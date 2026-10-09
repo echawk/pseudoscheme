@@ -661,6 +661,37 @@ restore the site's live variables and continue after it."
 
 (defmacro %return (x) `(return-from %machine ,x))
 
+;;; A tail call that keeps its caller's frame: Guile's prompts and fluid
+;;; bindings are instructions in the caller, whose frame a backtrace shows
+;;; while the body runs, so a tail call that establishes one isn't merged
+;;; (src/guile/stacks.lisp).
+
+(declaim (notinline keep-frame-point))
+(defun keep-frame-point () nil)
+
+(defmacro %keep-frame (call) `(multiple-value-prog1 ,call (keep-frame-point)))
+
+(defvar *keep-frame-operator-p* (constantly nil)
+  "A function of a call's operator (transformed): true if a call of it
+in tail position keeps the caller's frame.")
+
+(defun keep-frame (x)
+  (if (and (consp x) (funcall *keep-frame-operator-p* (car x)))
+      `(%keep-frame ,x)
+      x))
+
+(defun keep-tail-frames (e)
+  "E, a transformed body, with its tail calls that keep frames marked."
+  (cond ((atom e) e)
+	((quote-form-p e) e)
+	((keyword-p (car e) "IF")
+	 `(,(car e) ,(cadr e) ,(keep-tail-frames (caddr e)) ,@(mapcar #'keep-tail-frames (cdddr e))))
+	((keyword-p (car e) "BEGIN") (append (butlast e) (list (keep-tail-frames (car (last e))))))
+	((lambda-form-p (car e))
+	 `((,(caar e) ,(cadar e) ,(keep-tail-frames (caddar e))) ,@(cdr e)))
+	((keyword-p (car e) "LETREC") `(,(car e) ,(cadr e) ,(keep-tail-frames (caddr e))))
+	(t (keep-frame e))))
+
 ;;; SBCL compiles a top-level form, closures and all, as one component,
 ;;; and some of its costs grow with the product of the component's
 ;;; functions and blocks.  On arm64 and x86-64, with DEBUG >= 1 and
@@ -680,8 +711,29 @@ program's exit), which a compilation unit would report as aborted."
   #-sbcl (funcall thunk))
 
 (defmacro %lifted (lambda)
-  "LAMBDA, a closed procedure, compiled on its own (its own component)."
-  `(load-time-value (locally (declare ,*full-policy*) ,lambda) t))
+  "LAMBDA, a closed procedure, compiled on its own (its own component).
+Compiled with EVAL or COMPILE, it's COMPILE-LIFTED's: one too big for
+SBCL (past arm64's branch reach) is compiled again with frames pushed
+out of line, or interpreted.  In COMPILE-FILE (the Guile mode's module
+cache) the file is compiled again so (src/guile/cache.lisp)."
+  (if *compile-file-truename*
+      `(load-time-value (locally (declare ,*full-policy*) ,lambda) t)
+      `(load-time-value (compile-lifted '(locally (declare ,*full-policy*) ,lambda)) t)))
+
+(defun compile-lifted (form)
+  "The function FORM, a closed lambda expression, evaluates to: compiled,
+or compiled with *COMPACT-FRAMES*, or interpreted, whichever works first."
+  (flet ((try (compact)
+	   (let ((*compact-frames* compact) (*error-output* (make-broadcast-stream)))
+	     (handler-bind ((warning #'muffle-warning))
+	       (multiple-value-bind (f warnings failure)
+		   (handler-case (compile nil `(lambda () ,form))
+		     (error () (values nil t t)))
+		 (declare (ignore warnings))
+		 (and f (not failure) (funcall f)))))))
+    (or (try nil) (try t)
+	#+sbcl (let ((sb-ext:*evaluator-mode* :interpret)) (eval form))
+	#-sbcl (eval form))))
 (defmacro %go (label) `(go ,(second label)))
 (defmacro %ignorable (&rest variables)
   "Refer to VARIABLES, which a machine may not otherwise (its value and
@@ -1113,6 +1165,49 @@ called on the spot) may make a call that captures, in any position."
 (defun fresh ()
   (funcall (host-ref "gensym")))
 
+(defparameter +machine-prefix+ "%machine"
+  "The start of the name of a machine's function, which tells a backtrace
+(src/guile/stacks.lisp) its frames from others.")
+
+(defun fresh-machine-name (&optional procedure-name rest)
+  "A name for a machine: unique, with * after the prefix if REST (its
+procedure's last parameter is a rest list), and with PROCEDURE-NAME (a
+Scheme symbol), the procedure's, after a |."
+  (let* ((g (fresh))
+	 (name (format nil "~A~:[~;*~]~A~@[|~A~]" +machine-prefix+ rest (symbol-name g)
+		       (and procedure-name (ps:scheme-symbol-name procedure-name)))))
+    (if (symbol-package g) (intern name (symbol-package g)) (make-symbol name))))
+
+(defun machine-rest-p (machine)
+  "Whether machine MACHINE's procedure's last parameter is a rest list."
+  (let ((name (symbol-name machine)))
+    (and (> (length name) (length +machine-prefix+))
+	 (char= (char name (length +machine-prefix+)) #\*))))
+
+(defun machine-procedure-name (machine)
+  "The name of the procedure whose machine is named MACHINE, a string; or NIL."
+  (let ((at (position #\| (symbol-name machine))))
+    (and at (subseq (symbol-name machine) (1+ at)))))
+
+(defun procedure-name-marker-p (x)
+  "Whether X is the expression that names a lambda in its body:
+'(:procedure-name . name)."
+  (and (quote-form-p x) (consp (cadr x)) (eq (car (cadr x)) :procedure-name)))
+
+(defun strip-procedure-name (body)
+  "BODY without its leading name marker, and the name."
+  (if (and (consp body) (keyword-p (car body) "BEGIN") (consp (cdr body))
+	   (procedure-name-marker-p (cadr body)))
+      (values (if (cdddr body) (cons (car body) (cddr body)) (caddr body))
+	      (cdr (cadr (cadr body))))
+      (values body nil)))
+
+(defun machine-name-p (x)
+  (and (symbolp x)
+       (let ((name (symbol-name x)))
+	 (and (> (length name) (length +machine-prefix+))
+	      (string= +machine-prefix+ name :end2 (length +machine-prefix+))))))
+
 (defun formal-variables (formals)
   (cond ((null formals) '())
 	((symbolp formals) (list formals))
@@ -1254,13 +1349,15 @@ procedure with such a body needs no machine."
 (defun transform-lambda (e &optional self)
   "Lambda E transformed.  SELF: the variable a letrec or definition binds
 to E, if E is a known procedure."
-  (let ((formals (cadr e)) (body (caddr e)))
-    (if (tail-simple-p body)
-	`(,(car e) ,formals ,(simple body))
-	(build-machine formals body
-		       (and self (listp formals) (null (cdr (last formals)))
-			    (not (makes-closures-p body))
-			    self)))))
+  (multiple-value-bind (body name) (strip-procedure-name (caddr e))
+    (let ((formals (cadr e)))
+      (if (tail-simple-p body)
+	  `(,(car e) ,formals ,(keep-tail-frames (simple body)))
+	  (build-machine formals body
+			 (and self (listp formals) (null (cdr (last formals)))
+			      (not (makes-closures-p body))
+			      self)
+			 name)))))
 
 (defun makes-closures-p (e)
   "Whether evaluating E can make a closure (a lambda not called on the
@@ -1304,7 +1401,7 @@ spot)."
   (intern (format nil "%L~D" (incf (m-labels *m*))) "PSEUDOSCHEME-PSYNTAX"))
 
 (defun finish (x k)
-  (cond ((eq k :return) (emit `(%return ,x)))
+  (cond ((eq k :return) (emit `(%return ,(keep-frame x))))
 	((eq k :drop) (unless (atomic-p x) (emit x)))
 	(t (emit `(,(sym "set!") ,(cdr k) ,x)))))
 
@@ -1382,7 +1479,7 @@ spot)."
 	     (loop for p in (m-params *m*) for v in temps
 		   do (emit `(,(sym "set!") ,p ,v)))
 	     (emit `(%go ',(new-label-named "%ENTRY")))))
-	  ((eq k :return) (emit `(%return ,xs)))
+	  ((eq k :return) (emit `(%return ,(keep-frame xs))))
 	  (t (let ((site (incf (m-count *m*)))
 		   (label (new-label))
 		   (var (and (consp k) (cdr k))))
@@ -1424,11 +1521,12 @@ bound to a variable first if one after it may capture, to keep order."
       (walk e))
     found))
 
-(defun build-machine (formals body &optional self)
+(defun build-machine (formals body &optional self name)
   "The machine for a procedure with FORMALS and BODY.  SELF: its
 variable, if its tail calls to itself can be jumps back to its start
 (its parameters are a proper list, and its body makes no closures,
-which would capture bindings the jump reuses)."
+which would capture bindings the jump reuses).  NAME: the procedure's
+name, which its machine's is made with, for backtraces."
   (let* ((params (formal-variables formals))
 	 (*m* (make-machine :self self :params params)))
     (flat body :return)
@@ -1437,7 +1535,8 @@ which would capture bindings the jump reuses)."
 	   (vars (make-hash-table :test 'eq))
 	   (first-def (make-hash-table :test 'eq))
 	   (last-use (make-hash-table :test 'eq))
-	   (m (fresh)) (entry (fresh)) (value (fresh)) (frame (fresh))
+	   (m (fresh-machine-name name (not (listp (cdr (last (if (listp formals) formals (list nil formals))))))))
+	   (entry (fresh)) (value (fresh)) (frame (fresh))
 	   (n (length params)))
       (dolist (v params) (setf (gethash v vars) t (gethash v first-def) -1))
       (dolist (v locals) (setf (gethash v vars) t))
@@ -1507,7 +1606,7 @@ which would capture bindings the jump reuses)."
 ;;; a machine of its own.  The chunks start at the first element that may
 ;;; capture: the definitions before it stay where letrec* left them.
 
-(defparameter *chunk-sites* 32
+(defparameter *chunk-sites* 20
   "About how many calls that may capture a chunk of a sequence holds.")
 
 (defvar *chunk-markers*)

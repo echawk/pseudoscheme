@@ -404,13 +404,18 @@ continuation captured in it is re-entered."
 
 (defvar *vm-activation* nil "The activation the machine is running.")
 (defvar *vm-nested* nil "Whether the run is a dynamic extent's body.")
+(defvar *vm-runs* '()
+  "The runs of the machine in progress, innermost first: (fp . nested),
+the frame each began in.  A backtrace (stacks.lisp) splits the VM's
+stack between them.")
 
 (defun run-vm (vm code &optional nested (activation *vm-activation*))
   "Run from CODE, a code-pointer, until a frame returns to Lisp: the
 values it returns.  If NESTED, the run is a dynamic extent's body (a
 prompt's, a dynamic-wind's, a fluid binding's), and ends with the
 extent-exit of the instruction that ends the extent."
-  (let ((*vm-activation* activation) (*vm-nested* nested))
+  (let ((*vm-activation* activation) (*vm-nested* nested)
+	(*vm-runs* (cons (cons (vm-fp vm) nested) *vm-runs*)))
     (run-vm-1 vm code nested)))
 
 (defvar *vm-jit*)
@@ -1452,7 +1457,8 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
   (list (cons "program?" (lambda (x) (bool (typep x 'vm-program))))
 	(cons "program-code" (lambda (p) (code-address (program-code (check-program "program-code" p)))))
 	(cons "primitive-code?" (lambda (x) (declare (ignore x)) ps:false))
-	(cons "primitive-code-name" (lambda (x) (declare (ignore x)) ps:false))
+	;; a frame from Lisp's stack (stacks.lisp) is named by its address
+	(cons "primitive-code-name" (lambda (x) (let ((g (lisp-frame-at x))) (if g (gframe-name g) ps:false))))
 	(cons "program-num-free-variables"
 	      (lambda (p) (length (program-free (check-program "program-num-free-variables" p)))))
 	(cons "program-free-variable-ref"

@@ -390,6 +390,13 @@ square, else the nearest double, however big or small X is."
   (let ((match (char-matcher pred)))
     (or (loop for i from (1- end) downto start when (funcall match (char s i)) return i)
 	ps:false)))
+(defguile "substring" (s start &optional end)
+  ;; checked in Guile's order: the string, then the indices
+  (unless (stringp s) (wrong-type "substring" 1 s))
+  (unless (and (integerp start) (<= 0 start (length s))) (out-of-range "substring" start))
+  (let ((end (if (or (null end) (eq end +unbound+)) (length s) end)))
+    (unless (and (integerp end) (<= start end (length s))) (out-of-range "substring" end))
+    (subseq s start end)))
 (defguile "substring/copy" (s start &optional (end (length s))) (subseq s start end))
 ;;; libguile's debugging dumps of a string's and a symbol's buffer, as
 ;;; they are here: a string is its own buffer, never shared, and
@@ -862,9 +869,6 @@ less than 0.0."
   (let ((objects '()))
     (lambda (&optional (x nil x-p))
       (if x-p (progn (push x objects) *unspecified*) ps:false))))
-(defguile "make-stack" (&rest args) (declare (ignore args)) ps:false)
-(defguile "stack?" (x) (declare (ignore x)) ps:false)
-(defguile "frame?" (x) (declare (ignore x)) ps:false)
 (defguile "backtrace" (&rest args) (declare (ignore args)) *unspecified*)
 (defguile "display-backtrace" (&rest args) (declare (ignore args)) *unspecified*)
 (defguile "display-application" (&rest args) (declare (ignore args)) *unspecified*)

@@ -811,6 +811,20 @@ dynamic states.")
 	(setf (cdr entry) value)
 	(push (cons key value) (gethash p *procedure-properties*))))
   *unspecified*)
+;;; A procedure's code -> its Scheme name, for the frames of a backtrace
+;;; (stacks.lisp): a frame on Lisp's stack knows its code, not its closure.
+
+(defvar *code-names* (make-hash-table :test 'eq :weakness :key :synchronized t))
+
+(defun procedure-code (f)
+  "The code F runs: F itself, or the function a closure F closes."
+  (if (sb-kernel:closurep f) (sb-kernel:%closure-fun f) f))
+
+(defun register-code-name (f name)
+  (let ((code (procedure-code f)))
+    (unless (gethash code *code-names*)
+      (setf (gethash code *code-names*) name))))
+
 (defvar *root-procedure-names* nil
   "A procedure bound in the root module -> its name there: the name of
 a primitive, which (ice-9 documentation) finds its docstring by.")

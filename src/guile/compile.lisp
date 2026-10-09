@@ -245,12 +245,21 @@ references to these."
 	   (let ((value (node-field x 3)))
 	     ;; a procedure defined at top level is named, as Guile's are
 	     (if (eq (node-type value) :lambda)
-		 (with-lambda-meta (node-field value 1) (compile-lambda (node-field value 2)) t)
+		 (with-lambda-meta (node-field value 1)
+				   (name-lambda (node-field value 1) (compile-lambda (node-field value 2)))
+				   t)
 		 (compile-tree-il value)))))
     (:conditional
      (list (core "if") (compile-test (node-field x 1)) (compile-tree-il (node-field x 2))
 	   (compile-tree-il (node-field x 3))))
-    (:call (cons (compile-tree-il (node-field x 1)) (mapcar #'compile-tree-il (node-field x 2))))
+    (:call (let* ((f (node-field x 1)) (args (node-field x 2))
+		  (body (inline-body-position f (length args))))
+	     ;; a prompt's or fluid binding's body: inline in Guile
+	     (cons (compile-tree-il f)
+		   (loop for a in args for i from 0
+			 collect (if (and (eql i body) (eq (node-type a) :lambda))
+				     (inline-thunk (compile-tree-il a))
+				     (compile-tree-il a))))))
     (:primcall (let ((name (node-field x 1)) (args (node-field x 2)))
 		 (cons (if (or (and (/= (length args) 2)
 				    (member (ps:scheme-symbol-name name) '("eq?" "eqv?" "equal?") :test #'string=))
@@ -266,7 +275,7 @@ references to these."
 		     (setq x (node-field x 2)))
 	    (push (compile-tree-il x) forms)
 	    (cons (core "begin") (nreverse forms))))
-    (:lambda (with-lambda-meta (node-field x 1) (compile-lambda (node-field x 2))))
+    (:lambda (with-lambda-meta (node-field x 1) (name-lambda (node-field x 1) (compile-lambda (node-field x 2)))))
     (:let (let ((vals (mapcar #'compile-tree-il (node-field x 3)))
 		(vars (mapcar #'bind-lexical (node-field x 2))))
 	    (cons (list (core "lambda") vars (compile-tree-il (node-field x 4))) vals)))
@@ -275,9 +284,9 @@ references to these."
      (list (core "call-with-values")
 	   (list (core "lambda") '() (compile-tree-il (node-field x 1)))
 	   (compile-lambda (node-field x 2))))
-    (:prompt				; the body is a thunk
+    (:prompt				; the body is a thunk, inline in Guile
      (list (core "call-with-prompt") (compile-tree-il (node-field x 2))
-	   (compile-tree-il (node-field x 3)) (compile-tree-il (node-field x 4))))
+	   (inline-thunk (compile-tree-il (node-field x 3))) (compile-tree-il (node-field x 4))))
     (:abort
      (list* (core "apply") (core "abort-to-prompt") (compile-tree-il (node-field x 1))
 	    (append (mapcar #'compile-tree-il (node-field x 2))
@@ -335,6 +344,64 @@ comparisons can't return it."
 		 ((:toplevel-ref :module-ref) (predicate-name-p (node-field f 2))))))
       (:conditional (and (boolean-node-p (node-field x 2)) (boolean-node-p (node-field x 3))))
       (t nil))))
+
+(defun inline-body-position (f nargs)
+  "Which argument of a call of F with NARGS arguments is a body Guile
+compiles inline: call-with-prompt's thunk, with-fluid*'s."
+  (let ((name (case (node-type f)
+		((:toplevel-ref :module-ref) (ps:scheme-symbol-name (node-field f 2)))
+		(:primitive-ref (ps:scheme-symbol-name (node-field f 1))))))
+    (cond ((null name) nil)
+	  ((and (string= name "call-with-prompt") (= nargs 3)) 1)
+	  ((and (member name '("with-fluid*" "with-dynamic-state") :test #'string=) (plusp nargs))
+	   (1- nargs)))))
+
+(defun inline-thunk (thunk)
+  "THUNK, compiled, marked as code that is inline in its caller in Guile
+(a prompt's or fluid binding's body), whose frames a backtrace leaves out."
+  (list (core "%guile-inline")
+	(name-lambda (list (cons (ssym "name") (ssym +inline-body-name+))) thunk)))
+
+(defparameter +inline-body-name+ "%inline-body"
+  "The name an inline thunk's machine is made with (NAME-LAMBDA).")
+
+(defparameter *frame-keeping-procedures*
+  '("call-with-prompt" "with-fluid*" "with-fluids*" "with-dynamic-state")
+  "Procedures that are instructions in the caller in Guile (a prompt, a
+fluid binding), whose frame stays while their body runs: a tail call of
+one keeps the caller's frame, for backtraces (src/continuations.lisp).")
+
+(defun keep-frame-operator-p (op)
+  (let ((name (cond ((and (consp op) (symbolp (car op))
+			  (string-equal (symbol-name (car op)) "%guile-ref")
+			  (psx::quote-form-p (cadr op)) (site-p (cadr (cadr op))))
+		     (let ((n (site-name (cadr (cadr op))))) (and (symbolp n) (ps:scheme-symbol-name n))))
+		    ((symbolp op) (string-downcase (symbol-name op)))
+		    (t (psx::primitive-name op)))))
+    (and name (member name *frame-keeping-procedures* :test #'string=) t)))
+
+(setq psx::*keep-frame-operator-p* 'keep-frame-operator-p)
+
+(defun name-lambda (meta lambda)
+  "LAMBDA, a compiled lambda, with the name META gives it (if any) as the
+first expression of its body: a constant, '(:procedure-name . name),
+which the transformation for full continuations makes the name of its
+machine, for backtraces (src/continuations.lisp), and which otherwise
+does nothing."
+  (let ((name (loop for entry in (if (listp meta) meta '())
+		    when (and (consp entry) (symbolp (car entry))
+			      (string= (ps:scheme-symbol-name (car entry)) "name")
+			      (symbolp (cdr entry)) (cdr entry))
+		      return (cdr entry))))
+    (if (and name (consp lambda) (eq (car lambda) (core "lambda")) (consp (cddr lambda)))
+	(let ((body (caddr lambda)) (marker (quoted (cons :procedure-name name))))
+	  ;; into a sequence, not around it: long sequences are cut into
+	  ;; chunks (src/continuations.lisp), which a nested one wouldn't be
+	  (list (core "lambda") (cadr lambda)
+		(if (and (consp body) (eq (car body) (core "begin")))
+		    (list* (core "begin") marker (cdr body))
+		    (list (core "begin") marker body))))
+	lambda)))
 
 (defun with-lambda-meta (meta lambda &optional named)
   "LAMBDA, compiled, given the properties in META, the lambda's metadata
@@ -459,6 +526,11 @@ evaluated in the scope of those before it."
       (error "Guile primitive ~A isn't supported here" (ps:scheme-symbol-name name))))
   (psx:defhost "%guile-with-meta" (f props)
     (setf (gethash f *procedure-properties*) (append props (gethash f *procedure-properties* '())))
+    (let ((name (assoc (ssym "name") props)))
+      (when name (register-code-name f (cdr name))))
+    f)
+  (psx:defhost "%guile-inline" (f)
+    (register-code-name f :inline)
     f)
   (psx:defhost "%guile-arity-error" ()
     (guile-error (ssym "wrong-number-of-args") ps:false "Wrong number of arguments" '()))
@@ -491,7 +563,7 @@ evaluated in the scope of those before it."
       value))
   (psx::register-primitive-names
    '("%guile-ref" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
-     "%guile-with-meta"
+     "%guile-with-meta" "%guile-inline"
      "%guile-nargs>=" "%guile-nargs-between" "%guile-keywords-fit?" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
 

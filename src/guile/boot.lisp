@@ -266,12 +266,22 @@ Lisp's message TEXT about keyword arguments."
 	(values (ssym "keyword-argument-error")
 		(list ps:false "Keyword argument has no value" '() ps:false)))))
 
+(defun apply-type-error-p (c)
+  "Whether type error C is that of calling what isn't a function."
+  (equal (type-error-expected-type c) '(or function symbol)))
+
 (defun condition-throw-arguments (c)
   "The key and throw arguments for Lisp condition C."
   (flet ((message (key subr message args)
 	   (values (ssym key) (list subr message args ps:false))))
     (typecase c
       (guile-throw (values (guile-throw-key c) (guile-throw-args c)))
+      ;; applying what isn't a procedure: Lisp's FUNCALL of a symbol (#t
+      ;; is T) or of anything else
+      (undefined-function
+       (message "wrong-type-arg" ps:false "Wrong type to apply: ~S" (list (cell-error-name c))))
+      ((and type-error (satisfies apply-type-error-p))
+       (message "wrong-type-arg" ps:false "Wrong type to apply: ~S" (list (type-error-datum c))))
       (type-error
        (if (index-type-p (type-error-expected-type c))
 	   ;; a negative or huge index: Guile's arguments are the bounds and the index

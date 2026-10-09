@@ -146,9 +146,39 @@ root).
     `subr-call`, `foreign-call`, `halt`, `return-from-interrupt`
     (here `call/cc` and the rest are runtime procedures, which VM code
     calls), and `pointer-set!/immediate`.
-  - Frames and stacks for backtraces.
   - `compile` to `value` through bytecode, for the tests that inspect
     what it returns (compiler.test's program-sources).
+
+## Frames and stacks
+
+src/guile/stacks.lisp: `make-stack` and the primitives Guile's own
+`(system vm frame)` is built on (`frame-instruction-pointer`,
+`frame-local-ref`, `frame-num-locals`, `frame-previous`, `stack-ref`
+and the rest), so that its Scheme code runs unchanged. A stack comes
+from two places:
+
+- **Bytecode:** the VM's stack, where a run of the machine is on Lisp's
+  stack. Frames have their real locals and instruction pointers, so
+  names and arguments come from the image's debug information, as in
+  Guile.
+- **Scheme compiled to Lisp, and primitives:** SBCL's stack, through its
+  debugger interface.
+  - A procedure's machine (src/continuations.lisp) is named with the
+    procedure's name, which the compiler passes in its body as a
+    constant that compiles to nothing.
+  - Primitives are named by their code.
+  - Arguments are the ones SBCL kept, `_` where it didn't.
+  - Such a frame's instruction pointer is negative, in no image;
+    `primitive-code-name` answers its name.
+
+Two things make the frames Guile's:
+- A tail call of `call-with-prompt`, `with-fluid*` or
+  `with-dynamic-state` keeps its caller's frame. In Guile they are
+  instructions in the caller, and the frame stays while their body runs.
+- Their body thunks are left out, being inline in Guile.
+
+Prompts are marked where they are on the stack, for `make-stack`'s
+prompt-tag cuts. eval.test's stack tests and continuations.test pass.
 
 ## Translation to Lisp
 
