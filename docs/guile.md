@@ -498,7 +498,7 @@ What fails now, by cause:
 | stacks, frames, backtraces | Guile's VM's | none: `make-stack` is #f |
 | locales | the C library's | the C library's (newlocale); case mapping is SBCL's Unicode |
 | stack overflow handlers | a limit in words | the control stack's own limit |
-| recursion depth | memory | about 60,000 non-tail calls in a thread other than the main one: each binds `*fstack*` (full continuations), and SBCL's binding stack is of fixed size. threads.test's `par-map` of 10,000 elements nests that many futures in a worker thread, and doesn't finish |
+| recursion depth | memory | the control stack: 500 MB in the main thread (as run by the tests), 256 MB in a thread Guile makes |
 
 ### Emacs Lisp (future work)
 

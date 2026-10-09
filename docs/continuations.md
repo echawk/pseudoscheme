@@ -180,6 +180,16 @@ something that captures:
 
   Both the vector and the cons are stack-allocated (`dynamic-extent`).
   The normal path conses nothing on the heap and makes no closures.
+
+  (In fact, `%site` binds `*fstack*` only while the binding stack is
+  less than half used. SBCL's binding stack has a fixed size, about a
+  megabyte, so binding alone would stop recursion at about 57,000
+  nested calls. Deeper, a site calls `call-with-assigned-fstack`, which
+  assigns `*fstack*` and restores it with an `unwind-protect`. That
+  needs only control stack, so a million nested calls work. It is out
+  of line because an `unwind-protect` in a component makes SBCL compile
+  all of the component's functions more slowly. The check is two loads
+  and a compare; the r7rs benchmarks pay 1–3% for it.)
 - **Resuming** calls the machine with the site number, the value the
   call returned, and the frame. `%machine`'s `case` jumps to that
   site's resume label (`%l4` for site 1), which restores the live
