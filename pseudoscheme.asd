@@ -297,6 +297,7 @@
 	       (:file "threads" :depends-on ("primitives"))
 	       (:file "regex" :depends-on ("primitives"))
 	       (:file "foreign" :depends-on ("primitives"))
+	       (:file "sockets" :depends-on ("ports"))
 	       (:file "goops" :depends-on ("foreign" "ports"))
 	       (:file "arrays" :depends-on ("primitives"))
 	       (:file "cache" :depends-on ("boot"))

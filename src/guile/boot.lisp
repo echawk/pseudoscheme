@@ -667,9 +667,9 @@ not with Guile's behaviour.")
     (def "%guile-build-info" '())
     (def "%host-type" "aarch64-apple-darwin")
     (def "*features*" (mapcar #'ssym '("guile" "r7rs" "srfi-0" "srfi-4" "srfi-6" "srfi-13" "srfi-14"
-				       ;; what libguile adds, less sockets, fork,
-				       ;; effective ids and O_PATH ports
-				       "record" "defmacro" "debug-extensions" "values" "array-for-each"
+				       ;; what libguile adds, less fork, effective
+				       ;; ids and O_PATH ports
+				       "socket" "net-db" "record" "defmacro" "debug-extensions" "values" "array-for-each"
 				       "array" "sort" "ITIMER_VIRTUAL" "ITIMER_PROF" "regex" "popen"
 				       "posix" "chdir-port" "inexact" "complex" "random" "i/o-extensions"
 				       "i18n" "current-time" "delay" "threads" "char-ready?" "system")))

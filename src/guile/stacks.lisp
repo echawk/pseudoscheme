@@ -145,6 +145,13 @@ or its procedure's entry."
       (let ((proc (svref (vm-stack vm) (+ fp 1))))
 	(if (typep proc 'vm-program) (code-address (program-code proc)) 0))))
 
+(defun vm-hook-frame (vm image ip)
+  "The frame running at IP of IMAGE, the VM's current one, for a VM hook."
+  (let* ((stack (vm-stack vm)) (fp (vm-fp vm)) (proc (svref stack (+ fp 1))))
+    (make-gframe :vm (and (typep proc 'vm-program) (procedure-name* proc)) proc
+		 (subseq stack (+ fp 1) (max (+ fp 1) (1+ (vm-sp vm))))
+		 (code-address (make-code-pointer image ip)))))
+
 (defun vm-run-frames (vm cursor run)
   "The frames of RUN, (fp . nested), of VM from CURSOR, its current frame:
 innermost first, and the frame the next run out is at."

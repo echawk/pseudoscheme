@@ -259,6 +259,8 @@ bits there would otherwise be taken for."
 
 (defvar *vm-trace* nil "True: print each instruction as it runs.")
 
+(defvar *vm-applying* nil "True as VM-APPLY starts a run: at a procedure's entry.")
+
 (declaim (inline float-traps-enabled-p))
 (defun float-traps-enabled-p ()
   "Whether any of SBCL's floating-point traps is enabled."
@@ -294,7 +296,8 @@ flonum arithmetic is IEEE's whoever calls it."
       (loop for a in args for i from 1 do (setf (local i) a))
       (setf (vm-fp vm) fp (vm-sp vm) (+ fp 1 (length args))))
     (unwind-protect
-	 (values-list (run-vm vm (program-code program) nil (make-vm-activation fp)))
+	 (values-list (let ((*vm-applying* t))
+			(run-vm vm (program-code program) nil (make-vm-activation fp))))
       (setf (vm-fp vm) saved-fp (vm-sp vm) saved-sp))))
 
 ;;; ------------------------------------------------------------------
@@ -577,14 +580,33 @@ extent-exit of the instruction that ends the extent."
 (defvar *vm-jit*)
 (declaim (ftype function jit-entry intrinsic-name))
 
+(declaim (inline vm-hooks-on-p))
+(defun vm-hooks-on-p ()
+  "Whether the VM calls hooks ((system vm vm)'s): the trace level above
+zero and a next or apply hook added.  The interpreter alone runs then."
+  (and (or *vm-next-hooks* *vm-apply-hooks*) (plusp *vm-trace-level*)))
+
+(defparameter +entering-ops+ '("call" "call-label" "tail-call" "tail-call-label")
+  "Instructions after which the next one is a procedure's first.")
+
+(declaim (ftype function vm-hook-frame))
+
+(defun run-vm-hooks (hooks vm image ip)
+  "Call HOOKS with the frame running at IP of IMAGE, with no hooks on."
+  (let ((frame (vm-hook-frame vm image ip))
+	(*vm-trace-level* 0))
+    (dolist (h hooks) (funcall h frame))))
+
 (defun run-vm-1 (vm code nested)
   (let ((dispatch (vm-dispatch-table))
 	(image (code-pointer-image code))
 	(ip (code-pointer-word code))
-	(jumped t))			; IP wasn't reached by falling through
+	(jumped t)			; IP wasn't reached by falling through
+	;; the last instruction called a procedure (or Lisp did: VM-APPLY)
+	(entered (shiftf *vm-applying* nil)))
     (loop
       (let ((to
-	      (let ((translation (and jumped *vm-jit* (not *vm-trace*) (jit-entry image ip))))
+	      (let ((translation (and jumped *vm-jit* (not *vm-trace*) (not (vm-hooks-on-p)) (jit-entry image ip))))
 		(if translation
 		    ;; vm-jit.lisp
 		    (funcall (the function translation) vm image ip)
@@ -598,6 +620,10 @@ extent-exit of the instruction that ends the extent."
 						(decode-instruction (vm-image-bytes image) ip)
 					      (vector (svref dispatch (vm-op-opcode op)) operands next op))))))
 		      (let ((operands (svref entry 1)) (next (svref entry 2)))
+			(when (vm-hooks-on-p)
+			  (when (and entered *vm-apply-hooks*) (run-vm-hooks *vm-apply-hooks* vm image ip))
+			  (when *vm-next-hooks* (run-vm-hooks *vm-next-hooks* vm image ip))
+			  (setq entered (member (vm-op-name (svref entry 3)) +entering-ops+ :test #'string=)))
 			(when *vm-trace*
 			  (format *trace-output* "~&;; ~5D ~A ~{~S~^ ~}  fp ~D sp ~D~%" ip
 				  (vm-op-name (svref entry 3)) operands (vm-fp vm) (vm-sp vm)))
@@ -1644,13 +1670,27 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
 	     (<= (vm-image-base image) address (+ (vm-image-base image) (length (vm-image-bytes image)))))
 	   *vm-images*))
 
+(defvar *lisp-code-addresses* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t)
+  "Lisp procedure -> the address its code is named by: negative, so in
+no image, as a Lisp frame's instruction pointer is (stacks.lisp).")
+
+(defun procedure-code-address (p)
+  "A procedure's code's address, as Guile's program-code: a compiled
+program's in its image; a Lisp procedure's made up, but the same each time."
+  (cond ((typep p 'vm-program) (code-address (program-code p)))
+	((functionp p)
+	 (or (gethash p *lisp-code-addresses*)
+	     (setf (gethash p *lisp-code-addresses*)
+		   (1- (sb-ext:atomic-decf (car (load-time-value (list (- (expt 2 40))))))))))
+	(t (wrong-type "program-code" 1 p))))
+
 (defun check-program (who p)
   (unless (typep p 'vm-program) (wrong-type who 1 p))
   p)
 
 (defextension "scm_init_programs"
   (list (cons "program?" (lambda (x) (bool (typep x 'vm-program))))
-	(cons "program-code" (lambda (p) (code-address (program-code (check-program "program-code" p)))))
+	(cons "program-code" #'procedure-code-address)
 	(cons "primitive-code?" (lambda (x) (declare (ignore x)) ps:false))
 	;; a frame from Lisp's stack (stacks.lisp) is named by its address
 	(cons "primitive-code-name" (lambda (x) (let ((g (lisp-frame-at x))) (if g (gframe-name g) ps:false))))

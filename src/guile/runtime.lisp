@@ -921,7 +921,14 @@ character, boolean or () is an immediate)."
 (defguile "make-hook" (&optional (arity 0)) (make-hook* arity))
 (defguile "hook?" (x) (bool (hook-p x)))
 (defguile "hook-empty?" (h) (bool (null (hook-procedures h))))
+(defun hook-accepts-p (proc n)
+  "Whether PROC can be called with N arguments."
+  (destructuring-bind (required optional rest) (funcall (root-value "procedure-minimum-arity") proc)
+    (and (<= required n) (or (truthy rest) (<= n (+ required optional))))))
+
 (defguile "add-hook!" (h proc &optional (append ps:false))
+  (unless (hook-p h) (wrong-type "add-hook!" 1 h))
+  (unless (and (functionp proc) (hook-accepts-p proc (hook-arity h))) (wrong-type "add-hook!" 2 proc))
   (setf (hook-procedures h)
 	(if (truthy append)
 	    (append (remove proc (hook-procedures h)) (list proc))
@@ -931,6 +938,9 @@ character, boolean or () is an immediate)."
 (defguile "reset-hook!" (h) (setf (hook-procedures h) '()) *unspecified*)
 (defguile "hook->list" (h) (copy-list (hook-procedures h)))
 (defguile "run-hook" (h &rest args)
+  (unless (hook-p h) (wrong-type "run-hook" 1 h))
+  (unless (= (length args) (hook-arity h))
+    (guile-error (ssym "misc-error") "run-hook" "Hook ~S requires ~A arguments" (list h (hook-arity h))))
   (dolist (p (hook-procedures h)) (apply p args))
   *unspecified*)
 

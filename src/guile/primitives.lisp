@@ -308,6 +308,13 @@ square, else the nearest double, however big or small X is."
   (if (exact-zero-p im)
       re
       (complex (coerce re 'double-float) (coerce im 'double-float))))
+;; a real's angle is inexact, as Guile's: 0.0, or pi if its sign is
+;; negative (-0.0's too)
+(defguile "angle" (z)
+  (cond ((rationalp z) (if (minusp z) pi 0d0))
+	((floatp z) (if (and (not (nan-p z)) (minusp (float-sign z))) pi 0d0))
+	(t (host-call "angle" z))))
+
 (defguile "make-polar" (magnitude angle)
   (cond ((exact-zero-p magnitude) 0)
 	((exact-zero-p angle) magnitude)
@@ -926,6 +933,9 @@ less than 0.0."
 		 (when found (sb-sys:enable-interrupt signum original)))
 	       (remhash signum *signal-handlers*))
 	      ((integerp handler)
+	       ;; SIG_DFL or SIG_IGN
+	       (unless (member handler '(0 1))
+		 (guile-error (ssym "out-of-range") "sigaction" "Value out of range: ~S" (list handler) (list handler)))
 	       (install (if (= handler 1) :ignore :default))
 	       (setf (gethash signum *signal-handlers*) (cons handler flags)))
 	      ((functionp handler)
@@ -947,9 +957,10 @@ Guile's ((seconds . microseconds) (seconds . microseconds))."
     (list (cons interval-s interval-us) (cons value-s value-us))))
 
 (defguile "setitimer" (which interval-seconds interval-microseconds value-seconds value-microseconds)
-  (itimer-values (multiple-value-list
-		  (sb-unix:unix-setitimer (itimer-which which) interval-seconds interval-microseconds
-					  value-seconds value-microseconds))))
+  ;; microseconds past a second carry into the seconds, as Guile's do
+  (multiple-value-bind (is ius) (floor (+ (* interval-seconds 1000000) interval-microseconds) 1000000)
+    (multiple-value-bind (vs vus) (floor (+ (* value-seconds 1000000) value-microseconds) 1000000)
+      (itimer-values (multiple-value-list (sb-unix:unix-setitimer (itimer-which which) is ius vs vus))))))
 (defguile "getitimer" (which)
   (itimer-values (multiple-value-list (sb-unix:unix-getitimer (itimer-which which)))))
 
@@ -1019,7 +1030,15 @@ that name, if the host has one."
 		    (t (push (cons init s) *missing-extension-names*))))))))))
 
 (defextension "scm_init_ice_9_control"
-  (list (cons "suspendable-continuation?" (lambda (tag) (bool (psx::find-prompt tag))))))
+  ;; a prompt for TAG with no continuation barrier inside it, so that
+  ;; what is captured up to it can be resumed
+  (list (cons "suspendable-continuation?"
+	      (lambda (tag)
+		(bool (dolist (frame psx::*fstack*)
+			(when (vectorp frame)
+			  (case (svref frame 0)
+			    (:barrier (return nil))
+			    (:prompt (when (eq (cdr (svref frame 2)) tag) (return t)))))))))))
 
 ;;; (rnrs bytevectors gnu)'s bytevector-slice: a copy here, where Guile's
 ;;; shares the bytes
@@ -1550,6 +1569,42 @@ true (the predicate's value) if it matches."
 (setf (gethash "call-with-stack-overflow-handler" *extension-primitives*)
       (gethash "call-with-stack-overflow-handler" *guile-primitives*))
 (remhash "call-with-stack-overflow-handler" *guile-primitives*)
+
+;;; The rest of (system vm vm): calling on the VM, its engine and trace
+;;; level, and its hooks.  Compiled code runs on this VM however it is
+;;; called; the engine is a setting that nothing here reads.  The hooks
+;;; are what (system vm coverage) and statprof use.
+(defvar *vm-engine* (ssym "regular"))
+(defvar *vm-default-engine* (ssym "regular"))
+(defvar *vm-trace-level* 0)
+(defvar *vm-next-hooks* '() "Called with each instruction's frame, before it runs.")
+(defvar *vm-apply-hooks* '() "Called with a compiled procedure's frame as it's entered.")
+(defvar *vm-return-hooks* '())
+(defvar *vm-abort-hooks* '())
+
+(macrolet ((vm-extensions (&rest specs)
+	     `(progn
+		,@(loop for (name lambda-list . body) in specs
+			collect `(setf (gethash ,name *extension-primitives*) (lambda ,lambda-list ,@body))))))
+  (vm-extensions
+   ("call-with-vm" (proc &rest args) (apply (the function proc) args))
+   ("vm-engine" () *vm-engine*)
+   ("set-vm-engine!" (engine) (setq *vm-engine* engine) *unspecified*)
+   ("set-default-vm-engine!" (engine) (setq *vm-default-engine* engine) *unspecified*)
+   ("vm-trace-level" () *vm-trace-level*)
+   ("set-vm-trace-level!" (level) (setq *vm-trace-level* level) *unspecified*)))
+
+(macrolet ((hooks (&rest specs)
+	     `(progn
+		,@(loop for (kind var) in specs
+			collect `(setf (gethash ,(format nil "vm-add-~A-hook!" kind) *extension-primitives*)
+				       (lambda (f) (push f ,var) *unspecified*)
+				       (gethash ,(format nil "vm-remove-~A-hook!" kind) *extension-primitives*)
+				       (lambda (f) (setq ,var (remove f ,var :count 1)) *unspecified*))))))
+  ;; the VM calls the next and apply hooks while the trace level is above
+  ;; zero (vm.lisp's RUN-VM-1); the return and abort hooks are kept only
+  (hooks ("next" *vm-next-hooks*) ("apply" *vm-apply-hooks*)
+	 ("return" *vm-return-hooks*) ("abort" *vm-abort-hooks*)))
 
 ;;; ------------------------------------------------------------------
 ;;; More of libguile
