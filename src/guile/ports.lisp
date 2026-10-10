@@ -397,6 +397,8 @@ conversion strategy says."
 		 (let ((code (char-code char)))
 		   (sb-ext:string-to-octets (cond ((option-value *read-options* "r6rs-hex-escapes")
 						   (format nil "\\x~(~X~);" code))
+						  ((< code #x100)
+						   (format nil "\\x~(~2,'0X~)" code))
 						  ((< code #x10000)
 						   (format nil "\\u~(~4,'0X~)" code))
 						  (t (format nil "\\U~(~6,'0X~)" code)))
