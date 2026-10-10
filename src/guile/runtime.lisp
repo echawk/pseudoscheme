@@ -840,17 +840,26 @@ a primitive, which (ice-9 documentation) finds its docstring by.")
 
 (defun root-procedure-name (p)
   "P's name in the root module.  A Lisp function bound to several names
-(car and first) takes the one that is its Lisp name, if one is."
+(car and first) takes the one it was defined as a primitive under, or
+else the one that is its Lisp name, if one is."
   (unless *root-procedure-names*
-    (let ((table (make-hash-table :test 'eq :weakness :key)))
+    (let ((table (make-hash-table :test 'eq :weakness :key))
+	  ;; a primitive's own name, where boot-9 binds it under others too
+	  ;; (gensym is module-gensym)
+	  (primitive-names (make-hash-table :test 'eq)))
+      (maphash (lambda (name f) (when (functionp f) (setf (gethash f primitive-names) name)))
+	       *guile-primitives*)
       (dolist (handle (ghash-handles *obarray*))
 	(let ((v (cdr handle)))
 	  (when (and (gvariable-p v) (functionp (gvariable-value v)))
 	    (let* ((f (gvariable-value v))
 		   (old (gethash f table))
+		   (name (ps:scheme-symbol-name (car handle)))
 		   (lisp-name (ignore-errors (string-downcase (string (sb-kernel:%fun-name f))))))
 	      (when (or (null old)
-			(and lisp-name (string= lisp-name (ps:scheme-symbol-name (car handle)))))
+			(equal (gethash f primitive-names) name)
+			(and (not (equal (gethash f primitive-names) (ps:scheme-symbol-name old)))
+			     lisp-name (string= lisp-name name)))
 		(setf (gethash f table) (car handle)))))))
       (setq *root-procedure-names* table)))
   (gethash p *root-procedure-names*))

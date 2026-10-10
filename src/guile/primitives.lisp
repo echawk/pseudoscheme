@@ -178,15 +178,32 @@ NaN is itself."
 
 (defun exact-zero-p (x) (eql x 0))
 
+(defun complex-integer-expt (z k)
+  "Complex Z to the integer K, by multiplying, as Guile's integer-expt:
+no rounding error a logarithm would bring (0+bi squared is real)."
+  (if (minusp k)
+      (guile-divide 1 (complex-integer-expt z (- k)))
+      (let ((result 1) (base z))
+	(loop while (plusp k)
+	      do (when (oddp k) (setq result (* result base)))
+		 (setq k (ash k -1))
+		 (when (plusp k) (setq base (* base base))))
+	result)))
+
 (defguile "integer-expt" (n k)
   (unless (integerp k) (wrong-type "integer-expt" 2 k))
   (cond ((zerop k) 1)
 	((and (zerop n) (minusp k)) +nan+)
+	((complexp n) (complex-integer-expt n k))
 	(t (expt n k))))
 
 (defguile "expt" (z w)
   (cond ((exact-zero-p w) 1)
 	((and (zerop z) (realp w) (minusp w)) +nan+)
+	;; a complex to an integer, even an inexact one: by multiplying
+	((and (complexp z) (integerp w)) (complex-integer-expt z w))
+	((and (complexp z) (floatp w) (= w (ffloor w)) (< (abs w) (expt 2 53)))
+	 (complex-integer-expt z (round w)))
 	(t (host-call "expt" z w))))
 
 (defguile "modulo-expt" (n k m)
@@ -263,10 +280,34 @@ square, else the nearest double, however big or small X is."
 	   (complex 0d0 (coerce root 'double-float))))
 	(t (host-call "sqrt" z))))
 
+(defun guile-divide (x y)
+  "X over Y, a complex by Smith's algorithm, as Guile divides: (/ 0-1i) is
+0.0+1.0i, where the textbook formula gives -0.0+1.0i."
+  (if (not (complexp y))
+      (host-call "/" x y)
+      (let* ((a (realpart y)) (b (imagpart y))
+	     (xr (realpart x)) (xi (imagpart x)))
+	(when (realp x)
+	  ;; a real has no imaginary part to add (an exact 0 would turn a
+	  ;; -0.0 into 0.0)
+	  (return-from guile-divide
+	    (if (>= (abs a) (abs b))
+		(let* ((r (/ b a)) (d (+ a (* b r))))
+		  (complex (/ x d) (/ (- (* x r)) d)))
+		(let* ((r (/ a b)) (d (+ (* a r) b)))
+		  (complex (/ (* x r) d) (/ (- x) d))))))
+	(if (>= (abs a) (abs b))
+	    (let* ((r (/ b a)) (d (+ a (* b r))))
+	      (complex (/ (+ xr (* xi r)) d) (/ (- xi (* xr r)) d)))
+	    (let* ((r (/ a b)) (d (+ (* a r) b)))
+	      (complex (/ (+ (* xr r) xi) d) (/ (- (* xi r) xr) d)))))))
+
 (defguile "/" (x &rest ys)
   (when (if ys (some #'exact-zero-p ys) (exact-zero-p x))
     (numerical-overflow "divide"))
-  (apply #'host-call "/" x ys))
+  (cond ((not (or (complexp x) (some #'complexp ys))) (apply #'host-call "/" x ys))
+	((null ys) (guile-divide 1 x))
+	(t (let ((q x)) (dolist (y ys q) (setq q (guile-divide q y)))))))
 
 (defguile "inexact->exact" (z)
   (when (or (nan-p z) (and (floatp z) (sb-ext:float-infinity-p z)))
@@ -278,6 +319,40 @@ square, else the nearest double, however big or small X is."
 
 (defun guile-string->number (string radix)
   (unless (stringp string) (wrong-type "string->number" 1 string))
+  (let ((at (position #\@ string)))
+    (if (and at (not (find #\@ string :start (1+ at))))
+	(polar-string->number string at radix)
+	(let ((n (guile-string->number-1 string radix)))
+	  ;; Guile has no exact complex numbers: +i is 0.0+1.0i
+	  (if (numberp n) (guile-number n) n)))))
+
+(defun polar-string->number (string at radix)
+  "STRING, magnitude@angle, as Guile reads it: an exact zero magnitude is
+0, an exact zero angle the magnitude; -0 is -0.0 under #i."
+  (let* ((prefix-end (loop with i = 0
+			   while (and (< (1+ i) at) (char= (char string i) #\#)) do (incf i 2)
+			   finally (return i)))
+	 (prefix (subseq string 0 prefix-end))
+	 (inexact (search "#i" prefix :test #'char-equal))
+	 (mag-text (subseq string prefix-end at))
+	 (ang-text (subseq string (1+ at)))
+	 (mag (guile-string->number-1 (concatenate 'string prefix mag-text) radix))
+	 (ang (guile-string->number-1 (concatenate 'string prefix ang-text) radix)))
+    (unless (and (realp mag) (realp ang) (plusp (length mag-text)) (plusp (length ang-text))
+		 ;; reals only: 12@12+0i isn't a number
+		 (not (char-equal (char mag-text (1- (length mag-text))) #\i))
+		 (not (char-equal (char ang-text (1- (length ang-text))) #\i)))
+      (return-from polar-string->number ps:false))
+    (when (and inexact (zerop ang) (char= (char ang-text 0) #\-))
+      (setq ang -0d0))
+    (cond ((eql mag 0) 0)
+	  ((eql ang 0) mag)
+	  ((and (zerop mag) (or (nan-p ang) (and (floatp ang) (sb-ext:float-infinity-p ang))))
+	   (complex (float mag 1d0) 0d0))
+	  (t (let ((m (float mag 1d0)) (a (float ang 1d0)))
+	       (complex (* m (cos a)) (* m (sin a))))))))
+
+(defun guile-string->number-1 (string radix)
   ;; R5RS's # for a digit not known ("2#" is 20.0), which Guile still
   ;; reads: each # after a digit is a 0, no digit follows one in the
   ;; same digits ("5#.0" isn't a number), and the number is inexact
@@ -285,7 +360,7 @@ square, else the nearest double, however big or small X is."
 		  (dotimes (i (length s) s)
 		    (let ((c (char s i)))
 		      (cond ((digit-char-p c radix)
-			     (when hashed (return-from guile-string->number ps:false))
+			     (when hashed (return-from guile-string->number-1 ps:false))
 			     (setq after-digit t))
 			    ((and (char= c #\#) after-digit) (setf (char s i) #\0 hashed t))
 			    ((char= c #\.))
@@ -308,6 +383,35 @@ square, else the nearest double, however big or small X is."
   (if (exact-zero-p im)
       re
       (complex (coerce re 'double-float) (coerce im 'double-float))))
+(defun simple-upcase (c) (or (cl-unicode:uppercase-mapping c) c))
+(defun simple-downcase (c) (or (cl-unicode:lowercase-mapping c) c))
+
+;; case mapping a character at a time (Unicode's simple mappings), as
+;; Guile's: no final sigma, and ß stays ß; START and END name the part
+;; mapped, the rest kept
+(macrolet ((case-mapping (name mapper in-place)
+	     `(defguile ,name (s &optional (start 0) (end (length s)))
+		(unless (stringp s) (wrong-type ,name 1 s))
+		(unless (and (integerp start) (<= 0 start (length s))) (out-of-range ,name start))
+		(unless (and (integerp end) (<= start end (length s))) (out-of-range ,name end))
+		(let ((result ,(if in-place 's '(copy-seq s))))
+		  (loop for i from start below end
+			do (setf (char result i) (,mapper (char result i))))
+		  ,(if in-place '*unspecified* 'result)))))
+  (case-mapping "string-upcase" simple-upcase nil)
+  (case-mapping "string-downcase" simple-downcase nil)
+  (case-mapping "string-upcase!" simple-upcase t)
+  (case-mapping "string-downcase!" simple-downcase t))
+
+;; case folding a character at a time (Unicode's simple folding), as
+;; Guile's: a final sigma is σ, and ß stays ß
+(defguile "string-foldcase" (s)
+  (unless (stringp s) (wrong-type "string-foldcase" 1 s))
+  (map 'string (lambda (c)
+		 (let ((folded (sb-unicode:casefold (string c))))
+		   (if (= (length folded) 1) (char folded 0) c)))
+       s))
+
 ;; a real's angle is inexact, as Guile's: 0.0, or pi if its sign is
 ;; negative (-0.0's too)
 (defguile "angle" (z)

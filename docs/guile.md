@@ -7,7 +7,7 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
-`vendor/guile-test-suite/`), **42,179 tests pass** so far. See "Where it
+`vendor/guile-test-suite/`), **42,566 tests pass** so far. See "Where it
 stands" below. Emacs Lisp has started: Guile's elisp compiler runs, and
 `(compile '(defun ...) #:from 'elisp)` works. It is future work.
 
@@ -457,34 +457,43 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 42,179 |
-| fail | 191 | 66 |
-| error (an exception where a result was expected) | 465 | 99 |
-| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 85 / 10 / 7 / 4 |
+| pass | 5,982 | 42,566 |
+| fail | 191 | 40 |
+| error (an exception where a result was expected) | 465 | 57 |
+| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 96 / 10 / 11 / 6 |
 | files that crashed or hit the time limit | 32 | 0 |
 
-The biggest files pass entirely or nearly: `numbers` (28,987 of
-28,991), `srfi-1` (1,902), `regexp` (1,089), `srfi-67` (902), `r4rs`
-(538), `arrays` (564), `srfi-13` (533 of 534), `syntax` (251),
-`bytevectors` (238 of 239), `goops` (237), `srfi-60` (168), `peval`
-(163, all), `tree-il` (151), `srfi-4` (148), `optargs` (120, all),
-`reader` (115), `foreign` (79), `print`, `format`, `weaks`,
-`parameters`, `r6rs-enums`, `r6rs-arithmetic-fixnums`, `sort`, `popen`,
-`ports`.
+The biggest files pass entirely or nearly: `numbers` (all 28,991),
+`srfi-1` (1,902), `regexp` (1,092), `srfi-67` (902), `r4rs` (538),
+`arrays` (564), `srfi-13` (534), `syntax` (251 of 254), `bytevectors`
+(238 of 239), `goops` (237), `web-http` (234), `srfi-60` (168), `peval`
+(163), `tree-il` (153), `srfi-4` (148), `srfi-207` (136), `control`
+(127), `optargs` (120), `reader` (115), `srfi-105` (107), `foreign`,
+`print`, `format`, `weaks`, `parameters`, `r6rs-enums`,
+`r6rs-arithmetic-fixnums`, `sort`, `popen`, `ports`, `web-server`,
+`net-db`, `00-socket` (32; the rest need `fork`), `coverage` (11),
+`statprof`, `procprop`, `session`, `hooks`, `signals`, `unicode`.
 
 What fails now, by cause:
 
-- **Guile's VM** (docs/guile-vm.md) runs Guile's bytecode: `rtl`,
-  `rtl-compilation` and `dwarf` pass. Left: frames and stacks
-  (`coverage`, `statprof`, part of `eval`), `types`, continuations
-  captured in bytecode.
-- **libguile's internals**: immutable literal strings, copy-on-write
-  shared substrings (`substring/shared` copies), guardians (SBCL can't
-  give back a collected object), GC behaviour (`strings`, `guardians`,
-  `gc`).
+- **libguile's heap layout**: `types` (43) reads objects' memory as
+  libguile lays it out.
+- **Native code, not bytecode**: code a test file defines, and boot-9,
+  are SBCL code here, so the VM's hooks don't see them (2 of
+  `coverage`); a stack made in an exception handler misses the VM's
+  frames (`error-handling`).
+- **libguile's internals**: copy-on-write shared substrings
+  (`substring/shared` copies: a Scheme string is a simple Lisp string)
+  and string buffers (`strings`, 10), guardians and collection
+  (`guardians`, `gc`, `weaks`, `fluids`, `threads`: SBCL can't give back
+  a collected object), immutable literal vectors (`sort`).
+- **The environment**: locales not installed here (`i18n`, `time`,
+  `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`), Guile's
+  build tree (`popen`'s `meta/guile`).
 - **Emacs Lisp and ECMAScript** (`elisp*`, `ecmascript`): future work.
-- **A long tail** of exact error keys and messages, and smaller missing
-  pieces (sockets, `sandbox`, source properties, some POSIX).
+- **A short tail**: `letrec` reading its variables before they're
+  bound (`syntax`), suspendable ports, `srfi-119`'s source properties,
+  `tree-il`'s arity warning for applicable structs.
 
 ### Differences from Guile that remain
 
@@ -496,8 +505,8 @@ What fails now, by cause:
 | `(system foreign)` | present | present on CFFI (`foreign.test`: 79 pass, 0 fail). Structs aren't passed by value; `pointer->bytevector` of C's memory copies it; the deprecated `dynamic-link`/`dynamic-func` are absent |
 | `bytevector-slice` | shares the bytes | copies them |
 | port buffers, `(ice-9 suspendable-ports)` | Guile's | ports have their own buffers, which `(ice-9 ports internal)` doesn't expose: suspendable ports are absent |
-| stacks, frames, backtraces | Guile's VM's | none: `make-stack` is #f |
-| locales | the C library's | the C library's (newlocale); case mapping is SBCL's Unicode |
+| stacks, frames, backtraces | Guile's VM's | frames from the VM and from native code (stacks.lisp); the VM's next and apply hooks (`(system vm coverage)`, statprof) run while the trace level is above zero |
+| locales | the C library's | the C library's (newlocale); case mapping is Unicode's simple mappings, a character at a time, as Guile's |
 | stack overflow handlers | a limit in words | the control stack's own limit |
 | recursion depth | memory | the control stack: 500 MB in the main thread (as run by the tests), 256 MB in a thread Guile makes |
 

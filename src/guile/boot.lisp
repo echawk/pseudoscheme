@@ -164,6 +164,16 @@ version (src/continuations.lisp)."
 
 (defvar *raise-exception* nil "boot-9's raise-exception, once defined.")
 
+(defvar *primitive-functions* nil "The functions of *GUILE-PRIMITIVES*, a set.")
+
+(defun primitive-function-p (f)
+  (unless *primitive-functions*
+    (let ((set (make-hash-table :test 'eq)))
+      (maphash (lambda (name g) (declare (ignore name)) (when (functionp g) (setf (gethash g set) t)))
+	       *guile-primitives*)
+      (setq *primitive-functions* set)))
+  (gethash f *primitive-functions*))
+
 (defun define-in-module (module name value)
   "A top-level definition of NAME in MODULE (#f before modules boot)."
   (let ((root (not (module-p* module))))
@@ -171,7 +181,10 @@ version (src/continuations.lisp)."
       ;; before the module system: boot-9's own definitions
       (let ((override (cdr (assoc (ps:scheme-symbol-name name) *boot-overrides* :test #'string=))))
 	(when override (setq value (funcall override)))))
-    (when (and (functionp value) (not (gethash value *procedure-properties*)))
+    ;; named after its definition, unless it's a primitive, which has its
+    ;; own name ((define module-gensym gensym) doesn't rename gensym)
+    (when (and (functionp value) (not (gethash value *procedure-properties*))
+	       (not (primitive-function-p value)))
       (setf (gethash value *procedure-properties*) (list (cons (ssym "name") name))))
     (if root
 	(obarray-define name value)
@@ -316,7 +329,7 @@ Lisp's message TEXT about keyword arguments."
 	     ((some (lambda (pattern) (search pattern text))
 		     ;; the type errors of Pseudoscheme's own libraries
 		     '("isn't a pair" ": not a " ": not an " "neither char-set" "not predicate, char or char-set"
-		       "bad argument"))
+		       "bad argument" "Non-string value"))
 	      (message "wrong-type-arg" ps:false "Wrong type argument: ~A" (list text)))
 	     (t (message "misc-error" ps:false "~A" (list text)))))))))
 
@@ -611,7 +624,7 @@ not with Guile's behaviour.")
      "string-prefix-length-ci" "string-suffix-length-ci" "string-prefix?" "string-suffix?"
      "string-prefix-ci?" "string-suffix-ci?" "string-index" "string-index-right" "string-skip"
      "string-skip-right" "string-count" "string-contains" "string-contains-ci"
-     "string-titlecase!" "string-upcase!" "string-downcase!" "string-reverse" "string-reverse!"
+     "string-titlecase!" "string-reverse" "string-reverse!"
      "string-concatenate" "string-concatenate/shared" "string-concatenate-reverse"
      "string-concatenate-reverse/shared" "string-fold" "string-fold-right" "string-unfold"
      "string-unfold-right" "string-for-each" "string-map" "string-map!" "string-for-each-index"
