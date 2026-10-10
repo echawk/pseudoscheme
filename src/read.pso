@@ -574,13 +574,103 @@
                                                        L
                                                        (CDR (THE CONS L)))
                                                 (GO |.loop.153|)))))))
-                            (IF (ALPHA-CHAR-P D)
-                                (RETURN (SUB-READ-ARRAY-LITERAL N D PORT))
-                                (RETURN (READING-ERROR
-                                         PORT
-                                         "bad datum label"
-                                         N
-                                         D))))))))))))
+                            (IF (CHAR= D #\%)
+                                (RETURN (LIST 'SCHEME::$PRIMITIVE
+                                              N
+                                              (SUB-READ-CAREFULLY PORT)))
+                                (IF (CHAR-EQUAL D #\r)
+                                    (LET ((TOKEN (CAR (THE CONS
+                                                           (SUB-READ-TOKEN
+                                                            #\#
+                                                            PORT)))))
+                                      (LET ((X (STRING->NUMBER
+                                                (SUBSEQ TOKEN
+                                                        1
+                                                        (LENGTH (THE SIMPLE-STRING
+                                                                     TOKEN)))
+                                                N)))
+                                        (LET NIL
+                                          (LET ((TEMP X))
+                                            (IF (TRUEP TEMP)
+                                                (RETURN TEMP)
+                                                (RETURN (READING-ERROR
+                                                         PORT
+                                                         "bad number"
+                                                         TOKEN)))))))
+                                    (IF (CHAR= D #\v)
+                                        (LET ((A (.READ-CHAR PORT)))
+                                          (LET ((B (.READ-CHAR PORT)))
+                                            (LET NIL
+                                              (IF (NOT (EQL (.READ-CHAR PORT)
+                                                            #\())
+                                                  (READING-ERROR
+                                                   PORT
+                                                   "bad #v syntax"))
+                                              (LET ((ELEMENTS (SUB-READ-LIST
+                                                               C
+                                                               PORT)))
+                                                (LET ((.FILL (PROG (L)
+                                                               (SETQ L ELEMENTS)
+                                                               (GO .LAST)
+                                                               .LAST
+                                                               (IF (NULL L)
+                                                                   (RETURN 0)
+                                                                   (IF (NULL (CDR (THE CONS
+                                                                                       L)))
+                                                                       (RETURN (CAR (THE CONS
+                                                                                         L)))
+                                                                       (PROGN
+                                                                         (SETQ L
+                                                                               (CDR (THE CONS
+                                                                                         L)))
+                                                                         (GO .LAST)))))))
+                                                  (LET ((.ELEMENTS.1 (PROG (L K)
+                                                                       (PSETQ L
+                                                                              ELEMENTS
+                                                                              K
+                                                                              (LENGTH ELEMENTS))
+                                                                       (GO PAD)
+                                                                       PAD
+                                                                       (IF (SCHEME< K
+                                                                                    N)
+                                                                           (PROGN
+                                                                             (PSETQ L
+                                                                                    (APPEND L
+                                                                                            (LIST .FILL))
+                                                                                    K
+                                                                                    (SCHEME+ K
+                                                                                             1))
+                                                                             (GO PAD))
+                                                                           (RETURN L)))))
+                                                    (LET NIL
+                                                      (IF (AND (EQL A #\u)
+                                                               (EQL B #\8))
+                                                          (RETURN (LIST->BYTEVECTOR
+                                                                   .ELEMENTS.1))
+                                                          (IF (AND (EQL A #\f)
+                                                                   (EQL B #\x))
+                                                              (RETURN (LIST->FXVECTOR
+                                                                       .ELEMENTS.1))
+                                                              (IF (AND (EQL A
+                                                                            #\f)
+                                                                       (EQL B
+                                                                            #\l))
+                                                                  (RETURN (LIST->NUMERIC-VECTOR
+                                                                           "f64"
+                                                                           .ELEMENTS.1))
+                                                                  (RETURN (READING-ERROR
+                                                                           PORT
+                                                                           "bad #v syntax"))))))))))))
+                                        (IF (ALPHA-CHAR-P D)
+                                            (RETURN (SUB-READ-ARRAY-LITERAL
+                                                     N
+                                                     D
+                                                     PORT))
+                                            (RETURN (READING-ERROR
+                                                     PORT
+                                                     "bad datum label"
+                                                     N
+                                                     D)))))))))))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-DATUM-LABEL 'SCHEME::SUB-READ-DATUM-LABEL)
 (DEFUN SUB-READ-ARRAY-LITERAL (RANK FIRST PORT)
   (LET ((TAG (READ-ARRAY-TAG FIRST PORT)))
@@ -1026,6 +1116,65 @@
        C
        (.READ-CHAR PORT)
        (LIST 'SCHEME::$PRIMITIVE (SUB-READ-CAREFULLY PORT)))))
+(LOCALLY (DECLARE (SPECIAL *READ-GENSYMS*)) (SETQ *READ-GENSYMS* 'NIL))
+(SET-FORWARDING-FUNCTION '*READ-GENSYMS* 'SCHEME::*READ-GENSYMS*)
+(AT-TOP-LEVEL
+  (LOCALLY
+    (DECLARE (SPECIAL *READ-GENSYMS*))
+    (DEFINE-SHARP-MACRO
+     #\{
+     #'(LAMBDA (C PORT)
+         C
+         (.READ-CHAR PORT)
+         (PROG (.L.0)
+           (SETQ .L.0 'NIL)
+           (GO LOOP)
+           LOOP
+           (LET ((L .L.0))
+             (LET ((D (.READ-CHAR PORT)))
+               (IF (EQ D EOF-OBJECT)
+                   (RETURN (READING-ERROR PORT "end of file in #{"))
+                   (IF (CHAR= D #\})
+                       (LET ((TEXT (COERCE (THE LIST (REVERSE L))
+                                           'SIMPLE-STRING)))
+                         (LET ((SPACE (PROG (I)
+                                        (SETQ I 0)
+                                        (GO FIND)
+                                        FIND
+                                        (IF (SCHEME= I
+                                                     (LENGTH (THE SIMPLE-STRING
+                                                                  TEXT)))
+                                            (RETURN FALSE)
+                                            (IF (CHAR= (CHAR (THE SIMPLE-STRING
+                                                                  TEXT)
+                                                             I)
+                                                       #\Space)
+                                                (RETURN I)
+                                                (PROGN
+                                                  (SETQ I (SCHEME+ I 1))
+                                                  (GO FIND)))))))
+                           (LET NIL
+                             (IF (TRUEP SPACE)
+                                 (LET ((NAME (SUBSEQ TEXT 0 SPACE)))
+                                   (LET ((UNIQUE (SUBSEQ TEXT
+                                                         (SCHEME+ SPACE 1)
+                                                         (LENGTH (THE SIMPLE-STRING
+                                                                      TEXT)))))
+                                     (LET ((PROBE (TRUE? (ASSOC UNIQUE
+                                                                *READ-GENSYMS*
+                                                                :TEST
+                                                                #'SCHEME-EQUAL-P))))
+                                       (LET NIL
+                                         (IF (TRUEP PROBE)
+                                             (RETURN (CDR (THE CONS PROBE)))
+                                             (LET ((SYMBOL (PS::MAKE-GENSYM-FROM-NAME
+                                                            NAME)))
+                                               (SETQ *READ-GENSYMS*
+                                                     (CONS (CONS UNIQUE SYMBOL)
+                                                           *READ-GENSYMS*))
+                                               (RETURN SYMBOL)))))))
+                                 (RETURN (PS::MAKE-GENSYM-FROM-NAME TEXT))))))
+                       (PROGN (SETQ .L.0 (CONS D L)) (GO LOOP)))))))))))
 (AT-TOP-LEVEL
   (DEFINE-SHARP-MACRO
    #\'

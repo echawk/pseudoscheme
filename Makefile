@@ -5,7 +5,7 @@
 SBCL ?= sbcl
 
 .PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
-	test test-reports test-escape test-cli test-srfi test-programs test-guile test-all precompile-srfi
+	test test-reports test-escape test-cli test-srfi test-programs test-guile test-chez test-all precompile-srfi
 
 # Tests.  `make test` runs every suite in the default mode (full
 # continuations, src/continuations.lisp); `make test-escape` the
@@ -62,6 +62,15 @@ test-srfi:
 # alist" for some.
 test-guile:
 	@sh tests/run-guile-tests.sh $(GUILE_TESTS)
+
+# Chez Scheme's mats (vendor/chez-mats) on the --chez mode (src/chez/,
+# docs/chez.md): each file in its own process, JOBS at a time (6), each
+# under LIMIT seconds (120).  CHEZ_MATS="5_1 hash" for some.
+test-chez:
+	@echo "Building bin/pseudoscheme (log: /tmp/pseudoscheme-cli-build.log) ..."
+	@$(MAKE) -C contrib/cli > /tmp/pseudoscheme-cli-build.log 2>&1 \
+	  || { tail -20 /tmp/pseudoscheme-cli-build.log; exit 1; }
+	@sh tests/run-chez-mats.sh $(CHEZ_MATS)
 
 test-programs:
 	@echo "Building bin/pseudoscheme (log: /tmp/pseudoscheme-cli-build.log) ..."

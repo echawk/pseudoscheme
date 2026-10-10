@@ -90,8 +90,14 @@
   ;;; with it in its substitution.  gen-label generates such labels.
   ;;; the labels have to have read/write eq? invariance to support 
   ;;; separate compilation.
+  ;;; PSEUDOSCHEME: the identifier's name is kept with the gensym, for
+  ;;; messages about an unbound variable.
   (define gen-label
-    (lambda (_) (gensym)))
+    (lambda (x)
+      (cond
+        ((symbol? x) (gensym x))
+        ((stx? x) (gensym (id->sym x)))
+        (else (gensym)))))
 
   ;;; A rib is a record constructed at every lexical contour in the
   ;;; program to hold information about the variables introduced in that

@@ -213,11 +213,23 @@ Scheme see something CONDITION? and MESSAGE-CONDITION? are true of."
 		       (list (funcall (prim "make-i/o-filename-error")
 				      (namestring (or (file-error-pathname c) "")))))
 		      (reader-error (list (funcall (prim "make-lexical-violation"))))
+		      ((or undefined-function unbound-variable)
+		       (if (unbound-source-name c)
+			   (list (funcall (prim "make-undefined-violation")))
+			   (list (funcall (prim "make-assertion-violation")))))
 		      (t (list (funcall (prim "make-assertion-violation")))))
 		    (list (funcall (prim "make-message-condition") message)
 			  (funcall (prim "make-irritants-condition") irritants))))))
       (setf (gethash condition *foreign-originals*) c)
       condition)))
+
+(defun unbound-source-name (c)
+  "For an undefined-function or unbound-variable condition C on a global
+that psyntax named with a gensym: the name the program gave it, else NIL."
+  (let ((loc (cell-error-name c)))
+    (and (symbolp loc)
+	 (let ((scheme (find-symbol (symbol-name loc) "SCHEME")))
+	   (and scheme (get scheme :source-name))))))
 
 (defun foreign-condition-message (c)
   "The message and irritants a Scheme handler sees for Lisp condition C.
@@ -225,10 +237,13 @@ Applying a non-procedure shows up in Lisp as calling an undefined
 function (#f is a symbol) or as a type error expecting a function."
   (flet ((plain () (values (remove #\Newline (princ-to-string c)) '())))
     (typecase c
-      (undefined-function
+      ((or undefined-function unbound-variable)
        (if (eq (cell-error-name c) ps:false)
 	   (values "attempt to apply non-procedure" (list ps:false))
-	   (plain)))
+	   (let ((name (unbound-source-name c)))
+	     (if name
+		 (values (format nil "variable ~a is not bound" name) '())
+		 (plain)))))
       (type-error
        (cond ((subtypep 'function (type-error-expected-type c))
 	      (values "attempt to apply non-procedure" (list (type-error-datum c))))

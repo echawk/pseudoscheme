@@ -88,6 +88,10 @@
 (defstruct (box (:constructor make-box (contents)))
   contents)
 
+(defun make-gensym-from-name (name)
+  "For the reader's #{name unique}: an uninterned symbol."
+  (make-symbol (invert-case name)))
+
 (defun fxvector-p (x)
   (typep x '(simple-array fixnum (*))))
 

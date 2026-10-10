@@ -84,8 +84,12 @@
 
 (defun install-adapter ()
   (defhost "gensym" (&rest args)
-    (declare (ignore args))
-    (intern (format nil "~A~D" *gensym-prefix* (incf *gensym-count*)) "SCHEME"))
+    ;; the source name, if one is given, is kept for messages about an
+    ;; unbound variable (src/r6rs/conditions.lisp)
+    (let ((symbol (intern (format nil "~A~D" *gensym-prefix* (incf *gensym-count*)) "SCHEME")))
+      (when (and args (symbolp (first args)))
+	(setf (get symbol :source-name) (ps:scheme-symbol-name (first args))))
+      symbol))
   (defhost "void" () ps:unspecific)
   (defhost "symbol-value" (s) (symbol-value (location s)))
   (defhost "set-symbol-value!" (s v) (host-set! s v) ps:unspecific)

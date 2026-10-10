@@ -471,6 +471,31 @@
 		 (do ((i 0 (+ i 1)) (l elements (cdr l)))
 		     ((null? l) v)
 		   (vector-set! v i (car l))))))
+	    ;; Chez Scheme's #3%car: ($primitive 3 car), at optimize level 3
+	    ((char=? d #\%)
+	     (list '$primitive n (sub-read-carefully port)))
+	    ;; Chez Scheme's #12r-3b: a number in radix 12
+	    ((char-ci=? d #\r)
+	     (let* ((token (car (sub-read-token #\# port)))
+		    (x (string->number (substring token 1 (string-length token)) n)))
+	       (or x (reading-error port "bad number" token))))
+	    ;; Chez Scheme's #5vu8(1 2), #3vfx(...): filled out with the last element
+	    ((char=? d #\v)
+	     (let* ((a (read-char port)) (b (read-char port)))
+	       (if (not (eqv? (read-char port) #\())
+		   (reading-error port "bad #v syntax"))
+	       (let* ((elements (sub-read-list c port))
+		      (fill (let last ((l elements))
+			      (cond ((null? l) 0)
+				    ((null? (cdr l)) (car l))
+				    (else (last (cdr l))))))
+		      (elements (let pad ((l elements) (k (length elements)))
+				  (if (< k n) (pad (append l (list fill)) (+ k 1)) l))))
+		 (cond ((and (eqv? a #\u) (eqv? b #\8)) (ps:list->bytevector elements))
+		       ((and (eqv? a #\f) (eqv? b #\x)) (ps:list->fxvector elements))
+		       ((and (eqv? a #\f) (eqv? b #\l))
+			(ps:list->numeric-vector "f64" elements))
+		       (else (reading-error port "bad #v syntax"))))))
 	    ((char-alphabetic? d)
 	     (sub-read-array-literal n d port))
 	    (else
@@ -812,6 +837,36 @@
     c
     (read-char port)
     (list '$primitive (sub-read-carefully port))))
+
+; Chez Scheme's #{name unique}: a gensym.  The same unique name reads
+; as the same symbol.
+
+(define *read-gensyms* '())
+
+(define-sharp-macro #\{
+  (lambda (c port)
+    c
+    (read-char port)
+    (let loop ((l '()))
+      (let ((d (read-char port)))
+	(cond ((eof-object? d) (reading-error port "end of file in #{"))
+	      ((char=? d #\})
+	       (let* ((text (list->string (reverse l)))
+		      (space (let find ((i 0))
+			       (cond ((= i (string-length text)) #f)
+				     ((char=? (string-ref text i) #\space) i)
+				     (else (find (+ i 1)))))))
+		 (if space
+		     (let* ((name (substring text 0 space))
+			    (unique (substring text (+ space 1) (string-length text)))
+			    (probe (assoc unique *read-gensyms*)))
+		       (if probe
+			   (cdr probe)
+			   (let ((symbol (ps:make-gensym-from-name name)))
+			     (set! *read-gensyms* (cons (cons unique symbol) *read-gensyms*))
+			     symbol)))
+		     (ps:make-gensym-from-name text))))
+	      (else (loop (cons d l))))))))
 
 ;; R6RS 4.3.5 abbreviations: #'x #`x #,x #,@x.  (These replace an older
 ;; Pseudoscheme-specific #'cl-function escape; see README.)
