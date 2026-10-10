@@ -214,6 +214,11 @@ backend (below).
   rtl-compilation, the continuation cases and srfi-1, match and format
   over their `.go` modules all pass so.
 
+Flonum arithmetic is IEEE's, as Guile's: overflow gives an infinity and
+0.0/0.0 a NaN. Guile code runs with SBCL's floating-point traps off
+(`with-guile-errors`), and so does a compiled procedure called from Lisp
+(`vm-apply`, which masks them only when they're on).
+
 ### Backends
 
 `PSEUDOSCHEME_GUILE_VM_BACKEND` chooses how bytecode runs:
@@ -253,14 +258,12 @@ backend (below).
         `tst`): `uadd`, `usub`, `umul`, `ulogand`, `ulogior`,
         `ulogxor`, `ulogsub`, `ulsh`, `ursh`, `srsh` and their immediate
         forms;
-      - `fdiv`, IEEE's (an infinity or a NaN, as Guile's): SBCL's traps
-        masked in FPCR around the one `fdiv`;
       - predicates, as branches: both fixnums, a u64 that is a fixnum,
         Guile's 62-bit fixnum (`fixnum?`), and an index into a simple
         vector (its lowtag, widetag and length tested together). They
         guard the comparisons, the conversions (`untag-fixnum`,
         `scm->u64`, ...) and `scm-ref`/`scm-set!` on vectors.
-    - **By specialized Lisp, which SBCL's own VOPs compile** (130
+    - **By specialized Lisp, which SBCL's own VOPs compile** (150
       instructions in all, with the above):
       - the comparisons, branching directly;
       - the type tests (`char?`, `pair?`, `vector?`, the constants);
@@ -278,23 +281,29 @@ backend (below).
       - constants decoded when translating (`load-u64`, `load-f64`,
         `load-label`, the immediates, `make-non-immediate` once decoded);
       - `jtable` as a `case`;
-      - intrinsics called directly.
-
-      Allocation is fused: `allocate-words/immediate` with the store of
-      a pair's car, or of a constant header (a closure, a vector, a
-      variable, an atomic box), makes the Lisp object at once.
-    - **The handler's own source, in line** (17): allocation not fused,
-      the atomic box operations, `static-ref`/`static-set!`/
-      `static-patch!`, `builtin-ref`, `current-thread`, `word-ref`,
-      `word-set!`, `scm-ref/tag`, `pointer-ref/immediate` and
+      - intrinsics called directly, those that begin or end a dynamic
+        extent (`call-thread*`) included;
+      - the image's cells (`static-ref`, `static-set!`, `static-patch!`)
+        as one vector access, and `builtin-ref`;
+      - atomic boxes, by SBCL's barriers and compare-and-swap;
+      - structs: their vtable and fields;
+      - allocation, and words by index.
+    - **The handler's own source, in line** (4): `allocate-words` and
+      `allocate-pointerless-words` of a computed size, `word-set!`, and
       `tail-pointer-ref/immediate`.
-    - **The handler, called** (22): the runtime's business. That covers
-      continuations, prompts, `abort` and the throws, dynamic extents
-      (`call-thread*`), `subr-call`, `foreign-call`,
-      `expand-apply-argument`, `bind-kwargs`, `scm-set!/tag` (making a
-      struct), `pointer-set!/immediate`, `call-scm-sz-u32`,
-      `call-scm<-scmn-scmn`, `halt`, `return-from-interrupt` and
+    - **The handler, called** (7): the runtime's business. That covers
+      `prompt`, `abort`, the three throws, `bind-kwargs` and
       `unreachable`.
+      Eight more have no handler at all: Guile emits them only in its own
+      runtime's trampolines, never in compiled modules. They are the
+      reified continuations (`capture-continuation`,
+      `compose-continuation`, `continuation-call`; continuations here are
+      the Lisp side's), `subr-call`, `foreign-call`, `halt`,
+      `return-from-interrupt` and `pointer-set!/immediate`.
+
+    Allocation is fused: `allocate-words/immediate` with the store of a
+    pair's car, of a constant header (a closure, a vector, a variable, an
+    atomic box) or of a struct's vtable makes the Lisp object at once.
 
   `tests/guile-vm/vops.lisp` tests each VOP against Lisp's arithmetic,
   open-coded and called.

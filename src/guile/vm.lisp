@@ -259,8 +259,29 @@ bits there would otherwise be taken for."
 
 (defvar *vm-trace* nil "True: print each instruction as it runs.")
 
+(declaim (inline float-traps-enabled-p))
+(defun float-traps-enabled-p ()
+  "Whether any of SBCL's floating-point traps is enabled."
+  #+(and sbcl arm64) (logtest (sb-vm:floating-point-modes) #x1f00) ; FPCR's enables
+  #-(and sbcl arm64) (getf (sb-int:get-floating-point-modes) :traps))
+
+(defmacro with-ieee-floats (&body body)
+  "Run BODY with the floating-point traps off, as Guile's arithmetic is
+IEEE's: overflow gives an infinity, 0.0/0.0 a NaN.  Cheap when they're
+off already (in Guile code, WITH-GUILE-ERRORS's)."
+  (let ((f (gensym "BODY")))
+    `(flet ((,f () ,@body))
+       (declare (dynamic-extent #',f))
+       (if (float-traps-enabled-p)
+	   (sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow) (,f))
+	   (,f)))))
+
 (defun vm-apply (program args)
-  "Call PROGRAM, a vm-program, on ARGS, from Lisp: its values."
+  "Call PROGRAM, a vm-program, on ARGS, from Lisp: its values.  Its
+flonum arithmetic is IEEE's whoever calls it."
+  (with-ieee-floats (vm-apply-1 program args)))
+
+(defun vm-apply-1 (program args)
   (let* ((vm (current-vm))
 	 (saved-fp (vm-fp vm)) (saved-sp (vm-sp vm))
 	 (fp (+ saved-sp 3)))
@@ -822,6 +843,14 @@ are once made), its field count, and the bitmap of its unboxed fields."
       (realize vm obj value)
       (heap-set obj i value)))
 
+(defun make-struct-of-vtable (vtable slots)
+  "A struct of VTABLE with SLOTS, a simple vector: a vtable, an applicable
+struct or a plain one, as VTABLE's flags say."
+  (let ((flags (vtable-flags vtable)))
+    (cond ((logtest flags +vtable-flag-vtable+) (make-vtable-from-slots vtable slots))
+	  ((logtest flags +vtable-flag-applicable+) (make-applicable-struct vtable slots))
+	  (t (%make-gstruct vtable slots)))))
+
 (defun struct-from-raw (vm raw vtable)
   "RAW, whose first word now points to VTABLE, as a struct of VTABLE."
   (let* ((words (raw-object-words raw))
@@ -829,10 +858,7 @@ are once made), its field count, and the bitmap of its unboxed fields."
     (loop for i from 1 below (length words)
 	  for w = (svref words i)
 	  unless (eql w 0) do (setf (svref slots (1- i)) w))
-    (let* ((flags (vtable-flags vtable))
-	   (struct (cond ((logtest flags +vtable-flag-vtable+) (make-vtable-from-slots vtable slots))
-			 ((logtest flags +vtable-flag-applicable+) (make-applicable-struct vtable slots))
-			 (t (%make-gstruct vtable slots)))))
+    (let ((struct (make-struct-of-vtable vtable slots)))
       (replace-in-frame vm raw struct)
       struct)))
 

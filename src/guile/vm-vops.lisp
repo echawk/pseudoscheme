@@ -304,31 +304,6 @@ the flags so that CONDITION holds when it is true."
 		 (sb-assem:emit-label no))))))
   (define-out-of-line %vm-vector-word-p (x i) (if (%vm-vector-word-p x i) t nil))
 
-  ;;; Flonums: division as Guile's, IEEE's (an infinity or a NaN, never
-  ;;; a trap): the traps SBCL enables masked in FPCR around the one
-  ;;; instruction
-
-  (sb-c:defknown %vm-f/ (double-float double-float) double-float
-      (sb-c:flushable sb-c:movable)
-    :overwrite-fndb-silently t)
-  (sb-c:define-vop (%vm-f/)
-    (:translate %vm-f/)
-    (:policy :fast-safe)
-    (:args (x :scs (sb-vm::double-reg)) (y :scs (sb-vm::double-reg)))
-    (:arg-types double-float double-float)
-    (:results (r :scs (sb-vm::double-reg)))
-    (:result-types double-float)
-    (:temporary (:sc sb-vm::non-descriptor-reg) saved tmp)
-    (:generator 6
-      (sb-assem:inst mrs saved :fpcr)
-      ;; the enables of the invalid, divide-by-zero, overflow, underflow
-      ;; and inexact traps: bits 8 to 12
-      (sb-assem:inst and tmp saved (ldb (byte 64 0) (lognot #x1f00)))
-      (sb-assem:inst msr :fpcr tmp)
-      (sb-assem:inst fdiv r x y)
-      (sb-assem:inst msr :fpcr saved)))
-  (define-out-of-line %vm-f/ (x y) (%vm-f/ (the double-float x) (the double-float y)))
-
   (sb-ext:lock-package "SB-C")
   (sb-ext:lock-package "SB-VM")
   (setq *vm-vops* t))
@@ -781,6 +756,14 @@ of TYPE, else GENERAL, a function of the index giving a form of X."
 (defun program-free-form (x)
   `(sb-ext:truly-the simple-vector (sb-mop:funcallable-standard-instance-access ,x ,(program-slot 'free))))
 
+(defun struct-field-clause (x i value)
+  "COND clauses reading (or, with VALUE, setting) field I - 1 of X when
+it's a plain struct (not a vtable, whose words are its own), I constant."
+  (and (>= i 1)
+       (let ((place `(svref (gstruct-slots ,x) ,(1- i))))
+	 `(((and (gstruct-p ,x) (not (vtable-p ,x)) (< ,(1- i) (length (gstruct-slots ,x))))
+	    ,(if value `(setf ,place ,value) place))))))
+
 (defun word-ref-form (x i)
   "Word I (a form) of X, as HEAP-REF: of a pair, a vector, a closure (its
 code and free variables) or a variable."
@@ -794,6 +777,7 @@ code and free variables) or a variable."
 		     ((integerp i)
 		      `(((and (typep ,x 'vm-program) (< ,(- i 2) (length ,(program-free-form x))))
 			 (svref ,(program-free-form x) ,(- i 2))))))
+	     ,@(and (integerp i) (struct-field-clause x i nil))
 	     (t (heap-ref ,x ,i)))))
 
 (defun word-set-form (x i value)
@@ -807,6 +791,7 @@ code and free variables) or a variable."
 	     ,@(and (integerp i) (>= i 2)
 		    `(((and (typep ,x 'vm-program) (< ,(- i 2) (length ,(program-free-form x))))
 		       (setf (svref ,(program-free-form x) ,(- i 2)) ,value))))
+	     ,@(and (integerp i) (struct-field-clause x i value))
 	     (t (scm-store vm ,x ,i ,value)))))
 
 (deftranslator "scm-ref" (operands ip next)
@@ -1178,13 +1163,220 @@ the middle of an instruction, say)."
 			      general))
 		   ,next))))))))
 
-;; division: the VOP
+;; division: SBCL's, the traps off (VM-APPLY's WITH-IEEE-FLOATS) so that
+;; it gives an infinity or a NaN, as Guile's
 (deftranslator "fdiv" (operands ip next)
   (declare (ignore ip))
   (destructuring-bind (dst a b) operands
     `(let ((x (vm-slot vm ,a)) (y (vm-slot vm ,b)))
        (setf (vm-slot vm ,dst)
 	     (if (and (typep x 'double-float) (typep y 'double-float))
-		 (%vm-f/ x y)
+		 (/ (sb-ext:truly-the double-float x) (sb-ext:truly-the double-float y))
 		 (sb-int:with-float-traps-masked (:divide-by-zero :invalid :overflow) (/ x y))))
        ,next)))
+
+;;; Structs: allocated, then their vtable stored, make the struct at once
+
+(setf (gethash "allocate-words/immediate" *vop-peepholes*)
+      (let ((others (gethash "allocate-words/immediate" *vop-peepholes*)))
+	(lambda (instructions goto)
+	  (or (destructuring-bind ((ip op (dst count) next) &optional second &rest more) instructions
+		(declare (ignore ip op more))
+		(and second (string= (vm-op-name (second second)) "scm-set!/tag") (eql (first second) next)
+		     (destructuring-bind (obj tag val) (third second)
+		       (and (= obj dst) (= tag 1) (/= val dst)
+			    `(let* ((vtable (vm-slot vm ,val))
+				    ;; making a vtable might run Scheme code
+				    (struct ,(out-call `(make-struct-of-vtable
+							 vtable (make-array ,(1- count) :initial-element ps:false)))))
+			       (setf (vm-slot vm ,dst) struct)
+			       ,(funcall goto (fourth second)))))))
+	      (funcall others instructions goto)))))
+
+;; not fused: the raw words made a struct
+(deftranslator "scm-set!/tag" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (obj tag val) operands
+    (and (= tag 1)
+	 `(let ((x (vm-slot vm ,obj)))
+	    (if (raw-object-p x)
+		,(out-call `(struct-from-raw vm x (vm-slot vm ,val)))
+		(vm-error "scm-set!/tag ~D of ~S isn't supported yet" ,tag x))
+	    ,next))))
+
+(deftranslator "scm-ref/tag" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst obj tag) operands
+    (and (= tag 1)
+	 `(let ((x (vm-slot vm ,obj)))
+	    (setf (vm-slot vm ,dst)
+		  (cond ((gstruct-p x) (gstruct-vtable x))
+			((struct-p x) (struct-vtable-of x))
+			(t (vm-error "scm-ref/tag ~D of ~S isn't supported yet" ,tag x))))
+	    ,next))))
+
+;;; The image's cells: one vector access (the address decoded when
+;;; translating)
+
+(defun cell-index (ip offset)
+  "The index in the image's cells of the cell OFFSET words from IP, or NIL."
+  (multiple-value-bind (index rest) (floor (* 4 (+ ip offset)) 8)
+    (and (zerop rest) index)))
+
+(deftranslator "static-ref" (operands ip next)
+  (destructuring-bind (dst offset) operands
+    (let ((index (cell-index ip offset)))
+      (and index
+	   `(let ((cell (svref (vm-image-cells image) ,index)))
+	      (setf (vm-slot vm ,dst)
+		    (cond ((integerp cell) (scm-from-bits cell image))
+			  ((stored-integer-p cell) (stored-integer-value cell))
+			  (t cell)))
+	      ,next)))))
+
+(deftranslator "static-set!" (operands ip next)
+  (destructuring-bind (src offset) operands
+    (let ((index (cell-index ip offset)))
+      (and index
+	   `(let ((v (vm-slot vm ,src)))
+	      (setf (svref (vm-image-cells image) ,index) (if (integerp v) (store-integer v) v))
+	      ,next)))))
+
+(deftranslator "static-patch!" (operands ip next)
+  (destructuring-bind (dst-offset src-offset) operands
+    (let ((index (cell-index ip dst-offset)))
+      (and index
+	   `(progn (setf (svref (vm-image-cells image) ,index) ,(* 4 (+ ip src-offset))) ,next)))))
+
+;; the root's procedure, its variable looked up once (ROOT-PROCEDURE's
+;; compiler macro)
+(deftranslator "builtin-ref" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst idx) operands
+    (let ((name (and (< idx 5) (svref #("apply" "values" "abort-to-prompt" "call-with-values"
+					 "call-with-current-continuation")
+				      idx))))
+      (and name `(progn (setf (vm-slot vm ,dst) (root-procedure ,name)) ,next)))))
+
+(defframe "current-thread" (dst) `(setf (vm-slot vm ,dst) sb-thread:*current-thread*))
+
+;;; Atomic boxes: SBCL's barriers and compare-and-swap (its VOPs)
+
+(deftranslator "atomic-scm-ref/immediate" (operands ip next)
+  (destructuring-bind (dst obj i) operands
+    (and (= i 1)
+	 `(let ((box (vm-slot vm ,obj)))
+	    (if (atomic-box-p box)
+		(progn (sb-thread:barrier (:read))
+		       (setf (vm-slot vm ,dst) (atomic-box-value box))
+		       ,next)
+		,(instruction-form (gethash "atomic-scm-ref/immediate" *vm-ops-by-name*) ip operands next))))))
+
+(deftranslator "atomic-scm-set!/immediate" (operands ip next)
+  (destructuring-bind (obj i val) operands
+    (and (= i 1)
+	 `(let ((box (vm-slot vm ,obj)))
+	    (if (atomic-box-p box)
+		(progn (setf (atomic-box-value box) (vm-slot vm ,val))
+		       (sb-thread:barrier (:write))
+		       ,next)
+		,(instruction-form (gethash "atomic-scm-set!/immediate" *vm-ops-by-name*) ip operands next))))))
+
+(deftranslator "atomic-scm-swap!/immediate" (operands ip next)
+  (destructuring-bind (dst obj i val) operands
+    (and (= i 1)
+	 `(let ((box (vm-slot vm ,obj)) (new (vm-slot vm ,val)))
+	    (if (atomic-box-p box)
+		(progn (setf (vm-slot vm ,dst)
+			     (loop (let ((old (atomic-box-value box)))
+				     (when (eq (sb-ext:compare-and-swap (atomic-box-value box) old new) old)
+				       (return old)))))
+		       ,next)
+		,(instruction-form (gethash "atomic-scm-swap!/immediate" *vm-ops-by-name*) ip operands next))))))
+
+(deftranslator "atomic-scm-compare-and-swap!/immediate" (operands ip next)
+  (destructuring-bind (dst obj i expected desired) operands
+    (and (= i 1)
+	 `(let ((box (vm-slot vm ,obj)) (expected (vm-slot vm ,expected)) (desired (vm-slot vm ,desired)))
+	    (if (atomic-box-p box)
+		(progn (setf (vm-slot vm ,dst)
+			     (loop (let ((old (atomic-box-value box)))
+				     (unless (eq old expected) (return old))
+				     (when (eq (sb-ext:compare-and-swap (atomic-box-value box) old desired) old)
+				       (return old)))))
+		       ,next)
+		,(instruction-form (gethash "atomic-scm-compare-and-swap!/immediate" *vm-ops-by-name*)
+				   ip operands next))))))
+
+;;; Allocation not fused, and words by index: as the handlers, but a
+;;; vector's header and its words directly
+
+(deftranslator "allocate-words/immediate" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst count) operands
+    `(progn (setf (vm-slot vm ,dst) (make-raw-object (make-array ,count :initial-element 0))) ,next)))
+
+(deftranslator "allocate-pointerless-words/immediate" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst count) operands
+    `(progn (setf (vm-slot vm ,dst) (make-raw-object (make-array ,count :initial-element 0))) ,next)))
+
+(deftranslator "word-ref" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst obj i) operands
+    `(let ((x (vm-slot vm ,obj)) (i (vm-slot vm ,i)))
+       (setf (vm-slot vm ,dst)
+	     (cond ((eql i 0) (if (simple-vector-p x) (logior (ash (length x) 8) 13) (heap-header x)))
+		   ((%vm-vector-word-p x i)
+		    (svref (sb-ext:truly-the simple-vector x) (1- (sb-ext:truly-the fixnum i))))
+		   (t (heap-ref x i))))
+       ,next)))
+
+(deftranslator "pointer-ref/immediate" (operands ip next)
+  (destructuring-bind (dst obj i) operands
+    (and (= i 2)
+	 `(let ((x (vm-slot vm ,obj)))
+	    (if (typep x 'ps-r6rs::octets)
+		(progn (setf (vm-slot vm ,dst) (make-vm-pointer x 0)) ,next)
+		,(instruction-form (gethash "pointer-ref/immediate" *vm-ops-by-name*) ip operands next))))))
+
+;;; The rest of the intrinsics: called directly, the stack loaded again
+
+(deftranslator "call-scm-sz-u32" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (a b c idx) operands
+    (let ((f (known-intrinsic idx)))
+      (and f `(progn ,(out-call `(funcall (the function ',f) (vm-slot vm ,a) (vm-slot vm ,b) (vm-slot vm ,c)))
+		     ,next)))))
+
+;; two of the image's objects: decoded when translating, if they have been
+(deftranslator "call-scm<-scmn-scmn" (operands ip next)
+  (destructuring-bind (dst a b idx) operands
+    (let ((f (known-intrinsic idx)))
+      (flet ((object (offset)
+	       (let ((address (* 4 (+ ip offset))))
+		 (multiple-value-bind (object found)
+		     (and *region-image* (gethash address (vm-image-objects *region-image*)))
+		   (if found `',object `(image-object image ,address))))))
+	(and f `(progn (setf (vm-slot vm ,dst)
+			     ,(out-call `(funcall (the function ',f) ,(object a) ,(object b))))
+		       ,next))))))
+
+;; those that may begin or end a dynamic extent: where EXTENT-STEP says
+(loop for (name . args) in '(("call-thread") ("call-thread-scm" a) ("call-thread-scm-scm" a b))
+      do (let ((args args))
+	   (setf (gethash name *vop-translators*)
+		 (lambda (operands ip next)
+		   (declare (ignore ip))
+		   (let* ((idx (car (last operands))) (f (known-intrinsic idx)))
+		     (and f (out-call
+			     `(extent-step vm image ,next
+					   (funcall (the function ',f)
+						    ,@(loop for nil in args for slot in operands
+							    collect `(vm-slot vm ,slot)))))))))))
+
+;; the last argument, a list, spread on the frame
+(defframe "expand-apply-argument" ()
+  `(let* ((n (- %sp (vm-fp vm))) (list (svref %stack (+ (vm-fp vm) n))))
+     ,(frame-size-form '(+ (1- n) (length list)))
+     (loop for x in list for i from (1- n) do (setf (svref %stack (+ (vm-fp vm) 1 i)) x))))
