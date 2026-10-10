@@ -36,6 +36,7 @@
               (vm-vops.lisp).")
 
 (defvar *vm-vops*)			; vm-vops.lisp
+(defvar *region-image* nil)		; vm-vops.lisp
 
 (defvar *vm-jit* (not (eq *vm-backend* :interpret))
   "True: run translations of code to Lisp (any backend but :interpret).")
@@ -120,31 +121,6 @@ a form better than its handler's source for them, or NIL.")
 
 (defun vop-backend-p () (and (eq *vm-backend* :vop) *vm-vops*))
 
-;; :vop: fixnum addition and subtraction by the VOPs of vm-vops.lisp, the
-;; intrinsic when they give NIL
-(defspecializer "call-scm<-scm-scm" (operands ip next)
-  (declare (ignore ip))
-  (destructuring-bind (dst a b idx) operands
-    (let* ((name (intrinsic-name idx))
-	   (vop (and (vop-backend-p) (cdr (assoc name '(("add" . %vm-fixnum+) ("sub" . %vm-fixnum-))
-						  :test #'equal)))))
-      (and vop
-	   `(let ((x (vm-slot vm ,a)) (y (vm-slot vm ,b)))
-	      (setf (vm-slot vm ,dst) (or (,vop x y) (funcall (the function (intrinsic ,idx)) x y)))
-	      ,next)))))
-
-(defspecializer "call-scm<-scm-uimm" (operands ip next)
-  (declare (ignore ip))
-  (destructuring-bind (dst a b idx) operands
-    (let* ((name (intrinsic-name idx))
-	   (vop (and (vop-backend-p) (cdr (assoc name '(("add/immediate" . %vm-fixnum+)
-							 ("sub/immediate" . %vm-fixnum-))
-						  :test #'equal)))))
-      (and vop
-	   `(let ((x (vm-slot vm ,a)))
-	      (setf (vm-slot vm ,dst) (or (,vop x ,b) (funcall (the function (intrinsic ,idx)) x ,b)))
-	      ,next)))))
-
 (defun instruction-form (op ip operands next)
   "Instruction OP at IP, its handler's source with OPERANDS in place: a
 form whose value is where to go, as the handler's is."
@@ -170,34 +146,49 @@ form whose value is where to go, as the handler's is."
 		     (symbol-macrolet ((fp (vm-fp vm)) (sp (vm-sp vm)) (stack (vm-stack vm)))
 		       ,@body)))))))))
 
+(defun transfer-form (form next tags &optional reload)
+  "Run FORM, an instruction's, and go where its value says.  RELOAD, if
+given, is run before going on to the next instruction."
+  `(let ((to ,form))
+     (cond ((eql to ,next)
+	    ,@(and reload (list reload))
+	    ,(if (gethash next tags)
+		 `(go ,(gethash next tags))
+		 `(return-from region to)))
+	   ((typep to 'fixnum) (setq ip to) (go dispatch))
+	   ;; a call or return in the image: on, if it's in the region
+	   ((and (code-pointer-p to) (eq (code-pointer-image to) image))
+	    (setq ip (code-pointer-word to))
+	    (go dispatch))
+	   (t (return-from region to)))))
+
 (defun region-form (instructions)
   "A function of the machine, the image and an IP in INSTRUCTIONS that
-runs from IP: where to go when control leaves the region."
-  (let ((tags (make-hash-table)))
+runs from IP: where to go when control leaves the region.  With the :vop
+backend, the VM's stack and stack pointer are kept in variables (%STACK
+and %SP), loaded again where an instruction may have changed them
+(vm-vops.lisp)."
+  (let ((tags (make-hash-table))
+	(vop (vop-backend-p)))
     (dolist (i instructions) (setf (gethash (first i) tags) (gensym (format nil "I~D-" (first i)))))
     `(lambda (vm image ip)
        (declare (type vm vm) (fixnum ip) (ignorable image)
-		(optimize (speed 2) (safety ,(if (vop-backend-p) 0 1)) (debug 0) (compilation-speed 0)))
+		(optimize (speed 2) (safety ,(if vop 0 1)) (debug 0) (compilation-speed 0)))
        (block region
-	 (tagbody
-	  dispatch
-	    (case ip
-	      ,@(loop for (ip) in instructions collect `(,ip (go ,(gethash ip tags))))
-	      (t (return-from region ip)))
-	    ,@(loop for (ip op operands next) in instructions
-		    collect (gethash ip tags)
-		    collect `(let ((to ,(instruction-form op ip operands next)))
-			       (cond ((eql to ,next)
-				      ,(if (gethash next tags)
-					   `(go ,(gethash next tags))
-					   `(return-from region to)))
-				     ((typep to 'fixnum) (setq ip to) (go dispatch))
-				     ;; a call or return in the image: on, if
-				     ;; it's in the region
-				     ((and (code-pointer-p to) (eq (code-pointer-image to) image))
-				      (setq ip (code-pointer-word to))
-				      (go dispatch))
-				     (t (return-from region to))))))))))
+	 (let ,(and vop '((%stack (vm-stack vm)) (%sp (vm-sp vm))))
+	   ,@(and vop '((declare (simple-vector %stack) (fixnum %sp))))
+	   (tagbody
+	    dispatch
+	      ,@(and vop '((setq %stack (vm-stack vm) %sp (vm-sp vm))))
+	      (case ip
+		,@(loop for (ip) in instructions collect `(,ip (go ,(gethash ip tags))))
+		(t (return-from region ip)))
+	      ,@(loop for rest on instructions
+		      for (ip op operands next) = (first rest)
+		      collect (gethash ip tags)
+		      collect (if vop
+				  (vop-instruction-form rest tags)
+				  (transfer-form (instruction-form op ip operands next) next tags)))))))))
 
 (defun compile-region (image entry)
   "Translate the region from ENTRY, mark its instructions as entering the
@@ -208,7 +199,8 @@ translation, and return it; or NIL if it can't be compiled."
 		    (handler-case
 			(handler-bind ((warning #'muffle-warning))
 			  (let ((*error-output* (make-broadcast-stream)))
-			    (compile nil (region-form instructions))))
+			    (let ((*region-image* image))
+				      (compile nil (region-form instructions)))))
 		      (error () nil)))))
     (if code
 	(dolist (i instructions)

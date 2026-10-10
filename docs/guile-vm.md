@@ -226,13 +226,50 @@ backend (below).
   `compile-file` into a fasl kept under the cache directory, keyed by the
   image's contents. An installed module's code is translated once (srfi-1:
   58 s the first time, then loaded).
-- **`vop`:** as `jit`, but SBCL-specific (vm-vops.lisp):
+- **`vop`:** as `jit`, but SBCL-specific (vm-vops.lisp; SBCL on arm64,
+  the feature `:pseudoscheme-vops`; elsewhere `vop` is `jit`):
   - regions are compiled at `(safety 0)`, so the VM stack's slots are
     read and written unchecked;
-  - the `add` and `sub` intrinsics are VOPs written for arm64, after the
-    manner of pvk.ca's "SBCL: the ultimate assembly code breadboard". They
-    work on the tagged words themselves (a tag test, `adds`, a branch on
-    overflow), giving NIL for the general case.
+  - the stack and stack pointer are kept in variables of the region's
+    function. Instructions that only read and write slots use them; after
+    any other instruction, or a call out that might run the VM again,
+    they are loaded again;
+  - a comparison and the conditional jump after it are one branch, and
+    jumps, `call-label`, `tail-call-label` and returns into the region
+    go straight to their targets (a call's return address is a constant);
+    frame sizing and the call frame are inline;
+  - most instructions (135 of Guile's 169) are translated inline, by
+    VOPs:
+    - VOPs written for arm64 here, after the manner of pvk.ca's "SBCL:
+      the ultimate assembly code breadboard". They work on the tagged
+      words themselves and give NIL for the general case (the intrinsic,
+      or the handler's code):
+      - Scheme fixnums: `add`, `sub` (also with an immediate, whose
+        tagged word is the instruction's operand), `mul` (`mul`/`smulh`),
+        `quo`, `rem` and `mod` (`sdiv`, `msub`), `logand`, `logior`,
+        `logxor`, `logsub`, and `lsh`/`rsh` with or without an immediate;
+      - unboxed u64s that are fixnums (the sign and tag bits clear, one
+        `tst`): `uadd`, `usub`, `umul`, `ulogand`, `ulogior`,
+        `ulogxor`, `ulogsub`, `ulsh`, `ursh`, `srsh` and their immediate
+        forms;
+      - predicates, as branches: both fixnums, a u64 that is a fixnum,
+        Guile's 62-bit fixnum (`fixnum?`), and an index into a simple
+        vector (its lowtag, widetag and length tested together), which
+        guard the comparisons, the conversions (`untag-fixnum`,
+        `scm->u64`, ...) and `scm-ref`/`scm-set!` on vectors.
+    - SBCL's own VOPs, by typed Lisp: pairs' `car`/`cdr`, flonum
+      arithmetic, characters, the type tests (`char?`, `pair?`,
+      `vector?`, the constants), and raw memory (`u8-ref` through
+      `f64-set!`, a `sap-ref` into a simple octet vector, in bounds).
+    - Constants (`load-u64`, `load-f64`, `load-label`, and
+      `make-non-immediate` once decoded) are decoded when translating;
+      `jtable` is a `case`; `push`, `pop`, `drop`, `receive` and
+      `bind-optionals` size the frame inline.
+    The rest (calls, returns to Lisp, prompts, throws, keyword arguments)
+    run their handlers.
+
+  `tests/guile-vm/vops.lisp` tests each VOP against Lisp's arithmetic,
+  open-coded and called.
 
 All the backends translate the same handler sources, and all four pass
 rtl, rtl-compilation, compiler, numbers, srfi-1 over its `.go`, and the
@@ -243,10 +280,10 @@ on arm64):
 
 | | interpret | jit | aot | vop | Guile 3.0.11 VM | Guile JIT |
 |---|---|---|---|---|---|---|
-| fib 30 | 566 | 67 | 71 | 54 | 61 | 60 |
-| loop 10^6 | 99 | 10.6 | 9.9 | 2.7 | 11.9 | 9.4 |
-| tak 24 16 8 | 456 | 51 | 55 | 44 | 49 | 49 |
-| vector sum 10^6 | 295 | 26.5 | 27.9 | 23.3 | 24.0 | 23.4 |
+| fib 30 | 555 | 68 | 69 | 22 | 60 | 60 |
+| loop 10^6 | 98 | 10.5 | 10.0 | 2.1 | 11.9 | 11.9 |
+| tak 24 16 8 | 451 | 52 | 52 | 21 | 49 | 49 |
+| vector sum 10^6 | 290 | 29.4 | 27.5 | 9.3 | 22.1 | 24.8 |
 
 What made translated code fast:
 - compiling it at speed 2, so that the slot accessors are inlined;
@@ -255,5 +292,6 @@ What made translated code fast:
   allocated on every call);
 - frame sizing on fixnums, inlined.
 
-In `vop`, the VOPs are most of the gain. `(safety 0)` without them gives
-fib 30 69 ms and the loop 9 ms.
+In `vop`, keeping the stack in variables, branching straight from
+comparisons and calls within the region, and the VOPs are the gain
+(fib 30 was 54 ms with only the `add` and `sub` VOPs).
