@@ -23,6 +23,7 @@ bin/pseudoscheme                    # R7RS REPL (,q quits)
 bin/pseudoscheme --r6rs prog.sps a b
 bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
 bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
+bin/pseudoscheme --r4rs prog.scm     # or --ieee, --r3rs, --r2rs, --rrs: the older reports (docs/reports.md)
 bin/pseudoscheme -p '(exact-integer-sqrt 17)'
 bin/pseudoscheme --help
 ```
@@ -126,6 +127,8 @@ src/srfi/            -- SRFI libraries, mostly reference implementations
 src/chez/            -- Chez Scheme: (chezscheme), its top level
                         (--chez), threads, the FFI on CFFI
                         (docs/chez.md)
+src/reports/         -- the older Revised Reports as languages (--r4rs,
+                        --ieee, --r3rs, --r2rs, --rrs; docs/reports.md)
 src/guile/           -- Guile (--guile): libguile in Lisp, a Tree-IL
                         compiler, Guile's own boot-9 and modules loaded
                         from a Guile installation (docs/guile.md); and

@@ -262,6 +262,10 @@
 	       (:module "chez" :pathname "../chez/"
 		:depends-on ("front")
 		:components ((:file "chez")))
+	       (:module "reports" :pathname "../reports/"
+		:depends-on ("front" "chez")
+		:components ((:file "reports")
+			     (:static-file "reports.sls") (:static-file "rrs.sls")))
 	       (:module "guile" :pathname "../guile/"
 		:depends-on ("front")
 		:components ((:file "guile")

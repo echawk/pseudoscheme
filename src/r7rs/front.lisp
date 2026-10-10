@@ -429,6 +429,7 @@ cond-expand.")
 		  unless (equal (mapcar #'sname* name) '("scheme" "r5rs"))
 		    collect (format nil "(~{~(~A~)~^ ~})" (mapcar #'sname* name))))))
   (install-chez-libraries)		; src/chez/chez.lisp
+  (install-report-libraries)		; src/reports/reports.lisp
   (install-ikarus-library)
   (psx:eval-library (read-scheme *pseudoscheme-r5rs-library*))
   ;; the interaction libraries of the R7RS REPL, and of R5RS on psyntax
@@ -546,7 +547,8 @@ R7RS REPL's."
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
 	(top-level (current-top-level))
 	(value ps:unspecific))
-    (dolist (form (read-forms path :fold-case (eq top-level :r5rs)) value)
+    (dolist (form (read-forms path :fold-case (or (eq top-level :r5rs) (report-keyword-p top-level)))
+		  value)
       (setq value (eval-at-top-level top-level form)))))
 
 (defun load-file (path)
@@ -583,13 +585,15 @@ and eval in the interaction environment should be too)?"
 also the default)."
   (cond ((at-r5rs-repl-p) :r5rs)
 	((at-chez-top-level-p) :chez)	; src/chez/chez.lisp
+	((at-report-top-level-p))	; src/reports/reports.lisp
 	(t :r7rs)))
 
 (defun eval-at-top-level (top-level form)
-  (ecase top-level
+  (case top-level
     (:r5rs (eval-at-r5rs-repl form))
     (:chez (eval-at-chez-top-level form))
-    (:r7rs (eval-at-repl form))))
+    (:r7rs (eval-at-repl form))
+    (t (eval-at-report-top-level top-level form))))
 
 (defun eval-at-current-repl (form)
   "Evaluate FORM at the top level we're at (see CURRENT-TOP-LEVEL)."

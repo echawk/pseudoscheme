@@ -5,7 +5,7 @@
 SBCL ?= sbcl
 
 .PHONY: bootstrap bootstrap-all bootstrap-pso bootstrap-psyntax bootstrap-check clean \
-	test test-escape test-cli test-srfi test-programs test-guile test-all precompile-srfi
+	test test-reports test-escape test-cli test-srfi test-programs test-guile test-all precompile-srfi
 
 # Tests.  `make test` runs every suite in the default mode (full
 # continuations, src/continuations.lisp); `make test-escape` the
@@ -22,7 +22,7 @@ SBCL ?= sbcl
 SCHEME_RUN = PSEUDOSCHEME_LIBRARY_CACHE=0 $(SBCL) --dynamic-space-size 4GB \
 	--control-stack-size 500MB --script
 
-SUITES = syntax-case library interop srfi-system r5rs r7rs r6rs continuation
+SUITES = syntax-case library interop srfi-system r5rs r7rs r6rs continuation reports
 
 test:
 	@# one run first, so ASDF compiles whatever is stale once
@@ -32,6 +32,11 @@ test:
 	  grep -hE "tests passed|of [0-9]+ tests" /tmp/pseudoscheme-test-$$t.log \
 	    || { echo "$$t: no result; see /tmp/pseudoscheme-test-$$t.log"; exit 1; }; \
 	done
+
+# The older reports' conformance tests (tests/reports/, docs/reports.md),
+# R4RS, IEEE 1178, R3RS, R2RS and the Revised Report; REPORTS="r4rs r2rs" for some.
+test-reports:
+	@$(SCHEME_RUN) tests/run-reports-tests.lisp $(REPORTS)
 
 test-escape:
 	@for t in r5rs r7rs r6rs; do \

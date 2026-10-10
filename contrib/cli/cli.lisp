@@ -28,6 +28,10 @@
   --r7rs           R7RS-small (the default)
   --r6rs           R6RS, expanded by psyntax
   --r5rs           R5RS: (scheme r5rs), with a case-folding reader
+  --r4rs, --ieee, --r3rs, --r2rs, --rrs
+                   the older reports, each with exactly its names: R4RS,
+                   IEEE 1178-1990, R3RS, R2RS, the 1978 Revised Report
+                   (docs/reports.md)
   --chez           Chez Scheme: FILE runs as a Chez script, at a top level
                    with (chezscheme)'s bindings (docs/chez.md); run as
                    scheme-script, this program is --chez
@@ -98,6 +102,11 @@ definition holds for the next -e too); the last one's values."
     (:r7rs (pseudoscheme-api::r7rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
     (:r6rs (pseudoscheme-api::r6rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
     (:r5rs (r5rs:eval text))
+    ((:r4rs :ieee :r3rs :r2rs :rrs)
+     (pseudoscheme-api::ensure-psyntax)
+     (let ((values (list ps:unspecific)) (ps:*fold-case* t))
+       (dolist (form (pseudoscheme-api:read-scheme-forms text) (values-list values))
+	 (setq values (multiple-value-list (ps-r7rs::eval-at-report-top-level *standard* form))))))
     (:guile (psg:eval-string text))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (let ((values (list ps:unspecific)))
@@ -109,6 +118,9 @@ definition holds for the next -e too); the last one's values."
     (:r7rs (r7rs:load path))
     (:r6rs (r6rs:load path))
     (:r5rs (r5rs:load path))
+    ((:r4rs :ieee :r3rs :r2rs :rrs)
+     (pseudoscheme-api::ensure-psyntax)
+     (ps-r7rs::load-file-at-report-top-level *standard* path))
     (:guile (psg:load-file path))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (ps-r7rs::load-file-at-chez-top-level path))))
@@ -146,6 +158,9 @@ skipped when FILE is read."
 	   (ecase *standard*
 	     (:r5rs (r5rs:load file)
 		    (r5rs:eval (format nil "(main '~A)" (pseudoscheme-api:write-to-string args))))
+	     ((:r4rs :ieee :r3rs :r2rs :rrs)
+	      (run-file file)
+	      (evaluate-string (format nil "(main '~A)" (pseudoscheme-api:write-to-string args))))
 	     (:r7rs (pseudoscheme-api::ensure-psyntax)
 		    (let ((ps-r7rs::*include-directory*
 			    (make-pathname :name nil :type nil :defaults (pathname file))))
@@ -164,7 +179,7 @@ skipped when FILE is read."
 ;;; SRFI 22's script interpreters: this program, run as one of these
 ;;; names (a link to it, say), is FILE ARG ... and calls FILE's main.
 (defparameter *script-interpreters*
-  '(("scheme-r4rs" . :r5rs) ("scheme-r5rs" . :r5rs) ("scheme-ieee-1178-1990" . :r5rs)
+  '(("scheme-r4rs" . :r4rs) ("scheme-r5rs" . :r5rs) ("scheme-ieee-1178-1990" . :ieee)
     ("scheme-srfi-0" . :r5rs) ("scheme-r6rs" . :r6rs) ("scheme-r7rs" . :r7rs)
     ;; Chez Scheme's script interpreter (its scripts have no main)
     ("scheme-script" . :chez)))
@@ -247,6 +262,12 @@ proportion (ps:limit-thread-stack-size)."
     (:r7rs (r7rs:repl))
     (:r6rs (r6rs:repl))
     (:r5rs (r5rs:repl))
+    ((:r4rs :ieee :r3rs :r2rs :rrs)
+     (pseudoscheme-api::ensure-psyntax)
+     (let ((ps:*fold-case* t))
+       (pseudoscheme-api::repl-loop
+	(lambda (form) (ps-r7rs::eval-at-report-top-level *standard* form))
+	:prompt (format nil "~(~A~)> " *standard*))))
     (:guile (psg:repl))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (pseudoscheme-api::repl-loop (lambda (form) (ps-r7rs::eval-at-chez-top-level form))
@@ -294,6 +315,11 @@ list of (:eval text) / (:print text)."
 		((string= a "--r7rs") (setq *standard* :r7rs))
 		((string= a "--r6rs") (setq *standard* :r6rs))
 		((string= a "--r5rs") (setq *standard* :r5rs))
+		((string= a "--r4rs") (setq *standard* :r4rs))
+		((member a '("--ieee" "--ieee-1178") :test #'string=) (setq *standard* :ieee))
+		((string= a "--r3rs") (setq *standard* :r3rs))
+		((string= a "--r2rs") (setq *standard* :r2rs))
+		((string= a "--rrs") (setq *standard* :rrs))
 		((string= a "--chez") (setq *standard* :chez))
 		((string= a "--guile") (setq *standard* :guile))
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
@@ -407,7 +433,7 @@ is reported, and the program runs anyway."
     (when file
       (setf ps-r7rs:*script-file*
             (namestring (merge-pathnames (uiop:parse-native-namestring file) (uiop:getcwd)))))
-    (when (eq *standard* :r5rs) (setf ps:*fold-case* t))
+    (when (member *standard* '(:r5rs :r4rs :ieee :r3rs :r2rs :rrs)) (setf ps:*fold-case* t))
     (handler-bind ((serious-condition
 		     (lambda (e)
 		       (if (interrupt-p e)

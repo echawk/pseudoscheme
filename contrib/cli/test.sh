@@ -15,6 +15,10 @@ trap 'rm -rf $tmp' EXIT
 check "r7rs -p" "6" $PS -p '(+ 1 2 3)'
 check "r6rs -p" "(1 2 3)" $PS --r6rs -p '(list-sort < (list 3 1 2))'
 check "r5rs folds case" "#t" $PS --r5rs -p "(eq? 'abc 'ABC)"
+check "r4rs: no values" "ERR" sh -c "$PS --r4rs -p '(values 1)' >/dev/null 2>&1 && echo OK || echo ERR"
+check "r3rs: the empty list is false" "2" $PS --r3rs -p "(if '() 1 2)"
+check "r2rs: #!true and 1+" "(#t 5)" $PS --r2rs -p "(list #!true (1+ 4))"
+check "rrs: block and aset" "5" $PS --rrs -p "(block (define x 1) (aset' x 5) x)"
 check "r7rs is case-sensitive" "#f" $PS -p "(eq? 'abc 'ABC)"
 
 # R5RS's load and eval in the interaction environment are at R5RS's
