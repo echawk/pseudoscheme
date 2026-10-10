@@ -392,7 +392,16 @@ as an exact rational."
 (defun parse-ureal (s start end radix)
   "Returns the value and whether it is inexact by default."
   (let ((slash (position #\/ s :start start :end end)))
-    (cond (slash
+    (cond ((find #\# s :start start :end end)
+	   (parse-hashed-ureal s start end radix))
+	  ((and slash (= radix 10)
+		(find-if #'exponent-marker-p s :start (1+ slash) :end end))
+	   ;; Chez Scheme's 1/5e4: the exponent scales the ratio
+	   (let* ((e (position-if #'exponent-marker-p s :start (1+ slash) :end end))
+		  (ratio (parse-ureal s start e radix))
+		  (scale (parse-decimal (concatenate 'string "1" (subseq s e end)) 0 (- (1+ end) e))))
+	     (and ratio scale (values (* ratio scale) t))))
+	  (slash
 	   (let ((n (parse-uinteger s start slash radix))
 		 (d (parse-uinteger s (1+ slash) end radix)))
 	     (and n d (not (zerop d)) (values (/ n d) nil))))
@@ -405,7 +414,70 @@ as an exact rational."
 	  ((and (= radix 16)
 		(find-if (lambda (c) (or (char= c #\.) (char-equal c #\p))) s :start start :end end))
 	   (let ((v (parse-hex-float s start end)))
+	     (and v (values v t))))
+	  ((and (< radix 10)
+		(find-if (lambda (c) (or (char= c #\.) (char-equal c #\e))) s :start start :end end))
+	   (let ((v (parse-radix-float s start end radix)))
 	     (and v (values v t)))))))
+
+(defun parse-hashed-ureal (s start end radix)
+  "R4RS's 98##: a # for each unknown trailing digit, read as 0, which
+makes the number inexact.  A #'s only followers in its part (before a /
+or exponent) are #'s and a point.  0/0# is +nan.0; a denominator of 0
+written without a # is no number."
+  (let ((slash (position #\/ s :start start :end end)))
+    (flet ((valid-part-p (a b)
+	     (let ((seen-digit nil) (seen-hash nil))
+	       (loop for i from a below b
+		     for c = (char s i)
+		     do (cond ((and (= radix 10) (exponent-marker-p c)) (return))
+			      ((char= c #\#)
+			       (unless seen-digit (return-from valid-part-p nil))
+			       (setq seen-hash t))
+			      ((digit-char-p c radix)
+			       (when seen-hash (return-from valid-part-p nil))
+			       (setq seen-digit t))))
+	       t))
+	   (plain (a b) (substitute #\0 #\# (subseq s a b))))
+      (if slash
+	  (when (and (valid-part-p start slash) (valid-part-p (1+ slash) end))
+	    (let* ((n (parse-ureal (plain start slash) 0 (- slash start) radix))
+		   (dtext (plain (1+ slash) end))
+		   (d (parse-uinteger dtext 0 (length dtext) radix)))
+	      (cond ((null n) nil)
+		    ((and d (zerop d))
+		     (and (find #\# s :start (1+ slash) :end end)
+			  (values (if (zerop n) +nan+ +inf+) t)))
+		    (t (let ((v (parse-ureal (concatenate 'string (plain start (1+ slash)) dtext)
+					     0 (+ (- slash start) 1 (length dtext)) radix)))
+			 (and v (values v t)))))))
+	  (when (valid-part-p start end)
+	    (let ((v (parse-ureal (plain start end) 0 (- end start) radix)))
+	      (and v (values v t))))))))
+
+(defun parse-radix-float (s start end radix)
+  "Chez Scheme's #b1.01e11: digits with a point and an exponent, both in
+RADIX (below 10), as an exact rational; or NIL."
+  (let* ((e (position-if (lambda (c) (char-equal c #\e)) s :start start :end end))
+	 (mantissa-end (or e end))
+	 (point (position #\. s :start start :end mantissa-end))
+	 (whole (if point
+		    (concatenate 'string (subseq s start point) (subseq s (1+ point) mantissa-end))
+		    (subseq s start mantissa-end)))
+	 (fraction-digits (if point (- mantissa-end point 1) 0)))
+    (when (and (plusp (length whole))
+	       (every (lambda (c) (digit-char-p c radix)) whole))
+      (let ((exponent (if e
+			  (let* ((i (1+ e))
+				 (sign (if (and (< i end) (member (char s i) '(#\+ #\-)))
+					   (prog1 (if (char= (char s i) #\-) -1 1) (incf i))
+					   1))
+				 (n (parse-uinteger s i end radix)))
+			    (and n (* sign n)))
+			  0)))
+	(when exponent
+	  (* (parse-integer whole :radix radix)
+	     (expt radix (- exponent fraction-digits))))))))
 
 (defun parse-real (s start end radix)
   "Returns value and inexact-by-default-p, or NIL."
@@ -486,6 +558,10 @@ follow an exponent marker."
 
 (defun parse-scheme-number (string &optional (radix 10))
   "The number STRING denotes, or NIL (STRING->NUMBER)."
+  ;; Number syntax is ASCII: CL's DIGIT-CHAR-P would take Unicode's
+  ;; other digits (٦, ...), which are no number's
+  (when (find-if (lambda (c) (>= (char-code c) 128)) string)
+    (return-from parse-scheme-number nil))
   (let ((start 0) (end (length string)) (exactness nil) (radix radix) (radix-prefix nil))
     (loop while (and (< (1+ start) end) (char= (char string start) #\#))
 	  do (case (char-downcase (char string (1+ start)))
@@ -495,6 +571,15 @@ follow an exponent marker."
 		(setq radix-prefix t
 		      radix (ecase (char-downcase (char string (1+ start)))
 			      (#\x 16) (#\b 2) (#\o 8) (#\d 10))))
+	       ;; Chez Scheme's #32r: radix 32
+	       ((#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9)
+		(let* ((r (position-if-not #'digit-char-p string :start (1+ start)))
+		       (n (and r (char-equal (char string r) #\r)
+			       (parse-integer string :start (1+ start) :end r))))
+		  (when (or radix-prefix (null n) (not (<= 2 n 36)))
+		    (return-from parse-scheme-number nil))
+		  (setq radix-prefix t radix n)
+		  (setq start (- r 1))))
 	       (#\e (if exactness (return-from parse-scheme-number nil) (setq exactness :exact)))
 	       (#\i (if exactness (return-from parse-scheme-number nil) (setq exactness :inexact)))
 	       (t (return-from parse-scheme-number nil)))

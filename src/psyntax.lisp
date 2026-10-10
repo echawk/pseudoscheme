@@ -109,6 +109,20 @@ built-ins but whose value the R6RS/R7RS layers replaced: OPEN-PRIMITIVES
 must leave them as (primitive x), or the translator would open-code the
 old built-in.")
 
+(defparameter *extended-primitives* '()
+  "(name min max): closed primitives (see *CLOSED-PRIMITIVES*) whose new
+value is an extension of the built-in that agrees with it when called
+with MIN to MAX (NIL: any number of) arguments, as Chez's variadic fx+
+does.  OPEN-PRIMITIVES still opens such calls, so they stay open-coded.")
+
+(defun open-call-of-extended-primitive-p (form)
+  (let ((f (car form)))
+    (and (consp f) (symbolp (car f)) (string= (symbol-name (car f)) "PRIMITIVE")
+	 (consp (cdr f)) (symbolp (cadr f)) (null (cddr f))
+	 (let ((entry (assoc (ps:scheme-symbol-name (cadr f)) *extended-primitives* :test #'string=))
+	       (n (and (listp (cdr form)) (length (cdr form)))))
+	   (and entry n (<= (second entry) n) (or (null (third entry)) (<= n (third entry))))))))
+
 (defun open-primitives (form)
   "FORM with each (primitive x) replaced by a reference to x (see
 OPEN-PRIMITIVES-1), and its internal definitions made letrecs (see
@@ -124,6 +138,8 @@ psyntax renames every user variable: nothing in its output can shadow a
 host global."
   (cond ((atom form) form)
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "QUOTE")) form)
+	((open-call-of-extended-primitive-p form)
+	 (cons (cadr (car form)) (mapcar #'open-primitives-1 (cdr form))))
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
 	      (not (member (ps:scheme-symbol-name (cadr form)) *closed-primitives* :test #'string=)))

@@ -50,7 +50,7 @@
          (LET ((FORM (SUB-READ PORT)))
            (IF (TRUEP (READER-TOKEN? FORM))
                (READING-ERROR PORT (CDR (THE CONS FORM)))
-               FORM))))))
+               (DATUM-OF FORM)))))))
 (SET-VALUE-FROM-FUNCTION 'SCHEME-READ 'SCHEME::SCHEME-READ)
 (DEFUN SUB-READ-CAREFULLY (PORT)
   (LET ((FORM (SUB-READ PORT)))
@@ -58,8 +58,16 @@
         (READING-ERROR PORT "unexpected end of file")
         (IF (TRUEP (READER-TOKEN? FORM))
             (READING-ERROR PORT (CDR (THE CONS FORM)))
-            FORM))))
+            (DATUM-OF FORM)))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-CAREFULLY 'SCHEME::SUB-READ-CAREFULLY)
+(LOCALLY
+  (DECLARE (SPECIAL EOF-DATUM))
+  (SETQ EOF-DATUM (LIST 'SCHEME::EOF-DATUM)))
+(SET-FUNCTION-FROM-VALUE 'EOF-DATUM 'SCHEME::EOF-DATUM)
+(DEFUN DATUM-OF (FORM)
+  (DECLARE (SPECIAL EOF-DATUM))
+  (IF (EQ FORM EOF-DATUM) EOF-OBJECT FORM))
+(SET-VALUE-FROM-FUNCTION 'DATUM-OF 'SCHEME::DATUM-OF)
 (LOCALLY
   (DECLARE (SPECIAL READER-TOKEN-MARKER))
   (SETQ READER-TOKEN-MARKER (LIST 'SCHEME::READER-TOKEN)))
@@ -76,6 +84,26 @@
   (DECLARE (SPECIAL CLOSE-PAREN))
   (SETQ CLOSE-PAREN (MAKE-READER-TOKEN "unexpected right parenthesis")))
 (SET-FUNCTION-FROM-VALUE 'CLOSE-PAREN 'SCHEME::CLOSE-PAREN)
+(LOCALLY
+  (DECLARE (SPECIAL CLOSE-BRACKET))
+  (SETQ CLOSE-BRACKET (MAKE-READER-TOKEN "unexpected right bracket")))
+(SET-FUNCTION-FROM-VALUE 'CLOSE-BRACKET 'SCHEME::CLOSE-BRACKET)
+(DEFUN CLOSES? (FORM C PORT)
+  (DECLARE (SPECIAL CLOSE-BRACKET CLOSE-PAREN))
+  (IF (NOT (OR (EQ FORM CLOSE-PAREN) (EQ FORM CLOSE-BRACKET)))
+      FALSE
+      (IF (NOT (CHEZ-READER-P))
+          TRUE
+          (IF (AND (EQL C #\() (EQ FORM CLOSE-BRACKET))
+              (READING-ERROR
+               PORT
+               "parenthesized list terminated by close bracket")
+              (IF (AND (EQL C #\[) (EQ FORM CLOSE-PAREN))
+                  (READING-ERROR
+                   PORT
+                   "bracketed list terminated by close parenthesis")
+                  TRUE)))))
+(SET-VALUE-FROM-FUNCTION 'CLOSES? 'SCHEME::CLOSES?)
 (LOCALLY
   (DECLARE (SPECIAL DOT))
   (SETQ DOT (MAKE-READER-TOKEN "unexpected \" . \"")))
@@ -161,34 +189,34 @@
  'SET-STANDARD-READ-MACRO!
  'SCHEME::SET-STANDARD-READ-MACRO!)
 (DEFUN SUB-READ-LIST (C PORT)
-  (DECLARE (SPECIAL DOT CLOSE-PAREN))
+  (DECLARE (SPECIAL DOT))
   (LET ((FORM (SUB-READ PORT)))
     (IF (EQ FORM EOF-OBJECT)
         (READING-ERROR PORT "end of file inside list -- unbalanced parentheses")
-        (IF (EQ FORM CLOSE-PAREN)
+        (IF (TRUEP (CLOSES? FORM C PORT))
             'NIL
             (IF (EQ FORM DOT)
                 (READING-ERROR PORT "nothing before \" . \" in a list")
-                (CONS FORM (SUB-READ-LIST-TAIL C PORT)))))))
+                (CONS (DATUM-OF FORM) (SUB-READ-LIST-TAIL C PORT)))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-LIST 'SCHEME::SUB-READ-LIST)
 (DEFUN SUB-READ-LIST-TAIL (C PORT)
-  (DECLARE (SPECIAL DOT CLOSE-PAREN))
+  (DECLARE (SPECIAL DOT))
   (LET ((FORM (SUB-READ PORT)))
     (IF (EQ FORM EOF-OBJECT)
         (READING-ERROR PORT "end of file inside list -- unbalanced parentheses")
-        (IF (EQ FORM CLOSE-PAREN)
+        (IF (TRUEP (CLOSES? FORM C PORT))
             'NIL
             (IF (EQ FORM DOT)
                 (LET ((LAST-FORM (SUB-READ-CAREFULLY PORT)))
                   (LET ((ANOTHER-FORM (SUB-READ PORT)))
                     (LET NIL
-                      (IF (EQ ANOTHER-FORM CLOSE-PAREN)
+                      (IF (TRUEP (CLOSES? ANOTHER-FORM C PORT))
                           LAST-FORM
                           (READING-ERROR
                            PORT
                            "randomness after form after dot"
                            ANOTHER-FORM)))))
-                (CONS FORM (SUB-READ-LIST-TAIL C PORT)))))))
+                (CONS (DATUM-OF FORM) (SUB-READ-LIST-TAIL C PORT)))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-LIST-TAIL 'SCHEME::SUB-READ-LIST-TAIL)
 (LOCALLY
   (DECLARE (SPECIAL SUB-READ-LIST))
@@ -198,8 +226,8 @@
   (SET-STANDARD-READ-MACRO! #\[ TRUE SUB-READ-LIST))
 (AT-TOP-LEVEL
   (LOCALLY
-    (DECLARE (SPECIAL CLOSE-PAREN))
-    (SET-STANDARD-READ-MACRO! #\] TRUE #'(LAMBDA (C PORT) C PORT CLOSE-PAREN))))
+    (DECLARE (SPECIAL CLOSE-BRACKET))
+    (SET-STANDARD-READ-MACRO! #\] TRUE #'(LAMBDA (C PORT) C PORT CLOSE-BRACKET))))
 (AT-TOP-LEVEL
   (SET-STANDARD-READ-MACRO!
    #\{
@@ -253,22 +281,22 @@
                 (EVERY-OTHER (CDR (THE CONS (CDR (THE CONS ES)))))))))
 (SET-VALUE-FROM-FUNCTION 'EVERY-OTHER 'SCHEME::EVERY-OTHER)
 (DEFUN SUB-READ-ARGUMENTS (C PORT)
-  (DECLARE (SPECIAL CLOSE-PAREN DOT))
+  (DECLARE (SPECIAL DOT))
   (LET ((FORM (SUB-READ PORT)))
     (IF (EQ FORM DOT)
         (LET ((TAIL (SUB-READ-CAREFULLY PORT)))
           (LET ((.CLOSE (SUB-READ PORT)))
             (LET NIL
-              (IF (EQ .CLOSE CLOSE-PAREN)
+              (IF (TRUEP (CLOSES? .CLOSE C PORT))
                   TAIL
                   (READING-ERROR PORT "randomness after form after dot" .CLOSE)))))
         (IF (EQ FORM EOF-OBJECT)
             (READING-ERROR
              PORT
              "end of file inside list -- unbalanced parentheses")
-            (IF (EQ FORM CLOSE-PAREN)
+            (IF (TRUEP (CLOSES? FORM C PORT))
                 'NIL
-                (CONS FORM (SUB-READ-LIST-TAIL C PORT)))))))
+                (CONS (DATUM-OF FORM) (SUB-READ-LIST-TAIL C PORT)))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-ARGUMENTS 'SCHEME::SUB-READ-ARGUMENTS)
 (DEFUN NEOTERIC-SUFFIXES (FORM PORT)
   (LET ((C (.PEEK-CHAR PORT)))
@@ -469,6 +497,26 @@
                            (CHAR-DOWNCASE .C.0))))
              (LET ((PROBE (TRUE? (ASSOC .C.1 *SHARP-MACROS* :TEST #'EQ))))
                (LET NIL
+                 (IF (AND (TRUEP (R6RS-STRICT? PORT))
+                          (NOT (MEMBER .C.1
+                                       '(#\(
+                                         #\t
+                                         #\f
+                                         #\\
+                                         #\;
+                                         #\|
+                                         #\!
+                                         #\'
+                                         #\`
+                                         #\,
+                                         #\v
+                                         #\x
+                                         #\b
+                                         #\o
+                                         #\d
+                                         #\e
+                                         #\i))))
+                     (NOT-IN-R6RS PORT (.STRING #\# .C.1)))
                  (IF (TRUEP PROBE)
                      (FUNCALL (CDR (THE CONS PROBE)) .C.1 PORT)
                      (READING-ERROR PORT "unknown # syntax" .C.1))))))))))
@@ -476,6 +524,9 @@
   #'(LAMBDA (C PORT)
       C
       (LET ((NAME (CAR (THE CONS (SUB-READ-TOKEN (.READ-CHAR PORT) PORT)))))
+        (IF (AND (SCHEME> (LENGTH (THE SIMPLE-STRING NAME)) 1)
+                 (TRUEP (R6RS-STRICT? PORT)))
+            (NOT-IN-R6RS PORT "alternative boolean"))
         (IF (OR (SCHEME= (LENGTH (THE SIMPLE-STRING NAME)) 1)
                 (STRING= (STRING-DOWNCASE NAME) LONG-NAME))
             VALUE
@@ -497,23 +548,35 @@
                      (READING-ERROR PORT "unknown # syntax" NAME)))))))))
 (DEFINE-SHARP-MACRO #\t (SHARP-BOOLEAN TRUE "true"))
 (AT-TOP-LEVEL
-  (DEFINE-SHARP-MACRO
-   #\!
-   #'(LAMBDA (C PORT)
-       (.READ-CHAR PORT)
-       (LET ((NAME (STRING-DOWNCASE
-                    (CAR (THE CONS (SUB-READ-TOKEN (.READ-CHAR PORT) PORT))))))
-         (IF (OR (STRING= NAME "fold-case") (STRING= NAME "no-fold-case"))
-             (SET-PORT-FOLD-CASE PORT (STRING= NAME "fold-case")))
-         (IF (OR (STRING= NAME "srfi-88") (STRING= NAME "no-srfi-88"))
-             (SET-PORT-KEYWORDS PORT (STRING= NAME "srfi-88")))
-         (IF (STRING= NAME "eof")
-             EOF-OBJECT
-             (LET ((READER (READER-DIRECTIVE PORT NAME)))
-               (IF (TRUEP READER)
-                   (CALL-ALTERNATIVE-READER READER PORT)
-                   (SUB-READ PORT))))))))
+  (LOCALLY
+    (DECLARE (SPECIAL EOF-DATUM))
+    (DEFINE-SHARP-MACRO
+     #\!
+     #'(LAMBDA (C PORT)
+         (.READ-CHAR PORT)
+         (LET ((NAME (STRING-DOWNCASE
+                      (CAR (THE CONS (SUB-READ-TOKEN (.READ-CHAR PORT) PORT))))))
+           (IF (OR (STRING= NAME "fold-case") (STRING= NAME "no-fold-case"))
+               (SET-PORT-FOLD-CASE PORT (STRING= NAME "fold-case")))
+           (IF (OR (STRING= NAME "srfi-88") (STRING= NAME "no-srfi-88"))
+               (SET-PORT-KEYWORDS PORT (STRING= NAME "srfi-88")))
+           (IF (OR (STRING= NAME "r6rs") (STRING= NAME "chezscheme"))
+               (SET-PORT-R6RS PORT (STRING= NAME "r6rs")))
+           (IF (AND (TRUEP (R6RS-STRICT? PORT))
+                    (MEMBER NAME '("eof" "bwp") :TEST #'SCHEME-EQUAL-P))
+               (NOT-IN-R6RS PORT (STRING-APPEND "#!" NAME)))
+           (IF (STRING= NAME "eof")
+               EOF-DATUM
+               (LET ((READER (READER-DIRECTIVE PORT NAME)))
+                 (IF (TRUEP READER)
+                     (CALL-ALTERNATIVE-READER READER PORT)
+                     (SUB-READ PORT)))))))))
+(LOCALLY
+  (DECLARE (SPECIAL VECTOR-LENGTH-LIMIT))
+  (SETQ VECTOR-LENGTH-LIMIT (SCHEME-EXPT 2 32)))
+(SET-FUNCTION-FROM-VALUE 'VECTOR-LENGTH-LIMIT 'SCHEME::VECTOR-LENGTH-LIMIT)
 (DEFUN SUB-READ-DATUM-LABEL (C PORT)
+  (DECLARE (SPECIAL VECTOR-LENGTH-LIMIT))
   C
   (PROG (.N.0)
     (SETQ .N.0 0)
@@ -537,43 +600,46 @@
                     (IF (CHAR= D #\#)
                         (RETURN (DATUM-LABEL-REFERENCE PORT N))
                         (IF (CHAR= D #\()
-                            (LET ((ELEMENTS (SUB-READ-LIST C PORT)))
-                              (IF (SCHEME> (LENGTH ELEMENTS) N)
-                                  (READING-ERROR
-                                   PORT
-                                   "too many elements for the vector's length"
-                                   N))
-                              (LET ((V (MAKE-VECTOR N
-                                                    (PROG (L)
-                                                      (SETQ L ELEMENTS)
-                                                      (GO .LAST)
-                                                      .LAST
-                                                      (IF (NULL L)
-                                                          (RETURN 0)
-                                                          (IF (NULL (CDR (THE CONS
-                                                                              L)))
-                                                              (RETURN (CAR (THE CONS
+                            (PROGN
+                              (IF (SCHEME> N VECTOR-LENGTH-LIMIT)
+                                  (READING-ERROR PORT "invalid vector length" N))
+                              (LET ((ELEMENTS (SUB-READ-LIST C PORT)))
+                                (IF (SCHEME> (LENGTH ELEMENTS) N)
+                                    (READING-ERROR
+                                     PORT
+                                     "too many elements for the vector's length"
+                                     N))
+                                (LET ((V (MAKE-VECTOR N
+                                                      (PROG (L)
+                                                        (SETQ L ELEMENTS)
+                                                        (GO .LAST)
+                                                        .LAST
+                                                        (IF (NULL L)
+                                                            (RETURN 0)
+                                                            (IF (NULL (CDR (THE CONS
                                                                                 L)))
-                                                              (PROGN
-                                                                (SETQ L
-                                                                      (CDR (THE CONS
-                                                                                L)))
-                                                                (GO .LAST))))))))
-                                (RETURN (PROG (I L)
-                                          (PSETQ I 0 L ELEMENTS)
-                                          (GO |.loop.153|)
-                                          |.loop.153|
-                                          (IF (NULL L)
-                                              (RETURN V)
-                                              (PROGN
-                                                (SETF (SVREF V I)
-                                                      (CAR (THE CONS L)))
-                                                UNSPECIFIC
-                                                (PSETQ I
-                                                       (SCHEME+ I 1)
-                                                       L
-                                                       (CDR (THE CONS L)))
-                                                (GO |.loop.153|)))))))
+                                                                (RETURN (CAR (THE CONS
+                                                                                  L)))
+                                                                (PROGN
+                                                                  (SETQ L
+                                                                        (CDR (THE CONS
+                                                                                  L)))
+                                                                  (GO .LAST))))))))
+                                  (RETURN (PROG (I L)
+                                            (PSETQ I 0 L ELEMENTS)
+                                            (GO |.loop.162|)
+                                            |.loop.162|
+                                            (IF (NULL L)
+                                                (RETURN V)
+                                                (PROGN
+                                                  (SETF (SVREF V I)
+                                                        (CAR (THE CONS L)))
+                                                  UNSPECIFIC
+                                                  (PSETQ I
+                                                         (SCHEME+ I 1)
+                                                         L
+                                                         (CDR (THE CONS L)))
+                                                  (GO |.loop.162|))))))))
                             (IF (CHAR= D #\%)
                                 (RETURN (LIST 'SCHEME::$PRIMITIVE
                                               N
@@ -597,80 +663,101 @@
                                                          PORT
                                                          "bad number"
                                                          TOKEN)))))))
-                                    (IF (CHAR= D #\v)
-                                        (LET ((A (.READ-CHAR PORT)))
-                                          (LET ((B (.READ-CHAR PORT)))
-                                            (LET NIL
-                                              (IF (NOT (EQL (.READ-CHAR PORT)
-                                                            #\())
+                                    (IF (AND (CHAR= D #\v)
+                                             (EQL (.PEEK-CHAR PORT) #\s))
+                                        (PROGN
+                                          (.READ-CHAR PORT)
+                                          (IF (NOT (EQL (.READ-CHAR PORT) #\())
+                                              (READING-ERROR
+                                               PORT
+                                               "bad #vs syntax"))
+                                          (RETURN (MAKE-STENCIL-VECTOR
+                                                   N
+                                                   (SUB-READ-LIST C PORT))))
+                                        (IF (CHAR= D #\v)
+                                            (PROGN
+                                              (IF (SCHEME> N
+                                                           VECTOR-LENGTH-LIMIT)
                                                   (READING-ERROR
                                                    PORT
-                                                   "bad #v syntax"))
-                                              (LET ((ELEMENTS (SUB-READ-LIST
-                                                               C
-                                                               PORT)))
-                                                (LET ((.FILL (PROG (L)
-                                                               (SETQ L ELEMENTS)
-                                                               (GO .LAST)
-                                                               .LAST
-                                                               (IF (NULL L)
-                                                                   (RETURN 0)
-                                                                   (IF (NULL (CDR (THE CONS
-                                                                                       L)))
-                                                                       (RETURN (CAR (THE CONS
-                                                                                         L)))
-                                                                       (PROGN
-                                                                         (SETQ L
-                                                                               (CDR (THE CONS
-                                                                                         L)))
-                                                                         (GO .LAST)))))))
-                                                  (LET ((.ELEMENTS.1 (PROG (L K)
-                                                                       (PSETQ L
-                                                                              ELEMENTS
-                                                                              K
-                                                                              (LENGTH ELEMENTS))
-                                                                       (GO PAD)
-                                                                       PAD
-                                                                       (IF (SCHEME< K
-                                                                                    N)
-                                                                           (PROGN
+                                                   "invalid vector length"
+                                                   N))
+                                              (LET ((A (.READ-CHAR PORT)))
+                                                (LET ((B (.READ-CHAR PORT)))
+                                                  (LET NIL
+                                                    (IF (NOT (EQL (.READ-CHAR PORT)
+                                                                  #\())
+                                                        (READING-ERROR
+                                                         PORT
+                                                         "bad #v syntax"))
+                                                    (LET ((ELEMENTS (SUB-READ-LIST
+                                                                     C
+                                                                     PORT)))
+                                                      (LET ((.FILL (PROG (L)
+                                                                     (SETQ L
+                                                                           ELEMENTS)
+                                                                     (GO .LAST)
+                                                                     .LAST
+                                                                     (IF (NULL L)
+                                                                         (RETURN 0)
+                                                                         (IF (NULL (CDR (THE CONS
+                                                                                             L)))
+                                                                             (RETURN (CAR (THE CONS
+                                                                                               L)))
+                                                                             (PROGN
+                                                                               (SETQ L
+                                                                                     (CDR (THE CONS
+                                                                                               L)))
+                                                                               (GO .LAST)))))))
+                                                        (LET ((.ELEMENTS.1 (PROG (L K)
                                                                              (PSETQ L
-                                                                                    (APPEND L
-                                                                                            (LIST .FILL))
+                                                                                    ELEMENTS
                                                                                     K
-                                                                                    (SCHEME+ K
-                                                                                             1))
-                                                                             (GO PAD))
-                                                                           (RETURN L)))))
-                                                    (LET NIL
-                                                      (IF (AND (EQL A #\u)
-                                                               (EQL B #\8))
-                                                          (RETURN (LIST->BYTEVECTOR
-                                                                   .ELEMENTS.1))
-                                                          (IF (AND (EQL A #\f)
-                                                                   (EQL B #\x))
-                                                              (RETURN (LIST->FXVECTOR
-                                                                       .ELEMENTS.1))
-                                                              (IF (AND (EQL A
-                                                                            #\f)
-                                                                       (EQL B
-                                                                            #\l))
-                                                                  (RETURN (LIST->NUMERIC-VECTOR
-                                                                           "f64"
-                                                                           .ELEMENTS.1))
-                                                                  (RETURN (READING-ERROR
-                                                                           PORT
-                                                                           "bad #v syntax"))))))))))))
-                                        (IF (ALPHA-CHAR-P D)
-                                            (RETURN (SUB-READ-ARRAY-LITERAL
-                                                     N
-                                                     D
-                                                     PORT))
-                                            (RETURN (READING-ERROR
-                                                     PORT
-                                                     "bad datum label"
-                                                     N
-                                                     D)))))))))))))))
+                                                                                    (LENGTH ELEMENTS))
+                                                                             (GO PAD)
+                                                                             PAD
+                                                                             (IF (SCHEME< K
+                                                                                          N)
+                                                                                 (PROGN
+                                                                                   (PSETQ L
+                                                                                          (APPEND L
+                                                                                                  (LIST .FILL))
+                                                                                          K
+                                                                                          (SCHEME+ K
+                                                                                                   1))
+                                                                                   (GO PAD))
+                                                                                 (RETURN L)))))
+                                                          (LET NIL
+                                                            (IF (AND (EQL A #\u)
+                                                                     (EQL B #\8))
+                                                                (RETURN (LIST->BYTEVECTOR
+                                                                         .ELEMENTS.1))
+                                                                (IF (AND (EQL A
+                                                                              #\f)
+                                                                         (EQL B
+                                                                              #\x))
+                                                                    (RETURN (LIST->FXVECTOR
+                                                                             .ELEMENTS.1))
+                                                                    (IF (AND (EQL A
+                                                                                  #\f)
+                                                                             (EQL B
+                                                                                  #\l))
+                                                                        (RETURN (LIST->NUMERIC-VECTOR
+                                                                                 "f64"
+                                                                                 .ELEMENTS.1))
+                                                                        (RETURN (READING-ERROR
+                                                                                 PORT
+                                                                                 "bad #v syntax")))))))))))))
+                                            (IF (ALPHA-CHAR-P D)
+                                                (RETURN (SUB-READ-ARRAY-LITERAL
+                                                         N
+                                                         D
+                                                         PORT))
+                                                (RETURN (READING-ERROR
+                                                         PORT
+                                                         "bad datum label"
+                                                         N
+                                                         D))))))))))))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ-DATUM-LABEL 'SCHEME::SUB-READ-DATUM-LABEL)
 (DEFUN SUB-READ-ARRAY-LITERAL (RANK FIRST PORT)
   (LET ((TAG (READ-ARRAY-TAG FIRST PORT)))
@@ -804,8 +891,18 @@
                                                                                                   (ASCII->CHAR 7))
                                                                                             (CONS (CONS 'SCHEME::VTAB
                                                                                                         (ASCII->CHAR 11))
-                                                                                                  (LIST (CONS 'SCHEME::ESC
-                                                                                                              (ASCII->CHAR 27))))))))))))))))))))
+                                                                                                  (CONS (CONS 'SCHEME::ESC
+                                                                                                              (ASCII->CHAR 27))
+                                                                                                        (CONS (CONS 'SCHEME::NUL
+                                                                                                                    (ASCII->CHAR 0))
+                                                                                                              (CONS (CONS 'SCHEME::BEL
+                                                                                                                          (ASCII->CHAR 7))
+                                                                                                                    (CONS (CONS 'SCHEME::VT
+                                                                                                                                (ASCII->CHAR 11))
+                                                                                                                          (CONS (CONS 'SCHEME::NEL
+                                                                                                                                      (ASCII->CHAR 133))
+                                                                                                                                (LIST (CONS 'SCHEME::LS
+                                                                                                                                            (ASCII->CHAR 8232)))))))))))))))))))))))))
 (SET-FUNCTION-FROM-VALUE 'NAMED-CHARACTERS 'SCHEME::NAMED-CHARACTERS)
 (AT-TOP-LEVEL
   (LOCALLY
@@ -993,17 +1090,35 @@
           (IF (TRUEP TEMP)
               TEMP
               (IF (MEMBER .STRING STRANGE-SYMBOL-NAMES :TEST #'SCHEME-EQUAL-P)
-                  (INTERN-TOKEN .STRING)
+                  (TOKEN-SYMBOL TOKEN PORT)
                   (IF (STRING= .STRING ".")
                       DOT
-                      (IF (CHAR-NUMERIC-P (CHAR (THE SIMPLE-STRING .STRING) 0))
+                      (IF (AND (CHAR-NUMERIC-P
+                                (CHAR (THE SIMPLE-STRING .STRING) 0))
+                               (NOT (CHEZ-READER-P)))
                           (READING-ERROR
                            PORT
                            "unsupported number syntax"
                            .STRING)
-                          (INTERN-TOKEN .STRING))))))
-        (INTERN-TOKEN .STRING))))
+                          (TOKEN-SYMBOL TOKEN PORT))))))
+        (TOKEN-SYMBOL TOKEN PORT))))
 (SET-VALUE-FROM-FUNCTION 'PARSE-TOKEN 'SCHEME::PARSE-TOKEN)
+(DEFUN TOKEN-SYMBOL (TOKEN PORT)
+  (IF (AND (NULL (CDR (THE CONS TOKEN)))
+           (TRUEP (R6RS-STRICT? PORT))
+           (NOT (R6RS-IDENTIFIER-P (CAR (THE CONS TOKEN)))))
+      (READING-ERROR
+       PORT
+       (STRING-APPEND
+        (CAR (THE CONS TOKEN))
+        " symbol syntax not allowed in #!r6rs mode"))
+      (INTERN-TOKEN (CAR (THE CONS TOKEN)))))
+(SET-VALUE-FROM-FUNCTION 'TOKEN-SYMBOL 'SCHEME::TOKEN-SYMBOL)
+(DEFUN R6RS-STRICT? (PORT) (TRUE? (PORT-R6RS-P PORT)))
+(SET-VALUE-FROM-FUNCTION 'R6RS-STRICT? 'SCHEME::R6RS-STRICT?)
+(DEFUN NOT-IN-R6RS (PORT WHAT)
+  (READING-ERROR PORT (STRING-APPEND WHAT " syntax not allowed in #!r6rs mode")))
+(SET-VALUE-FROM-FUNCTION 'NOT-IN-R6RS 'SCHEME::NOT-IN-R6RS)
 (LOCALLY
   (DECLARE (SPECIAL STRANGE-SYMBOL-NAMES))
   (SETQ STRANGE-SYMBOL-NAMES '("+" "-" "..." "1+" "-1+" "1-")))
@@ -1098,6 +1213,9 @@
            (LET NIL
              (IF (NOT (EQL (.READ-CHAR PORT) #\())
                  (READING-ERROR PORT "bad #v syntax"))
+             (IF (AND (TRUEP (R6RS-STRICT? PORT))
+                      (NOT (AND (EQL A #\u) (EQL B #\8))))
+                 (NOT-IN-R6RS PORT (.STRING #\# #\v A B)))
              (IF (AND (EQL A #\u) (EQL B #\8))
                  (LIST->BYTEVECTOR (SUB-READ-LIST C PORT))
                  (IF (AND (EQL A #\f) (EQL B #\x))

@@ -53,14 +53,19 @@
 	 ;; A token here is an unexpected ) or ., an error (R7RS 6.13.2).
 	 (if (reader-token? form)
 	     (reading-error port (cdr form))
-	     form))))))
+	     (datum-of form)))))))
 
 (define (sub-read-carefully port)
   (let ((form (sub-read port)))
     (cond ((eof-object? form)
            (reading-error port "unexpected end of file"))
 	  ((reader-token? form) (reading-error port (cdr form)))
-	  (else form))))
+	  (else (datum-of form)))))
+
+; Chez Scheme's #!eof, the end-of-file object as a datum: read as this
+; marker, so that a list or the like doesn't take it for the file's end.
+(define eof-datum (list 'eof-datum))
+(define (datum-of form) (if (eq? form eof-datum) ps:eof-object form))
 
 (define reader-token-marker (list 'reader-token))
 (define (make-reader-token message) (cons reader-token-marker message))
@@ -68,6 +73,18 @@
   (and (pair? form) (eq? (car form) reader-token-marker)))
 
 (define close-paren (make-reader-token "unexpected right parenthesis"))
+(define close-bracket (make-reader-token "unexpected right bracket"))
+
+; Does FORM close the list opened by C?  ( and [ close with either )
+; or ], except in Chez Scheme's reader, where they must match.
+(define (closes? form c port)
+  (cond ((not (or (eq? form close-paren) (eq? form close-bracket))) #f)
+	((not (ps:true? (ps:chez-reader-p))) #t)
+	((and (eqv? c #\() (eq? form close-bracket))
+	 (reading-error port "parenthesized list terminated by close bracket"))
+	((and (eqv? c #\[) (eq? form close-paren))
+	 (reading-error port "bracketed list terminated by close parenthesis"))
+	(else #t)))
 (define dot         (make-reader-token "unexpected \" . \""))
 
 
@@ -144,27 +161,27 @@
     (cond ((eof-object? form)
            (reading-error port
 			  "end of file inside list -- unbalanced parentheses"))
-          ((eq? form close-paren) '())
+          ((closes? form c port) '())
 	  ;; A dot needs a datum before it, (#;a . b) included.
           ((eq? form dot)
 	   (reading-error port "nothing before \" . \" in a list"))
-          (else (cons form (sub-read-list-tail c port))))))
+          (else (cons (datum-of form) (sub-read-list-tail c port))))))
 
 (define (sub-read-list-tail c port)
   (let ((form (sub-read port)))
     (cond ((eof-object? form)
            (reading-error port
 			  "end of file inside list -- unbalanced parentheses"))
-          ((eq? form close-paren) '())
+          ((closes? form c port) '())
           ((eq? form dot)
            (let* ((last-form (sub-read-carefully port))
                   (another-form (sub-read port)))
-             (cond ((eq? another-form close-paren) last-form)
+             (cond ((closes? another-form c port) last-form)
                    (else
                     (reading-error port
 				   "randomness after form after dot"
 				   another-form)))))
-          (else (cons form (sub-read-list-tail c port))))))
+          (else (cons (datum-of form) (sub-read-list-tail c port))))))
 
 (set-standard-read-macro! #\( #t sub-read-list)
 
@@ -175,7 +192,7 @@
 (set-standard-read-macro! #\] #t
   (lambda (c port)
     c port
-    close-paren))
+    close-bracket))
 
 ; SRFI 105: {a + b} is (+ a b), and within curly braces f(x) is (f x),
 ; x[i] is ($bracket-apply$ x i) and f{a + b} is (f (+ a b)).  (Braces
@@ -223,13 +240,13 @@
     (cond ((eq? form dot)
 	   (let* ((tail (sub-read-carefully port))
 		  (close (sub-read port)))
-	     (if (eq? close close-paren)
+	     (if (closes? close c port)
 		 tail
 		 (reading-error port "randomness after form after dot" close))))
 	  ((eof-object? form)
 	   (reading-error port "end of file inside list -- unbalanced parentheses"))
-	  ((eq? form close-paren) '())
-	  (else (cons form (sub-read-list-tail c port))))))
+	  ((closes? form c port) '())
+	  (else (cons (datum-of form) (sub-read-list-tail c port))))))
 
 (define (neoteric-suffixes form port)
   (let ((c (peek-char port)))
@@ -387,6 +404,10 @@
 		  (reading-error port "end of file after #")
 		  (char-downcase c)))
 	   (probe (assq c *sharp-macros*)))
+      (if (and (r6rs-strict? port)
+	       (not (memv c '(#\( #\t #\f #\\ #\; #\| #\! #\' #\` #\, #\v
+			      #\x #\b #\o #\d #\e #\i))))
+	  (not-in-r6rs port (string #\# c)))
       (if probe
 	  ((cdr probe) c port)
 	  (reading-error port "unknown # syntax" c)))))
@@ -397,6 +418,8 @@
   (lambda (c port)
     c
     (let ((name (car (sub-read-token (read-char port) port))))
+      (if (and (> (string-length name) 1) (r6rs-strict? port))
+	  (not-in-r6rs port "alternative boolean"))
       (if (or (= (string-length name) 1)
 	      (string=? (common-lisp:string-downcase name) long-name))
 	  value
@@ -434,9 +457,14 @@
       ;; SRFI 88: after #!srfi-88, foo: is a keyword
       (if (or (string=? name "srfi-88") (string=? name "no-srfi-88"))
 	  (ps:set-port-keywords port (ps-lisp:string= name "srfi-88")))
+      ;; Chez Scheme's #!r6rs: only R6RS syntax after it, until #!chezscheme
+      (if (or (string=? name "r6rs") (string=? name "chezscheme"))
+	  (ps:set-port-r6rs port (ps-lisp:string= name "r6rs")))
+      (if (and (r6rs-strict? port) (member name '("eof" "bwp")))
+	  (not-in-r6rs port (string-append "#!" name)))
       ;; Chez Scheme's #!eof: the end-of-file object
       (if (string=? name "eof")
-	  ps:eof-object
+	  eof-datum
       ;; #!sweet and the like: the port's alternative reader reads on
       (let ((reader (ps:reader-directive port name)))
 	(if reader
@@ -444,6 +472,9 @@
 	    (sub-read port)))))))
 
 ; Datum labels, #<n>=<datum> and #<n># (R7RS 2.4).
+
+; Chez Scheme's #<n>(...) and #<n>vfx(...): longer than this is an error
+(define vector-length-limit (expt 2 32))
 
 (define (sub-read-datum-label c port)
   c
@@ -461,6 +492,8 @@
 	    ;; Chez Scheme's #3(a b): a vector of length 3, the last
 	    ;; element repeated to fill it
 	    ((char=? d #\()
+	     (if (> n vector-length-limit)
+		 (reading-error port "invalid vector length" n))
 	     (let ((elements (sub-read-list c port)))
 	       (if (> (length elements) n)
 		   (reading-error port "too many elements for the vector's length" n))
@@ -480,7 +513,15 @@
 		    (x (string->number (substring token 1 (string-length token)) n)))
 	       (or x (reading-error port "bad number" token))))
 	    ;; Chez Scheme's #5vu8(1 2), #3vfx(...): filled out with the last element
+	    ;; Chez Scheme's #5vs(a b): a stencil vector of mask 5
+	    ((and (char=? d #\v) (eqv? (peek-char port) #\s))
+	     (read-char port)
+	     (if (not (eqv? (read-char port) #\())
+		 (reading-error port "bad #vs syntax"))
+	     (ps:make-stencil-vector n (sub-read-list c port)))
 	    ((char=? d #\v)
+	     (if (> n vector-length-limit)
+		 (reading-error port "invalid vector length" n))
 	     (let* ((a (read-char port)) (b (read-char port)))
 	       (if (not (eqv? (read-char port) #\())
 		   (reading-error port "bad #v syntax"))
@@ -577,7 +618,12 @@
     (page      . ,(ascii->char 12))
     (alarm     . ,(ascii->char 7))
     (vtab      . ,(ascii->char 11))    ;R6RS
-    (esc       . ,(ascii->char 27))))  ;R6RS
+    (esc       . ,(ascii->char 27))    ;R6RS
+    (nul       . ,(ascii->char 0))     ;Chez Scheme's
+    (bel       . ,(ascii->char 7))
+    (vt        . ,(ascii->char 11))
+    (nel       . ,(ascii->char #x85))
+    (ls        . ,(ascii->char #x2028))))
 
 (define-sharp-macro #\\
   (lambda (c port)
@@ -722,16 +768,31 @@
 	  (or (char-numeric? c) (char=? c #\+) (char=? c #\-) (char=? c #\.))))
 	(cond ((string->number string))
 	      ((member string strange-symbol-names)
-	       (intern-token string))
+	       (token-symbol token port))
 	      ((string=? string ".")
 	       dot)
 	      ;; Anything else that doesn't parse as a number: a symbol
 	      ;; if it can be one (R6RS/R7RS "peculiar identifiers" such
 	      ;; as ->x and .foo), else an error.
-	      ((char-numeric? (string-ref string 0))
+	      ((and (char-numeric? (string-ref string 0))
+		    (not (ps:true? (ps:chez-reader-p))))
 	       (reading-error port "unsupported number syntax" string))
-	      (else (intern-token string)))
-	(intern-token string))))
+	      (else (token-symbol token port)))
+	(token-symbol token port))))
+
+; After Chez Scheme's #!r6rs, a symbol must be an R6RS identifier (or
+; have an escape in it).
+(define (token-symbol token port)
+  (if (and (null? (cdr token))
+	   (r6rs-strict? port)
+	   (not (ps:true? (ps:r6rs-identifier-p (car token)))))
+      (reading-error port (string-append (car token) " symbol syntax not allowed in #!r6rs mode"))
+      (intern-token (car token))))
+
+(define (r6rs-strict? port) (ps:true? (ps:port-r6rs-p port)))
+
+(define (not-in-r6rs port what)
+  (reading-error port (string-append what " syntax not allowed in #!r6rs mode")))
 
 (define strange-symbol-names
   '("+" "-" "..." "1+" "-1+" "1-"))  ;1+ and -1+ for S&ICP, 1- for Chez Scheme
@@ -815,6 +876,8 @@
 	   (b (read-char port)))
       (if (not (eqv? (read-char port) #\())
 	  (reading-error port "bad #v syntax"))
+      (if (and (r6rs-strict? port) (not (and (eqv? a #\u) (eqv? b #\8))))
+	  (not-in-r6rs port (string #\# #\v a b)))
       (cond ((and (eqv? a #\u) (eqv? b #\8))
 	     (ps:list->bytevector (sub-read-list c port)))
 	    ;; Chez Scheme's fxvectors and flvectors (f64vectors here)

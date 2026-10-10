@@ -66,7 +66,7 @@
     "compile-profile" "source-table" "make-boot" "heap-check" "(exit" "(emergency-exit" "(abort" "foreign-callable"
     "foreign-procedure" "ftype" "load-shared-object" "collect-" "optimize-level"
     "generate-wpo" "wpo-" "compile-interpret-simple" "(expand " "expand-output"
-    "debug-level" "enable-type-recovery" "#%$"))
+    "debug-level" "enable-type-recovery" "check-loop-allocation"))
 
 (define (unsupported-clause? clause)
   (let ([s (guard (c [#t ""])
@@ -115,9 +115,7 @@
 
 (define (dollar-unbound? m)
   ;; "variable $foo is not bound": a system primitive
-  (let ([p "variable $"])
-    (and (>= (string-length m) (string-length p))
-         (string=? (substring m 0 (string-length p)) p))))
+  (string-contains? m "variable $"))
 
 (define (mat-report result name count . msg)
   (printf "MAT ~a ~a ~a" result name count)

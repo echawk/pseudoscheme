@@ -28,12 +28,10 @@
 (define mkdir %chez:mkdir)
 (define delete-directory %chez:delete-directory)
 (define rename-file %chez:rename-file)
-(define file-modification-time %chez:file-modification-time)
 (define (directory-separator) #\/)
 (define machine-type %chez:machine-type)
 (define get-mode %chez:get-mode)
 (define chmod %chez:chmod)
-(define file-change-time %chez:file-change-time)
 (define (source-directories) '("."))
 (define (record-writer . args) (if #f #f))
 (define (collect . args) (if #f #f))
@@ -216,3 +214,102 @@
     (make-date (time-nanosecond t) (mod rem 60) (mod (div rem 60) 60) (div rem 3600)
                d m y off)))
 (define (current-date . offset) (apply time-utc->date (current-time) offset))
+
+;; Stencil vectors, #5vs(a b)
+(define stencil-vector %chez:stencil-vector)
+(define stencil-vector? %chez:stencil-vector?)
+(define stencil-vector-mask %chez:stencil-vector-mask)
+(define stencil-vector-length %chez:stencil-vector-length)
+(define stencil-vector-ref %chez:stencil-vector-ref)
+(define stencil-vector-set! %chez:stencil-vector-set!)
+(define stencil-vector-mask-width %chez:stencil-vector-mask-width)
+(define stencil-vector-update %chez:stencil-vector-update)
+(define stencil-vector-truncate! %chez:stencil-vector-truncate!)
+
+;; File times, as time-utc times
+(define (file-time i)
+  (lambda (path . follow?)
+    (make-time 'time-utc 0 (list-ref (apply %chez:file-times path follow?) i))))
+(define file-access-time (file-time 0))
+(define file-change-time (file-time 1))
+(define file-modification-time (file-time 2))
+
+;; R6RS's versions of procedures Chez extends, as Chez names them
+(define-syntax define-r6rs-versions
+  (syntax-rules ()
+    ((_ (r6rs-name name) ...)
+     (begin (define (r6rs-name a b . more) (apply name a b more)) ...))))
+(define-r6rs-versions
+  (r6rs:char=? char=?) (r6rs:char<? char<?) (r6rs:char>? char>?)
+  (r6rs:char<=? char<=?) (r6rs:char>=? char>=?)
+  (r6rs:char-ci=? char-ci=?) (r6rs:char-ci<? char-ci<?) (r6rs:char-ci>? char-ci>?)
+  (r6rs:char-ci<=? char-ci<=?) (r6rs:char-ci>=? char-ci>=?)
+  (r6rs:string=? string=?) (r6rs:string<? string<?) (r6rs:string>? string>?)
+  (r6rs:string<=? string<=?) (r6rs:string>=? string>=?)
+  (r6rs:string-ci=? string-ci=?) (r6rs:string-ci<? string-ci<?)
+  (r6rs:string-ci>? string-ci>?) (r6rs:string-ci<=? string-ci<=?)
+  (r6rs:string-ci>=? string-ci>=?))
+(define (r6rs:fx+ a b) (fx+ a b))
+(define (r6rs:fx- a b) (fx- a b))
+(define (r6rs:fx* a b) (fx* a b))
+
+;; (char-name name) is the character, (char-name char) its name, or #f;
+;; (char-name name char) names it (char #f: unnames the name)
+(define char-names
+  (list (cons 'space #\space) (cons 'tab #\tab) (cons 'return #\return)
+        (cons 'page #\page) (cons 'newline #\newline) (cons 'linefeed #\newline)
+        (cons 'backspace #\backspace) (cons 'delete #\delete) (cons 'rubout #\delete)
+        (cons 'nul #\nul) (cons 'vtab #\vtab) (cons 'alarm #\alarm)
+        (cons 'esc #\esc) (cons 'bel #\alarm) (cons 'vt #\vtab)
+        (cons 'nel (integer->char #x85)) (cons 'ls (integer->char #x2028))))
+(define char-name
+  (case-lambda
+    ((x)
+     (cond ((symbol? x) (let ((e (assq x char-names))) (and e (cdr e))))
+           ((char? x)
+            (let loop ((l char-names))
+              (cond ((null? l) #f)
+                    ((char=? (cdar l) x) (caar l))
+                    (else (loop (cdr l))))))
+           (else (error 'char-name "not a symbol or character" x))))
+    ((name c)
+     (set! char-names
+           (let remove ((l char-names))
+             (cond ((null? l) '())
+                   ((or (eq? (caar l) name) (and c (char=? (cdar l) c))) (remove (cdr l)))
+                   (else (cons (car l) (remove (cdr l)))))))
+     (when c (set! char-names (cons (cons name c) char-names))))))
+
+(define (flonum->fixnum x)
+  (unless (flonum? x) (error 'flonum->fixnum "not a flonum" x))
+  (exact (truncate x)))
+(define (flsingle x)
+  (let ((b (make-bytevector 4)))
+    (bytevector-ieee-single-native-set! b 0 x)
+    (bytevector-ieee-single-native-ref b 0)))
+(define (immutable-vector-append . vs) (vector->immutable-vector (apply vector-append vs)))
+(define (immutable-vector-copy v . range)
+  (vector->immutable-vector (apply vector-copy v range)))
+(define (vector-cas! v i old new)
+  (and (eq? (vector-ref v i) old) (begin (vector-set! v i new) #t)))
+
+;; Bytevector integers of 3, 5, 6 and 7 bytes
+(define-syntax define-bytevector-int-accessors
+  (syntax-rules ()
+    ((_ (size u-ref s-ref u-set! s-set!) ...)
+     (begin
+       (begin
+         (define (u-ref bv i endianness) (bytevector-uint-ref bv i endianness size))
+         (define (s-ref bv i endianness) (bytevector-sint-ref bv i endianness size))
+         (define (u-set! bv i n endianness) (bytevector-uint-set! bv i n endianness size))
+         (define (s-set! bv i n endianness) (bytevector-sint-set! bv i n endianness size)))
+       ...))))
+(define-bytevector-int-accessors
+  (3 bytevector-u24-ref bytevector-s24-ref bytevector-u24-set! bytevector-s24-set!)
+  (5 bytevector-u40-ref bytevector-s40-ref bytevector-u40-set! bytevector-s40-set!)
+  (6 bytevector-u48-ref bytevector-s48-ref bytevector-u48-set! bytevector-s48-set!)
+  (7 bytevector-u56-ref bytevector-s56-ref bytevector-u56-set! bytevector-s56-set!))
+
+;; The pretty printer's formats for keywords: accepted, not used
+(define pretty-format
+  (case-lambda ((name) #f) ((name format) (if #f #f))))

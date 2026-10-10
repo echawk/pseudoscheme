@@ -27,15 +27,54 @@
       (progn (setf *default-pathname-defaults* (uiop:ensure-directory-pathname dir)) ps:unspecific)
       (namestring *default-pathname-defaults*)))
 
-(defprim "chez:file-directory?" (name)
-  (ps:true? (and (uiop:directory-exists-p (uiop:parse-native-namestring name)) t)))
+;;; stat(2) and lstat(2), through sb-posix: Chez's file predicates
+;;; follow symbolic links unless their follow? argument is #f.
 
-(defprim "chez:file-regular?" (name)
-  (ps:true? (and (uiop:file-exists-p (uiop:parse-native-namestring name)) t)))
+(defun file-stat (name follow?)
+  "The stat of file NAME (lstat unless FOLLOW?), or NIL if there is none."
+  (let ((path (namestring (uiop:parse-native-namestring name))))
+    (handler-case (if follow? (sb-posix:stat path) (sb-posix:lstat path))
+      (sb-posix:syscall-error () nil))))
+
+(defun file-type-p (name follow? type)
+  (let ((stat (file-stat name follow?)))
+    (ps:true? (and stat (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt) type)))))
+
+(defun follow-arg (follow?) (not (eq follow? ps:false)))
+
+(defprim "chez:file-exists?" (name &optional (follow? t))
+  (ps:true? (and (file-stat name (follow-arg follow?)) t)))
+
+(defprim "chez:file-directory?" (name &optional (follow? t))
+  (file-type-p name (follow-arg follow?) sb-posix:s-ifdir))
+
+(defprim "chez:file-regular?" (name &optional (follow? t))
+  (file-type-p name (follow-arg follow?) sb-posix:s-ifreg))
 
 (defprim "chez:file-symbolic-link?" (name)
-  (let ((p (uiop:parse-native-namestring name)))
-    (ps:true? (and (probe-file p) (not (equal (truename p) (merge-pathnames p)))))))
+  (file-type-p name nil sb-posix:s-iflnk))
+
+(defprim "chez:file-times" (name &optional (follow? t))
+  "(access change modification), in seconds since the epoch."
+  (let ((stat (or (file-stat name (follow-arg follow?))
+		  (ps:scheme-error "failed for ~S: no such file or directory" name))))
+    (list (sb-posix:stat-atime stat) (sb-posix:stat-ctime stat) (sb-posix:stat-mtime stat))))
+
+(defun call-for-file (who name error? function)
+  "Call FUNCTION on NAME's native path: #t, or on failure #f, or an
+error if ERROR? is true."
+  (handler-case (progn (funcall function (namestring (uiop:parse-native-namestring name))) ps:true)
+    (sb-posix:syscall-error (e)
+      (if (and error? (not (eq error? ps:false)))
+	  (ps:scheme-error "~A: failed for ~A: ~A" who name
+			   (sb-int:strerror (sb-posix:syscall-errno e)))
+	  ps:false))))
+
+(defprim "chez:delete-file" (name &optional error?)
+  (call-for-file "delete-file" name error? #'sb-posix:unlink))
+
+(defprim "chez:delete-directory" (name &optional error?)
+  (call-for-file "delete-directory" name error? #'sb-posix:rmdir))
 
 (defprim "chez:directory-list" (name)
   (let ((dir (uiop:ensure-directory-pathname (uiop:parse-native-namestring name))))
@@ -50,17 +89,9 @@
   (ensure-directories-exist (uiop:ensure-directory-pathname name))
   ps:unspecific)
 
-(defprim "chez:delete-directory" (name &optional error?)
-  (declare (ignore error?))
-  (uiop:delete-empty-directory (uiop:ensure-directory-pathname name))
-  ps:unspecific)
-
 (defprim "chez:rename-file" (old new)
   (rename-file (uiop:parse-native-namestring old) (uiop:parse-native-namestring new))
   ps:unspecific)
-
-(defprim "chez:file-modification-time" (name)
-  (or (file-write-date (uiop:parse-native-namestring name)) 0))
 
 (defprim "chez:library-directories" ()
   (mapcar (lambda (d) (cons (path-string d) (path-string d))) psx:*library-path*))
@@ -96,9 +127,6 @@
   (uiop:run-program (list "chmod" (format nil "~O" mode)
 			  (namestring (uiop:parse-native-namestring name))))
   ps:unspecific)
-
-(defprim "chez:file-change-time" (name)
-  (stat-field name "%Z" "%c"))
 
 (defprim "chez:machine-type" ()
   "Chez Scheme's name for this machine, threaded: ta6osx, tarm64le, ...
@@ -501,3 +529,62 @@ nothing is ready.")
   (unless (probe-file path)
     (io-error-filename "open-input-file" path "make-i/o-file-does-not-exist-error"))
   (open path :direction :input :external-format :utf-8))
+
+;;; Stencil vectors (ps:stencil-vector, src/core.lisp)
+
+(defun check-stencil-vector (who x)
+  (unless (ps:stencil-vector-p x)
+    (ps:scheme-error "~A: ~S is not a stencil vector" who x))
+  x)
+
+(defun stencil-vector-index (who sv i)
+  (unless (and (integerp i) (< -1 i (length (ps:stencil-vector-elements sv))))
+    (ps:scheme-error "~A: invalid index ~S" who i))
+  i)
+
+(defprim "chez:stencil-vector" (mask &rest elements)
+  (ps:make-stencil-vector mask elements))
+
+(defprim "chez:stencil-vector?" (x) (ps:true? (ps:stencil-vector-p x)))
+
+(defprim "chez:stencil-vector-mask" (sv)
+  (ps:stencil-vector-mask (check-stencil-vector "stencil-vector-mask" sv)))
+
+(defprim "chez:stencil-vector-length" (sv)
+  (length (ps:stencil-vector-elements (check-stencil-vector "stencil-vector-length" sv))))
+
+(defprim "chez:stencil-vector-ref" (sv i)
+  (check-stencil-vector "stencil-vector-ref" sv)
+  (svref (ps:stencil-vector-elements sv) (stencil-vector-index "stencil-vector-ref" sv i)))
+
+(defprim "chez:stencil-vector-set!" (sv i x)
+  (check-stencil-vector "stencil-vector-set!" sv)
+  (setf (svref (ps:stencil-vector-elements sv) (stencil-vector-index "stencil-vector-set!" sv i)) x)
+  ps:unspecific)
+
+(defprim "chez:stencil-vector-mask-width" () ps:stencil-vector-mask-width)
+
+(defprim "chez:stencil-vector-update" (sv remove add &rest new)
+  (check-stencil-vector "stencil-vector-update" sv)
+  (let* ((mask (ps:stencil-vector-mask sv))
+	 (kept (logandc2 mask remove)))
+    (unless (and (integerp remove) (integerp add) (>= remove 0) (>= add 0)
+		 (= (logand mask remove) remove)
+		 (zerop (logand kept add))
+		 (= (logcount add) (length new)))
+      (ps:scheme-error "stencil-vector-update: invalid masks ~S and ~S for ~S" remove add sv))
+    (let ((old (ps:stencil-vector-elements sv)) (oi 0) (out '()))
+      (loop for bit from 0 below ps:stencil-vector-mask-width
+	    do (cond ((logbitp bit add) (push (pop new) out))
+		     ((logbitp bit kept) (push (svref old oi) out)))
+	       (when (logbitp bit mask) (incf oi)))
+      (ps:make-stencil-vector (logior kept add) (nreverse out)))))
+
+(defprim "chez:stencil-vector-truncate!" (sv mask)
+  (check-stencil-vector "stencil-vector-truncate!" sv)
+  (let ((old (ps:stencil-vector-elements sv)))
+    (unless (and (integerp mask) (>= mask 0) (<= (logcount mask) (length old)))
+      (ps:scheme-error "stencil-vector-truncate!: invalid mask ~S for ~S" mask sv))
+    (setf (ps:stencil-vector-elements sv) (subseq old 0 (logcount mask))
+	  (ps:stencil-vector-mask sv) mask)
+    ps:unspecific))

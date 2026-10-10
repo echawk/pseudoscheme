@@ -31,10 +31,14 @@ if [ "$1" = "--one" ]; then
   skip=
   : > "$OUT/$name.out"
   : > "$OUT/$name.err"
+  # a mat file's own library, as oop.ss is oop.ms's, is loaded first
+  files="$name.ms"
+  [ -f "$ROOT/vendor/chez-mats/$name.ss" ] && files="$name.ss $name.ms"
   attempt=0
   while [ $attempt -lt 8 ]; do
     attempt=$((attempt + 1))
-    ( cd "$work" && CHEZ_MAT_SKIP="$skip" "$PS" --chez "$ROOT/tests/chez-mat.ss" "$name.ms" \
+    # exec, so that the kill below reaches pseudoscheme, not just a subshell
+    ( cd "$work" && CHEZ_MAT_SKIP="$skip" exec "$PS" --chez "$ROOT/tests/chez-mat.ss" $files \
         > "$OUT/$name.out.$attempt" 2>> "$OUT/$name.err" < /dev/null ) & pid=$!
     ( sleep "$LIMIT"; kill -9 $pid 2>/dev/null ) > /dev/null 2>&1 & w=$!
     wait $pid 2>/dev/null

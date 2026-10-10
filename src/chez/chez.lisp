@@ -45,6 +45,21 @@
     "date-zone-offset" "time-utc->date" "current-date" "copy-time" "time-difference"
     "time-difference!" "add-duration" "add-duration!" "subtract-duration"
     "subtract-duration!" "time=?" "time<?" "time<=?" "time>?" "time>=?"
+    "stencil-vector" "stencil-vector?" "stencil-vector-mask" "stencil-vector-length"
+    "stencil-vector-ref" "stencil-vector-set!" "stencil-vector-mask-width"
+    "stencil-vector-update" "stencil-vector-truncate!" "file-access-time" "pretty-format"
+    "r6rs:char=?" "r6rs:char<?" "r6rs:char>?" "r6rs:char<=?" "r6rs:char>=?"
+    "r6rs:char-ci=?" "r6rs:char-ci<?" "r6rs:char-ci>?" "r6rs:char-ci<=?"
+    "r6rs:char-ci>=?" "r6rs:string=?" "r6rs:string<?" "r6rs:string>?"
+    "r6rs:string<=?" "r6rs:string>=?" "r6rs:string-ci=?" "r6rs:string-ci<?"
+    "r6rs:string-ci>?" "r6rs:string-ci<=?" "r6rs:string-ci>=?" "r6rs:fx+" "r6rs:fx-"
+    "r6rs:fx*" "char-name" "flonum->fixnum" "flsingle" "immutable-vector-append"
+    "immutable-vector-copy" "vector-cas!" "bytevector-u24-ref" "bytevector-s24-ref"
+    "bytevector-u24-set!" "bytevector-s24-set!" "bytevector-u40-ref"
+    "bytevector-s40-ref" "bytevector-u40-set!" "bytevector-s40-set!"
+    "bytevector-u48-ref" "bytevector-s48-ref" "bytevector-u48-set!"
+    "bytevector-s48-set!" "bytevector-u56-ref" "bytevector-s56-ref"
+    "bytevector-u56-set!" "bytevector-s56-set!"
     ;; hashtables.scm
     "make-weak-eq-hashtable" "make-weak-eqv-hashtable" "make-ephemeron-eq-hashtable"
     "make-ephemeron-eqv-hashtable" "hashtable-weak?" "hashtable-ephemeron?"
@@ -148,16 +163,21 @@
 ;;; extra arguments, and a program may import both.  So the extensions
 ;;; are made to the R6RS procedures themselves, which (chezscheme)
 ;;; re-exports: (dynamic-wind critical? before thunk after), the file
-;;; procedures' options ('replace, 'append, ...), and eval of one
+;;; procedures' options ('replace, 'append, ...), delete-file's error?
+;;; and file-exists?'s follow?, and eval of one
 ;;; argument (through psyntax's eval-hook).  Without Chez's arguments they behave as before.  They are
 ;;; closed primitives (psx::*closed-primitives*): the translator's
 ;;; built-ins of those names, open-coded, wouldn't take the arguments.
 
-(defun extend-host-procedure (name make)
-  "Replace host procedure NAME by (funcall MAKE old-procedure)."
+(defun extend-host-procedure (name make &optional arity)
+  "Replace host procedure NAME by (funcall MAKE old-procedure).  ARITY,
+(min max), says with how many arguments the new procedure is the old:
+calls with those are still open-coded."
   (let ((old (psx:host-ref name)))
     (psx:host-set! name (funcall make old))
-    (pushnew name psx::*closed-primitives* :test #'string=)))
+    (pushnew name psx::*closed-primitives* :test #'string=)
+    (when arity
+      (pushnew (cons name arity) psx::*extended-primitives* :test #'equal))))
 
 (defun chez-file-options-p (options)
   (and options (not (eq (car options) ps:false))))
@@ -195,6 +215,39 @@
 			   (lambda (old) (lambda (path proc &rest options) (declare (ignore options)) (funcall old path proc))))
     (extend-host-procedure "with-input-from-file"
 			   (lambda (old) (lambda (path thunk &rest options) (declare (ignore options)) (funcall old path thunk))))
+;; Chez's comparisons take one argument or more, its fx+, fx- and
+    ;; fx* any number (fx- one or more)
+    (dolist (name '("char=?" "char<?" "char>?" "char<=?" "char>=?"
+		    "char-ci=?" "char-ci<?" "char-ci>?" "char-ci<=?" "char-ci>=?"
+		    "string=?" "string<?" "string>?" "string<=?" "string>=?"
+		    "string-ci=?" "string-ci<?" "string-ci>?" "string-ci<=?" "string-ci>=?"))
+      (extend-host-procedure name
+			     (lambda (old)
+			       (lambda (x &rest more)
+				 (if more
+				     (apply old x more)
+				     ;; the comparison of x with itself checks its type
+				     (progn (funcall old x x) ps:true))))
+			     '(2 nil)))
+    (flet ((arithmetic (name zero one)
+	     (extend-host-procedure name
+				    (lambda (old)
+				      (lambda (&rest args)
+					(cond ((null args)
+					       (if zero zero (ps:scheme-error "~A: no arguments" name)))
+					      ((null (cdr args)) (funcall one old (car args)))
+					      (t (reduce old args)))))
+				    '(2 2))))
+      (arithmetic "fx+" 0 (lambda (old x) (funcall old x 0)))
+      (arithmetic "fx*" 1 (lambda (old x) (funcall old x 1)))
+      (arithmetic "fx-" nil (lambda (old x) (funcall old 0 x))))
+        ;; (delete-file path error?) and (file-exists? path follow?)
+    (dolist (name '("delete-file" "file-exists?"))
+      (let ((chez (psx:host-ref (concatenate 'string "chez:" name))))
+	(extend-host-procedure name
+			       (lambda (old)
+				 (lambda (path &optional (arg nil arg-p))
+				   (if arg-p (funcall chez path arg) (funcall old path)))))))
     (extend-host-procedure "call-with-output-file" #'call-with-output)
     (extend-host-procedure "with-output-to-file" #'with-output)
     ;; (rnrs eval)'s eval is psyntax's: with one argument, or the

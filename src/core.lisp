@@ -92,6 +92,22 @@
   "For the reader's #{name unique}: an uninterned symbol."
   (make-symbol (invert-case name)))
 
+;;; Chez Scheme's stencil vectors, #<mask>vs(...): a mask of up to 58
+;;; bits and an element for each bit set, in order from the lowest.
+
+(defstruct (stencil-vector (:constructor %make-stencil-vector (mask elements)))
+  (mask 0 :type (integer 0)) (elements #() :type simple-vector))
+
+(defconstant stencil-vector-mask-width 58)
+
+(defun make-stencil-vector (mask elements)
+  "For the reader's #<mask>vs(...) and Chez's stencil-vector."
+  (unless (and (integerp mask) (<= 0 mask) (< mask (ash 1 stencil-vector-mask-width)))
+    (scheme-error "stencil-vector: invalid mask ~S" mask))
+  (unless (= (logcount mask) (length elements))
+    (scheme-error "stencil-vector: mask ~S doesn't match ~S elements" mask (length elements)))
+  (%make-stencil-vector mask (coerce elements 'simple-vector)))
+
 (defun fxvector-p (x)
   (typep x '(simple-array fixnum (*))))
 
@@ -489,6 +505,54 @@ and whether it was #!fold-case.  Other ports fold as *FOLD-CASE* says.")
   "The datum labels (R7RS 2.4) defined so far in the datum being read:
 an alist from label numbers to placeholders.")
 
+(defvar *chez-reader* nil
+  "Does the reader read as Chez Scheme's does (pseudoscheme --chez)?
+Then tokens that begin like numbers but aren't, such as 2.a, are
+symbols, not errors, and #!r6rs restricts a port to R6RS syntax.")
+
+(defun chez-reader-p () *chez-reader*)
+
+;;; Chez Scheme's #!r6rs: after it, a port's syntax must be R6RS's
+;;; (src/read.scm), in --chez mode; #!chezscheme lifts that.
+
+(defvar *port-r6rs* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq))
+
+(defun set-port-r6rs (port r6rs)
+  (when *chez-reader*
+    (setf (gethash port *port-r6rs*) r6rs)))
+
+(defun port-r6rs-p (port) (values (gethash port *port-r6rs*)))
+
+(defvar *char-category-function* nil
+  "A function from a character to its Unicode general category, a string
+such as \"Lu\" (src/r6rs/enums.lisp sets it).")
+
+(defun r6rs-identifier-p (string)
+  "Is STRING an R6RS identifier (R6RS 4.2.4), escapes aside?"
+  (flet ((category (c) (and *char-category-function* (funcall *char-category-function* c)))
+	 (subsequent-ascii-p (c) (or (alphanumericp c) (find c "!$%&*/:<=>?^_~+-.@"))))
+    (flet ((initial-p (c)
+	     (if (< (char-code c) 128)
+		 (or (alpha-char-p c) (find c "!$%&*/:<=>?^_~"))
+		 (member (category c) '("Lu" "Ll" "Lt" "Lm" "Lo" "Mn" "Nl" "No" "Pd" "Pc"
+					"Po" "Sc" "Sm" "Sk" "So" "Co")
+			 :test #'equal)))
+	   (subsequent-p (c)
+	     (if (< (char-code c) 128)
+		 (subsequent-ascii-p c)
+		 (member (category c) '("Lu" "Ll" "Lt" "Lm" "Lo" "Mn" "Nl" "No" "Pd" "Pc" "Po"
+					"Sc" "Sm" "Sk" "So" "Co" "Nd" "Mc" "Me")
+			 :test #'equal))))
+      (or (member string '("+" "-" "...") :test #'string=)
+	  (and (> (length string) 0)
+	       (or (initial-p (char string 0))
+		   (and (> (length string) 1) (string= string "->" :end1 2)))
+	       (every #'subsequent-p (subseq string 1)))))))
+
+(defvar *forward-labels* nil
+  "Was a datum label referred to before its definition, as Chez Scheme
+allows anywhere in the datum being read?")
+
 (defstruct (label-placeholder (:constructor make-label-placeholder ()))
   (datum nil) (defined nil))
 
@@ -542,8 +606,12 @@ braces; or with PORT's alternative reader, if it has one."
 		       (if found fold *fold-case*)))
 	(*keywords* (values (gethash port *port-keywords*)))
 	(*neoteric* nil)
-	(*datum-labels* '()))
-    (funcall thunk)))
+	(*datum-labels* '())
+	(*forward-labels* nil))
+    (let ((datum (funcall thunk)))
+      (if *forward-labels*
+	  (resolve-forward-labels port datum)
+	  datum))))
 
 (defun set-port-fold-case (port fold)
   (setf (gethash port *port-fold-case*) fold
@@ -611,7 +679,10 @@ braces; or with PORT's alternative reader, if it has one."
 
 (defun read-labelled-datum (port n thunk)
   "#N=<datum>: the datum THUNK reads, in which #N# refers to itself."
-  (let ((placeholder (make-label-placeholder)))
+  (let ((placeholder (let ((old (cdr (assoc n *datum-labels*))))
+		       (if (and old (not (label-placeholder-defined old)))
+			   old
+			   (make-label-placeholder)))))
     (push (cons n placeholder) *datum-labels*)
     (let ((datum (funcall thunk)))
       (when (eq datum placeholder)
@@ -625,10 +696,35 @@ braces; or with PORT's alternative reader, if it has one."
   "#N#: the datum labelled N, or its placeholder while it is being read."
   (let ((placeholder (cdr (assoc n *datum-labels*))))
     (cond ((null placeholder)
-	   (scheme-reading-error port "undefined datum label" n))
+	   ;; Chez Scheme's forward reference: resolved once the datum is read
+	   (let ((placeholder (make-label-placeholder)))
+	     (setq *forward-labels* t)
+	     (push (cons n placeholder) *datum-labels*)
+	     placeholder))
 	  ((label-placeholder-defined placeholder)
 	   (label-placeholder-datum placeholder))
 	  (t placeholder))))
+
+(defun resolve-forward-labels (port datum)
+  "DATUM, its labels' placeholders replaced by what they label."
+  (dolist (entry *datum-labels*)
+    (unless (label-placeholder-defined (cdr entry))
+      (scheme-reading-error port "undefined datum label" (car entry))))
+  (flet ((value (x) (if (label-placeholder-p x) (label-placeholder-datum x) x)))
+    (let ((seen (make-hash-table :test 'eq)))
+      (labels ((walk (x)
+		 (when (and (or (consp x) (simple-vector-p x))
+			    (not (gethash x seen)))
+		   (setf (gethash x seen) t)
+		   (if (consp x)
+		       (progn (setf (car x) (value (car x))) (walk (car x))
+			      (setf (cdr x) (value (cdr x))) (walk (cdr x)))
+		       (dotimes (i (length x))
+			 (setf (svref x i) (value (svref x i)))
+			 (walk (svref x i)))))))
+	(let ((datum (value datum)))
+	  (walk datum)
+	  datum)))))
 
 (defun replace-placeholder (datum placeholder)
   "Replace PLACEHOLDER by the datum it stands for, in pairs and vectors."

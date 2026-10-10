@@ -61,7 +61,15 @@
 (define load
   (case-lambda
     ((path) (%chez:load path))
-    ((path eval-proc) (%chez:load path))))
+    ;; each form read is passed to eval-proc
+    ((path eval-proc)
+     (call-with-input-file path
+       (lambda (p)
+         (let loop ()
+           (let ((x (read p)))
+             (unless (eof-object? x)
+               (eval-proc x)
+               (loop)))))))))
 
 (define (load-program path) (%chez:load path))
 (define (load-library path) (%chez:load path))

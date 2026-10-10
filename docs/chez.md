@@ -21,10 +21,141 @@ All of it lives in `src/chez/`:
 | ffi.lisp | `load-shared-object`, `foreign-procedure`, foreign memory, on CFFI |
 | chezscheme.scm, lists.scm, numbers.scm, hashtables.scm, threads.scm, conditions.scm, top-level.scm, ffi.scm | the library's body, in Scheme |
 
-`(chezscheme)` exports 1118 of the 1715 names Chez 10.4.1's does (803
+`(chezscheme)` exports 1178 of the 1715 names Chez 10.4.1's does (803
 before this work), with no extra names of its own. The comparison is
 `(library-exports '(chezscheme))` in Chez against psyntax's
 `library-export-bindings` here.
+
+## Chez's own tests: the mats
+
+Chez Scheme's test suite, its "mats" (`mats/*.ms` at cisco/ChezScheme
+e3b13636), is vendored in vendor/chez-mats and run by `make test-chez`
+(tests/run-chez-mats.sh). Each file runs in its own `--chez` process.
+tests/chez-mat.ss stands in for Chez's mat.ss and reports one line per
+clause:
+
+| result | meaning |
+|---|---|
+| pass | true, or raised the error it should |
+| fail | false, or raised no error where it should have |
+| error | raised an unexpected condition |
+| unbound | referred to a name `(chezscheme)` doesn't export |
+| unsup | needs what isn't planned here: Chez's compiler and its files, the inspector, `$` system procedures |
+| crash | hung or killed its process, and was skipped on a retry |
+
+The files about the compiler or C (cp0, cptypes, foreign, ftype,
+profile, windows) aren't counted in the totals. The latest run:
+
+| | pass | fail | error | unbound | unsup | crash |
+|---|---|---|---|---|---|---|
+| **counted files** | **12573** | **1277** | **792** | **1550** | **6663** | **26** |
+| first run | 7892 | 941 | 714 | 1798 | 4726 | 24 |
+
+The first run stopped reading nine files early, at reader syntax we
+didn't have. Once those files read through, more of their clauses
+counted in every column, failures included. By file:
+
+| file | pass | fail | error | unbound | unsup | crash |
+|---|---|---|---|---|---|---|
+| 3 | 468 | 58 | 0 | 4 | 150 | 0 |
+| 4 | 153 | 17 | 17 | 1 | 89 | 7 |
+| 5_1 | 382 | 0 | 3 | 16 | 4 | 0 |
+| 5_2 | 187 | 18 | 1 | 4 | 3 | 7 |
+| 5_3 | 98 | 0 | 0 | 6 | 0 | 0 |
+| 5_4 | 780 | 68 | 3 | 19 | 12 | 0 |
+| 5_5 | 425 | 62 | 0 | 9 | 54 | 1 |
+| 5_6 | 383 | 88 | 9 | 43 | 197 | 2 |
+| 5_7 | 37 | 17 | 3 | 2 | 1 | 0 |
+| 5_8 | 19 | 3 | 0 | 0 | 0 | 0 |
+| 6 | 2597 | 121 | 44 | 52 | 62 | 0 |
+| 7 | 172 | 45 | 134 | 89 | 575 | 0 |
+| 8 | 684 | 154 | 242 | 217 | 919 | 3 |
+| bytevector | 863 | 50 | 12 | 13 | 1673 | 3 |
+| cfl | 59 | 0 | 0 | 123 | 81 | 0 |
+| cp0 | 7 | 0 | 1 | 44 | 244 | 0 |
+| cptypes | 3 | 0 | 0 | 22 | 539 | 0 |
+| date | 75 | 35 | 1 | 2 | 159 | 0 |
+| enum | 41 | 3 | 0 | 2 | 0 | 0 |
+| examples | 4 | 2 | 54 | 318 | 0 | 0 |
+| exceptions | 12 | 0 | 0 | 2 | 71 | 0 |
+| fl | 737 | 14 | 0 | 16 | 125 | 0 |
+| foreign | 21 | 1 | 4 | 4 | 28 | 0 |
+| format | 960 | 212 | 14 | 0 | 26 | 0 |
+| ftype | 18 | 0 | 0 | 79 | 1115 | 0 |
+| fx | 1122 | 18 | 19 | 49 | 597 | 0 |
+| hash | 665 | 145 | 1 | 12 | 443 | 0 |
+| ieee | 479 | 22 | 1 | 14 | 4 | 0 |
+| io | 248 | 35 | 64 | 101 | 445 | 0 |
+| misc | 357 | 28 | 16 | 137 | 309 | 3 |
+| oop | 70 | 0 | 97 | 75 | 0 | 0 |
+| primvars | 69 | 11 | 0 | 9 | 43 | 0 |
+| profile | 7 | 6 | 1 | 13 | 181 | 0 |
+| record | 348 | 34 | 51 | 211 | 539 | 0 |
+| thread | 19 | 0 | 2 | 4 | 70 | 0 |
+| unix | 60 | 17 | 4 | 0 | 12 | 0 |
+| windows | 15 | 0 | 0 | 0 | 0 | 0 |
+
+What the fixes since the first run were:
+
+- **The reader.** It now handles:
+  - datum labels referred to before they are defined (`'#1=(a #2#)`
+    with `#2=` later in the same datum);
+  - `#!eof` inside a list;
+  - `#i#32r+21`, any radix after an exactness prefix;
+  - binary and octal exponents (`#b1.1e101`), and an exponent after
+    a ratio (`1/5e4`);
+  - R4RS's `98##` digit placeholders;
+  - stencil vectors (`#5vs(a b)`);
+  - the character names `#\bel`, `#\nul`, `#\vt`, `#\nel`
+    and `#\ls`;
+  - tokens like `2.a`, read as symbols.
+
+  In `--chez` mode, `#!r6rs` restricts the rest of the port to R6RS
+  syntax, `(` and `[` must be closed by their own kind of bracket,
+  and absurd vector lengths are errors. Number syntax is ASCII only, so
+  `٦` is no longer read as 6.
+- **Top-level `module`.** Internal modules already worked. At top level, a
+  module is expanded as a library of its own that imports what the top
+  level has. An anonymous module's exports are imported at once; a
+  named one's when `(import name)` runs.
+- **Arities Chez extends:**
+  - comparisons (`char=?`, `string<?`, ..., `fx=`, `fl<`) take one
+    argument;
+  - `fx+`, `fx-` and `fx*` take any number;
+  - `delete-file` takes `error?`, `file-exists?` takes `follow?`;
+  - `load` takes an eval procedure.
+
+  The translator still open-codes the standard arities: an extended
+  primitive is closed only for calls whose argument counts it doesn't
+  share with the built-in (`psx::*extended-primitives*`).
+- **New exports:**
+  - stencil vectors;
+  - the `r6rs:` versions of the comparisons and of `fx+`, `fx-` and
+    `fx*`;
+  - `char-name`;
+  - file times as `time-utc` times, from `stat` (`file-access-time`,
+    ...);
+  - the 24-, 40-, 48- and 56-bit bytevector accessors;
+  - `flonum->fixnum`, `flsingle`, `immutable-vector-append`,
+    `immutable-vector-copy`, `vector-cas!` and `pretty-format`.
+- **The harness** loads oop.ss before oop.ms, as Chez's makefile does.
+  It counts clauses that reach `$` system procedures as unsup, and it
+  kills a hung clause's process rather than the shell around it.
+
+The largest groups left:
+- 7 and 8: clauses that need the files of an earlier `compile-file`
+  or `compile-whole-library` (missing here; the harness can't tell
+  them from the clauses' text), `define-property`, library
+  introspection, `eval-when` and `meta`.
+- format: `~e`, `~f`, `~$` and `~:r` (ordinals), where CL's `format`
+  writes numbers differently from Chez's.
+- hash: weak and ephemeron tables, which are ordinary tables here.
+- record: R6RS record-syntax details, `#[...]` record literals, and
+  `record-equal-procedure` and `record-hash-procedure`.
+- oop: oop.ss builds `define-class` on `$make-record-type`, a system
+  procedure, so its library doesn't load.
+- examples: Chez's example programs, which the mats expect to find and
+  load.
 
 ## Why Chez is the near one
 
@@ -183,10 +314,12 @@ Exception occurred with non-condition value 42
 
 ### Reader syntax
 
-`#&x` (boxes), `#vu8(...)`, `#vfx(...)`, `#vfl(...)`, `#3(a b)`
-(length-prefixed vectors, filled out with the last element), `#%car`,
-and `#!eof` are read, and boxes and fxvectors are written back the same
-way.
+`#&x` (boxes), `#vu8(...)`, `#vfx(...)`, `#vfl(...)`, `#5vs(a b)`
+(stencil vectors), `#3(a b)` (length-prefixed vectors, filled out with
+the last element), `#%car`, `#12r-3b`, `#{name unique}` and `#!eof` are
+read. Boxes, fxvectors and stencil vectors are written back the same
+way. The mats section above lists the rest, along with what `#!r6rs`
+turns off.
 
 ## What e still needs
 
@@ -240,14 +373,13 @@ The main causes:
 Of the 597 names still missing, most are Chez's internals: `$`-system
 procedures, compiler knobs (`cp0-*`, `enable-*`), boot files, fasl,
 profiling and cost centers, the inspector, the 56 port-buffer
-accessors, stencil vectors, phantom bytevectors. The ones that matter
+accessors, phantom bytevectors. The ones that matter
 to programs, in rough order:
 
 1. engines and timer interrupts (above);
 2. ftypes (`define-ftype`, `ftype-ref`), on CFFI's structs;
-3. `r6rs:` variants (57 names, trivial);
-4. annotations and source objects;
-5. `define-record` and `record-case`, the old record syntax;
-6. `meta-cond`, `extend-syntax`, `define-structure`;
-7. continuation marks (Chez 10's), which would share prompts' frames
+3. annotations and source objects;
+4. `define-record` and `record-case`, the old record syntax;
+5. `meta-cond`, `extend-syntax`, `define-structure`;
+6. continuation marks (Chez 10's), which would share prompts' frames
    (docs/continuations.md).

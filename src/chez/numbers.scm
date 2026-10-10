@@ -43,10 +43,12 @@
 ;;; Fixnums: Chez's names for R6RS's, and its extras
 
 (define (chain-compare op)
-  (lambda (a b . more)
-    (let loop ((a a) (b b) (more more))
-      (and (op a b)
-           (or (null? more) (loop b (car more) (cdr more)))))))
+  (lambda (a . more)
+    (if (null? more)
+        (begin (op a a) #t)             ;checks a's type
+        (let loop ((a a) (b (car more)) (more (cdr more)))
+          (and (op a b)
+               (or (null? more) (loop b (car more) (cdr more))))))))
 (define fx= (chain-compare fx=?))
 (define fx< (chain-compare fx<?))
 (define fx> (chain-compare fx>?))

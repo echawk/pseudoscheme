@@ -3198,13 +3198,18 @@
                ((import)
                 (syntax-match e ()
                   ((_ imp* ...)
-                   (let-values (((subst lib*) (parse-import-spec* (stx->datum imp*))))
-                     (for-each
-                       (lambda (x)
-                         (extend-library-subst! (interaction-library) (car x) (cdr x)))
-                       (reverse subst))
-                     (for-each (lambda (lib) ((inv-collector) lib) ((vis-collector) lib)) lib*)
+                   (begin
+                     (import-at-top-level
+                       (map (lambda (spec)
+                              (cond
+                                ((and (symbol? spec) (assq spec (top-level-modules))) => cdr)
+                                (else spec)))
+                            (stx->datum imp*)))
                      (chi-top* (cdr e*) init*)))))
+               ;; PSEUDOSCHEME: Chez's module at top level (chi-top-module)
+               ((module)
+                (chi-top-module e)
+                (chi-top* (cdr e*) init*))
                ;; PSEUDOSCHEME: Chez's library as a top-level form, so
                ;; that a macro can produce one (top-level-library-expander)
                ((library)
@@ -3231,6 +3236,55 @@
                    (cons (cons #f (chi-expr e '() '()))
                       init*))))))))))
   
+;;; PSEUDOSCHEME: the bindings of import specs IMP* added to the
+  ;;; interaction library, shadowing earlier ones.
+  (define (import-at-top-level imp*)
+    (let-values (((subst lib*) (parse-import-spec* imp*)))
+      (for-each
+        (lambda (x)
+          (extend-library-subst! (interaction-library) (car x) (cdr x)))
+        (reverse subst))
+      (for-each (lambda (lib) ((inv-collector) lib) ((vis-collector) lib)) lib*)))
+
+  ;;; PSEUDOSCHEME: Chez's top-level modules, by name: (name . library
+  ;;; name), for (import name).
+  (define top-level-modules (make-parameter '()))
+
+  ;;; PSEUDOSCHEME: Chez's (module name (export ...) body ...) at top
+  ;;; level, expanded as a library of its own that imports what the top
+  ;;; level has (a library made of the interaction library's bindings
+  ;;; and the source library's).  Without a name, its
+  ;;; exports are imported here at once; with one, (import name) does that.
+  (define (chi-top-module e)
+    (let-values (((name exp-id* b*) (parse-module e)))
+      (let* ((lib-name (list 'pseudoscheme 'module
+                             (string->symbol (symbol->string (gensym 'module)))))
+             (top-subst (library-subst (interaction-library)))
+             (source (interaction-source-name))
+             (source-subst (if (library-exists? source)
+                               (library-subst (find-library-by-name source))
+                               '()))
+             (top-name (list 'pseudoscheme 'module
+                             (string->symbol (symbol->string (gensym 'top)))))
+             ;; the top level's bindings, the latest of each name
+             (subst (let ((seen (make-eq-hashtable)))
+                      (let f ((ls (append top-subst source-subst)) (acc '()))
+                        (cond
+                          ((null? ls) acc)
+                          ((hashtable-ref seen (caar ls) #f) (f (cdr ls) acc))
+                          (else
+                           (hashtable-set! seen (caar ls) #t)
+                           (f (cdr ls) (cons (car ls) acc)))))))
+             (imp* (list top-name)))
+        (install-library (gensym) top-name '() '() '() '() subst '()
+          (lambda () (if #f #f)) (lambda () (if #f #f)) #f)
+        (library-expander-with
+          (lambda ()
+            (core-library-expander-parts lib-name (map id->sym exp-id*) imp* b* #t)))
+        (if name
+            (top-level-modules (cons (cons (id->sym name) lib-name) (top-level-modules)))
+            (import-at-top-level (list lib-name))))))
+
   (define (expand-transformer expr r)
     (let ((rtc (make-collector)))
       (let ((expanded-rhs

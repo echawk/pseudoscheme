@@ -121,6 +121,8 @@
   "C's general category as a string: \"Lu\", \"Ll\", ..."
   (values (cl-unicode:general-category c)))
 
+(setq ps:*char-category-function* #'unicode-category-name)
+
 (defun cased-p (c)
   (member (unicode-category-name c) '("Lu" "Ll" "Lt") :test #'string=))
 

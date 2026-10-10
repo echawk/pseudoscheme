@@ -426,6 +426,8 @@ is reported, and the program runs anyway."
 	      (t (setq *standard* standard *script* t)
 		 (values '() (car args) (cdr args) nil))))
     (when *userinit* (load-user-init-file))
+    ;; Chez reads 2.a as a symbol, and #!r6rs is strict
+    (when (eq *standard* :chez) (setq ps:*chez-reader* t))
     ;; With no program, SRFI 193's ("") as in Chez.  A script's name is
     ;; made absolute before it runs, in case it changes directory.
     (setf ps-r7rs:*command-line* (cons (or file "") file-args)
