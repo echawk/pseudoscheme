@@ -53,21 +53,45 @@
 	 (lambda ()
 	   (funcall (psg::load-go-file (psg::installed-go-file name)))))))))
 
+;; A stand-in for Guile's source tree, which %guile-build-info's
+;; top_srcdir names and ftw.test, ports.test and c-api.test look into:
+;; test-suite/ (its tests and its library, linked to the vendored ones),
+;; module/ (the installed Guile's Scheme sources), libguile/ (no C here)
+(defun make-source-tree ()
+  (let ((top (sb-posix:mkdtemp "/tmp/guile-srcdir-XXXXXX")))
+    (flet ((dir (name) (ensure-directories-exist (format nil "~A/~A/" top name)))
+	   (file (name) (with-open-file (s (format nil "~A/~A" top name) :direction :output)))
+	   (link (from name) (sb-posix:symlink (string-right-trim "/" (namestring from))
+					       (format nil "~A/~A" top name))))
+      (mapc #'dir '("libguile" "test-suite/tests" "test-suite/test-suite" "test-suite/standalone"))
+      (mapc #'file '("README" "COPYING" "Makefile.am" "test-suite/Makefile.am"))
+      (link psg::*guile-source-directory* "module")
+      (dolist (f (directory (merge-pathnames "tests/*.*" *suite*)))
+	(link f (format nil "test-suite/tests/~A.~A" (pathname-name f) (pathname-type f))))
+      (dolist (f '("lib.scm" "guile-test" "lib"))
+	(link (merge-pathnames (format nil "test-suite/~A" f) *suite*) (format nil "test-suite/test-suite/~A" f))))
+    top))
+
 (defun guile-string (x)
   (with-output-to-string (s) (write-string (substitute #\/ #\\ (namestring x)) s)))
 
 (let* ((path (merge-pathnames *file*))
        (name (pathname-name path))
+       (top (make-source-tree))
        (result
 	 (handler-case
 	     (psg:eval-string
 	      (format nil "(set! %load-path (cons ~S %load-path))
 (use-modules (test-suite lib))
 ;; what (test-suite guile-test)'s main sets: the tests' directory, and
-;; where they may write files
-(let ((m (resolve-module '(test-suite guile-test))))
+;; where they may write files, which is also the working directory
+(let ((m (resolve-module '(test-suite guile-test)))
+      (tmp (mkdtemp (string-copy \"/tmp/guile-test-XXXXXX\"))))
   (module-set! m 'test-suite ~S)
-  (module-set! m 'tmp-dir (mkdtemp (string-copy \"/tmp/guile-test-XXXXXX\"))))
+  (module-set! m 'tmp-dir tmp)
+  (chdir tmp))
+(set! %guile-build-info
+      (append '((top_srcdir . ~S) (srcdir . ~S)) %guile-build-info))
 (define %counter (make-count-reporter))
 (register-reporter (car %counter))
 ~A
@@ -82,10 +106,13 @@
        ((cadr %counter))))"
 		      (guile-string *suite*)
 		      (guile-string (merge-pathnames "tests/" *suite*))
+		      top (concatenate 'string top "/libguile")
 		      (if *verbose* "(register-reporter user-reporter)" "")
 		      (concatenate 'string name ".test") (guile-string path)
 		      (concatenate 'string name ".test")
 		      "(format (current-error-port) \"file aborted: ~s ~s~%\" key args)"))
 	   (error (e) (format nil " error=1 (~A)" (remove #\Newline (princ-to-string e)))))))
   (format t "~&~A~A~%" name result)
-  (finish-output))
+  (finish-output)
+  ;; rm doesn't follow the links
+  (uiop:run-program (list "rm" "-rf" top) :ignore-error-status t))
