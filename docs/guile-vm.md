@@ -144,17 +144,32 @@ root).
   - Continuations through VM code: `call/cc` and prompts capture the VM
     stack's slices with the runtime's frames (src/continuations.lisp);
     re-entry, generators and composable continuations give what Guile
-    gives.
+    gives. How re-entry works:
+    - A re-entry restores each captured slice as a new activation, above
+      what is running. The captured activation may be running still: a
+      generator composes its continuation from inside it.
+    - The frames it re-establishes are copies naming the new activation,
+      so that a continuation captured inside it captures that.
+    - A prompt's handler gives the frame to go on in relative to its
+      activation (in the extent exit), so it holds in a re-entry too.
+    - A composable continuation ends where its body would return to the
+      prompt. A prompt's body is a thunk the prompt's frame calls, unless
+      the prompt is in tail position: then Guile's compiler puts the body
+      in line, and the prompt's frame returns the body's values. So the
+      continuation ends at the first frame above the prompt's if its
+      return only leads to the prompt's `unwind`; otherwise at the
+      prompt's frame, past the `unwind`.
+    - The run that ends it, the outermost of the activation's frames
+      inside the prompt, returns to the composer; the runs inside stay
+      nested in it, as they were.
+    - A `:vm-delimit` frame marks where a composition ends, so that a
+      continuation captured inside it ends there too when re-entered.
 - **Left:**
   - The instructions only libguile's own generated code uses:
     `capture-continuation`, `continuation-call`, `compose-continuation`,
     `subr-call`, `foreign-call`, `halt`, `return-from-interrupt`
     (here `call/cc` and the rest are runtime procedures, which VM code
     calls), and `pointer-set!/immediate`.
-  - Re-entering a composable continuation whose prompt's body is a
-    nested run of the machine (control.test's "nested prompts" at -O2):
-    the body's end comes back as an extent exit, not as the values `k`
-    returns.
 
 ## Frames and stacks
 

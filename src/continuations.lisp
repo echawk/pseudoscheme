@@ -177,6 +177,11 @@ rebuilds it."
 		    (return-from call-with-continuation-base (funcall thunk))))
       (setq *shared-winders* '()))))
 
+(defvar *winder-leaving-normally* nil
+  "While a winder's after runs because its thunk returned: the winder.
+The Guile VM's winders use it: compiled code calls its own after on a
+normal exit, however its frames were rebuilt.")
+
 (defun winder-extent (winder thunk)
   "Call THUNK inside dynamic-wind WINDER (whose before has run): its
 after runs however THUNK is left."
@@ -191,7 +196,8 @@ after runs however THUNK is left."
 	       (setq normal t))
 	  (unless (or normal (member winder *shared-winders* :test #'eq))
 	    (funcall (cdr winder))))
-      (funcall (cdr winder)))))
+      (let ((*winder-leaving-normally* winder))
+	(funcall (cdr winder))))))
 
 (defun full-dynamic-wind (before thunk after)
   (funcall before)
@@ -498,7 +504,7 @@ call returns, then continue the frame."
 		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
       (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
 				 (svref frame 2)))
-      ((:vm :vm-prompt) (funcall *frame-resumer* frame inner))
+      ((:vm :vm-prompt :vm-delimit) (funcall *frame-resumer* frame inner))
       (t (let ((value (with-frame (frame) (funcall inner))))
 	   (apply head (svref frame 2) value frame (make-list (svref frame 3))))))))
 
