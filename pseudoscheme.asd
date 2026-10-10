@@ -303,5 +303,6 @@
 	       (:file "vm-ops" :depends-on ("primitives"))
 	       (:file "vm" :depends-on ("vm-elf" "vm-ops" "goops"))
 	       (:file "vm-jit" :depends-on ("vm"))
+	       (:file "vm-vops" :depends-on ("vm-jit"))
 	       (:file "stacks" :depends-on ("vm"))
 	       (:static-file "root-primitives.txt")))

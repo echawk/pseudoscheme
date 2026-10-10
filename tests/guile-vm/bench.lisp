@@ -1,0 +1,26 @@
+;;; Run tests/guile-vm/bench.scm's compiled procedures on Guile's VM, with
+;;; the backend PSEUDOSCHEME_GUILE_VM_BACKEND names: the best of 3 runs.
+;;; Usage: sbcl --script tests/guile-vm/bench.lisp BENCH.go
+(require :asdf)
+(let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
+  (when (probe-file setup) (load setup)))
+(push (merge-pathnames "../../" (make-pathname :name nil :type nil :defaults *load-truename*))
+      asdf:*central-registry*)
+(handler-bind ((warning #'muffle-warning)) (asdf:load-system :pseudoscheme/guile))
+(psg:boot)
+(in-package "PSEUDOSCHEME-GUILE")
+(let* ((file (second sb-ext:*posix-argv*))
+       (bytes (with-open-file (in file :element-type '(unsigned-byte 8))
+		(let ((v (make-array (file-length in) :element-type '(unsigned-byte 8))))
+		  (read-sequence v in) v)))
+       (cases (call-with-guile-catch (lambda () (funcall (load-image bytes))))))
+  (format t "~&~(~A~):~%" *vm-backend*)
+  (dolist (c cases)
+    (destructuring-bind (name f &rest args) c
+      (let ((best nil))
+	(dotimes (i 3)
+	  (let ((start (get-internal-real-time)))
+	    (apply f args)
+	    (let ((ms (/ (* 1000.0 (- (get-internal-real-time) start)) internal-time-units-per-second)))
+	      (setq best (if best (min best ms) ms)))))
+	(format t "  ~18A ~8,1F ms~%" name best)))))

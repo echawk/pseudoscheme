@@ -35,6 +35,8 @@
   :vop        as :jit, with SBCL VOPs for the hottest instructions
               (vm-vops.lisp).")
 
+(defvar *vm-vops*)			; vm-vops.lisp
+
 (defvar *vm-jit* (not (eq *vm-backend* :interpret))
   "True: run translations of code to Lisp (any backend but :interpret).")
 
@@ -111,6 +113,38 @@ a form better than its handler's source for them, or NIL.")
 					    `(progn (setf (vm-slot vm ,dst) ',x) ,next)))))))))
   (immediates "make-immediate" "make-short-immediate" "make-long-immediate" "make-long-long-immediate"))
 
+(defun intrinsic-name (index)
+  "The name of Guile's intrinsic INDEX, a string."
+  (let ((entry (rassoc index (bytecode-table "intrinsic-list"))))
+    (and entry (ps:scheme-symbol-name (car entry)))))
+
+(defun vop-backend-p () (and (eq *vm-backend* :vop) *vm-vops*))
+
+;; :vop: fixnum addition and subtraction by the VOPs of vm-vops.lisp, the
+;; intrinsic when they give NIL
+(defspecializer "call-scm<-scm-scm" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst a b idx) operands
+    (let* ((name (intrinsic-name idx))
+	   (vop (and (vop-backend-p) (cdr (assoc name '(("add" . %vm-fixnum+) ("sub" . %vm-fixnum-))
+						  :test #'equal)))))
+      (and vop
+	   `(let ((x (vm-slot vm ,a)) (y (vm-slot vm ,b)))
+	      (setf (vm-slot vm ,dst) (or (,vop x y) (funcall (the function (intrinsic ,idx)) x y)))
+	      ,next)))))
+
+(defspecializer "call-scm<-scm-uimm" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst a b idx) operands
+    (let* ((name (intrinsic-name idx))
+	   (vop (and (vop-backend-p) (cdr (assoc name '(("add/immediate" . %vm-fixnum+)
+							 ("sub/immediate" . %vm-fixnum-))
+						  :test #'equal)))))
+      (and vop
+	   `(let ((x (vm-slot vm ,a)))
+	      (setf (vm-slot vm ,dst) (or (,vop x ,b) (funcall (the function (intrinsic ,idx)) x ,b)))
+	      ,next)))))
+
 (defun instruction-form (op ip operands next)
   "Instruction OP at IP, its handler's source with OPERANDS in place: a
 form whose value is where to go, as the handler's is."
@@ -143,7 +177,7 @@ runs from IP: where to go when control leaves the region."
     (dolist (i instructions) (setf (gethash (first i) tags) (gensym (format nil "I~D-" (first i)))))
     `(lambda (vm image ip)
        (declare (type vm vm) (fixnum ip) (ignorable image)
-		(optimize (speed 2) (safety 1) (debug 0) (compilation-speed 0)))
+		(optimize (speed 2) (safety ,(if (vop-backend-p) 0 1)) (debug 0) (compilation-speed 0)))
        (block region
 	 (tagbody
 	  dispatch

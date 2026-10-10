@@ -206,24 +206,54 @@ becomes one Lisp function, compiled by SBCL:
   extent) is returned to the interpreter, which goes on from there.
 
 Since the handlers are the same, so are the semantics, continuations
-included. The translation emits only portable Common Lisp; SBCL's VOPs
-(pvk.ca's "assembly code breadboard") would be a further, SBCL- and
-x86-64-specific step.
+included. The translation is portable Common Lisp, except in the `vop`
+backend (below).
 
-- `PSEUDOSCHEME_GUILE_JIT=0` turns it off.
+- `PSEUDOSCHEME_GUILE_JIT=0` turns it off (the `interpret` backend).
 - `PSEUDOSCHEME_GUILE_JIT_THRESHOLD=0` translates all code run. rtl,
   rtl-compilation, the continuation cases and srfi-1, match and format
   over their `.go` modules all pass so.
 
-On the installed Guile's compiled code (milliseconds; Guile 3.0.11 for
-comparison):
+### Backends
 
-| | interpreter before | interpreter | translated | Guile VM | Guile JIT |
-|---|---|---|---|---|---|
-| fib 25 | 84 | 59 | 23 | 5.7 | 0.7 |
-| loop 10^6 | 225 | 99 | 22 | | |
-| tak 18 12 6 | 17 | 14 | 5 | | |
-| vector sum 10^6 | 419 | 294 | 73 | | |
+`PSEUDOSCHEME_GUILE_VM_BACKEND` chooses how bytecode runs:
 
-("Interpreter before" is without the fixnum fast paths and the cached
-lookup of the runtime's procedures that intrinsics call.)
+- **`interpret`:** the interpreter alone, the reference.
+- **`jit`:** the default. Regions that run often are translated as
+  above.
+- **`aot`:** every region of an image is translated as the image loads.
+  The translation is written as a Lisp file and compiled with
+  `compile-file` into a fasl kept under the cache directory, keyed by the
+  image's contents. An installed module's code is translated once (srfi-1:
+  58 s the first time, then loaded).
+- **`vop`:** as `jit`, but SBCL-specific (vm-vops.lisp):
+  - regions are compiled at `(safety 0)`, so the VM stack's slots are
+    read and written unchecked;
+  - the `add` and `sub` intrinsics are VOPs written for arm64, after the
+    manner of pvk.ca's "SBCL: the ultimate assembly code breadboard". They
+    work on the tagged words themselves (a tag test, `adds`, a branch on
+    overflow), giving NIL for the general case.
+
+All the backends translate the same handler sources, and all four pass
+rtl, rtl-compilation, compiler, numbers, srfi-1 over its `.go`, and the
+continuation cases, with every region translated.
+
+`sh tests/guile-vm/bench.sh` compares them (best of 3, milliseconds,
+on arm64):
+
+| | interpret | jit | aot | vop | Guile 3.0.11 VM | Guile JIT |
+|---|---|---|---|---|---|---|
+| fib 30 | 566 | 67 | 71 | 54 | 61 | 60 |
+| loop 10^6 | 99 | 10.6 | 9.9 | 2.7 | 11.9 | 9.4 |
+| tak 24 16 8 | 456 | 51 | 55 | 44 | 49 | 49 |
+| vector sum 10^6 | 295 | 26.5 | 27.9 | 23.3 | 24.0 | 23.4 |
+
+What made translated code fast:
+- compiling it at speed 2, so that the slot accessors are inlined;
+- decoding constant immediates when translating;
+- making one code pointer per address (a call's return address was
+  allocated on every call);
+- frame sizing on fixnums, inlined.
+
+In `vop`, the VOPs are most of the gain. `(safety 0)` without them gives
+fib 30 69 ms and the loop 9 ms.
