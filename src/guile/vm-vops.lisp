@@ -304,6 +304,31 @@ the flags so that CONDITION holds when it is true."
 		 (sb-assem:emit-label no))))))
   (define-out-of-line %vm-vector-word-p (x i) (if (%vm-vector-word-p x i) t nil))
 
+  ;;; Flonums: division as Guile's, IEEE's (an infinity or a NaN, never
+  ;;; a trap): the traps SBCL enables masked in FPCR around the one
+  ;;; instruction
+
+  (sb-c:defknown %vm-f/ (double-float double-float) double-float
+      (sb-c:flushable sb-c:movable)
+    :overwrite-fndb-silently t)
+  (sb-c:define-vop (%vm-f/)
+    (:translate %vm-f/)
+    (:policy :fast-safe)
+    (:args (x :scs (sb-vm::double-reg)) (y :scs (sb-vm::double-reg)))
+    (:arg-types double-float double-float)
+    (:results (r :scs (sb-vm::double-reg)))
+    (:result-types double-float)
+    (:temporary (:sc sb-vm::non-descriptor-reg) saved tmp)
+    (:generator 6
+      (sb-assem:inst mrs saved :fpcr)
+      ;; the enables of the invalid, divide-by-zero, overflow, underflow
+      ;; and inexact traps: bits 8 to 12
+      (sb-assem:inst and tmp saved (ldb (byte 64 0) (lognot #x1f00)))
+      (sb-assem:inst msr :fpcr tmp)
+      (sb-assem:inst fdiv r x y)
+      (sb-assem:inst msr :fpcr saved)))
+  (define-out-of-line %vm-f/ (x y) (%vm-f/ (the double-float x) (the double-float y)))
+
   (sb-ext:lock-package "SB-C")
   (sb-ext:lock-package "SB-VM")
   (setq *vm-vops* t))
@@ -345,6 +370,11 @@ in which VM-SLOT is the cached stack's, or NIL.")
 (defmacro deftranslator (name lambda-list &body body)
   `(setf (gethash ,name *vop-translators*) (lambda ,lambda-list ,@body)))
 
+(defvar *vop-peepholes* (make-hash-table :test 'equal)
+  "Instruction name -> a function of the instructions from one of its (as
+VOP-INSTRUCTION-FORM's) and GOTO returning a form doing it and some after
+it, then going on; or NIL.  The instructions after keep their own tags.")
+
 (defvar *vop-comparisons* (make-hash-table :test 'equal)
   "Comparison instruction name -> a function of its operands and DEST
 returning a form that branches: DEST, of :less, :equal, :none or
@@ -372,11 +402,16 @@ following conditional jump does then; and the instruction.")
 going where it does (a statement of the region's TAGBODY)."
   (destructuring-bind (ip op operands next) (first instructions)
     (let ((name (vm-op-name op))
-	  (following (second instructions)))
+	  (following (second instructions))
+	  (fused nil))
       (flet ((goto (target)
 	       (let ((tag (gethash target tags)))
 		 (if tag `(go ,tag) `(return-from region ,target)))))
 	(cond
+	  ;; an instruction and those after it, together
+	  ((let ((f (gethash name *vop-peepholes*)))
+	     (and f (setq fused (funcall f instructions #'goto))))
+	   (cached fused))
 	  ;; a comparison and the conditional jump after it: one branch
 	  ((and following (eql (first following) next) (gethash name *vop-comparisons*)
 		(member (vm-op-name (second following)) +conditional-jumps+ :test #'string=))
@@ -735,21 +770,44 @@ of TYPE, else GENERAL, a function of the index giving a form of X."
 
 ;;; Memory: a vector's elements, a pair's car and cdr
 
+(defun program-slot (name)
+  "The location of vm-program's slot NAME, for FUNCALLABLE-STANDARD-INSTANCE-ACCESS."
+  (let ((class (find-class 'vm-program)))
+    (sb-mop:finalize-inheritance class)
+    (sb-mop:slot-definition-location
+     (find name (sb-mop:class-slots class) :key #'sb-mop:slot-definition-name))))
+
+(defun program-code-form (x) `(sb-mop:funcallable-standard-instance-access ,x ,(program-slot 'code)))
+(defun program-free-form (x)
+  `(sb-ext:truly-the simple-vector (sb-mop:funcallable-standard-instance-access ,x ,(program-slot 'free))))
+
 (defun word-ref-form (x i)
-  "Word I (a form) of X, as HEAP-REF."
-  (cond ((eql i 0) `(if (consp ,x) (car (sb-ext:truly-the cons ,x)) (heap-ref ,x 0)))
-	(t `(cond ,@(and (eql i 1) `(((consp ,x) (cdr (sb-ext:truly-the cons ,x)))))
-		  ((%vm-vector-word-p ,x ,i)
-		   (svref (sb-ext:truly-the simple-vector ,x) (1- (sb-ext:truly-the fixnum ,i))))
-		  (t (heap-ref ,x ,i))))))
+  "Word I (a form) of X, as HEAP-REF: of a pair, a vector, a closure (its
+code and free variables) or a variable."
+  (if (eql i 0)
+      `(if (consp ,x) (car (sb-ext:truly-the cons ,x)) (heap-ref ,x 0))
+      `(cond ,@(and (eql i 1) `(((consp ,x) (cdr (sb-ext:truly-the cons ,x)))
+				((gvariable-p ,x) (gvariable-value ,x))))
+	     ((%vm-vector-word-p ,x ,i)
+	      (svref (sb-ext:truly-the simple-vector ,x) (1- (sb-ext:truly-the fixnum ,i))))
+	     ,@(cond ((eql i 1) `(((typep ,x 'vm-program) ,(program-code-form x))))
+		     ((integerp i)
+		      `(((and (typep ,x 'vm-program) (< ,(- i 2) (length ,(program-free-form x))))
+			 (svref ,(program-free-form x) ,(- i 2))))))
+	     (t (heap-ref ,x ,i)))))
 
 (defun word-set-form (x i value)
   "Set word I (a form) of X to VALUE, as SCM-STORE."
-  (cond ((eql i 0) `(if (consp ,x) (setf (car (sb-ext:truly-the cons ,x)) ,value) (scm-store vm ,x 0 ,value)))
-	(t `(cond ,@(and (eql i 1) `(((consp ,x) (setf (cdr (sb-ext:truly-the cons ,x)) ,value))))
-		  ((%vm-vector-word-p ,x ,i)
-		   (setf (svref (sb-ext:truly-the simple-vector ,x) (1- (sb-ext:truly-the fixnum ,i))) ,value))
-		  (t (scm-store vm ,x ,i ,value))))))
+  (if (eql i 0)
+      `(if (consp ,x) (setf (car (sb-ext:truly-the cons ,x)) ,value) (scm-store vm ,x 0 ,value))
+      `(cond ,@(and (eql i 1) `(((consp ,x) (setf (cdr (sb-ext:truly-the cons ,x)) ,value))
+				((gvariable-p ,x) (setf (gvariable-value ,x) ,value))))
+	     ((%vm-vector-word-p ,x ,i)
+	      (setf (svref (sb-ext:truly-the simple-vector ,x) (1- (sb-ext:truly-the fixnum ,i))) ,value))
+	     ,@(and (integerp i) (>= i 2)
+		    `(((and (typep ,x 'vm-program) (< ,(- i 2) (length ,(program-free-form x))))
+		       (setf (svref ,(program-free-form x) ,(- i 2)) ,value))))
+	     (t (scm-store vm ,x ,i ,value)))))
 
 (deftranslator "scm-ref" (operands ip next)
   (declare (ignore ip))
@@ -932,3 +990,201 @@ into a simple octet vector and in it; else GENERAL."
 
 (conversion-translator "call-f64<-scm" 'double-float 'x
 		       (lambda (idx) `(funcall (the function (intrinsic ,idx)) x)) '("scm->f64"))
+
+;;; Allocation: an object's words, then its first word (its type), give
+;;; the Lisp object at once, without the raw words between
+
+(defun fresh-object-form (header)
+  "A form making the object whose first word is HEADER, as REALIZE, or NIL."
+  (case (logand header #x7f)
+    (69 `(make-vm-program nil ,(ash header -16)))	; a closure
+    (13 `(make-array ,(ash header -8) :initial-element ps:false)) ; a vector
+    (7 '(make-gvariable))				; a variable (a box)
+    (55 '(make-atomic-box ps:false))))
+
+(setf (gethash "allocate-words/immediate" *vop-peepholes*)
+      (lambda (instructions goto)
+	(destructuring-bind ((ip op (dst count) next) &optional second third &rest more) instructions
+	  (declare (ignore ip op more))
+	  (flet ((named (i name) (and i (string= (vm-op-name (second i)) name))))
+	    (cond
+	      ;; a pair: its car stored first
+	      ((and (= count 2) (named second "scm-set!/immediate") (eql (first second) next)
+		    (destructuring-bind (obj i val) (third second) (and (= obj dst) (= i 0) (/= val dst))))
+	       `(progn (setf (vm-slot vm ,dst) (cons (vm-slot vm ,(third (third second))) ps:false))
+		       ,(funcall goto (fourth second))))
+	      ;; its header, a constant
+	      ((and (named second "load-u64") (named third "word-set!/immediate")
+		    (eql (first second) next) (eql (first third) (fourth second)))
+	       (destructuring-bind (h high low) (third second)
+		 (destructuring-bind (obj i val) (third third)
+		   (let* ((header (logior (ash high 32) low))
+			  (object (and (= obj dst) (= i 0) (= val h) (/= h dst) (fresh-object-form header))))
+		     (and object
+			  `(progn (setf (vm-slot vm ,h) ,header (vm-slot vm ,dst) ,object)
+				  ,(funcall goto (fourth third)))))))))))))
+
+;; a closure's code
+(deftranslator "word-set!/immediate" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (obj i val) operands
+    (and (= i 1)
+	 `(let ((x (vm-slot vm ,obj)) (v (vm-slot vm ,val)))
+	    (if (typep x 'vm-program)
+		(setf ,(program-code-form 'x) v)
+		(word-store vm x 1 v))
+	    ,next))))
+
+;;; Calls: the frame pushed through %STACK, and a compiled callee's code
+;;; gone to (in the region if it's there); a Lisp procedure applied
+
+(defun enter-form ()
+  "Go to the callee in the frame just made: its code, or where it returns."
+  `(let ((callee (svref %stack (+ (vm-fp vm) 1))))
+     (if (typep callee 'vm-program)
+	 ,(program-code-form 'callee)
+	 (prog1 (call-lisp-procedure vm callee) ,+reload+))))
+
+(deftranslator "call" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (proc nlocals) operands
+    `(let ((new-fp (+ (vm-fp vm) ,proc)))
+       (declare (fixnum new-fp))
+       (when (>= (+ new-fp ,nlocals 1) (length %stack))
+	 (grow-stack vm (+ new-fp ,nlocals 1))
+	 (setq %stack (vm-stack vm)))
+       (setf (svref %stack new-fp) nil
+	     (svref %stack (- new-fp 1)) ,(return-address next)
+	     (svref %stack (- new-fp 2)) ,proc)
+       (setf (vm-fp vm) new-fp (vm-sp vm) (+ new-fp ,nlocals))
+       (setq %sp (+ new-fp ,nlocals))
+       ,(enter-form))))
+
+(deftranslator "tail-call" (operands ip next)
+  (declare (ignore operands ip next))
+  (enter-form))
+
+;;; The frame and the arguments
+
+(macrolet ((nargs (name test)
+	     `(deftranslator ,name (operands ip next)
+		(declare (ignore ip))
+		`(progn (unless (,',test (- %sp (vm-fp vm)) ,(first operands)) (wrong-num-args vm))
+			,next))))
+  (nargs "assert-nargs-ee" =) (nargs "assert-nargs-ge" >=) (nargs "assert-nargs-le" <=))
+
+(defcomparison "arguments<=?" (operands dest)
+  `(let ((n (- %sp (vm-fp vm))))
+     (cond ((< n ,(first operands)) ,(funcall dest :less))
+	   ((= n ,(first operands)) ,(funcall dest :equal))
+	   (t ,(funcall dest :none)))))
+
+(defcomparison "positional-arguments<=?" (operands dest)
+  (destructuring-bind (nreq expected) operands
+    `(let ((n (positional-count vm ,nreq)))
+       (cond ((< n ,expected) ,(funcall dest :less))
+	     ((= n ,expected) ,(funcall dest :equal))
+	     (t ,(funcall dest :none))))))
+
+(defframe "receive-values" (proc allow-extra nvalues)
+  `(let ((n (- %sp (+ (vm-fp vm) ,proc))))
+     (when ,(if (= allow-extra 1) `(< n ,nvalues) `(/= n ,nvalues))
+       (values-error "vm-error" "Wrong number of values returned to continuation"))))
+
+(defframe "bind-rest" (dst)
+  `(let* ((fp (vm-fp vm)) (rest '()))
+     (loop for i from (- %sp fp 1) downto ,dst do (push (svref %stack (+ fp 1 i)) rest))
+     ,(frame-size-form (+ dst 1) '+unbound+)
+     (setf (svref %stack (+ (vm-fp vm) 1 ,dst)) rest)))
+
+(defframe "shuffle-down" (from to)
+  `(let* ((fp (vm-fp vm)) (n (- %sp fp)))
+     (loop for i from ,from below n for j from ,to
+	   do (setf (svref %stack (+ fp 1 j)) (svref %stack (+ fp 1 i))))
+     ,(frame-size-form `(- n ,(- from to)))))
+
+;;; Moves, immediates and instrumentation
+
+(defframe "mov" (dst src) `(setf (vm-slot vm ,dst) (vm-slot vm ,src)))
+(defframe "long-mov" (dst src) `(setf (vm-slot vm ,dst) (vm-slot vm ,src)))
+(defframe "long-fmov" (dst src)
+  `(let ((fp (vm-fp vm))) (setf (svref %stack (+ fp 1 ,dst)) (svref %stack (+ fp 1 ,src)))))
+(dolist (name '("handle-interrupts" "instrument-entry" "instrument-loop"))
+  (frame-translator name (lambda (&rest operands) (declare (ignore operands)) nil)))
+
+(loop for (name bits) in '(("make-immediate" (ldb (byte 64 0) b)) ("make-short-immediate" b)
+			   ("make-long-immediate" b) ("make-long-long-immediate" (logior (ash b 32) low)))
+      do (let ((bits bits))
+	   (setf (gethash name *vop-translators*)
+		 (lambda (operands ip next)
+		   (declare (ignore ip))
+		   (destructuring-bind (dst b &optional low) operands
+		     (let* ((bits (funcall (compile nil `(lambda (b low) (declare (ignorable low)) ,bits)) b low))
+			    (constant (assoc bits +immediate-constants+))
+			    (literal (handler-case (list (scm-from-bits bits)) (error () nil))))
+		       (cond (constant `(progn (setf (vm-slot vm ,dst) ,(cdr constant)) ,next))
+			     ((and literal (literal-immediate-p (first literal)))
+			      `(progn (setf (vm-slot vm ,dst) ',(first literal)) ,next)))))))))
+
+(defun known-intrinsic (idx)
+  "Intrinsic IDX's function, or NIL if there's none (in code decoded from
+the middle of an instruction, say)."
+  (ignore-errors (intrinsic idx)))
+
+;;; Intrinsics in general: the function, found when translating, called;
+;;; it might run the VM, so the stack is loaded again after
+
+(macrolet ((call-shape (name lambda-list result &rest args)
+	     `(deftranslator ,name (operands ip next)
+		(declare (ignore ip))
+		(destructuring-bind ,lambda-list operands
+		  (declare (ignorable ,@(remove 'idx lambda-list)))
+		  (let* ((f (known-intrinsic idx))
+			 (call (out-call `(funcall (the function ',f) ,,@args))))
+		    (and f `(progn ,,(if result '`(setf (vm-slot vm ,dst) ,call) 'call) ,next)))))))
+  (call-shape "call-scm<-scm" (dst a idx) t `(vm-slot vm ,a))
+  (call-shape "call-scm<-thread" (dst idx) t)
+  (call-shape "call-scm<-thread-scm" (dst a idx) t `(vm-slot vm ,a))
+  (call-shape "call-scm-scm" (a b idx) nil `(vm-slot vm ,a) `(vm-slot vm ,b))
+  (call-shape "call-scm-scm-scm" (a b c idx) nil `(vm-slot vm ,a) `(vm-slot vm ,b) `(vm-slot vm ,c))
+  (call-shape "call-scm-uimm-scm" (a b c idx) nil `(vm-slot vm ,a) b `(vm-slot vm ,c)))
+
+;; flonum functions: SBCL's, of doubles, when they give doubles
+(defparameter +f64-functions+
+  '(("fabs" (abs x)) ("fsqrt" (if (>= x 0d0) (sqrt x) (general))) ("fsin" (sin x)) ("fcos" (cos x))
+    ("ftan" (tan x)) ("fatan" (atan x)) ("fatan2" (atan x y))))
+
+(dolist (shape '("call-f64<-f64" "call-f64<-f64-f64"))
+  (let ((two (string= shape "call-f64<-f64-f64")))
+    (setf (gethash shape *vop-translators*)
+	  (lambda (operands ip next)
+	    (declare (ignore ip))
+	    (destructuring-bind (dst a &rest more) operands
+	      (let* ((b (and two (first more))) (idx (car (last more)))
+		     (f (known-intrinsic idx))
+		     (fast (second (assoc (intrinsic-name idx) +f64-functions+ :test #'equal)))
+		     (general `(funcall (the function ',f) x ,@(and two '(y)))))
+		(and f
+		`(let ((x (vm-slot vm ,a)) ,@(and two `((y (vm-slot vm ,b)))))
+		   (setf (vm-slot vm ,dst)
+			 ,(if fast
+			      `(flet ((general () ,general))
+				 (declare (ignorable #'general))
+				 (if (and (typep x 'double-float) ,@(and two '((typep y 'double-float))))
+				     (let ((x (sb-ext:truly-the double-float x))
+					   ,@(and two '((y (sb-ext:truly-the double-float y)))))
+				       ,fast)
+				     (general)))
+			      general))
+		   ,next))))))))
+
+;; division: the VOP
+(deftranslator "fdiv" (operands ip next)
+  (declare (ignore ip))
+  (destructuring-bind (dst a b) operands
+    `(let ((x (vm-slot vm ,a)) (y (vm-slot vm ,b)))
+       (setf (vm-slot vm ,dst)
+	     (if (and (typep x 'double-float) (typep y 'double-float))
+		 (%vm-f/ x y)
+		 (sb-int:with-float-traps-masked (:divide-by-zero :invalid :overflow) (/ x y))))
+       ,next)))

@@ -6,5 +6,7 @@
 (define (vec-sum n)
   (let ((v (make-vector n 1)))
     (let lp ((i 0) (s 0)) (if (= i n) s (lp (+ i 1) (+ s (vector-ref v i)))))))
+(define (cons-list n) (let lp ((i 0) (l '())) (if (= i n) (length l) (lp (+ i 1) (cons i l)))))
 (list (list "fib 30" fib 30) (list "loop 10^6" count-loop 1000000)
-      (list "tak 24 16 8" tak 24 16 8) (list "vector sum 10^6" vec-sum 1000000))
+      (list "tak 24 16 8" tak 24 16 8) (list "vector sum 10^6" vec-sum 1000000)
+      (list "cons 10^6" cons-list 1000000))
