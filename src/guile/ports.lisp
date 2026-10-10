@@ -538,8 +538,27 @@ mark, as Guile writes."
     (when (port-output-p p) (ignore-errors (flush-output p)))
     (remhash p *open-output-ports*)
     (setf (port-open-p p) nil)
-    (when (port-close-fn p) (funcall (port-close-fn p))))
+    (let ((fd (port-fd p)))
+      (when (port-close-fn p) (funcall (port-close-fn p)))
+      (when fd (run-fdes-finalizers fd))))
   t)
+
+;;; (ice-9 fdes-finalizers): procedures called with a file descriptor
+;;; when a port closes it
+(defvar *fdes-finalizers* (make-hash-table) "fd -> finalizers, the latest first.")
+
+(defun run-fdes-finalizers (fd)
+  (let ((finalizers (gethash fd *fdes-finalizers*)))
+    (remhash fd *fdes-finalizers*)
+    (dolist (f finalizers) (funcall f fd))))
+
+(defextension "scm_init_fdes_finalizers"
+  (list (cons "add-fdes-finalizer!"
+	      (lambda (fd f) (push f (gethash fd *fdes-finalizers*)) *unspecified*))
+	(cons "remove-fdes-finalizer!"
+	      (lambda (fd f)
+		(setf (gethash fd *fdes-finalizers*) (remove f (gethash fd *fdes-finalizers*) :count 1))
+		*unspecified*))))
 
 (defun port-position (port)
   (unless (port-seek-fn port)
