@@ -406,19 +406,22 @@ square, else the nearest double, however big or small X is."
     (subseq s start end)))
 (defguile "substring/copy" (s start &optional (end (length s))) (subseq s start end))
 ;;; libguile's debugging dumps of a string's and a symbol's buffer, as
-;;; they are here: a string is its own buffer, never shared, and
-;;; mutable; "wide" if a character is past Latin-1.
+;;; they are here: a string is its own buffer, never shared (a Scheme
+;;; string is a simple string, so substring/shared copies), mutable
+;;; unless read-only; "wide" if a character is past Latin-1.
 
 (defun wide-string-p (s) (some (lambda (c) (> (char-code c) 255)) s))
 
 (defguile "%string-dump" (s)
   (unless (stringp s) (wrong-type "%string-dump" 1 s))
   (flet ((entry (key value) (cons (ssym key) value)))
-    (list (entry "string" s) (entry "start" 0) (entry "length" (length s))
-	  (entry "shared" ps:false) (entry "read-only" ps:false)
+    (progn
+      (list (entry "string" s) (entry "start" 0) (entry "length" (length s))
+	  (entry "shared" ps:false) (entry "read-only" (bool (read-only-string-p s)))
 	  (entry "stringbuf" s) (entry "stringbuf-chars" (copy-seq s))
 	  (entry "stringbuf-length" (length s)) (entry "stringbuf-shared" ps:false)
-	  (entry "stringbuf-mutable" ps:true) (entry "stringbuf-wide" (bool (wide-string-p s))))))
+	  (entry "stringbuf-mutable" (bool (not (read-only-string-p s))))
+	  (entry "stringbuf-wide" (bool (wide-string-p s)))))))
 
 (defguile "%symbol-dump" (sym)
   (unless (ps:scheme-symbol-p sym) (wrong-type "%symbol-dump" 1 sym))
@@ -445,7 +448,52 @@ square, else the nearest double, however big or small X is."
 	       ("string-ci>?" string-greaterp) ("string-ci<=?" string-not-greaterp)
 	       ("string-ci>=?" string-not-lessp)))
 
-(defguile "substring/read-only" (s start &optional (end (length s))) (subseq s start end))
+;;; Read-only strings: literals in compiled code (strings of a VM image),
+;;; substring/read-only's and symbol->string's.  The root's string
+;;; mutators check (WRAP-STRING-MUTATORS, as the root is installed).
+
+(defvar *read-only-strings* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t))
+
+(defun read-only-string (s)
+  (setf (gethash s *read-only-strings*) t)
+  s)
+
+(defun read-only-string-p (s) (and (stringp s) (gethash s *read-only-strings*)))
+
+(defun check-mutable-string (s)
+  (when (read-only-string-p s)
+    (guile-error (ssym "misc-error") ps:false "string is read-only: ~s" (list s))))
+
+(defparameter +string-mutators+
+  '(("string-set!" . 0) ("string-fill!" . 0) ("substring-fill!" . 0) ("string-copy!" . 0)
+    ("substring-move!" . 3) ("string-upcase!" . 0) ("string-downcase!" . 0)
+    ("string-capitalize!" . 0) ("string-titlecase!" . 0) ("string-reverse!" . 0)
+    ("string-map!" . 1) ("string-xcopy!" . 0))
+  "The root's procedures that change a string, and which argument it is.")
+
+(defun wrap-string-mutators ()
+  "Make the root's string mutators refuse read-only strings."
+  (loop for (name . position) in +string-mutators+
+	do (let* ((v (obarray-variable (ssym name)))
+		  (f (and v (gvariable-value v)))
+		  (position position))
+	     (when (functionp f)
+	       (setf (gvariable-value v)
+		     (lambda (&rest args)
+		       (check-mutable-string (nth position args))
+		       (apply f args)))))))
+
+(defguile "substring/read-only" (s start &optional (end (length s)))
+  (read-only-string (subseq s start end)))
+
+(defvar *symbol-strings* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t)
+  "Symbol -> its name, read-only, as symbol->string gives it each time.")
+
+(defguile "symbol->string" (sym)
+  (unless (ps:scheme-symbol-p sym) (wrong-type "symbol->string" 1 sym))
+  (or (gethash sym *symbol-strings*)
+      (setf (gethash sym *symbol-strings*) (read-only-string (copy-seq (ps:scheme-symbol-name sym))))))
+
 (defguile "string-append/shared" (&rest strings) (apply #'concatenate 'string strings))
 (defguile "string-bytes-per-char" (s) (if (every (lambda (c) (< (char-code c) 256)) s) 1 4))
 (defguile "string-utf8-length" (s) (length (sb-ext:string-to-octets s :external-format :utf-8)))
@@ -984,7 +1032,8 @@ Guile's ((seconds . microseconds) (seconds . microseconds))."
 (pushnew 'run-after-gc-hook sb-ext:*after-gc-hooks*)
 (defguile "restore-signals" () *unspecified*)
 (defguile "alarm" (n) (declare (ignore n)) 0)
-(defguile "load-compiled" (file) (declare (ignore file)) ps:false)
+;; a compiled file, Guile's .go, run on the VM (vm.lisp): its value
+(defguile "load-compiled" (file) (funcall (the function (load-go-file file))))
 
 ;;; ------------------------------------------------------------------
 ;;; load-extension: libguile's init functions for modules partly in C.

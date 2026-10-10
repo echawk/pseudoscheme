@@ -188,7 +188,8 @@ bits there would otherwise be taken for."
 			 (setf (svref (program-free program) i) (scm (+ 2 i))))))
 		 (13 (let* ((n (ash word0 -8)) (v (make-array n)))
 		       (dotimes (i n v) (setf (svref v i) (scm (+ 1 i))))))
-		 (21 (decode-static-string image (raw 1) (raw 2) (raw 3)))
+		 ;; a literal: read-only
+		 (21 (read-only-string (decode-static-string image (raw 1) (raw 2) (raw 3))))
 		 (61 (make-syntax-object (scm 1) (scm 2) (scm 3) (scm 4)))
 		 (77 (let* ((n (raw 1))
 			    (contents (raw 2))

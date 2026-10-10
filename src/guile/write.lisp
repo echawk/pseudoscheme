@@ -227,6 +227,10 @@ true, or NIL.")
 	     (let ((*print-stack* (cons x *print-stack*)))
 	       (write-elements "#" (coerce x 'list) stream display))))
 	((garray-p x) (write-array x stream display))
+	;; SRFI 207's notation, when the bytestrings print option is on
+	((and (typep x 'ps-r6rs::octets) (option-value *print-options* "bytestrings")
+	      (member (gethash x *bytevector-types* "vu8") '("vu8" "u8") :test #'equal))
+	 (write-bytestring x stream))
 	((and (typep x 'ps-r6rs::octets) (gethash x *bytevector-types*))
 	 (write-tagged-bytevector x (gethash x *bytevector-types*) stream display))
 	((typep x 'ps-r6rs::octets) (write-elements "#vu8" (coerce x 'list) stream display))
@@ -253,3 +257,17 @@ true, or NIL.")
 (defun guile-display (x &optional (stream *standard-output*))
   (let ((*print-stack* '())) (guile-print x stream t))
   *unspecified*)
+
+(defun write-bytestring (bv stream)
+  "BV as SRFI 207's bytestring: #u8\"...\", printable ASCII as it is."
+  (write-string "#u8\"" stream)
+  (loop for b across bv
+	do (case b
+	     (7 (write-string "\\a" stream)) (8 (write-string "\\b" stream))
+	     (9 (write-string "\\t" stream)) (10 (write-string "\\n" stream))
+	     (13 (write-string "\\r" stream)) (34 (write-string "\\\"" stream))
+	     (92 (write-string "\\\\" stream)) (124 (write-string "\\|" stream))
+	     (t (if (<= 32 b 126)
+		    (write-char (code-char b) stream)
+		    (format stream "\\x~(~x~);" b)))))
+  (write-char #\" stream))

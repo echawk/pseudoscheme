@@ -31,7 +31,10 @@
   '(("u8" . 1) ("s8" . 1) ("u16" . 2) ("s16" . 2) ("u32" . 4) ("s32" . 4) ("u64" . 8) ("s64" . 8)
     ("f32" . 4) ("f64" . 8) ("c32" . 8) ("c64" . 16) ("vu8" . 1)))
 
-(setq ps::*bytevector-type* (lambda (v) (gethash v *bytevector-types* "vu8")))
+;; for EQUAL?: a u8vector's bytes are a bytevector's, as in Guile, where
+;; (equal? #u8(1) #vu8(1)); other element types differ
+(setq ps::*bytevector-type*
+      (lambda (v) (let ((type (gethash v *bytevector-types* "vu8"))) (if (equal type "u8") "vu8" type))))
 
 (defun type-size (type) (cdr (assoc type *type-sizes* :test #'string=)))
 

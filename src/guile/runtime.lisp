@@ -804,7 +804,16 @@ dynamic states.")
 (defguile "set-procedure-properties!" (p alist) (setf (gethash p *procedure-properties*) alist) *unspecified*)
 (defguile "procedure-property" (p key)
   (let ((entry (assoc key (gethash p *procedure-properties* '()))))
-    (if entry (cdr entry) ps:false)))
+    (cond (entry (cdr entry))
+	  ;; a procedure's arguments, from its Lisp lambda list if it has
+	  ;; no arglist of its own: (required optional keywords
+	  ;; allow-other-keys? rest)
+	  ((and (eq key (ssym "arglist")) (functionp p) (not (typep p 'standard-object)))
+	   (let ((arity (function-arity p)))
+	     (if arity
+		 (list (first arity) (second arity) '() ps:false (if (third arity) (ssym "rest") ps:false))
+		 ps:false)))
+	  (t ps:false))))
 (defguile "set-procedure-property!" (p key value)
   (let ((entry (assoc key (gethash p *procedure-properties* '()))))
     (if entry
@@ -1053,8 +1062,14 @@ fails over and over (boot-9 half loaded)."
 (defguile "inf" () sb-ext:double-float-positive-infinity)
 (defguile "nan" () (- sb-ext:double-float-positive-infinity sb-ext:double-float-positive-infinity))
 (defun function-arity (f)
-  "F's arity from its Lisp lambda list: required and optional counts,
-and whether it takes more; NIL if that isn't known."
+  "F's arity: required and optional counts, and whether it takes more;
+NIL if that isn't known.  From its arglist property (a lambda* or the
+like, compile.lisp), or else its Lisp lambda list."
+  (let ((arglist (and (functionp f) (cdr (assoc (ssym "arglist") (gethash f *procedure-properties* '()))))))
+    (when (and (consp arglist) (integerp (first arglist)))
+      (destructuring-bind (req opt keywords aok rest) arglist
+	(return-from function-arity
+	  (list req opt (or (truthy rest) (consp keywords) (truthy aok)))))))
   (let ((lambda-list (if (functionp f) (sb-kernel:%fun-lambda-list f) :unknown)))
     (when (listp lambda-list)
       (let ((required 0) (optional 0) (rest nil) (state :required))
@@ -1093,7 +1108,6 @@ and whether it takes more; NIL if that isn't known."
 (defguile "micro-version" () "11")
 (defguile "effective-version" () "3.0")
 (defguile "version" () "3.0.11")
-(defguile "debug-options-interface" (&rest args) (declare (ignore args)) '())
 ;;; Option sets, as libguile's scm_options: (name boolean-p value doc).
 ;;; Called with no argument, the interface returns the options set (a
 ;;; boolean by its name alone, others as name and value); with a list, it
@@ -1125,6 +1139,19 @@ and whether it takes more; NIL if that isn't known."
      ("curly-infix" t nil "Support SRFI-105 curly infix expressions.")
      ("r7rs-symbols" t nil "Support R7RS |...| symbol notation.")
      ("bytestrings" t nil "Read bytestrings (SRFI 207)."))))
+
+(defvar *debug-options*
+  (make-options
+   '(("backwards" t nil "Display backtrace in anti-chronological order.")
+     ("width" nil 79 "Maximal width of backtrace.")
+     ("depth" nil 20 "Maximal length of printed backtrace.")
+     ("backtrace" t t "Show backtrace on error.")
+     ("stack" nil 837222 "Stack size limit (measured in words; 0 = no check).")
+     ("show-file-name" nil t "Show file names and line numbers in backtraces when not `#f'.  A value of `base' displays only base names, while `#t' displays full names.")
+     ("warn-deprecated" t nil "Warn when deprecated features are used."))))
+
+(defguile "debug-options-interface" (&optional (arg nil argp))
+  (if argp (options-interface *debug-options* arg) (options-interface *debug-options*)))
 
 (defun option-scheme-value (v)
   (cond ((eq v :reader) (ssym "reader")) ((eq v t) ps:true) ((null v) ps:false) (t v)))

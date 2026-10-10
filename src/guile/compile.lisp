@@ -113,22 +113,29 @@ psyntax's 18 core types, (language tree-il) defines <fix>, <let-values>,
 		 (setq module (module-public-interface* module)))
 	       (and module (module-variable* module (site-name site)))))))
 
-(defun signal-unbound-variable (name)
+(defvar *unbound-variable-hook* nil
+  "NIL, or a function of a name and its module, called as that top-level
+variable is found unbound, before the error: a file being loaded makes
+a later definition first (boot.lisp's EVAL-LOAD-FORM).")
+
+(defun signal-unbound-variable (name &optional module)
+  (when (and *unbound-variable-hook* module)
+    (funcall *unbound-variable-hook* name module))
   (guile-error (ssym "unbound-variable") ps:false "Unbound variable: ~S" (list name) ps:false))
 
 (defun site-ref (site)
   (let ((v (or (site-variable site)
 	       (let ((v (site-lookup site)))
-		 (unless v (signal-unbound-variable (site-name site)))
+		 (unless v (signal-unbound-variable (site-name site) (and (eq (site-kind site) :toplevel) (site-module site))))
 		 (setf (site-variable site) v)))))
     (let ((x (gvariable-value v)))
-      (when (eq x +unbound+) (signal-unbound-variable (site-name site)))
+      (when (eq x +unbound+) (signal-unbound-variable (site-name site) (and (eq (site-kind site) :toplevel) (site-module site))))
       x)))
 
 (defun site-set (site value)
   (let ((v (or (site-variable site)
 	       (let ((v (site-lookup site)))
-		 (unless v (signal-unbound-variable (site-name site)))
+		 (unless v (signal-unbound-variable (site-name site) (and (eq (site-kind site) :toplevel) (site-module site))))
 		 (setf (site-variable site) v)))))
     (setf (gvariable-value v) value)
     *unspecified*))
@@ -393,6 +400,10 @@ does nothing."
 			      (string= (ps:scheme-symbol-name (car entry)) "name")
 			      (symbolp (cdr entry)) (cdr entry))
 		      return (cdr entry))))
+    ;; a lambda with properties (an arglist): the lambda inside named
+    (when (and (consp lambda) (eq (car lambda) (core "%guile-with-meta")))
+      (return-from name-lambda
+	(list* (car lambda) (name-lambda meta (second lambda)) (cddr lambda))))
     (if (and name (consp lambda) (eq (car lambda) (core "lambda")) (consp (cddr lambda)))
 	(let ((body (caddr lambda)) (marker (quoted (cons :procedure-name name))))
 	  ;; into a sequence, not around it: long sequences are cut into
@@ -413,9 +424,12 @@ documentation, and if NAMED its name."
 				 (or (string= key "documentation")
 				     (and named (string= key "name")))))
 		       collect entry)))
-    (if props
-	(list (core "%guile-with-meta") lambda (quoted props))
-	lambda)))
+    (cond ((null props) lambda)
+	  ;; one with properties already (an arglist): all of them
+	  ((and (consp lambda) (eq (car lambda) (core "%guile-with-meta")))
+	   (list (core "%guile-with-meta") (second lambda)
+		 (quoted (append props (cadr (third lambda))))))
+	  (t (list (core "%guile-with-meta") lambda (quoted props))))))
 
 (defun compile-lambda (case)
   (cond ((not (node-type case))
@@ -429,8 +443,31 @@ documentation, and if NAMED its name."
 			     (append (subseq vars 0 req) (nth req vars))
 			     vars)))
 	   (list (core "lambda") formals (compile-tree-il (node-field case 7)))))
-	(t (let ((args (fresh-lexical)))
-	     (list (core "lambda") args (compile-clauses case args))))))
+	(t (let* ((args (fresh-lexical))
+		  (lambda (list (core "lambda") args (compile-clauses case args)))
+		  (arglist (and (not (node-type (node-field case 8))) (clause-arglist case))))
+	     ;; one clause with optional or keyword arguments: its shape, for
+	     ;; procedure-arguments and procedure-minimum-arity
+	     (if arglist
+		 (list (core "%guile-with-meta") lambda (quoted (list (cons (ssym "arglist") arglist))))
+		 lambda)))))
+
+(defun clause-arglist (case)
+  "CASE's arguments as Guile's arglist property gives them: (required
+optional keywords allow-other-keys? rest), the counts of required and
+optional ones, keywords as (keyword . index)."
+  (let* ((req (length (node-field case 1)))
+	 (opt (if (truthy (node-field case 2)) (length (node-field case 2)) 0))
+	 (rest (node-field case 3))
+	 (kw-spec (node-field case 4))
+	 (gensyms (node-field case 6)))
+    (list req opt
+	  (if (truthy kw-spec)
+	      (loop for (keyword nil var) in (cdr kw-spec)
+		    collect (cons keyword (or (position var gensyms) 0)))
+	      '())
+	  (if (and (truthy kw-spec) (truthy (car kw-spec))) ps:true ps:false)
+	  (if (truthy rest) rest ps:false))))
 
 (defun simple-case-p (case)
   (and (not (truthy (node-field case 2))) (not (truthy (node-field case 4)))))

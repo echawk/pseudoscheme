@@ -25,7 +25,27 @@
 (defvar *read-hash-procedures* '()
   "READ-HASH-EXTEND's table: (char . procedure of char and port).")
 
+(defvar *read-hash-fluid* nil
+  "Guile's %read-hash-procedures fluid, which boot-9's read-hash-extend
+sets: an alist of the same kind.")
+
+(defun read-hash-procedure (c)
+  "The procedure read-hash-extend installed for #C, or NIL."
+  (or (cdr (assoc c *read-hash-procedures*))
+      (and *read-hash-fluid*
+	   (let ((alist (fluid-value *read-hash-fluid*)))
+	     (and (listp alist)
+		  (let ((proc (cdr (assoc c alist))))
+		    (and (functionp proc) proc)))))))
+
 (defvar *guile-fold-case* nil)
+
+;;; SRFI 105's curly-infix expressions, after #!curly-infix: {a + b} is
+;;; (+ a b), and in braces data are neoteric (f(x) is (f x)).
+(defvar *curly-infix* nil "True after #!curly-infix, in the file it's in.")
+(defvar *neoteric* nil "True while a curly-infix expression is read.")
+(defvar *bracket-lists* nil
+  "True after #!curly-infix-and-bracket-lists: [a b] is ($bracket-list$ a b).")
 
 (defvar *elisp-nil* (ps::make-photon "#nil")
   "#nil, Emacs Lisp's nil in Guile: its own object.")
@@ -37,7 +57,8 @@
 
 (defun delimiterp (c)
   (or (null c) (member c '(#\Space #\Tab #\Newline #\Return #\Page #\( #\) #\[ #\] #\" #\;))
-      (char= c (code-char 11))))
+      (char= c (code-char 11))
+      (and *curly-infix* (member c '(#\{ #\})))))
 
 (defun whitespacep (c)
   (member c '(#\Space #\Tab #\Newline #\Return #\Page #.(code-char 11) #.(code-char 160))))
@@ -88,7 +109,10 @@ ending at !#.  True if handled; it always is."
 				 "curly-infix-and-bracket-lists" "eof")
 			  :test #'string=))
 	     (cond ((string= name "fold-case") (setq *guile-fold-case* t))
-		   ((string= name "no-fold-case") (setq *guile-fold-case* nil)))
+		   ((string= name "no-fold-case") (setq *guile-fold-case* nil))
+		   ((string= name "curly-infix") (setq *curly-infix* t))
+		   ((string= name "curly-infix-and-bracket-lists")
+		    (setq *curly-infix* t *bracket-lists* t)))
 	     t)
 	    (t ;; a block comment: up to !#
 	     (loop for c = (readc port)
@@ -112,9 +136,53 @@ that reads the datum and records where it was (ports.lisp).")
       (guile-read-datum port)))
 
 (defun guile-read-datum (port)
+  (if *neoteric*
+      (neoteric-suffixes port (guile-read-datum-1 port))
+      (guile-read-datum-1 port)))
+
+(defun neoteric-suffixes (port datum)
+  "DATUM, and what follows it with no space between: f(x) is (f x), f{x +
+y} is (f (+ x y)), f{} is (f), f[x] is ($bracket-apply$ f x)."
+  (loop
+    (case (peekc port)
+      (#\( (readc port) (setq datum (cons datum (read-list port #\)))))
+      (#\[ (readc port) (setq datum (list* (ssym "$bracket-apply$") datum (read-list port #\]))))
+      (#\{ (readc port)
+       (let ((items (read-curly-items port)))
+	 (setq datum (if (null items) (list datum) (list datum (curly-infix items))))))
+      (t (return datum)))))
+
+(defun read-curly-items (port)
+  "The data up to a }, read as neoteric expressions: a list, dotted if
+there's a . before the last."
+  (let ((*neoteric* t))
+    (read-list port #\})))
+
+(defun curly-infix (items)
+  "A curly-infix list's datum: {} is (), {e} is e, {e1 e2} is (e1 e2); an
+odd number with the same operator between is (op e1 e2 ...); otherwise
+($nfx$ e1 ...), a dotted list too ({. e} is e)."
+  (cond ((not (listp items)) items)	; {. e}
+	((not (null (cdr (last items)))) (cons (ssym "$nfx$") items))
+	((null items) '())
+	((null (cdr items)) (car items))
+	((null (cddr items)) items)
+	((and (oddp (length items))
+	      (let ((op (second items)))
+		(loop for (nil o) on items by #'cddr while o always (ps:scheme-equal-p o op))))
+	 (cons (second items) (loop for e in items by #'cddr collect e)))
+	(t (cons (ssym "$nfx$") items))))
+
+(defun guile-read-datum-1 (port)
   (let ((c (skip-whitespace-and-comments port)))
     (when (null c) (read-error port "unexpected end of file"))
     (readc port)
+    (when (and *curly-infix* (char= c #\{))
+      (return-from guile-read-datum-1 (curly-infix (read-curly-items port))))
+    (when (and *curly-infix* (char= c #\}))
+      (read-error port "unexpected \"}\""))
+    (when (and *bracket-lists* (char= c #\[))
+      (return-from guile-read-datum-1 (cons (ssym "$bracket-list$") (read-list port #\]))))
     (case c
       ((#\( #\[) (read-list port (if (char= c #\() #\) #\])))
       ((#\) #\]) (read-error port "unexpected \"~A\"" c))
@@ -132,14 +200,16 @@ that reads the datum and records where it was (ports.lisp).")
     (loop
       (let ((c (skip-whitespace-and-comments port)))
 	(cond ((null c) (read-error port "unterminated list"))
-	      ((member c '(#\) #\]))
+	      ((or (member c '(#\) #\])) (and (char= c #\}) (char= close #\})))
 	       (readc port)
 	       (unless (char= c close) (read-error port "mismatched close paren ~A" c))
 	       (let ((list (nreverse items)))
-		 (when tail (setf (cdr (last list)) (car tail)))
+		 (when tail
+		   ;; (. x) is x
+		   (if list (setf (cdr (last list)) (car tail)) (setq list (car tail))))
 		 (return list)))
 	      (tail (read-error port "more than one datum after dot"))
-	      ((and (char= c #\.) items)
+	      ((char= c #\.)
 	       (readc port)
 	       (if (delimiterp (peekc port))
 		   (setq tail (list (guile-read-1 port)))
@@ -261,7 +331,15 @@ DIGITS is NIL)."
 		    (t (write-char c s))))))))
 
 (defun read-hash (port)
-  (let ((c (readc port)))
+  (let* ((c (readc port))
+	 ;; a procedure read-hash-extend installed comes first, as in
+	 ;; Guile: SRFI 10 takes #, from unsyntax
+	 (extension (and c (read-hash-procedure c))))
+    (when extension
+      (return-from read-hash
+	(if (gport-p port)
+	    (funcall extension c port)
+	    (call-with-reading-port port (lambda (p) (funcall extension c p))))))
     (case c
       ((nil) (read-error port "end of file after #"))
       (#\( (coerce (read-list port #\)) 'simple-vector))
@@ -278,9 +356,8 @@ DIGITS is NIL)."
 	     (make-array (length bits) :element-type 'bit
 			 :initial-contents (map 'list (lambda (c) (if (char= c #\1) 1 0)) bits))))
       (t
-       (let ((proc (cdr (assoc c *read-hash-procedures*))))
-	 (cond (proc (funcall proc c port))
-	       ((alpha-char-p c) (read-hash-alpha c port))
+       (progn
+	 (cond ((alpha-char-p c) (read-hash-alpha c port))
 	       ((digit-char-p c) (read-array-literal c port))
 	       (t (read-error port "unknown # syntax #~A" c))))))))
 

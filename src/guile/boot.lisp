@@ -151,7 +151,8 @@ version (src/continuations.lisp)."
 (defun apply-value ()
   ;; #nil ends a list as () does, for Emacs Lisp's sake
   (let ((apply (psx:host-ref "apply")))
-    (lambda (f &rest args)
+    ;; a procedure and a list at least, as Guile's
+    (lambda (f arg &rest more &aux (args (cons arg more)))
       (let ((tail (last args)))
 	(when (and tail (eq (car tail) *elisp-nil*))
 	  (setq args (append (butlast args) (list '()))))
@@ -450,13 +451,75 @@ primitive-load, written in Scheme, does)."
 					start line line-start)))
 		     (declare (dynamic-extent frame))
 		     (psx::with-frame (frame)
-		       (if kept (eval-keeping form kept) (primitive-eval form))))))
+		       (eval-load-form form kept text (file-position stream) filename)))))
     value))
+
+;;; A module's procedures are defined before its other forms run, as in
+;;; Guile, whose module is declarative: its definitions a letrec*, the
+;;; procedures in it bound first.  Here a file's forms run in order, so a
+;;; form that refers to a procedure the file (or a file it includes)
+;;; defines further on fails as unbound; then that definition is made,
+;;; and the form run again.
+
+(defun eval-load-form (form kept text position filename)
+  (let ((done '()) (module *current-module*))
+    (flet ((run (x) (if kept (eval-keeping x kept) (primitive-eval x))))
+      (loop
+	(let ((definition
+		(catch 'hoist
+		  (let ((*unbound-variable-hook*
+			  (lambda (name in)
+			    ;; a top-level variable of the module the form is in
+			    (when (and (eq in module) (not (member name done)))
+			      (let ((d (later-procedure-definition name text position filename)))
+				(when d
+				  (push name done)
+				  (throw 'hoist (list d))))))))
+		    (return-from eval-load-form (run form))))))
+	  ;; the definition, made outside the form's dynamic extent; then the
+	  ;; form again
+	  (run (first definition)))))))
+
+(defun later-procedure-definition (name text position filename)
+  "The definition of NAME as a procedure in TEXT after POSITION, or in a
+file it includes, in the same module: or NIL."
+  (labels ((kw (x s) (and (ps:scheme-symbol-p x) (string= (ps:scheme-symbol-name x) s)))
+	   (procedure-definition-p (f)
+	     (and (consp f) (consp (cdr f))
+		  (or (and (or (kw (car f) "define") (kw (car f) "define*") (kw (car f) "define-inlinable"))
+			   (consp (second f)) (eq (car (second f)) name))
+		      (and (kw (car f) "define") (eq (second f) name) (consp (cddr f)) (consp (third f))
+			   (some (lambda (k) (kw (car (third f)) k)) '("lambda" "lambda*" "case-lambda"))))))
+	   (included-file (f)
+	     (and (consp f) (consp (cdr f)) (stringp (second f))
+		  (cond ((kw (car f) "include-from-path") (search-load-path (second f)))
+			((kw (car f) "include")
+			 (namestring (merge-pathnames (second f) (directory-namestring filename)))))))
+	   (scan (forms)
+	     (dolist (f forms)
+	       ;; another module's forms follow
+	       (when (and (consp f) (kw (car f) "define-module")) (return nil))
+	       (cond ((procedure-definition-p f) (return f))
+		     ((included-file f)
+		      (let ((found (scan (read-file-forms (included-file f)))))
+			(when found (return found))))))))
+    (scan (read-text-forms text position))))
+
+(defun read-text-forms (text position)
+  "The forms of TEXT from POSITION, as far as they read."
+  (let ((stream (make-string-input-stream text position)))
+    (loop for form = (handler-case (guile-read stream) (error () ps:eof-object))
+	  until (eq form ps:eof-object)
+	  collect form)))
+
+(defun read-file-forms (path)
+  (and path (probe-file path)
+       (read-text-forms (uiop:read-file-string path) 0)))
 
 (defun continue-load (value filename text position scanned line line-start)
   "Go on loading FILENAME after a form that returned VALUE (a re-entered
 continuation captured in it)."
-  (let ((*current-load-file* filename) (*guile-fold-case* nil))
+  (let ((*current-load-file* filename) (*guile-fold-case* nil) (*curly-infix* nil) (*bracket-lists* nil))
     (load-forms filename text position scanned line line-start nil value)))
 
 (defun primitive-load (filename)
@@ -467,7 +530,9 @@ otherwise form by form, keeping the code to cache it."
 	 (value *unspecified*)		; the last form's, as Guile's primitive-load returns
 	 (*cacheable-load* nil)
 	 (*current-load-file* filename)
-	 (*guile-fold-case* nil))
+	 (*guile-fold-case* nil)
+	 (*curly-infix* nil)
+	 (*bracket-lists* nil))
     (if (and cacheable (load-cached filename))
       *unspecified*
       (let ((kept (and cacheable (list '()))))
@@ -530,7 +595,8 @@ not with Guile's behaviour.")
   (maphash (lambda (name f) (obarray-define (ssym name) f)) *guile-primitives*)
   (install-port-root-bindings)
   (install-regex-root-bindings)
-  (install-root-variables))
+  (install-root-variables)
+  (wrap-string-mutators))
 
 ;;; Root primitives that are SRFI 13's and SRFI 14's, as in Guile, taken
 ;;; from Pseudoscheme's (srfi 13) and (srfi 14).
@@ -676,7 +742,7 @@ not with Guile's behaviour.")
     (def "%exception-handler" (make-fluid* ps:false t))
     (def "%exception-epoch" (make-fluid* 1))
     (def "%init-exceptions!" (lambda (&rest types) (declare (ignore types)) *unspecified*))
-    (def "%read-hash-procedures" (make-fluid* '()))
+    (def "%read-hash-procedures" (setq *read-hash-fluid* (make-fluid* '())))
     (def "read-hash-extend" (install-read-hash-extend))
     (def "file-name-separator-string" "/")
     (def "internal-time-units-per-second" internal-time-units-per-second)

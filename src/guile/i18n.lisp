@@ -236,3 +236,26 @@ locale) on S: the number and the characters it took, or #f and 0."
     (cons "nl-langinfo" #'nl-langinfo))
    (loop for (name . value) in *langinfo-items* collect (cons name value))
    (loop for (name value) in *lconv-items* collect (cons name value))))
+
+;;; (ice-9 unicode): characters' formal names, the Unicode database's
+;;; (SBCL's), as Guile gives them: upper case, spaces between words; none
+;;; for control characters or code points named only by number
+
+(defun char-formal-name (c)
+  (let ((name (char-name c)))
+    (and name
+	 (not (eq (sb-unicode:general-category c) :cc))
+	 (not (and (> (length name) 1) (char= (char name 0) #\U)
+		   (every (lambda (d) (digit-char-p d 16)) (subseq name 1))))
+	 (string-upcase (substitute #\Space #\_ name)))))
+
+(defextension "scm_init_unicode"
+  (list (cons "char->formal-name"
+	      (lambda (c)
+		(unless (characterp c) (wrong-type "char->formal-name" 1 c))
+		(or (char-formal-name c) ps:false)))
+	(cons "formal-name->char"
+	      (lambda (name)
+		(unless (stringp name) (wrong-type "formal-name->char" 1 name))
+		(let ((c (name-char (substitute #\_ #\Space name))))
+		  (if (and c (equal (char-formal-name c) (string-upcase name))) c ps:false))))))

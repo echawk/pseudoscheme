@@ -791,6 +791,27 @@ read buffer, unread."
 
 ;;; Lisp streams as ports
 
+(defun call-with-reading-port (stream function)
+  "Call FUNCTION with a port reading Lisp STREAM a character at a time (a
+reader extension's, reading the rest of a datum from the stream the
+reader reads): what it peeked at and didn't take goes back to STREAM."
+  (let ((port (make-port :kind "file" :input t :output nil :encoding "UTF-8" :buffering :none
+			 :read (lambda (buf start count)
+				 (declare (ignore count))
+				 (let ((c (read-char stream nil nil)))
+				   (if c
+				       (let ((octets (sb-ext:string-to-octets (string c) :external-format :utf-8)))
+					 (replace buf octets :start1 start)
+					 (length octets))
+				       0))))))
+    (unwind-protect (funcall function port)
+      (let ((left (- (port-rend port) (port-rpos port))))
+	(when (plusp left)
+	  (let ((chars (length (sb-ext:octets-to-string (port-rbuf port) :start (port-rpos port)
+							 :end (port-rend port) :external-format :utf-8))))
+	    (handler-case (file-position stream (- (file-position stream) chars))
+	      (error () (when (= chars 1) (unread-char (char (sb-ext:octets-to-string (port-rbuf port) :start (port-rpos port) :end (port-rend port) :external-format :utf-8) 0) stream))))))))))
+
 (defvar *stream-ports* (make-hash-table :test 'eq :weakness :key :synchronized t))
 
 (defun stream-port (stream)

@@ -56,10 +56,13 @@
 
 ;;; Names of code
 
-(defvar *root-code-names* nil "(obarray . table): root code -> name.")
+(defvar *root-code-names* nil "(obarray size table): root code -> name.")
 
 (defun root-code-name (code)
-  (unless (and *root-code-names* (eq (car *root-code-names*) *obarray*))
+  ;; made again when the root has gained bindings since: boot-9's, if it
+  ;; was first made while boot-9 loaded
+  (unless (and *root-code-names* (eq (car *root-code-names*) *obarray*)
+	       (eql (cadr *root-code-names*) (obarray-size)))
     (let ((table (make-hash-table :test 'eq)))
       (dolist (handle (ghash-handles *obarray*))
 	(let ((v (cdr handle)))
@@ -67,8 +70,12 @@
 	    (let ((f (gvariable-value v)))
 	      (unless (gethash (procedure-code f) table)
 		(setf (gethash (procedure-code f) table) (or (root-procedure-name f) (car handle))))))))
-      (setq *root-code-names* (cons *obarray* table))))
-  (gethash code (cdr *root-code-names*)))
+      (setq *root-code-names* (list *obarray* (obarray-size) table))))
+  (gethash code (third *root-code-names*)))
+
+(defun obarray-size ()
+  (let ((table (ghash-table *obarray*)))
+    (if (hash-table-p table) (hash-table-count table) 0)))
 
 (defvar *lisp-source-root*
   (namestring (asdf:system-source-directory :pseudoscheme)))
