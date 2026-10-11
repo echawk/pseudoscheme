@@ -1103,7 +1103,11 @@ like, compile.lisp), or else its Lisp lambda list."
 (defguile "include-deprecated-features" () ps:false)
 (defguile "issue-deprecation-warning" (&rest messages) (declare (ignore messages)) *unspecified*)
 (defguile "%warn-auto-compilation-enabled" () *unspecified*)
-(defguile "gc" () (sb-ext:gc :full t) *unspecified*)
+(defguile "gc" ()
+  (sb-ext:gc :full t)
+  ;; the hook has run when gc returns, as in Guile
+  (funcall 'run-after-gc-hook-1)
+  *unspecified*)
 (defguile "gc-stats" ()
   (list (cons (ssym "gc-time-taken") (* sb-ext:*gc-run-time* (floor 1000000 internal-time-units-per-second)))
 	(cons (ssym "heap-size") (sb-ext:dynamic-space-size))

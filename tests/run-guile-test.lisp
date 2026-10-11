@@ -57,6 +57,9 @@
 ;; top_srcdir names and ftw.test, ports.test and c-api.test look into:
 ;; test-suite/ (its tests and its library, linked to the vendored ones),
 ;; module/ (the installed Guile's Scheme sources), libguile/ (no C here)
+(defparameter *pseudoscheme-command*
+  (asdf:system-relative-pathname :pseudoscheme "bin/pseudoscheme"))
+
 (defun make-source-tree ()
   (let ((top (sb-posix:mkdtemp "/tmp/guile-srcdir-XXXXXX")))
     (flet ((dir (name) (ensure-directories-exist (format nil "~A/~A/" top name)))
@@ -89,7 +92,13 @@
       (tmp (mkdtemp (string-copy \"/tmp/guile-test-XXXXXX\"))))
   (module-set! m 'test-suite ~S)
   (module-set! m 'tmp-dir tmp)
-  (chdir tmp))
+  (chdir tmp)
+  ;; meta/guile, Guile's build tree's script (popen.test runs it): here
+  ;; bin/pseudoscheme --guile, if it's built
+  (when (file-exists? ~S)
+    (mkdir \"meta\")
+    (call-with-output-file \"meta/guile\" (lambda (p) (display ~S p)))
+    (chmod \"meta/guile\" #o755)))
 (set! %guile-build-info
       (append '((top_srcdir . ~S) (srcdir . ~S)) %guile-build-info))
 (define %counter (make-count-reporter))
@@ -106,6 +115,11 @@
        ((cadr %counter))))"
 		      (guile-string *suite*)
 		      (guile-string (merge-pathnames "tests/" *suite*))
+		      (guile-string *pseudoscheme-command*)
+		      (format nil "#!/bin/sh
+if [ \"$1\" = -c ]; then shift; exec ~A --guile -e \"$@\"; fi
+exec ~A --guile \"$@\"
+" (guile-string *pseudoscheme-command*) (guile-string *pseudoscheme-command*))
 		      top (concatenate 'string top "/libguile")
 		      (if *verbose* "(register-reporter user-reporter)" "")
 		      (concatenate 'string name ".test") (guile-string path)

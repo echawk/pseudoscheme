@@ -78,7 +78,9 @@
 (defun register-photons ()
   (setq *named-photons*
 	(list (cons "unspecific" ps:unspecific) (cons "eof" ps:eof-object)
-	      (cons "nil" *elisp-nil*) (cons "unbound" +unbound+))))
+	      (cons "nil" *elisp-nil*) (cons "unbound" +unbound+)
+	      ;; a letrec variable's value before its init (compile.lisp)
+	      (cons "unassigned" ps:unassigned))))
 
 (defmethod make-load-form ((p ps::photon) &optional environment)
   (declare (ignore environment))

@@ -400,6 +400,11 @@ is reported, and the program runs anyway."
     (load setup)))
 
 (defun report-and-exit (e)
+  ;; Guile's (exit n), not caught: the program's exit status
+  (let ((status (and (eq *standard* :guile) (psg::quit-status e))))
+    (when status
+      (finish-output)
+      (uiop:quit status)))
   (case *standard*
     (:chez (format *error-output* "~&~A~%" (ps-r7rs::chez-error-text e)))
     (:guile (format *error-output* "~&~A" (psg:error-text e)))

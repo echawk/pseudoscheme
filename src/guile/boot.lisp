@@ -929,6 +929,39 @@ boot); the last form's values."
   (boot)
   (call-with-guile-catch (lambda () (primitive-load (namestring (merge-pathnames path))))))
 
+(defvar *quit-code* nil)
+
+(defun quit-status (condition)
+  "If CONDITION is an uncaught (exit ...) -- Guile's quit, a
+&quit-exception -- the exit status it asks for: (exit) and (exit #t) 0,
+(exit #f) 1, (exit n) n.  Else NIL."
+  (flet ((status (x)
+	   (cond ((eq x ps:true) 0)
+		 ((eq x ps:false) 1)
+		 ((integerp x) x)
+		 (t 0))))
+    ;; (throw 'quit n), as Guile's exit does
+    (when (and (typep condition 'guile-throw)
+	       (eq (guile-throw-key condition) (ssym "quit")))
+      (let ((args (guile-throw-args condition)))
+	(return-from quit-status (if args (status (first args)) 0)))))
+  (when (and (typep condition 'guile-throw) (root-value "&quit-exception"))
+    (let ((exn (first (guile-throw-args condition)))
+	  (code (or *quit-code*
+		    (setq *quit-code*
+			  (eval-string "(lambda (exn)
+                              (and ((exception-predicate &quit-exception) exn)
+                                   (list ((exception-accessor &quit-exception
+                                            (record-accessor &quit-exception 'code))
+                                          exn))))")))))
+      (let ((result (ignore-errors (funcall code exn))))
+	(when (consp result)
+	  (let ((status (car result)))
+	    (cond ((eq status ps:true) 0)
+		  ((eq status ps:false) 1)
+		  ((integerp status) status)
+		  (t 0))))))))
+
 (defun error-text (condition)
   "CONDITION as Guile prints an uncaught exception: by print-exception."
   (if (and (typep condition 'guile-throw) (root-value "print-exception"))

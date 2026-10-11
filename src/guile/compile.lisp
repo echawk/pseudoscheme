@@ -163,6 +163,10 @@ image and of this process mustn't collide.")
 (defun fresh-lexical ()
   (ssym (format nil "~~~D.~A" (incf *lexical-count*) *lexical-tag*)))
 
+(defvar *unassigned* '()
+  "The gensyms of letrec variables not yet assigned where the code being
+compiled runs: a read of one checks.")
+
 (defun lexical (gensym)
   (or (gethash gensym *lexicals*)
       ;; free in the node being compiled: can't happen in psyntax's output
@@ -170,6 +174,21 @@ image and of this process mustn't collide.")
 
 (defun bind-lexical (gensym)
   (setf (gethash gensym *lexicals*) (fresh-lexical)))
+
+(defun node-module (x)
+  "The module a toplevel node refers to: the one psyntax expanded it in
+(its mod field, which a define-module earlier in the same top-level
+begin changes), else the one being compiled for."
+  (let ((name (node-field x 1)))
+    (or (and (consp name)
+	     (module-p* *compile-module*)
+	     (not (equal name (module-slot *compile-module* +module-name+)))
+	     ;; an existing module only: resolving here mustn't load one
+	     (let* ((resolve (root-value "resolve-module"))
+		    (m (and resolve (ignore-errors
+				     (funcall resolve name ps:false ps:false :ensure ps:false)))))
+	       (and m (truthy m) (module-p* m) m)))
+	*compile-module*)))
 
 (defvar *literals-read-only* nil
   "True while compiling for (compile ... #:to 'value): string constants
@@ -237,9 +256,19 @@ references to these."
     (:void (quoted *unspecified*))
     (:const (let ((value (node-field x 1)))
 	      ;; compile's string literals are constant, as Guile's compiled code's
-	      (quoted (if (and *literals-read-only* (stringp value)) (read-only-string value) value))))
+	      (quoted (cond ((not *literals-read-only*) value)
+			    ((stringp value) (read-only-string value))
+			    ((and (simple-vector-p value) (plusp (length value))) (read-only-vector value))
+			    ((and (typep value '(simple-array (unsigned-byte 8) (*))) (plusp (length value)))
+			     (read-only-bytevector value))
+			    (t value)))))
     (:primitive-ref (primitive-operator (node-field x 1)))
-    (:lexical-ref (lexical (node-field x 2)))
+    (:lexical-ref
+     (let ((gensym (node-field x 2)))
+       (if (member gensym *unassigned* :test #'eq)
+	   ;; a letrec variable read by an init before it's assigned
+	   (list (core "%guile-assigned") (lexical gensym) (quoted (node-field x 1)))
+	   (lexical gensym))))
     (:lexical-set (list (core "set!") (lexical (node-field x 2)) (compile-tree-il (node-field x 3))))
     (:module-ref
      (list (core "%guile-ref")
@@ -249,12 +278,12 @@ references to these."
 	   (quoted (make-site (node-field x 1) (node-field x 2) (truthy (node-field x 3)) :module))
 	   (compile-tree-il (node-field x 4))))
     (:toplevel-ref
-     (list (core "%guile-ref") (quoted (make-site *compile-module* (node-field x 2) nil :toplevel))))
+     (list (core "%guile-ref") (quoted (make-site (node-module x) (node-field x 2) nil :toplevel))))
     (:toplevel-set
-     (list (core "%guile-set!") (quoted (make-site *compile-module* (node-field x 2) nil :toplevel))
+     (list (core "%guile-set!") (quoted (make-site (node-module x) (node-field x 2) nil :toplevel))
 	   (compile-tree-il (node-field x 3))))
     (:toplevel-define
-     (list (core "%guile-define!") (quoted *compile-module*) (quoted (node-field x 2))
+     (list (core "%guile-define!") (quoted (node-module x)) (quoted (node-field x 2))
 	   (let ((value (node-field x 3)))
 	     ;; a procedure defined at top level is named, as Guile's are
 	     (if (eq (node-type value) :lambda)
@@ -288,7 +317,8 @@ references to these."
 		     (setq x (node-field x 2)))
 	    (push (compile-tree-il x) forms)
 	    (cons (core "begin") (nreverse forms))))
-    (:lambda (with-lambda-meta (node-field x 1) (name-lambda (node-field x 1) (compile-lambda (node-field x 2)))))
+    (:lambda (let ((*unassigned* '()))	; a lambda's body runs later
+	       (with-lambda-meta (node-field x 1) (name-lambda (node-field x 1) (compile-lambda (node-field x 2))))))
     (:let (let ((vals (mapcar #'compile-tree-il (node-field x 3)))
 		(vars (mapcar #'bind-lexical (node-field x 2))))
 	    (cons (list (core "lambda") vars (compile-tree-il (node-field x 4))) vals)))
@@ -316,7 +346,9 @@ references to these."
   (when (and parallel (cdr vals) (notevery (lambda (v) (eq (node-type v) :lambda)) vals))
     (let* ((vars (mapcar #'bind-lexical gensyms))
 	   (temps (mapcar (lambda (v) (declare (ignore v)) (fresh-lexical)) vars))
-	   (vals (mapcar #'compile-tree-il vals)))
+	   ;; every init runs before any variable is assigned
+	   (vals (let ((*unassigned* (append gensyms *unassigned*)))
+		   (mapcar #'compile-tree-il vals))))
       (return-from compile-letrec
 	(cons (list (core "lambda") vars
 		    (cons (list (core "lambda") temps
@@ -324,14 +356,22 @@ references to these."
 				       (append (mapcar (lambda (v tmp) (list (core "set!") v tmp)) vars temps)
 					       (list (compile-tree-il body)))))
 			  vals))
-	      (mapcar (constantly (quoted ps:false)) vars)))))
+	      (mapcar (constantly (quoted ps:unassigned)) vars)))))
   (let* ((vars (mapcar #'bind-lexical gensyms))
-	 (vals (mapcar #'compile-tree-il vals)))
+	 (all-lambdas (every (lambda (v) (eq (node-type v) :lambda)) vals))
+	 ;; letrec*: an init may read the variables before it, not the
+	 ;; ones from its own on (reads inside lambdas, which run later,
+	 ;; aren't checked)
+	 (vals (loop for v in vals
+		     for rest on gensyms
+		     collect (let ((*unassigned* (if all-lambdas *unassigned* (append rest *unassigned*))))
+			       (compile-tree-il v)))))
     (cons (list (core "lambda") vars
 		(list* (core "begin")
 		       (append (mapcar (lambda (v e) (list (core "set!") v e)) vars vals)
 			       (list (compile-tree-il body)))))
-	  (mapcar (constantly (quoted ps:false)) vars))))
+	  ;; the LABELS case (all lambdas) as psyntax makes it, with #f
+	  (mapcar (constantly (quoted (if all-lambdas ps:false ps:unassigned))) vars))))
 
 (defun compile-test (x)
   "Test X of a conditional.  Emacs Lisp's nil, #nil, is false to Guile's
@@ -451,7 +491,9 @@ documentation, and if NAMED its name."
 	   (list (core "lambda") formals (compile-tree-il (node-field case 7)))))
 	(t (let* ((args (fresh-lexical))
 		  (lambda (list (core "lambda") args (compile-clauses case args)))
-		  (arglist (and (not (node-type (node-field case 8))) (clause-arglist case))))
+		  (arglist (if (not (node-type (node-field case 8)))
+			       (clause-arglist case)
+			       (clauses-arglist case))))
 	     ;; one clause with optional or keyword arguments: its shape, for
 	     ;; procedure-arguments and procedure-minimum-arity
 	     (if arglist
@@ -474,6 +516,22 @@ optional ones, keywords as (keyword . index)."
 	      '())
 	  (if (and (truthy kw-spec) (truthy (car kw-spec))) ps:true ps:false)
 	  (if (truthy rest) rest ps:false))))
+
+(defun clauses-arglist (case)
+  "The arglist of a case-lambda: the arities of all its clauses, as one
+(so that Guile's analyzer's arity check, through procedure-minimum-arity,
+takes every clause's calls): the fewest required arguments, optional ones
+up to the most any clause takes, a rest argument if any clause has one."
+  (let ((min-req nil) (max-args 0) (rest nil))
+    (loop for c = case then (node-field c 8)
+	  while (node-type c)
+	  do (let* ((req (length (node-field c 1)))
+		    (opt (if (truthy (node-field c 2)) (length (node-field c 2)) 0)))
+	       (setq min-req (if min-req (min min-req req) req)
+		     max-args (max max-args (+ req opt)))
+	       (when (or (truthy (node-field c 3)) (truthy (node-field c 4)))
+		 (setq rest (or rest (if (truthy (node-field c 3)) (node-field c 3) (ssym "rest")))))))
+    (list (or min-req 0) (- max-args (or min-req 0)) '() ps:false (or rest ps:false))))
 
 (defun simple-case-p (case)
   (and (not (truthy (node-field case 2))) (not (truthy (node-field case 4)))))
@@ -578,6 +636,10 @@ evaluated in the scope of those before it."
   (psx:defhost "%guile-arity-error" ()
     (guile-error (ssym "wrong-number-of-args") ps:false "Wrong number of arguments" '()))
   (psx:defhost "%guile-abort*" (tag args) (apply #'psx::abort-to-prompt tag args))
+  (psx:defhost "%guile-assigned" (value name)
+    (if (eq value ps:unassigned)
+	(guile-error (ssym "misc-error") ps:false "Unbound variable: ~S" (list name))
+	value))
   (psx:defhost "%guile-nargs>=" (args n) (bool (nthcdr-p args n)))
   (psx:defhost "%guile-nargs-between" (args min max)
     (let ((n (list-length args))) (bool (<= min n max))))

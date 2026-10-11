@@ -394,9 +394,9 @@ as an exact rational."
   (let ((slash (position #\/ s :start start :end end)))
     (cond ((find #\# s :start start :end end)
 	   (parse-hashed-ureal s start end radix))
-	  ((and slash (= radix 10)
+	  ((and slash (= radix 10) *chez-reader*
 		(find-if #'exponent-marker-p s :start (1+ slash) :end end))
-	   ;; Chez Scheme's 1/5e4: the exponent scales the ratio
+	   ;; Chez Scheme's 1/5e4 (its reader only): the exponent scales the ratio
 	   (let* ((e (position-if #'exponent-marker-p s :start (1+ slash) :end end))
 		  (ratio (parse-ureal s start e radix))
 		  (scale (parse-decimal (concatenate 'string "1" (subseq s e end)) 0 (- (1+ end) e))))
@@ -415,7 +415,7 @@ as an exact rational."
 		(find-if (lambda (c) (or (char= c #\.) (char-equal c #\p))) s :start start :end end))
 	   (let ((v (parse-hex-float s start end)))
 	     (and v (values v t))))
-	  ((and (< radix 10)
+	  ((and (< radix 10) *chez-reader*
 		(find-if (lambda (c) (or (char= c #\.) (char-equal c #\e))) s :start start :end end))
 	   (let ((v (parse-radix-float s start end radix)))
 	     (and v (values v t)))))))
@@ -456,7 +456,7 @@ written without a # is no number."
 	      (and v (values v t))))))))
 
 (defun parse-radix-float (s start end radix)
-  "Chez Scheme's #b1.01e11: digits with a point and an exponent, both in
+  "Chez Scheme's (in its reader, *CHEZ-READER*) #b1.01e11: digits with a point and an exponent, both in
 RADIX (below 10), as an exact rational; or NIL."
   (let* ((e (position-if (lambda (c) (char-equal c #\e)) s :start start :end end))
 	 (mantissa-end (or e end))

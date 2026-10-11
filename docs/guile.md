@@ -7,7 +7,7 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
-`vendor/guile-test-suite/`), **42,566 tests pass** so far. See "Where it
+`vendor/guile-test-suite/`), **42,685 tests pass** so far. See "Where it
 stands" below. Emacs Lisp runs too: `,language elisp` at the REPL, and
 Guile's three elisp test files pass in full (below).
 
@@ -457,22 +457,23 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 42,566 |
-| fail | 191 | 40 |
-| error (an exception where a result was expected) | 465 | 57 |
+| pass | 5,982 | 42,685 |
+| fail | 191 | 29 |
+| error (an exception where a result was expected) | 465 | 32 |
 | unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 96 / 10 / 11 / 6 |
-| files that crashed or hit the time limit | 32 | 0 |
+| files that crashed or hit the time limit | 32 | 0 (with the module cache filled) |
 
 The biggest files pass entirely or nearly: `numbers` (all 28,991),
 `srfi-1` (1,902), `regexp` (1,092), `srfi-67` (902), `r4rs` (538),
-`arrays` (564), `srfi-13` (534), `syntax` (251 of 254), `bytevectors`
-(238 of 239), `goops` (237), `web-http` (234), `srfi-60` (168), `peval`
-(163), `tree-il` (153), `srfi-4` (148), `srfi-207` (136), `control`
+`arrays` (564), `srfi-13` (534), `syntax` (254), `bytevectors`
+(239), `goops` (237), `web-http` (234), `srfi-60` (168), `peval`
+(163), `tree-il` (154), `srfi-4` (148), `srfi-207` (136), `control`
 (127), `optargs` (120), `reader` (115), `srfi-105` (107), `foreign`,
 `print`, `format`, `weaks`, `parameters`, `r6rs-enums`,
 `r6rs-arithmetic-fixnums`, `sort`, `popen`, `ports`, `web-server`,
 `net-db`, `00-socket` (32; the rest need `fork`), `coverage` (11),
-`statprof`, `procprop`, `session`, `hooks`, `signals`, `unicode`.
+`statprof`, `procprop`, `session`, `hooks`, `signals`, `unicode`, `posix`,
+`elisp` (87), `elisp-compiler` (99), `ecmascript` (32).
 
 What fails now, by cause:
 
@@ -485,16 +486,12 @@ What fails now, by cause:
 - **libguile's internals**: copy-on-write shared substrings
   (`substring/shared` copies: a Scheme string is a simple Lisp string)
   and string buffers (`strings`, 10), guardians and collection
-  (`guardians`, `gc`, `weaks`, `fluids`, `threads`: SBCL can't give back
-  a collected object), immutable literal vectors (`sort`).
+  (`guardians`, `weaks`, `fluids`, `threads`: SBCL can't give back
+  a collected object).
 - **The environment**: locales not installed here (`i18n`, `time`,
-  `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`), Guile's
-  build tree (`popen`'s `meta/guile`).
-- **ECMAScript** (`ecmascript`): future work. (Emacs Lisp now passes:
-  below.)
-- **A short tail**: `letrec` reading its variables before they're
-  bound (`syntax`), suspendable ports, `srfi-119`'s source properties,
-  `tree-il`'s arity warning for applicable structs.
+  `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`).
+- **A short tail**: suspendable ports (`suspendable-ports`: ports keep
+  their own buffers), `srfi-119`'s source properties.
 
 ### Differences from Guile that remain
 

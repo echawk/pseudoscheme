@@ -78,6 +78,10 @@
 			  sorted)))))
 
 (defguile "sort!" (seq less)
+  ;; a vector literal of compiled code is constant
+  (when (read-only-vector-p seq)
+    (guile-error (ssym "wrong-type-arg") "sort!" "Wrong type argument in position ~A: ~S"
+		 (list 1 seq) (list seq)))
   (if (listp seq)
       (stable-sort seq (guile-less less))
       (store-elements seq (sort-elements seq less "sort!"))))
@@ -564,6 +568,16 @@ square, else the nearest double, however big or small X is."
 
 (defun read-only-string-p (s) (and (stringp s) (gethash s *read-only-strings*)))
 
+;;; Vector literals of compiled code are constant too: (compile '(sort!
+;;; #(0) <)) is an error.  They're in the same table; only sort! and
+;;; stable-sort! check (vector-set! is open-coded).
+
+(defun read-only-vector (v)
+  (setf (gethash v *read-only-strings*) t)
+  v)
+
+(defun read-only-vector-p (v) (and (simple-vector-p v) (gethash v *read-only-strings*)))
+
 (defun check-mutable-string (s)
   (when (read-only-string-p s)
     (guile-error (ssym "misc-error") ps:false "string is read-only: ~s" (list s))))
@@ -575,8 +589,39 @@ square, else the nearest double, however big or small X is."
     ("string-map!" . 1) ("string-xcopy!" . 0))
   "The root's procedures that change a string, and which argument it is.")
 
+(defun read-only-bytevector (bv)
+  (setf (gethash bv *read-only-strings*) t)
+  bv)
+
+(defun read-only-bytevector-p (bv)
+  (and (typep bv '(array (unsigned-byte 8) (*))) (gethash bv *read-only-strings*)))
+
+(defparameter +bytevector-mutators+
+  '("bytevector-u8-set!" "bytevector-s8-set!" "bytevector-fill!" "bytevector-copy!")
+  "Bytevector mutators that refuse a read-only bytevector (a literal of
+compiled code), when called rather than open-coded.")
+
+(defun wrap-bytevector-mutator (variable name)
+  "Make the procedure in VARIABLE, bytevector mutator NAME, refuse a
+read-only bytevector."
+  (let ((f (and variable (gvariable-value variable))))
+    (when (and (functionp f) (not (gethash f *checking-mutators*)))
+      (let ((checking (lambda (bv &rest args)
+			(let ((target (if (string= name "bytevector-copy!") (second args) bv)))
+			  (when (read-only-bytevector-p target)
+			    (guile-error (ssym "wrong-type-arg") name "Wrong type argument in position ~A: ~S"
+					 (list 1 target) (list target))))
+			(apply f bv args))))
+	(setf (gethash checking *checking-mutators*) t
+	      (gvariable-value variable) checking)))))
+
+(defvar *checking-mutators* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq))
+
 (defun wrap-string-mutators ()
-  "Make the root's string mutators refuse read-only strings."
+  "Make the root's string mutators refuse read-only strings, and its
+bytevector mutators read-only bytevectors."
+  (dolist (name +bytevector-mutators+)
+    (wrap-bytevector-mutator (obarray-variable (ssym name)) name))
   (loop for (name . position) in +string-mutators+
 	do (let* ((v (obarray-variable (ssym name)))
 		  (f (and v (gvariable-value v)))
@@ -1127,9 +1172,15 @@ Guile's ((seconds . microseconds) (seconds . microseconds))."
 (defun run-after-gc-hook ()
   (psx::with-thread-state (run-after-gc-hook-1)))
 
+(defvar *hooked-gc-epoch* nil
+  "The collection the after-gc-hook last ran after: (gc) runs it at once,
+and SBCL's own run, later, in another thread, then skips it.")
+
 (defun run-after-gc-hook-1 ()
-  (let ((hook *after-gc-hook*))
-    (when (and hook (hook-procedures hook))
+  (let ((hook *after-gc-hook*)
+	(epoch sb-kernel::*gc-epoch*))
+    (when (and hook (hook-procedures hook)
+	       (not (eq (shiftf *hooked-gc-epoch* epoch) epoch)))
       (dolist (p (hook-procedures hook))
 	(ignore-errors (funcall p))))))
 
@@ -1156,6 +1207,10 @@ Guile's ((seconds . microseconds) (seconds . microseconds))."
       (loop for (name . value) in (funcall ext)
 	    do (define-in-module *current-module* (ssym name) value)))
     (fill-unbound-exports init)
+    ;; (rnrs bytevectors)'s mutators refuse read-only bytevectors
+    (dolist (name +bytevector-mutators+)
+      (let ((v (module-local-variable* *current-module* (ssym name))))
+	(when v (wrap-bytevector-mutator v name))))
     *unspecified*))
 
 (defvar *extension-primitives* (make-hash-table :test 'equal)
@@ -1227,8 +1282,10 @@ that name, if the host has one."
 		    (out-of-range "bytevector-slice" size))
 		  ;; sharing BV's bytes, as Guile's (its linker writes each
 		  ;; section of an image through a slice)
-		  (make-array size :element-type '(unsigned-byte 8)
-				   :displaced-to bv :displaced-index-offset offset))))
+		  ;; read-only if BV is (a literal of compiled code), as Guile's
+		  (let ((slice (make-array size :element-type '(unsigned-byte 8)
+						:displaced-to bv :displaced-index-offset offset)))
+		    (if (read-only-bytevector-p bv) (read-only-bytevector slice) slice)))))
 	;; Guile's checks of the size, before the host's
 	(cons "bytevector->sint-list" (lambda (bv endianness size) (integer-list-size-check "bytevector->sint-list" bv size)
 					(funcall (psx:host-ref "bytevector->sint-list") bv endianness size)))
@@ -1857,11 +1914,25 @@ true (the predicate's value) if it matches."
 	(system-error "ttyname" (sb-alien:extern-alien "errno" sb-alien:int))
 	(cffi:foreign-string-to-lisp p))))
 (defguile "utime" (obj &optional actime modtime actimens modtimens flags)
-  (declare (ignore actimens modtimens flags))
+  ;; utimensat(2): nanoseconds, and AT_SYMLINK_NOFOLLOW for a link's own times
   (let* ((now (- (get-universal-time) #.(encode-universal-time 0 0 0 1 1 1970 0)))
 	 (a (if (integerp actime) actime now)) (m (if (integerp modtime) modtime now))
+	 (an (if (integerp actimens) actimens 0)) (mn (if (integerp modtimens) modtimens 0))
+	 (flags (if (integerp flags) flags 0))
 	 (path (if (stringp obj) obj (port-filename* (->port obj "utime")))))
-    (sb-posix:utimes path a m))
+    (sb-alien:with-alien ((times (sb-alien:array (sb-alien:signed 64) 4)))
+      (setf (sb-alien:deref times 0) a (sb-alien:deref times 1) an
+	    (sb-alien:deref times 2) m (sb-alien:deref times 3) mn)
+      (let ((result (sb-alien:alien-funcall
+		     (sb-alien:extern-alien "utimensat"
+					    (function sb-alien:int sb-alien:int sb-alien:c-string
+						      (* (sb-alien:array (sb-alien:signed 64) 4))
+						      sb-alien:int))
+		     #+darwin -2 #-darwin -100	; AT_FDCWD
+		     path (sb-alien:addr times) flags)))
+	(when (minusp result)
+	  (let ((e (sb-alien:get-errno)))
+	    (guile-error (ssym "system-error") "utime" "~A" (list (sb-int:strerror e)) (list e)))))))
   *unspecified*)
 
 ;;; spawn: Guile 3.0.9's posix_spawn interface.  ARGS includes argv[0].
