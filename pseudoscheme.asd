@@ -311,3 +311,19 @@
 	       (:file "vm-vops" :depends-on ("vm-jit"))
 	       (:file "stacks" :depends-on ("vm"))
 	       (:static-file "root-primitives.txt")))
+
+;;; The REPL every mode shares: a line editor, meta-commands, ,language;
+;;; Guile's own REPL for --guile (src/repl/).
+(defsystem :pseudoscheme/repl
+  :version "3.0"
+  :pathname #p"src/repl/"
+  :depends-on (:pseudoscheme/api :pseudoscheme/guile
+	       #+sbcl :sb-posix #+sbcl :sb-introspect)
+  :serial t
+  :components ((:file "terminal")
+	       (:file "highlight")
+	       (:file "editor")
+	       (:file "repl")
+	       (:file "commands")
+	       (:file "languages")
+	       (:file "guile")))

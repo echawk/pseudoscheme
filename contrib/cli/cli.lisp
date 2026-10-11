@@ -83,7 +83,7 @@ With a FILE, it is run as a program: for R6RS/R7RS, any (library ...) /
 (define-library ...) forms are installed and the (import ...) program
 after them is run; for R5RS the file is loaded.  (command-line) is
 (FILE ARGUMENT ...).  Without a file or -e/-p, the REPL starts.
-In the REPL, ,q quits.
+In the REPL, ,help lists the commands and ,q quits.
 
 Scheme code can use Common Lisp packages as libraries:
   (import (prefix (cl common-lisp) cl:) (pseudoscheme lisp))
@@ -256,22 +256,12 @@ proportion (ps:limit-thread-stack-size)."
   (uiop:quit 0))
 
 (defun repl ()
-  (format t "Pseudoscheme ~A (~(~A~)) on ~A ~A~%" *version* *standard*
-	  (lisp-implementation-type) (lisp-implementation-version))
-  (ecase *standard*
-    (:r7rs (r7rs:repl))
-    (:r6rs (r6rs:repl))
-    (:r5rs (r5rs:repl))
-    ((:r4rs :ieee :r3rs :r2rs :rrs)
-     (pseudoscheme-api::ensure-psyntax)
-     (let ((ps:*fold-case* t))
-       (pseudoscheme-api::repl-loop
-	(lambda (form) (ps-r7rs::eval-at-report-top-level *standard* form))
-	:prompt (format nil "~(~A~)> " *standard*))))
-    (:guile (psg:repl))
-    (:chez (pseudoscheme-api::ensure-psyntax)
-	   (pseudoscheme-api::repl-loop (lambda (form) (ps-r7rs::eval-at-chez-top-level form))
-					:prompt "> "))))
+  "The REPL, in the language of *STANDARD* (src/repl/): ,language moves
+to the others, ,help lists the commands."
+  (pseudoscheme-repl:run-repl
+   *standard*
+   :banner (format nil "Pseudoscheme ~A (~(~A~)) on ~A ~A" *version* *standard*
+		   (lisp-implementation-type) (lisp-implementation-version))))
 
 (defun print-version-alist ()
   "SRFI 176's version output: one property to a line.  If the output goes

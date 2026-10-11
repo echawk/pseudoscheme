@@ -61,6 +61,10 @@
   (set-symbol-value! 'psyntax:interaction-library-name interaction-library-name)
   (set-symbol-value! 'psyntax:interaction-source-name interaction-source-name)
   (set-symbol-value! 'psyntax:identifier-binding identifier-binding)
+  ;; The REPL's (src/repl/languages.lisp)
+  (set-symbol-value! 'psyntax:interaction-symbols interaction-symbols)
+  (set-symbol-value! 'psyntax:top-level-binding top-level-binding)
+  (set-symbol-value! 'psyntax:expand-top-level expand-top-level)
   (set-symbol-value! 'psyntax:syntax->datum syntax->datum)
   (set-symbol-value! 'psyntax:free-identifier=? free-identifier=?)
   ;; A library's exports, for the Lisp side (src/interop.lisp): a list of

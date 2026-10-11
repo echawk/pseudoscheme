@@ -28,7 +28,8 @@
           ;; PSEUDOSCHEME
           scheme-report-environment
           interaction-library-name interaction-source-name
-          identifier-binding environment-symbols eval-hook)
+          identifier-binding environment-symbols eval-hook
+          interaction-symbols top-level-binding expand-top-level)
   (import
     ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
@@ -3984,6 +3985,53 @@
                      (cons 'global (cons lib (gen-global sym))))
                    label))))))))
       (else #f)))
+
+;;; PSEUDOSCHEME: for the REPL (src/repl/), without adding to the
+  ;;; interaction library as a reference would: the names visible at
+  ;;; the top level running, and what one of them is bound to there --
+  ;;; #f if nothing, else its binding, (global lib . location),
+  ;;; (core-prim . name), (global-macro ...), ..., or 'variable for a
+  ;;; top-level variable not yet defined.
+  (define (top-level-substs)
+    (let ((top (interaction-library-name))
+          (source (interaction-source-name)))
+      (append
+        (if (library-exists? top) (library-subst (find-library-by-name top)) '())
+        (if (library-exists? source) (library-subst (find-library-by-name source)) '()))))
+
+  (define (interaction-symbols)
+    (let ((seen (make-eq-hashtable)))
+      (let f ((ls (top-level-substs)) (acc '()))
+        (cond
+          ((null? ls) acc)
+          ((hashtable-ref seen (caar ls) #f) (f (cdr ls) acc))
+          (else
+           (hashtable-set! seen (caar ls) #t)
+           (f (cdr ls) (cons (caar ls) acc)))))))
+
+  (define (top-level-binding sym)
+    (let ((x (assq sym (top-level-substs))))
+      (and x
+           (or (imported-label->binding (cdr x)) 'variable))))
+
+;;; PSEUDOSCHEME: X expanded at the top level running, as
+  ;;; eval-top-level would before evaluating it: the core forms, a
+  ;;; definition's as (define location expression).  (The REPL's
+  ;;; ,expand; a definition's name is bound by it, as by evaluating.)
+  (define (expand-top-level x)
+    (let ((init*
+           (parameterize ((inv-collector (make-collector))
+                          (vis-collector (make-collector))
+                          (interaction-library
+                           (find-library-by-name (interaction-library-name))))
+             (chi-top* (list (mkstx x top-mark* '())) '()))))
+      (let ((forms (map (lambda (b)
+                          (let ((e (expanded->core (cdr b))))
+                            (if (car b) (list 'define (car b) e) e)))
+                        (reverse init*))))
+        (if (and (pair? forms) (null? (cdr forms)))
+            (car forms)
+            (cons 'begin forms)))))
 
   (define eval-top-level
     (lambda (x)

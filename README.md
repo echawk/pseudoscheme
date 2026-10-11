@@ -19,7 +19,7 @@ From the shell:
 
 ```sh
 make -C contrib/cli                 # builds bin/pseudoscheme
-bin/pseudoscheme                    # R7RS REPL (,q quits)
+bin/pseudoscheme                    # R7RS REPL: ,help, ,language chez, ,q (docs/repl.md)
 bin/pseudoscheme --r6rs prog.sps a b
 bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
 bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
@@ -158,8 +158,8 @@ bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
 docs/                -- interop (the bridge), libraries (Akku and
-                        snow), continuations, and racket, guile and
-                        chez (designs)
+                        snow), continuations, the REPL, and racket,
+                        guile and chez (designs)
 ```
 
 ## Systems
@@ -181,6 +181,8 @@ docs/                -- interop (the bridge), libraries (Akku and
   Scheme/Lisp bridge. The systems `r5rs`, `r6rs` and `r7rs` are
   shorthands for it.
 - `pseudoscheme/asdf` -- ASDF component types for Scheme sources.
+- `pseudoscheme/repl` -- the command's REPL: a line editor, meta-commands,
+  every mode's language, and Guile's own REPL (docs/repl.md).
 - `pseudoscheme-cli` (`contrib/cli/`) -- the command.
 - `pseudoscheme/bootstrap` -- regenerates the `.pso` files.
 
