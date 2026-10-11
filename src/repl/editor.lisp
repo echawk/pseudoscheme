@@ -147,7 +147,8 @@ $XDG_STATE_HOME/pseudoscheme/), or an empty one."
 	 (mark (and (option :color)
 		    (multiple-value-bind (a b) (matching-paren s point)
 		      (and a (list a b)))))
-	 (lines (uiop:split-string (highlight s :mark mark) :separator '(#\Newline)))
+	 ;; (split-string "") is (), not (""): an empty input still has its prompt
+	 (lines (or (uiop:split-string (highlight s :mark mark) :separator '(#\Newline)) (list "")))
 	 (row 0) (col 0) (point-row 0) (point-col 0) (index 0))
     ;; back to the first row
     (emit (if (> (ed-cursor-row ed) 0) (csi (ed-cursor-row ed) "A") "") (string #\Return) (csi "J"))
@@ -156,7 +157,7 @@ $XDG_STATE_HOME/pseudoscheme/), or an empty one."
 	     (incf col w)))
       (loop for k from 0
 	    for line in lines
-	    for plain-line in (uiop:split-string s :separator '(#\Newline))
+	    for plain-line in (or (uiop:split-string s :separator '(#\Newline)) (list ""))
 	    do (when (> k 0) (emit (string #\Newline)) (incf row) (setq col 0) (incf index))
 	       (let ((prefix (line-prefix ed k)))
 		 (emit prefix line)

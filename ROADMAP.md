@@ -218,16 +218,15 @@ What exists is in docs/interop.md:
 
 Next:
 
-- **Scheme-syntax CLOS** (`(pseudoscheme clos)`): `define-class`,
-  `define-generic`, `define-method` with Scheme bodies. Lisp's own
-  `cl:defclass`/`cl:defmethod` already work from Scheme.
+- ~~**Scheme-syntax CLOS**~~: done, `(pseudoscheme clos)`
+  (docs/interop.md 3.7).
 - **Assignment across the boundary**: inside a Lisp macro call a Scheme
   variable is read-only (it's passed by value), and so is a Lisp
   variable inside a Scheme macro's arguments.
-- **Fasl-safe expansions**: code that uses Scheme macros from Lisp
-  refers to the running image, so a Lisp file that uses them must be
-  loaded into an image where Pseudoscheme is booted, and its fasl
-  can't be loaded into a fresh one.
+- ~~**Fasl-safe expansions**~~: done. Under `compile-file`, a Scheme
+  macro's expansion in Lisp code is the Scheme `lambda`, expanded again
+  when the fasl loads (docs/interop.md 4.2); ASDF library components
+  compile into the system's fasls (docs/interop.md 5).
 - **A package/system map** for the cases where they differ (package
   `BT`, system `bordeaux-threads`), so that `(cl bt)` autoloads.
 - **Predicate overrides** per import, for functions like Ironclad's
@@ -254,13 +253,10 @@ Next:
 - **Thread safety**: psyntax's state is global and unlocked: the
   library table, the gensym counter, the interaction environment and
   the parameters the front end sets. Two steps would fix it:
-  - first, one recursive lock (bordeaux-threads, already used by SRFI
-    18 and the R6RS test runner) around everything that expands or installs
-    libraries: `psx:eval-library`, `eval-program`, `eval-top-level` and
-    `expand`, and the library locator they call back into. Code that has
-    already been expanded runs outside the lock, so only expansion is
-    serialized. This is enough for SRFI 18 threads running ordinary
-    code;
+  - ~~first, one recursive lock around everything that expands or
+    installs libraries~~: done (`*expander-lock*`, src/psyntax.lisp;
+    psyntax's `expansion-lock-hook`), with `eval-core` letting go of it
+    while expanded code runs;
   - `parameterize` assigns the parameter's one global value for the
     extent of its body (`parameterize*`, src/r7rs/rts.lisp), unless the
     thread has a table of its own values (`*thread-parameters*`, which

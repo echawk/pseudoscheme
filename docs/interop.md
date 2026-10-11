@@ -215,6 +215,49 @@ whatever installs systems for the user resolves them like any other
 dependency: Quicklisp, ocicl, qlot, CLPM, or a source registry. Scheme
 sources are components of the system (section 5).
 
+### 3.7 CLOS in Scheme's syntax: `(pseudoscheme clos)`
+
+`cl:defclass` and `cl:defmethod` work from Scheme through 3.5, in Lisp's
+syntax. `(pseudoscheme clos)` gives CLOS GOOPS's Scheme syntax, with
+method bodies in Scheme:
+
+```scheme
+(import (scheme base) (scheme write) (pseudoscheme clos))
+
+(define-class <point> ()
+  (x #:init-value 0 #:init-keyword #:x #:accessor point-x)
+  (y #:init-value 0 #:init-keyword #:y #:getter point-y #:setter set-point-y!))
+(define-class <point3> (<point>)
+  (z #:init-keyword #:z #:accessor point-z))
+
+(define-generic describe)
+(define-method (describe (p <point>)) (list 'point (point-x p) (point-y p)))
+(define-method (describe (p <point3>))
+  (append (call-next-method) (list (point-z p))))
+(define-method (describe (n <integer>)) (list 'integer n))
+(define-method (describe x) (list 'something x))      ; <top>
+
+(describe (make <point3> #:x 1 #:y 2 #:z 3))   ; => (point 1 2 3)
+(describe 42)                                  ; => (integer 42)
+```
+
+| | |
+|---|---|
+| `(define-class name (super ...) slot ...)` | a class; a slot is `name` or `(name option value ...)` with `#:init-value v`, `#:init-thunk f`, `#:init-keyword #:k`, `#:getter g`, `#:setter s` (`(s object v)`), `#:accessor a` (a getter) |
+| `(define-generic name)` | a generic function, which a method needs first |
+| `(define-method (name (param class) ... [. rest]) body ...)` | a method; a parameter without a class is `<top>`'s. In the body, `(call-next-method)` calls the next method (with other arguments if given) and `(next-method?)` says whether there is one |
+| `(make class #:key value ...)` | an instance |
+| `slot-ref`, `slot-set!`, `slot-bound?`, `class-of`, `class-name`, `class?`, `is-a?`, `generic?` | as in GOOPS |
+| `<top>` `<object>` `<number>` `<real>` `<integer>` `<string>` `<symbol>` `<pair>` `<null>` `<list>` `<vector>` `<procedure>` `<char>` `<hashtable>` | Lisp's classes `t`, `standard-object`, `number`, ... |
+
+The classes and generic functions are Lisp's own, named by the Scheme
+symbols, as `(cl:defclass ...)` from Scheme names them: Lisp code can
+`make-instance` the classes, specialize their generic functions with
+`defmethod`, and call them. A method's body is a Scheme procedure; the
+Lisp method that `define-method` makes calls it, passing along
+`call-next-method` and `next-method-p`. src/interop/clos.sls has the
+syntax and src/interop.lisp the primitives under it.
+
 ## 4. Lisp calling Scheme
 
 `(asdf:load-system :r7rs)` loads the API. `:r6rs` and `:r5rs` are the
@@ -298,10 +341,13 @@ is ordinary Lisp code, compiled with the file.
 
 Limits:
 - Lisp variables are passed by value, so the macro can't assign them.
-- The expansion refers to the running Pseudoscheme image, so code
-  compiled with these macros must be loaded into an image where
-  Pseudoscheme is booted, the same way the Scheme libraries themselves
-  must be.
+- Compiled with `compile-file`, a call's expansion carries the Scheme
+  `lambda` it expanded to, which is expanded and compiled again when
+  the fasl loads (`load-time-value`). The translation would refer to
+  the compiling session's psyntax. So the fasl loads into a fresh image
+  that has Pseudoscheme, with the library imported again (as
+  `r7rs:import` does at load time). Compiled with `compile` or
+  evaluated, the translation is used as it is.
 
 ### 4.3 The rest of the API
 
@@ -355,10 +401,15 @@ re-evaluating a `define-library` at the REPL) picks up changes. This is
 also how a Scheme library reaches Lisp users who never install a Scheme
 package manager: ship it as an ASDF system.
 
-Compiling the component does nothing: the component's own libraries
-are expanded again on each load (ROADMAP 2: compile them into the
-system's fasls). Libraries they import from the library path load from
-the compiled-library cache (README, "Loading real libraries").
+Compiling a library component expands its libraries and compiles them
+into the component's fasl, as the compiled-library cache compiles the
+libraries it finds on the library path (README, "Loading real
+libraries"). Loading the component installs them from that fasl, with
+nothing expanded, unless a library they were expanded against has
+changed since; then the source is expanded again. So does a library
+whose expansion holds a Lisp object, as one that imports a `(cl ...)`
+library does, since that can't be compiled to a file. Program files
+(`:r7rs-file` ...) run from source when loaded.
 
 ## 6. Scheme libraries from Scheme package managers
 
@@ -370,19 +421,23 @@ measures how many load.
 
 ## 7. Not done yet
 
-- **CLOS-style definitions in Scheme syntax.** `cl:defclass` and
-  `cl:defmethod` work through 3.5, with Lisp syntax. A `(pseudoscheme
-  clos)` with Scheme-style forms (`define-class`, `define-method`
-  bodies as Scheme) could follow.
-- **Compiled ASDF components**, and fasls of Lisp code that uses Scheme
-  macros, loadable into a fresh image (ROADMAP 2 and 4). Libraries from
-  the library path are compiled and cached; libraries that import a
-  `(cl ...)` library aren't, since their expansions hold Lisp functions.
+- **Libraries whose expansions hold Lisp objects** (those that import a
+  `(cl ...)` library) are expanded from source on each load. Neither the
+  compiled-library cache nor ASDF components can compile them to a file:
+  the bridge's functions are in their expansions.
 - **Continuations** captured in Scheme called from Lisp can escape
   through the Lisp frames above them but not be re-entered through
   them: a Scheme procedure handed to Lisp (`lisp-facing`, so any
   procedure passed to a `(cl ...)` function and `use-library`'s
   functions) runs in a barrier frame, and re-entering a continuation
   captured under one is an error (docs/continuations.md).
-- **Threads.** psyntax's state is global and unlocked: one expanding
-  thread at a time.
+- **Threads expanding at once.** psyntax's state is global, so a lock
+  (`*expander-lock*`, src/psyntax.lisp) lets one thread at a time
+  expand. psyntax's entry points take it (`eval`, `environment`'s
+  expansions, library loading, the REPL's evaluation), and `eval-core`
+  lets go of it while the expanded code runs, so only expanding is
+  serialized. Threads that load libraries and call `eval` at the same
+  time are safe. Expanding in parallel would need per-thread state
+  (the interaction library, `*include-directory*`). Also,
+  `parameterize` still assigns a parameter's one global value unless
+  the thread has its own table (ROADMAP 4).

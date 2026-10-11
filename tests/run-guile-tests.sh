@@ -10,11 +10,18 @@ SBCL=${SBCL:-sbcl}
 JOBS=${JOBS:-6}
 LIMIT=${LIMIT:-300}
 OUT=${OUT:-/tmp/pseudoscheme-guile-tests}
-export SBCL LIMIT OUT
+# How Guile's compiler runs (src/guile/boot.lisp, *GUILE-COMPILER*):
+# natively, unless PSEUDOSCHEME_GUILE_COMPILER says otherwise; the files
+# that test Guile's VM itself (coverage, statprof, ...) need compile's
+# code to run on the VM, so they get Guile's compiler, from its sources
+VM_TESTS="compiler coverage session statprof"
+export SBCL LIMIT OUT VM_TESTS
 
 if [ "$1" = "--one" ]; then
   f=$2; name=$(basename "$f" .test)
-  $SBCL --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-guile-test.lisp "$f" \
+  mode=${PSEUDOSCHEME_GUILE_COMPILER:-native}
+  case " $VM_TESTS " in *" $name "*) mode=${PSEUDOSCHEME_GUILE_COMPILER:-vm-source} ;; esac
+  PSEUDOSCHEME_GUILE_COMPILER=$mode $SBCL --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-guile-test.lisp "$f" \
     > "$OUT/$name.out" 2> "$OUT/$name.err" & pid=$!
   ( sleep "$LIMIT"; kill -9 $pid 2>/dev/null ) > /dev/null 2>&1 & w=$!
   wait $pid 2>/dev/null

@@ -65,6 +65,9 @@
   --precompile DIR likewise for the libraries (.sld files) under DIR
   -i, --interactive
                    start a REPL after running the file or expressions
+  --lisp           start the Lisp's own REPL instead, with all of
+                   Pseudoscheme loaded: an inferior Lisp for SLIME or
+                   SLY (contrib/emacs/pseudoscheme.el)
   --version        print the version and exit
   -V               print the version and more as SRFI 176's alist
   -h, --help       print this and exit
@@ -255,6 +258,17 @@ proportion (ps:limit-thread-stack-size)."
   (finish-output)
   (uiop:quit 0))
 
+(defvar *lisp-repl* nil "--lisp: the Lisp's own REPL rather than Scheme's.")
+
+(defun lisp-repl ()
+  "The Lisp's own REPL, its debugger on, in CL-USER: what SLIME and SLY
+start as an inferior Lisp and load Swank or Slynk into."
+  #+sbcl (progn
+	   (sb-ext:enable-debugger)
+	   (let ((*package* (find-package "COMMON-LISP-USER")))
+	     (sb-impl::toplevel-repl nil)))
+  #-sbcl (die "--lisp needs SBCL"))
+
 (defun repl ()
   "The REPL, in the language of *STANDARD* (src/repl/): ,language moves
 to the others, ,help lists the commands."
@@ -327,6 +341,7 @@ list of (:eval text) / (:print text)."
 		((string= a "--continuations=escape")
 		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) nil))
 		((member a '("-i" "--interactive") :test #'string=) (setq interactive t))
+		((string= a "--lisp") (setq *lisp-repl* t))
 		((member a '("-h" "--help") :test #'string=)
 		 (write-string *usage*) (uiop:quit 0))
 		((string= a "--version")
@@ -454,13 +469,18 @@ is reported, and the program runs anyway."
 	(unless (probe-file file) (die "no such file: ~A" file))
 	(if *script* (run-script file) (run-file file))))
     (finish-output)
-    (when (or interactive (and (null file) (null actions)))
-      (repl))
+    (cond (*lisp-repl* (lisp-repl))
+	  ((or interactive (and (null file) (null actions)))
+	   (repl)))
     (finish-output)
     (uiop:quit (if *precompile-failed* 1 0))))
 
 ;;; Initialize everything now, at build time, so it's in the saved image:
 ;;; Guile's boot-9 too, if a Guile installation is there to load it from.
 (pseudoscheme-interop:boot)
-(handler-case (psg:boot)
+(handler-case (progn (psg:boot)
+		     ;; and Guile's REPL, (system repl repl), set up for the line
+		     ;; editor: loading it in a new build (its cache being stale)
+		     ;; would take a minute before the first prompt
+		     (pseudoscheme-repl::install-guile-hooks))
   (error (e) (format *error-output* "~&;; Guile not booted into the image: ~A~%" e)))

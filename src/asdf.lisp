@@ -26,10 +26,14 @@
 ;;;; whatever the user installs systems with (Quicklisp, ocicl, qlot,
 ;;;; CLPM, a source registry) resolves them the usual way.
 ;;;;
-;;;; Compiling does nothing: a component's own libraries are expanded
-;;;; again on every load (ROADMAP.md 2: compile them into the system's
-;;;; fasls).  Libraries they import from the library path load from the
-;;;; compiled-library cache (src/library-cache.lisp).
+;;;; Compiling a library component expands its libraries and compiles
+;;;; them into the component's fasl, as the compiled-library cache
+;;;; (src/library-cache.lisp) compiles libraries from the library path;
+;;;; loading it installs them from there, unless a library it was
+;;;; expanded against has changed since (or one of them can't be
+;;;; compiled to a file: its expansion holds a Lisp object), when the
+;;;; source is expanded again.  Program files (:r7rs-file ...) are run
+;;;; from source when loaded.
 
 (defpackage "PSEUDOSCHEME-ASDF"
   (:use "COMMON-LISP")
@@ -45,14 +49,27 @@ it evaluates it (see PERFORM methods)."))
 (defclass r7rs-file (scheme-source-file) () (:default-initargs :type "scm"))
 (defclass r6rs-file (scheme-source-file) () (:default-initargs :type "sps"))
 (defclass r5rs-file (scheme-source-file) () (:default-initargs :type "scm"))
-(defclass r7rs-library (scheme-source-file) () (:default-initargs :type "sld"))
-(defclass r6rs-library (scheme-source-file) () (:default-initargs :type "sls"))
+(defclass r7rs-library (scheme-library-file) () (:default-initargs :type "sld"))
+(defclass r6rs-library (scheme-library-file) () (:default-initargs :type "sls"))
+
+(defclass scheme-library-file (scheme-source-file) ()
+  (:documentation "A file of Scheme libraries, compiled into a fasl."))
 
 (defmethod asdf:output-files ((o asdf:compile-op) (c scheme-source-file))
   (values nil t))
 
 (defmethod asdf:perform ((o asdf:compile-op) (c scheme-source-file))
   nil)
+
+(defmethod asdf:output-files ((o asdf:compile-op) (c scheme-library-file))
+  (list (make-pathname :type "fasl" :defaults (asdf:component-pathname c))))
+
+(defmethod asdf:perform ((o asdf:compile-op) (c scheme-library-file))
+  (compile-library-file (asdf:component-pathname c) (first (asdf:output-files o c))))
+
+(defmethod asdf:perform ((o asdf:load-op) (c scheme-library-file))
+  (let ((fasl (first (asdf:output-files (asdf:make-operation 'asdf:compile-op) c))))
+    (load-library-file (asdf:component-pathname c) fasl)))
 
 (defun library-root (file name)
   "The directory FILE's library NAME is rooted in: (foo bar) in
@@ -61,7 +78,8 @@ it evaluates it (see PERFORM methods)."))
 	(depth (1- (count-if #'symbolp name))))
     (make-pathname :directory (butlast dir depth) :name nil :type nil :defaults file)))
 
-(defun load-library-file (file)
+(defun library-forms (file)
+  "FILE's library forms, their library directories put on the library path."
   (let ((forms (ps-r7rs::read-forms file)))
     (dolist (form forms)
       (let ((name (ps-r7rs::library-name-of form)))
@@ -69,14 +87,38 @@ it evaluates it (see PERFORM methods)."))
 	  (pseudoscheme-api:add-library-directory (library-root file name)))))
     (pseudoscheme-api::ensure-psyntax)
     (let ((ps-r7rs::*include-directory* (make-pathname :name nil :type nil :defaults file)))
+      (mapcar (lambda (form) (ps-r7rs::resolve-includes (ps-r7rs::library-form form))) forms))))
+
+(defun compile-library-file (file fasl)
+  "Expand FILE's libraries and write their compiled code to FASL (the
+cache's fasls of them, one after another); if one of them can't be
+compiled to a file, FASL has none of them, and loading expands the
+source."
+  (let ((fasls (mapcar #'psx::compile-library-form (library-forms file))))
+    (ensure-directories-exist fasl)
+    (with-open-file (out fasl :direction :output :element-type '(unsigned-byte 8)
+			      :if-exists :supersede)
+      (when (every #'identity fasls)
+	(dolist (f fasls)
+	  (with-open-file (in f :element-type '(unsigned-byte 8))
+	    (let ((buffer (make-array (file-length in) :element-type '(unsigned-byte 8))))
+	      (read-sequence buffer in)
+	      (write-sequence buffer out))))))))
+
+(defun load-library-file (file &optional fasl)
+  "Install FILE's libraries: from FASL (COMPILE-LIBRARY-FILE's) if it has
+them and what they were expanded against is unchanged, else from source."
+  (let ((forms (library-forms file)))
+    (unless (and fasl (probe-file fasl) (plusp (with-open-file (in fasl) (file-length in)))
+		 (let ((psx::*compiled-libraries* '()))
+		   (handler-case
+		       (handler-bind ((warning #'muffle-warning))
+			 (load fasl)
+			 (and (= (length psx::*compiled-libraries*) (length forms))
+			      (psx::install-compiled-libraries (reverse psx::*compiled-libraries*))))
+		     (error () nil))))
       (dolist (form forms)
-	(psx:eval-library (ps-r7rs::resolve-includes (ps-r7rs::library-form form)))))))
-
-(defmethod asdf:perform ((o asdf:load-op) (c r7rs-library))
-  (load-library-file (asdf:component-pathname c)))
-
-(defmethod asdf:perform ((o asdf:load-op) (c r6rs-library))
-  (load-library-file (asdf:component-pathname c)))
+	(psx:eval-library form)))))
 
 (defmethod asdf:perform ((o asdf:load-op) (c r7rs-file))
   (r7rs:load (asdf:component-pathname c)))

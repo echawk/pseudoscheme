@@ -1285,13 +1285,13 @@
                                        (LET NIL
                                          (IF (TRUEP PROBE)
                                              (RETURN (CDR (THE CONS PROBE)))
-                                             (LET ((SYMBOL (PS::MAKE-GENSYM-FROM-NAME
+                                             (LET ((SYMBOL (MAKE-GENSYM-FROM-NAME
                                                             NAME)))
                                                (SETQ *READ-GENSYMS*
                                                      (CONS (CONS UNIQUE SYMBOL)
                                                            *READ-GENSYMS*))
                                                (RETURN SYMBOL)))))))
-                                 (RETURN (PS::MAKE-GENSYM-FROM-NAME TEXT))))))
+                                 (RETURN (MAKE-GENSYM-FROM-NAME TEXT))))))
                        (PROGN (SETQ .L.0 (CONS D L)) (GO LOOP)))))))))))
 (AT-TOP-LEVEL
   (DEFINE-SHARP-MACRO

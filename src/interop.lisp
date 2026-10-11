@@ -546,9 +546,7 @@ bind either, is a call of the global Lisp function of that name, looked
 up when called, as in Lisp: the function DEFUN is defining, calling
 itself, or one defined later.  (Such a call is found when psyntax
 reports its name unbound, and the expansion is redone.)"
-  (let ((environment (funcall (psx:host-ref "psyntax:environment")
-			      (list (ssym "pseudoscheme") (ssym "r7rs"))
-			      (list (ssym "prefix") library (ssym "%%lib:"))))
+  (let ((environment (macro-environment library))
 	(late-bound '())		; Lisp symbols named by unbound calls
 	(origins (make-hash-table :test 'eq)) ; Scheme symbol -> Lisp symbol
 	(params '()) (args '()))
@@ -606,8 +604,29 @@ reports its name unbound, and the expansion is redone.)"
 			       (error e)))))))
 	  (when core
 	    (return
-	      `(multiple-value-call #'values-to-lisp
-		 (funcall ,(scheme-translator:translate core psx:*host*) ,@(reverse args))))))))))
+	      (if *compile-file-truename*
+		  ;; compiled to a file: the translation refers to this
+		  ;; session's psyntax (its locations), so the fasl carries
+		  ;; the Scheme lambda instead, expanded again where it loads
+		  `(multiple-value-call #'values-to-lisp
+		     (funcall (load-time-value (scheme-lambda-function ',lambda-form ',library))
+			      ,@(reverse args)))
+		  `(multiple-value-call #'values-to-lisp
+		     (funcall ,(scheme-translator:translate core psx:*host*) ,@(reverse args)))))))))))
+
+(defun macro-environment (library)
+  "The environment a Scheme macro's call from Lisp is expanded in: R7RS,
+and LIBRARY's exports prefixed %%lib:."
+  (funcall (psx:host-ref "psyntax:environment")
+	   (list (ssym "pseudoscheme") (ssym "r7rs"))
+	   (list (ssym "prefix") library (ssym "%%lib:"))))
+
+(defun scheme-lambda-function (lambda-form library)
+  "The procedure LAMBDA-FORM, Scheme in the environment of a macro of
+LIBRARY (MACRO-ENVIRONMENT), is: what a fasl compiled from Lisp code
+calling a Scheme macro computes when it loads (SCHEME-MACRO-EXPANSION)."
+  (boot)
+  (psx:host-eval (psx::open-primitives (values (psx:expand lambda-form (macro-environment library))))))
 
 (defun define-scheme-macro (symbol library macro-name names)
   "Make SYMBOL a Lisp macro for Scheme macro MACRO-NAME of LIBRARY; NAMES
@@ -687,6 +706,92 @@ symbol case rule: \"equal\" and 'equal both name EQUAL."
     (ps-r7rs::install-host-library '("pseudoscheme" "lisp" "primitives") (nreverse prims))
     (dolist (form (ps-r7rs::read-forms
 		   (asdf:system-relative-pathname :pseudoscheme "src/interop/lisp.sls")))
+      (psx:eval-library form))))
+
+;;; ------------------------------------------------------------------
+;;; (pseudoscheme clos): CLOS in Scheme's syntax (src/interop/clos.sls).
+;;; Classes and generic functions are Lisp's own, named by the Scheme
+;;; symbols, as those (cl:defclass ...) defines from Scheme are; methods
+;;; are Scheme procedures, called by a Lisp method with what
+;;; call-next-method and next-method-p need.
+
+(defun clos-slot-definition (spec)
+  "A DEFCLASS slot from (name option value ...): #:init-value v,
+#:init-thunk f, #:init-keyword #:k."
+  (destructuring-bind (name . options) spec
+    (let ((slot (list name)))
+      (loop for (key value) on options by #'cddr
+	    do (case key
+		 (:init-value (setf slot (append slot (list :initform `(quote ,value)))))
+		 (:init-thunk (setf slot (append slot (list :initform `(funcall ,value)))))
+		 (:init-keyword (setf slot (append slot (list :initarg value))))
+		 ((:getter :setter :accessor))	; made in Scheme (clos.sls)
+		 (t (ps:scheme-error "define-class: unknown slot option ~S" key))))
+      slot)))
+
+(defun clos-define-class (name supers slots)
+  (eval `(defclass ,name ,(mapcar #'class-name supers)
+	   ,(mapcar #'clos-slot-definition slots)))
+  (find-class name))
+
+(defun clos-generic (name)
+  (when (and (fboundp name) (not (typep (fdefinition name) 'generic-function)))
+    (ps:scheme-error "define-generic: ~A is a function already, not a generic function"
+		     (ps:scheme-symbol-name name)))
+  (ensure-generic-function name))
+
+(defun clos-add-method (name specializers procedure rest)
+  "A method of the generic function NAME for SPECIALIZERS (classes, one per required
+parameter), which calls PROCEDURE with call-next-method and
+next-method-p as procedures, then the arguments."
+  (let* ((args (loop for nil in specializers collect (gensym "ARG")))
+	 (rest-var (and (not (eq rest ps:false)) (gensym "REST"))))
+    (eval `(defmethod ,name
+	       (,@(mapcar (lambda (a c) (list a (class-name c))) args specializers)
+		,@(and rest-var (list '&rest rest-var)))
+	     (,(if rest-var 'apply 'funcall)
+	      ,procedure
+	      (lambda (&rest next-args)
+		(if next-args (apply #'call-next-method next-args) (call-next-method)))
+	      (lambda () (if (next-method-p) t ps:false))
+	      ,@args ,@(and rest-var (list rest-var)))))
+    (fdefinition name)))
+
+(defparameter *clos-builtin-classes*
+  '(("<top>" . t) ("<object>" . standard-object) ("<number>" . number)
+    ("<real>" . real) ("<integer>" . integer) ("<string>" . string)
+    ("<symbol>" . symbol) ("<pair>" . cons) ("<null>" . null) ("<list>" . list)
+    ("<vector>" . vector) ("<procedure>" . function) ("<char>" . character)
+    ("<hashtable>" . hash-table))
+  "Scheme's names for Lisp's built-in classes, as GOOPS names them.")
+
+(defun install-clos-primitives ()
+  (let ((prims '()))
+    (macrolet ((prim (name lambda-list &body body)
+		 ;; exported as %clos:name, which clos.sls wraps
+		 `(let ((global (concatenate 'string "%clos:" ,name)))
+		    (psx:defhost global ,lambda-list ,@body)
+		    (push (cons global global) prims))))
+      (prim "define-class" (name supers slots) (clos-define-class name supers slots))
+      (prim "generic" (name) (clos-generic name))
+      (prim "add-method!" (name specializers procedure rest)
+	    (clos-add-method name specializers procedure rest))
+      (prim "builtin-class" (name)
+	    (find-class (cdr (assoc name *clos-builtin-classes* :test #'string=))))
+      (prim "make" (class &rest initargs) (apply #'make-instance class initargs))
+      (prim "slot-ref" (object slot) (slot-value object slot))
+      (prim "slot-set!" (object slot value) (setf (slot-value object slot) value) ps:unspecific)
+      (prim "slot-bound?" (object slot) (if (slot-boundp object slot) t ps:false))
+      (prim "class-of" (object) (class-of object))
+      (prim "class-name" (class) (class-name class))
+      (prim "class?" (x) (if (typep x 'class) t ps:false))
+      (prim "is-a?" (object class) (if (typep object class) t ps:false))
+      (prim "generic?" (x) (if (typep x 'generic-function) t ps:false))
+      ;; for define-class's slot options, #:getter and the like
+      (prim "keyword-name" (x) (if (keywordp x) (string-downcase (symbol-name x)) ps:false)))
+    (ps-r7rs::install-host-library '("pseudoscheme" "clos" "primitives") (nreverse prims))
+    (dolist (form (ps-r7rs::read-forms
+		   (asdf:system-relative-pathname :pseudoscheme "src/interop/clos.sls")))
       (psx:eval-library form))))
 
 ;;; ------------------------------------------------------------------
@@ -831,6 +936,7 @@ prefix or rename."
   (unless (eq *booted-host* psx:*host*)
     (pushnew 'cl-library-hook ps-r7rs::*virtual-libraries*)
     (let ((psx::*full-continuations* nil))
-      (install-lisp-primitives))
+      (install-lisp-primitives)
+      (install-clos-primitives))
     (setq *booted-host* psx:*host*))
   t)

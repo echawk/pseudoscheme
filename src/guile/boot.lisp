@@ -155,7 +155,8 @@ version (src/continuations.lisp)."
     (lambda (f arg &rest more &aux (args (cons arg more)))
       (let ((tail (last args)))
 	(when (and tail (eq (car tail) *elisp-nil*))
-	  (setq args (append (butlast args) (list '()))))
+	  (setq args (append (butlast args) (list '()))
+		tail (last args)))
 	(when (and tail (not (and (listp (car tail)) (ignore-errors (list-length (car tail))))))
 	  (guile-error (ssym "wrong-type-arg") "apply" "Apply to non-list: ~S" (list (car tail))
 		       (list (car tail)))))
@@ -559,9 +560,65 @@ otherwise form by form, keeping the code to cache it."
 	  (write-cached-file (cache-fasl filename) filename (reverse (car kept))))
 	value))))
 
+;;; How Guile's compiler runs, for (compile x #:to 'value) and the like
+;;; (src/guile/modules/language/tree-il/spec.scm):
+;;;
+;;;   :native     Tree-IL goes straight to native code, compiled by the
+;;;               host; Guile's own compiler (CPS, its passes, the
+;;;               assembler) isn't loaded at all.
+;;;   :vm         Guile's compiler compiles to bytecode, which the VM runs
+;;;               (vm.lisp), as in Guile; the compiler itself is the
+;;;               installed Guile's compiled .go files, run on the VM, so
+;;;               nothing of it is compiled here.
+;;;   :vm-source  likewise, but the compiler is loaded from its Scheme
+;;;               sources, compiled natively (and cached) like any module.
+;;;
+;;; PSEUDOSCHEME_GUILE_COMPILER=native|vm|vm-source chooses; so does
+;;; setting *GUILE-COMPILER* before Guile's compiler is first used.
+
+(defvar *guile-compiler* nil
+  "How Guile's compiler runs: :native, :vm or :vm-source (see above);
+NIL for PSEUDOSCHEME_GUILE_COMPILER's choice, else :native.")
+
+(defun guile-compiler ()
+  (or *guile-compiler*
+      (let ((env (uiop:getenv "PSEUDOSCHEME_GUILE_COMPILER")))
+	(cond ((member env '("vm") :test #'equal) :vm)
+	      ((member env '("vm-source") :test #'equal) :vm-source)
+	      ((member env '("native" "lisp") :test #'equal) :native)
+	      ;; the older switch: PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp
+	      ((equal (uiop:getenv "PSEUDOSCHEME_GUILE_COMPILE_VALUE") "lisp") :native)
+	      (t :native)))))
+
+(defun compiler-module-file-p (name)
+  "Is NAME (\"language/cps/dce\") a file of Guile's compiler: what :vm
+loads from the installed Guile's .go files?"
+  (let ((name (if (and (> (length name) 4) (string= ".scm" name :start2 (- (length name) 4)))
+		  (subseq name 0 (- (length name) 4))
+		  name)))
+    (and (or (and (> (length name) 9) (string= "language/" name :end2 9))
+	     (member name '("system/vm/assembler" "system/vm/linker" "system/base/optimize"
+			    "system/vm/disassembler")
+		     :test #'string=))
+	 name)))
+
+(defun load-installed-compiled (name path)
+  "With the :vm compiler, load Guile's compiler module NAME from the
+installed Guile's .go file on the VM, if there is one and PATH (where the
+source was found) is Guile's own, not one of src/guile/modules/'s
+replacements.  True if it did."
+  (let ((module (and (eq (guile-compiler) :vm) (compiler-module-file-p name))))
+    (when (and module (not (search "src/guile/modules/" (namestring path))))
+      (let ((go (ignore-errors (funcall 'installed-go-file module))))
+	(when (and go (probe-file go))
+	  (when *trace-loads* (format *trace-output* "~&;; loading ~A on the VM~%" go))
+	  (funcall (funcall 'load-go-file go))
+	  t)))))
+
 (defun primitive-load-path (name &optional (exception-on-not-found ps:true))
   (let ((path (search-load-path name)))
-    (cond (path (let ((*cacheable-load* t)) (primitive-load path)))
+    (cond ((and path (load-installed-compiled name path)) *unspecified*)
+	  (path (let ((*cacheable-load* t)) (primitive-load path)))
 	  ;; a thunk to call instead of the error
 	  ((functionp exception-on-not-found) (funcall exception-on-not-found))
 	  ((truthy exception-on-not-found)
@@ -767,12 +824,13 @@ not with Guile's behaviour.")
     (def "module-transformer" (lambda (m) (if (module-p* m) (module-slot m +module-transformer+) ps:false)))
     (def "define!" (lambda (name value) (define-in-module *current-module* name value)))
     (def "primitive-eval" #'primitive-eval)
-    ;; compile's `value' through bytecode, run by the VM, as Guile's is;
-    ;; or (PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp) by the host's compiler
+    ;; compile's `value' through Guile's compiler and the VM, or natively
+    ;; (*GUILE-COMPILER*, above)
     (def "%compile-value-via-bytecode?"
-	 (lambda () (bool (not (equal (uiop:getenv "PSEUDOSCHEME_GUILE_COMPILE_VALUE") "lisp")))))
+	 (lambda () (bool (not (eq (guile-compiler) :native)))))
     (def "%eval-tree-il" (lambda (tree module)
-			   (let ((*current-module* (if (module-p* module) module *current-module*)))
+			   (let ((*current-module* (if (module-p* module) module *current-module*))
+				 (*literals-read-only* t))
 			     (eval-tree-il tree))))
     (def "eval" #'guile-eval)
     (def "primitive-load" #'primitive-load)
@@ -830,6 +888,8 @@ not with Guile's behaviour.")
     (setq ps-r6rs::*native-alignment* nil)
     (install-compiler-primitives)
     (install-root-bindings)
+    ;; lists ending in Emacs Lisp's nil (elisp.lisp)
+    (funcall 'install-elisp-list-procedures)
     (let ((start (get-internal-real-time)))
       (with-guile-errors
 	(primitive-load-path "ice-9/boot-9"))

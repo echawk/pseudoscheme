@@ -127,9 +127,28 @@ root).
     tests/run-guile-test.lisp does this.
   - Bytecode from Guile's compiler running here runs on the VM:
     rtl.test and rtl-compilation.test pass.
-- **`compile`:** to `value` goes through bytecode, run by the VM, as
-  Guile's does (PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp compiles it with the
-  host instead). `eval` and `load` compile to Lisp. Data read from a
+- **`compile`:** to `value`, how it runs is a setting,
+  `PSEUDOSCHEME_GUILE_COMPILER` (or `psg::*guile-compiler*` from Lisp):
+
+  | setting | `compile` to `value` | Guile's compiler (CPS, its passes, the assembler) |
+  |---|---|---|
+  | `native` (the default) | Tree-IL straight to native code, by the host | not loaded |
+  | `vm` | bytecode, run by the VM, as Guile does | the installed Guile's `.go` files, run on the VM |
+  | `vm-source` | bytecode, run by the VM | Guile's sources, compiled natively and cached like any module |
+
+  `native` is the cheapest. The first `compile` in `vm-source` loads
+  some 55 modules of Guile's compiler, and with a cold cache, compiling
+  them takes minutes and gigabytes. `vm` loads them from the `.go` files
+  instead, with nothing compiled, though the VM's JIT then compiles
+  their hot regions. `compile.test` crashes under `vm` for now. The
+  test suite (tests/run-guile-tests.sh) runs under `native`, except its
+  tests of the VM itself (`compiler`, `coverage`, `session`,
+  `statprof`): those need compiled code to run on the VM, so they run
+  under `vm-source`.
+  Under `native`, `compile`'s string literals are read-only, as Guile's
+  compiler makes them. (`PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp`, the
+  older switch, still means `native`.) `eval` and `load` compile to
+  Lisp. Data read from a
   loaded file have source properties (line and column), as Guile's
   reader gives them, so `program-sources` finds them.
 - **How the heap ABI is met:**
@@ -239,15 +258,16 @@ Flonum arithmetic is IEEE's, as Guile's: overflow gives an infinity and
 `PSEUDOSCHEME_GUILE_VM_BACKEND` chooses how bytecode runs:
 
 - **`interpret`:** the interpreter alone, the reference.
-- **`jit`:** the default. Regions that run often are translated as
-  above.
+- **`jit`:** the default except on SBCL/arm64. Regions that run often
+  are translated as above.
 - **`aot`:** every region of an image is translated as the image loads.
   The translation is written as a Lisp file and compiled with
   `compile-file` into a fasl kept under the cache directory, keyed by the
   image's contents. An installed module's code is translated once (srfi-1:
   58 s the first time, then loaded).
-- **`vop`:** as `jit`, but SBCL-specific (vm-vops.lisp; SBCL on arm64,
-  the feature `:pseudoscheme-vops`; elsewhere `vop` is `jit`):
+- **`vop`:** the default on SBCL/arm64, the fastest. It's `jit`, but
+  SBCL-specific (vm-vops.lisp; SBCL on arm64, the feature
+  `:pseudoscheme-vops`; elsewhere `vop` is `jit`):
   - regions are compiled at `(safety 0)`, so the VM stack's slots are
     read and written unchecked;
   - the stack and stack pointer are kept in variables of the region's

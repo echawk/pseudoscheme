@@ -8,8 +8,8 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
 `vendor/guile-test-suite/`), **42,566 tests pass** so far. See "Where it
-stands" below. Emacs Lisp has started: Guile's elisp compiler runs, and
-`(compile '(defun ...) #:from 'elisp)` works. It is future work.
+stands" below. Emacs Lisp runs too: `,language elisp` at the REPL, and
+Guile's three elisp test files pass in full (below).
 
 The sections after "Where it stands" are the plan as written before the
 work started, with each stage marked as it now is.
@@ -490,7 +490,8 @@ What fails now, by cause:
 - **The environment**: locales not installed here (`i18n`, `time`,
   `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`), Guile's
   build tree (`popen`'s `meta/guile`).
-- **Emacs Lisp and ECMAScript** (`elisp*`, `ecmascript`): future work.
+- **ECMAScript** (`ecmascript`): future work. (Emacs Lisp now passes:
+  below.)
 - **A short tail**: `letrec` reading its variables before they're
   bound (`syntax`), suspendable ports, `srfi-119`'s source properties,
   `tree-il`'s arity warning for applicable structs.
@@ -510,25 +511,41 @@ What fails now, by cause:
 | stack overflow handlers | a limit in words | the control stack's own limit |
 | recursion depth | memory | the control stack: 500 MB in the main thread (as run by the tests), 256 MB in a thread Guile makes |
 
-### Emacs Lisp (future work)
+### Emacs Lisp
 
-Guile's elisp front end (`language/elisp/`) loads and runs unmodified,
+Guile's elisp front end (`language/elisp/`) runs unmodified. It compiles
 through the replacement `(language tree-il spec)`, whose native compiler
-goes from Tree-IL to `value`:
+goes from Tree-IL to `value`. `,language elisp` at Guile's REPL loads
+`boot.el`, all 136 of its forms:
 
-```scheme
-(compile '(progn (defun sq (x) (* x x)) (sq 7)) #:from 'elisp #:to 'value)  ; => 49
-(compile '(if nil 1 2) #:from 'elisp #:to 'value)                           ; => 2
+```
+scheme@(guile-user)> ,language elisp
+Happy hacking with Emacs Lisp!  To switch back, type `,L scheme'.
+elisp@(guile-user)> (defun sq (x) (* x x))
+$1 = sq
+elisp@(guile-user)> (mapcar (lambda (x) (sq x)) (cons 1 (cons 2 nil)))
+$2 = (1 4)
 ```
 
-Loading `language/elisp/boot.el` stops at the first missing piece
-(`*random-state*`, now defined; the next one is unknown). Still to do:
+`elisp.test` (87), `elisp-compiler.test` (99) and `elisp-reader.test`
+(20) all pass.
 
-- `#nil` as the end of a list in the host's list procedures (only
-  `apply` accepts it so far);
-- `#nil` and `#t` as Scheme's when elisp values reach Scheme code;
-- `elisp.test`, `elisp-compiler.test` and `elisp-reader.test`, which
-  currently crash.
+Emacs Lisp's nil is Guile's `#nil`, so the lists it conses end in `#nil`,
+and Guile's list procedures take that as the end of a list
+(src/guile/elisp.lisp):
+- **Defined in Scheme** (boot-9's, SRFI-1's): they get it from `null?`
+  and `pair?`.
+- **Loops that stop at either end**: `length`, `list?`, `reverse`, the
+  `mem` and `ass` procedures and `last-pair`, both as root bindings and
+  where the compiler calls them directly. They're as fast as the
+  originals, and those that return a tail return the list's own.
+- **Converted first**: `map`, `for-each`, `append`, `list->vector`,
+  `reverse!`, `delete!` and the like get a list ending in `()` in place
+  of one ending in `#nil`. The destructive ones therefore return a new
+  list rather than changing the argument.
+- **`sort`, `merge` and `append!`** keep `#nil` as Guile does.
+
+The writer prints `(1 . #nil)` as `(1)`, as Guile's does.
 
 ### Next steps
 

@@ -184,7 +184,43 @@ is returned)."
 	(say ";; Guile's REPL stopped: ~A" (psg:error-text e))))
     nil))
 
+;;; Evaluating Guile without its REPL: for the editor interface
+;;; (ide.lisp), which sends text to evaluate rather than running a REPL.
+
+(defun guile-ready ()
+  (psg:boot)
+  (install-guile-hooks))
+
+(defun guile-read-forms (text)
+  (guile-ready)
+  (with-input-from-string (in text)
+    (loop for form = (psg:guile-read in)
+	  until (eq form ps:eof-object)
+	  collect form)))
+
+(defun guile-eval (form)
+  (guile-ready)
+  (psg::call-with-guile-catch (lambda () (psg::primitive-eval form))))
+
+(defvar *guile-expander* nil)
+
+(defun guile-expand (form)
+  (guile-ready)
+  (funcall (or *guile-expander*
+	       (setq *guile-expander*
+		     (psg:eval-string
+		      "(lambda (x) ((@ (language tree-il) tree-il->scheme) (macroexpand x)))")))
+	   form))
+
 (define-language :guile
   :title "Guile 3.0 (Guile's own REPL; ,mode switches back)"
   :prompt "scheme@(guile-user)> "
-  :run #'run-guile-repl)
+  :run #'run-guile-repl
+  :read-forms #'guile-read-forms
+  :eval #'guile-eval
+  :write (lambda (value stream) (psg::guile-write value stream))
+  :names (lambda () (guile-ready) (guile-completions ""))
+  :expand #'guile-expand
+  :error-text #'psg:error-text
+  :load (lambda (path) (guile-ready) (psg:load-file path))
+  :unspecified-p (lambda (v) (eq v psg::*unspecified*)))

@@ -171,6 +171,10 @@ image and of this process mustn't collide.")
 (defun bind-lexical (gensym)
   (setf (gethash gensym *lexicals*) (fresh-lexical)))
 
+(defvar *literals-read-only* nil
+  "True while compiling for (compile ... #:to 'value): string constants
+are made read-only, as Guile's compiler makes them.")
+
 (defun quoted (x) (list (core "quote") x))
 
 (defparameter *open-primitives*
@@ -231,7 +235,9 @@ references to these."
 (defun compile-tree-il (x)
   (ecase (node-type x)
     (:void (quoted *unspecified*))
-    (:const (quoted (node-field x 1)))
+    (:const (let ((value (node-field x 1)))
+	      ;; compile's string literals are constant, as Guile's compiled code's
+	      (quoted (if (and *literals-read-only* (stringp value)) (read-only-string value) value))))
     (:primitive-ref (primitive-operator (node-field x 1)))
     (:lexical-ref (lexical (node-field x 2)))
     (:lexical-set (list (core "set!") (lexical (node-field x 2)) (compile-tree-il (node-field x 3))))

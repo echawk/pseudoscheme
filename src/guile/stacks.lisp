@@ -198,7 +198,7 @@ a prompt is."
 	(runs *vm-runs*)
 	(vm *vm*)
 	(cursor (and *vm* (vm-fp *vm*))))
-    (sb-debug:map-backtrace
+    (sb-debug::map-backtrace
      (lambda (frame)
        (let ((name (sb-di:debug-fun-name (sb-di:frame-debug-fun frame))))
 	 (cond ((eq name 'run-vm-1)

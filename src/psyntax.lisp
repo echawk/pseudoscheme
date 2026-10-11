@@ -93,7 +93,8 @@
   (defhost "void" () ps:unspecific)
   (defhost "symbol-value" (s) (symbol-value (location s)))
   (defhost "set-symbol-value!" (s v) (host-set! s v) ps:unspecific)
-  (defhost "eval-core" (x) (host-eval x))
+  ;; the expanded code runs without the expander lock (CALL-WITH-EXPANDER-LOCK)
+  (defhost "eval-core" (x) (call-without-expander-lock (lambda () (host-eval x))))
   (defhost "lisp-keyword?" (x) (ps:true? (keywordp x)))
   ;; SRFI 4's #s16(...), SRFI 88's foo:, and records (SRFI 163's array
   ;; literals)
@@ -822,7 +823,54 @@ sources elsewhere (boot/ builds one with Chez Scheme)."
   (when (boundp (location (sym "psyntax:library-locator")))
     (funcall (host-ref "psyntax:library-locator") #'locate-library))
   (install-library-cache-hooks)
+  ;; one thread at a time expands (*EXPANDER-LOCK*)
+  (when (boundp (location (sym "psyntax:expansion-lock-hook")))
+    (funcall (host-ref "psyntax:expansion-lock-hook") #'call-with-expander-lock))
   *host*)
+
+;;; ------------------------------------------------------------------
+;;; Threads: psyntax's state is global, so one thread at a time expands.
+;;; psyntax's entry points (expansion-lock-hook) hold *EXPANDER-LOCK*, a
+;;; recursive lock, and eval-core lets go of it while the expanded code
+;;; runs: what's serialized is expanding, not running.  A program's
+;;; threads that load libraries or call eval wait for each other only
+;;; while one of them is expanding.
+
+(defstruct (expander-lock (:constructor make-expander-lock ()))
+  (mutex (bt:make-lock "psyntax expander"))
+  (owner nil)
+  (depth 0 :type fixnum))
+
+(defvar *expander-lock* (make-expander-lock))
+
+(defun call-with-expander-lock (thunk)
+  (let ((lock *expander-lock*) (self (bt:current-thread)))
+    (if (eq (expander-lock-owner lock) self)
+	(progn
+	  (incf (expander-lock-depth lock))
+	  (unwind-protect (funcall thunk)
+	    (decf (expander-lock-depth lock))))
+	(bt:with-lock-held ((expander-lock-mutex lock))
+	  (setf (expander-lock-owner lock) self
+		(expander-lock-depth lock) 1)
+	  (unwind-protect (funcall thunk)
+	    (setf (expander-lock-owner lock) nil
+		  (expander-lock-depth lock) 0))))))
+
+(defun call-without-expander-lock (thunk)
+  "Call THUNK with the expander lock let go of, if this thread holds it,
+and taken again after."
+  (let ((lock *expander-lock*) (self (bt:current-thread)))
+    (if (not (eq (expander-lock-owner lock) self))
+	(funcall thunk)
+	(let ((depth (expander-lock-depth lock)))
+	  (setf (expander-lock-owner lock) nil
+		(expander-lock-depth lock) 0)
+	  (bt:release-lock (expander-lock-mutex lock))
+	  (unwind-protect (funcall thunk)
+	    (bt:acquire-lock (expander-lock-mutex lock))
+	    (setf (expander-lock-owner lock) self
+		  (expander-lock-depth lock) depth))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Finding libraries in files

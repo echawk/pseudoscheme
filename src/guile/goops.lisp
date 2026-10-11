@@ -341,6 +341,11 @@ which GOOPS can make only once it is loaded."
 	 (and (funcall recur (syntax-object-expression a) (syntax-object-expression b))
 	      (funcall recur (syntax-object-wrap a) (syntax-object-wrap b))
 	      (funcall recur (syntax-object-module a) (syntax-object-module b))))
+	;; weak vectors are equal? as vectors are: element by element
+	((or (weak-vector-p a) (weak-vector-p b))
+	 (and (weak-vector-p a) (weak-vector-p b)
+	      (= (length (weak-vector-cells a)) (length (weak-vector-cells b)))
+	      (every recur (weak-vector-elements a) (weak-vector-elements b))))
 	(t (struct-equal-1 a b recur))))
 
 (defun struct-equal-1 (a b recur)

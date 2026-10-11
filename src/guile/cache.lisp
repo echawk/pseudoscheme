@@ -175,7 +175,9 @@ code to KEPT (a list in a cons, newest first)."
 			 (when (or failure-p (null output))
 			   (error "compiling ~A failed" source))))))
 		 (uiop:rename-file-overwriting-target temp-fasl fasl)
-		 (when *trace-cache* (format *trace-output* "~&;; cached ~A~%" source))))
+		 (when *trace-cache*
+		   (format *trace-output* "~&;; cached ~A~@[ (heap ~D MB after a full GC)~]~%" source
+			   #+sbcl (floor (sb-kernel:dynamic-usage) 1048576) #-sbcl nil))))
 	   (error (e)
 	     (when *trace-cache* (format *trace-output* "~&;; not cached ~A: ~A~%" source e))))
       (ignore-errors (delete-file lisp))

@@ -65,6 +65,7 @@
   (set-symbol-value! 'psyntax:interaction-symbols interaction-symbols)
   (set-symbol-value! 'psyntax:top-level-binding top-level-binding)
   (set-symbol-value! 'psyntax:expand-top-level expand-top-level)
+  (set-symbol-value! 'psyntax:expansion-lock-hook expansion-lock-hook)
   (set-symbol-value! 'psyntax:syntax->datum syntax->datum)
   (set-symbol-value! 'psyntax:free-identifier=? free-identifier=?)
   ;; A library's exports, for the Lisp side (src/interop.lisp): a list of

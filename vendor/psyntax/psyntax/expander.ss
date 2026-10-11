@@ -29,7 +29,8 @@
           scheme-report-environment
           interaction-library-name interaction-source-name
           identifier-binding environment-symbols eval-hook
-          interaction-symbols top-level-binding expand-top-level)
+          interaction-symbols top-level-binding expand-top-level
+          expansion-lock-hook)
   (import
     ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
@@ -3735,6 +3736,10 @@
     (lambda (x env)
       (unless (env? env)
         (error 'expand "not an environment" env))
+      (with-expansion-lock (lambda () (expand-1 x env)))))
+
+  (define expand-1
+    (lambda (x env)
       (let ((subst (env-subst env)))
         (let ((rib (make-top-rib subst)))
           (let ((x (mkstx x top-mark* (list rib)))
@@ -3758,14 +3763,25 @@
     (lambda (x . rest)
       (let ((env (if (pair? rest) (car rest) #f)))
         (if (env? env)
-            (let-values (((x invoke-req*) (expand x env)))
-              (for-each invoke-library invoke-req*)
-              (eval-core (expanded->core x)))
+            (with-expansion-lock
+              (lambda ()
+                (let-values (((x invoke-req*) (expand-1 x env)))
+                  (for-each invoke-library invoke-req*)
+                  (eval-core (expanded->core x)))))
             ((eval-hook) x env)))))
 
   (define eval-hook
     (make-parameter
       (lambda (x env) (error 'eval "not an environment" env))))
+
+  ;;; PSEUDOSCHEME: psyntax's state (the library table, the interaction
+  ;;; library, its parameters) is global, so one thread at a time may
+  ;;; expand.  The host sets this hook to call its thunk holding a
+  ;;; recursive lock, which its eval-core lets go of while expanded code
+  ;;; runs (src/psyntax.lisp): what's serialized is expanding, not
+  ;;; running.  By default (a seed building psyntax), no lock.
+  (define expansion-lock-hook (make-parameter (lambda (thunk) (thunk))))
+  (define (with-expansion-lock thunk) ((expansion-lock-hook) thunk))
 
   ;;; Given a (library . _) s-expression, library-expander expands
   ;;; it to core-form, registers it with the library manager, and
@@ -3789,6 +3805,9 @@
       (_ (stx-error e "malformed library"))))
 
   (define (library-expander-with expand-library)
+    (with-expansion-lock (lambda () (library-expander-with-1 expand-library))))
+
+  (define (library-expander-with-1 expand-library)
     (define (build-visit-code macro*)
       (if (null? macro*)
           (build-void)
@@ -3942,9 +3961,11 @@
 
   (define eval-r6rs-top-level
     (lambda (x*)
-      (let-values (((lib* invoke-code) (top-level-expander x*)))
-        (for-each invoke-library lib*)
-        (eval-core (expanded->core invoke-code)))))
+      (with-expansion-lock
+        (lambda ()
+          (let-values (((lib* invoke-code) (top-level-expander x*)))
+            (for-each invoke-library lib*)
+            (eval-core (expanded->core invoke-code)))))))
 
   ;;; The interaction-library is a parameter that is either #f 
   ;;; (the default, for r6rs scripts) or set to an extensible library
@@ -4019,6 +4040,9 @@
   ;;; definition's as (define location expression).  (The REPL's
   ;;; ,expand; a definition's name is bound by it, as by evaluating.)
   (define (expand-top-level x)
+    (with-expansion-lock (lambda () (expand-top-level-1 x))))
+
+  (define (expand-top-level-1 x)
     (let ((init*
            (parameterize ((inv-collector (make-collector))
                           (vis-collector (make-collector))
@@ -4034,6 +4058,9 @@
             (cons 'begin forms)))))
 
   (define eval-top-level
+    (lambda (x) (with-expansion-lock (lambda () (eval-top-level-1 x)))))
+
+  (define eval-top-level-1
     (lambda (x)
       (define (eval-binding x)
         (let ((loc (car x)) (expr (cdr x)))

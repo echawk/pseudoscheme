@@ -22,12 +22,14 @@
 (defun backend-from-environment ()
   (let ((name (uiop:getenv "PSEUDOSCHEME_GUILE_VM_BACKEND")))
     (cond ((equal (uiop:getenv "PSEUDOSCHEME_GUILE_JIT") "0") :interpret)
-	  ((null name) :jit)
+	  ;; the fastest backend there is here: VOPs on SBCL/arm64
+	  ((null name) #+(and sbcl arm64) :vop #-(and sbcl arm64) :jit)
 	  (t (or (find name '(:interpret :jit :aot :vop) :test #'string-equal)
 		 (error "Unknown Guile VM backend ~A" name))))))
 
 (defvar *vm-backend* (backend-from-environment)
-  "How bytecode runs (PSEUDOSCHEME_GUILE_VM_BACKEND):
+  "How bytecode runs (PSEUDOSCHEME_GUILE_VM_BACKEND; by default :vop where
+SBCL's VOPs for it are there, arm64, else :jit):
   :interpret  the interpreter alone (vm.lisp), the reference;
   :jit        regions that run often translated to Lisp (below);
   :aot        every region of an image translated when it loads, the

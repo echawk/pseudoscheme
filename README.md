@@ -25,6 +25,7 @@ bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
 bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
 bin/pseudoscheme --r4rs prog.scm     # or --ieee, --r3rs, --r2rs, --rrs: the older reports (docs/reports.md)
 bin/pseudoscheme -p '(exact-integer-sqrt 17)'
+bin/pseudoscheme --lisp               # a Lisp REPL with all of it, for SLY/SLIME (docs/emacs.md)
 bin/pseudoscheme --help
 ```
 
@@ -158,8 +159,10 @@ bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
 tests/               -- test runners and the suites they run (chibi's
                         R5RS/R7RS, Racket's R6RS)
 docs/                -- interop (the bridge), libraries (Akku and
-                        snow), continuations, the REPL, and racket,
-                        guile and chez (designs)
+                        snow), continuations, the REPL, Emacs (SLY and
+                        SLIME), and racket, guile and chez (designs)
+contrib/emacs/       -- pseudoscheme.el, sly-pseudoscheme.el,
+                        slime-pseudoscheme.el (docs/emacs.md)
 ```
 
 ## Systems

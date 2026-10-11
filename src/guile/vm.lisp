@@ -1485,7 +1485,6 @@ thunk."
 	   ("sin" "sin" (x)) ("cos" "cos" (x)) ("tan" "tan" (x)) ("asin" "asin" (x))
 	   ("acos" "acos" (x)) ("atan" "atan" (x)) ("atan2" "atan" (a b))
 	   ("inexact" "exact->inexact" (x)) ("symbol->string" "symbol->string" (x))
-	   ("string->utf8" "string->utf8" (x)) ("utf8->string" "utf8->string" (x))
 	   ("fluid-ref" "fluid-ref" (f)) ("fluid-set!" "fluid-set!" (f x))
 	   ("$car" "car" (x)) ("$cdr" "cdr" (x)) ("$set-car!" "set-car!" (x v)) ("$set-cdr!" "set-cdr!" (x v))
 	   ("$variable-ref" "variable-ref" (v)) ("$variable-set!" "variable-set!" (v x))
@@ -1494,6 +1493,10 @@ thunk."
 	   ("$struct-vtable" "struct-vtable" (s)) ("$struct-ref" "struct-ref" (s i))
 	   ("$struct-set!" "struct-set!" (s i x)) ("$struct-ref/immediate" "struct-ref" (s i))
 	   ("$struct-set!/immediate" "struct-set!" (s i x))))
+
+;; not root bindings in Guile (they're (rnrs bytevectors)'s): the host's
+(defintrinsic "string->utf8" (x) (funcall (psx:host-ref "string->utf8") x))
+(defintrinsic "utf8->string" (x) (funcall (psx:host-ref "utf8->string") x))
 
 (defintrinsic "logsub" (a b) (funcall (root-procedure "logand") a (funcall (root-procedure "lognot") b)))
 (defintrinsic "lsh" (a n) (funcall (root-procedure "ash") a n))

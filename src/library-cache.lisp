@@ -132,9 +132,39 @@ locations are the ones compiled libraries were expanded against."
 ;;; ------------------------------------------------------------------
 ;;; Loading
 
+(defvar *compiled-libraries* :none
+  "While a fasl of several compiled libraries loads (an ASDF component's,
+src/asdf.lisp): the list they're collected on.")
+
 (defun register-compiled-library (text &rest install-arguments)
   "Called by a compiled library's fasl."
-  (setq *compiled-library* (cons text install-arguments)))
+  (setq *compiled-library* (cons text install-arguments))
+  (unless (eq *compiled-libraries* :none)
+    (push *compiled-library* *compiled-libraries*)))
+
+(defun compile-library-form (form)
+  "Expand and install library FORM (resolved: includes read), writing it
+to the compiled-library cache as LOAD-COMPILED-LIBRARY would: the fasl
+it's in, or NIL if it can't be cached (its expansion holds Lisp
+objects, or it was expanded against a library of this session only)."
+  (let* ((name (cadr form))
+	 (text (form-text form))
+	 (key (and text (library-key text))))
+    (when key
+      (push (list name key text form) *pending-libraries*))
+    (eval-library form)
+    (when key
+      (setf *pending-libraries* (remove name *pending-libraries* :key #'car :test #'equal))
+      (let ((fasl (library-fasl key)))
+	(and (probe-file fasl) fasl)))))
+
+(defun install-compiled-libraries (compiled)
+  "Install each of COMPILED, as REGISTER-COMPILED-LIBRARY records them,
+if every library each was expanded against is still the one it was;
+true if they all were installed."
+  (when (every (lambda (c) (dependencies-current-p (cdr c))) compiled)
+    (dolist (c compiled t)
+      (apply (entry "psyntax:install-library") (append (cdr c) (list t))))))
 
 (defun load-compiled-library (name)
   "psyntax's LIBRARY-LOADER: install library NAME from the cache and

@@ -129,7 +129,8 @@ r7rs> ,expand (let loop ((i 0)) (if (< i 3) (loop (+ i 1))))
 `(system repl repl)`, from Guile's sources, so it has all of Guile's
 meta-commands: `,describe`, `,apropos`, `,expand`, `,optimize`, `,time`,
 `,profile`, `,bt` and `,locals` after an error, `,module`, `,import`,
-`,in`, `,show`, `,option`, ... At a terminal it reads through the same
+`,in`, `,show`, `,option`, and `,language elisp` for Emacs Lisp
+(docs/guile.md). At a terminal it reads through the same
 line editor, as Guile's own `(ice-9 readline)` would. Its current input
 port is filled from the editor, and its `repl-reader` passes the prompt
 along. Completion covers the current module and the modules it uses,
