@@ -313,3 +313,5 @@
 ;; The pretty printer's formats for keywords: accepted, not used
 (define pretty-format
   (case-lambda ((name) #f) ((name format) (if #f #f))))
+(define decode-float %chez:decode-float)
+(define (display-string s . port) (apply display s port))

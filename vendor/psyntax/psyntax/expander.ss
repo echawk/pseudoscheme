@@ -2854,21 +2854,29 @@
                    (loop (cons (add-subst rib (chi-macro value e)) (cdr e*)) cmd*))
                   (else (loop (cdr e*) (cons e cmd*))))))))))
 
+  ;;; PSEUDOSCHEME: Chez's (id indirect-id ...) in an export list
+  ;;; exports id and the identifiers its expansions may refer to: here
+  ;;; they're all simply exported.
+  (define (flatten-module-exports e export*)
+    (let f ((ls export*))
+      (cond
+        ((null? ls) '())
+        ((id? (car ls)) (cons (car ls) (f (cdr ls))))
+        (else
+         (let ((x (syntax->list (car ls))))
+           (unless (and x (pair? x)) (stx-error e "module exports must be identifiers"))
+           (append (f x) (f (cdr ls))))))))
+
   (define parse-module
     (lambda (e)
       (syntax-match e ()
         ((_ (export* ...) b* ...)
-         (begin
-           (unless (for-all id? export*)
-             (stx-error e "module exports must be identifiers"))
-           (values #f export* b*)))
+         (values #f (flatten-module-exports e export*) b*))
         ((_ name (export* ...) b* ...)
          (begin
            (unless (id? name)
              (stx-error e "module name must be an identifier"))
-           (unless (for-all id? export*)
-             (stx-error e "module exports must be identifiers"))
-           (values name export* b*))))))
+           (values name (flatten-module-exports e export*) b*))))))
 
   (define chi-internal-module
     (lambda (e r mr lex* rhs* mod** kwd*)

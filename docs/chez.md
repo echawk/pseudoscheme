@@ -17,11 +17,12 @@ All of it lives in `src/chez/`:
 | file | what |
 |---|---|
 | chez.lisp | the `(chezscheme)` library, Chez's top level, library files that define their library at top level, the extensions Chez makes to R6RS procedures |
-| host.lisp | primitives in Lisp: boxes, fxvectors, weak tables, threads, mutexes and conditions, `format`, Chez-style parameters, fd ports, nonblocking reads, file options |
+| host.lisp | primitives in Lisp: boxes, fxvectors, weak tables, threads, mutexes and conditions, `format`'s column-tracking port, Chez-style parameters, fd ports, nonblocking reads, file options, typed record fields |
 | ffi.lisp | `load-shared-object`, `foreign-procedure`, foreign memory, on CFFI |
-| chezscheme.scm, lists.scm, numbers.scm, hashtables.scm, threads.scm, conditions.scm, top-level.scm, ffi.scm | the library's body, in Scheme |
+| chezscheme.scm, lists.scm, records.scm, numbers.scm, hashtables.scm, threads.scm, conditions.scm, top-level.scm, ffi.scm | the library's body, in Scheme |
+| format.scm | Chez's own `format`, `printf` and `fprintf` (s/format.ss), made by boot/chez-format.py |
 
-`(chezscheme)` exports 1178 of the 1715 names Chez 10.4.1's does (803
+`(chezscheme)` exports 1198 of the 1715 names Chez 10.4.1's does (803
 before this work), with no extra names of its own. The comparison is
 `(library-exports '(chezscheme))` in Chez against psyntax's
 `library-export-bindings` here.
@@ -48,7 +49,7 @@ profile, windows) aren't counted in the totals. The latest run:
 
 | | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
-| **counted files** | **12573** | **1277** | **792** | **1550** | **6663** | **26** |
+| **counted files** | **13372** | **1094** | **782** | **1453** | **6842** | **20** |
 | first run | 7892 | 941 | 714 | 1798 | 4726 | 24 |
 
 The first run stopped reading nine files early, at reader syntax we
@@ -58,39 +59,39 @@ counted in every column, failures included. By file:
 | file | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
 | 3 | 468 | 58 | 0 | 4 | 150 | 0 |
-| 4 | 153 | 17 | 17 | 1 | 89 | 7 |
+| 4 | 503 | 41 | 61 | 88 | 268 | 1 |
 | 5_1 | 382 | 0 | 3 | 16 | 4 | 0 |
-| 5_2 | 187 | 18 | 1 | 4 | 3 | 7 |
+| 5_2 | 191 | 18 | 1 | 4 | 3 | 7 |
 | 5_3 | 98 | 0 | 0 | 6 | 0 | 0 |
 | 5_4 | 780 | 68 | 3 | 19 | 12 | 0 |
 | 5_5 | 425 | 62 | 0 | 9 | 54 | 1 |
 | 5_6 | 383 | 88 | 9 | 43 | 197 | 2 |
 | 5_7 | 37 | 17 | 3 | 2 | 1 | 0 |
 | 5_8 | 19 | 3 | 0 | 0 | 0 | 0 |
-| 6 | 2597 | 121 | 44 | 52 | 62 | 0 |
+| 6 | 2603 | 117 | 39 | 55 | 62 | 0 |
 | 7 | 172 | 45 | 134 | 89 | 575 | 0 |
-| 8 | 684 | 154 | 242 | 217 | 919 | 3 |
+| 8 | 684 | 154 | 239 | 220 | 919 | 3 |
 | bytevector | 863 | 50 | 12 | 13 | 1673 | 3 |
 | cfl | 59 | 0 | 0 | 123 | 81 | 0 |
 | cp0 | 7 | 0 | 1 | 44 | 244 | 0 |
 | cptypes | 3 | 0 | 0 | 22 | 539 | 0 |
 | date | 75 | 35 | 1 | 2 | 159 | 0 |
 | enum | 41 | 3 | 0 | 2 | 0 | 0 |
-| examples | 4 | 2 | 54 | 318 | 0 | 0 |
+| examples | 8 | 2 | 54 | 314 | 0 | 0 |
 | exceptions | 12 | 0 | 0 | 2 | 71 | 0 |
 | fl | 737 | 14 | 0 | 16 | 125 | 0 |
 | foreign | 21 | 1 | 4 | 4 | 28 | 0 |
-| format | 960 | 212 | 14 | 0 | 26 | 0 |
+| format | 1174 | 5 | 7 | 0 | 26 | 0 |
 | ftype | 18 | 0 | 0 | 79 | 1115 | 0 |
 | fx | 1122 | 18 | 19 | 49 | 597 | 0 |
 | hash | 665 | 145 | 1 | 12 | 443 | 0 |
-| ieee | 479 | 22 | 1 | 14 | 4 | 0 |
-| io | 248 | 35 | 64 | 101 | 445 | 0 |
-| misc | 357 | 28 | 16 | 137 | 309 | 3 |
+| ieee | 481 | 22 | 1 | 12 | 4 | 0 |
+| io | 257 | 32 | 58 | 101 | 445 | 0 |
+| misc | 362 | 28 | 15 | 133 | 309 | 3 |
 | oop | 70 | 0 | 97 | 75 | 0 | 0 |
 | primvars | 69 | 11 | 0 | 9 | 43 | 0 |
 | profile | 7 | 6 | 1 | 13 | 181 | 0 |
-| record | 348 | 34 | 51 | 211 | 539 | 0 |
+| record | 553 | 41 | 19 | 31 | 539 | 0 |
 | thread | 19 | 0 | 2 | 4 | 70 | 0 |
 | unix | 60 | 17 | 4 | 0 | 12 | 0 |
 | windows | 15 | 0 | 0 | 0 | 0 | 0 |
@@ -147,11 +148,11 @@ The largest groups left:
   or `compile-whole-library` (missing here; the harness can't tell
   them from the clauses' text), `define-property`, library
   introspection, `eval-when` and `meta`.
-- format: `~e`, `~f`, `~$` and `~:r` (ordinals), where CL's `format`
-  writes numbers differently from Chez's.
+- format: the printer parameters (`print-radix`, `print-level`, ...),
+  which the writer doesn't consult yet.
 - hash: weak and ephemeron tables, which are ordinary tables here.
-- record: R6RS record-syntax details, `#[...]` record literals, and
-  `record-equal-procedure` and `record-hash-procedure`.
+- record: R6RS record-syntax details, `#[...]` record literals,
+  `record-reader`, and `$record` system procedures.
 - oop: oop.ss builds `define-class` on `$make-record-type`, a system
   procedure, so its library doesn't load.
 - examples: Chez's example programs, which the mats expect to find and
@@ -301,16 +302,45 @@ output while writing its input.
 
 ### `format` and error messages
 
-Chez's `format` follows Common Lisp's, so CL's `format` does the work.
-Objects are printed as Scheme prints them through a pprint-dispatch
-table, which calls Scheme's writer for everything but integers and
-ratios. An uncaught error is reported as Chez reports it:
+`format`, `printf` and `fprintf` are Chez's own: boot/chez-format.py
+fetches s/format.ss (with the parts of s/print.ss and s/cmacros.ss it
+needs) from cisco/ChezScheme at e3b13636, rewrites the few internals it
+uses (`$oops`, `andmap`, `syntax-error`, ...), and wraps its body in a
+`module`, so that each definition compiles on its own, writing
+src/chez/format.scm. Its directives therefore write numbers exactly as
+Chez does (`~e`, `~f`, `~$`, `~:r`). The column it tracks for `~&` and
+`~t` comes from host.lisp's `format-port`, a Gray stream. An uncaught
+error is reported as Chez reports it:
 
 ```
 Exception in car: 5 is not a pair
 Exception in foo: bad thing with irritant 42
 Exception occurred with non-condition value 42
 ```
+
+### Old records
+
+src/chez/records.scm has Chez's older record interface:
+- `define-record`, with its parent, field inits and `prefix`,
+  `predicate` and `constructor` options;
+- `type-descriptor`;
+- `make-record-type` and `record-constructor` of a record-type
+  descriptor;
+- the `csv7:` field procedures, which take a field's name or index.
+
+These are R6RS record types, so the two interfaces mix. Typed fields
+(`(immutable double-float a)`, `integer-8`, ...) are checked by
+constructors and mutators; host.lisp keeps each type's field types.
+`record-type-equal-procedure` and `record-type-hash-procedure` give
+`equal?` and `equal-hash` their per-type procedures, through hooks in
+`equal?` (`ps::*record-equal-hook*`, which joins records to its
+cycle-safe pass) and in `equal-hash`.
+
+In this mode `map`, `for-each`, `fold-left`, `fold-right`, `for-all` and
+`exists` check their arguments as Chez does: a procedure, and proper
+lists of one length. Cyclic lists are errors, not endless loops. (R7RS's
+`map` stops at the shortest list, so other modes don't check map's
+lengths.)
 
 ### Reader syntax
 
@@ -370,7 +400,7 @@ The main causes:
 
 ## Not planned
 
-Of the 597 names still missing, most are Chez's internals: `$`-system
+Of the 517 names still missing, most are Chez's internals: `$`-system
 procedures, compiler knobs (`cp0-*`, `enable-*`), boot files, fasl,
 profiling and cost centers, the inspector, the 56 port-buffer
 accessors, phantom bytevectors. The ones that matter
@@ -379,7 +409,7 @@ to programs, in rough order:
 1. engines and timer interrupts (above);
 2. ftypes (`define-ftype`, `ftype-ref`), on CFFI's structs;
 3. annotations and source objects;
-4. `define-record` and `record-case`, the old record syntax;
+4. `record-case` and `#[...]` record literals;
 5. `meta-cond`, `extend-syntax`, `define-structure`;
 6. continuation marks (Chez 10's), which would share prompts' frames
    (docs/continuations.md).

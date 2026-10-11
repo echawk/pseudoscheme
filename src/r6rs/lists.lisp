@@ -22,6 +22,14 @@
     (unless (every (lambda (l) (= (length l) n)) lists)
       (ps:scheme-error "~A: lists differ in length" who))))
 
+(defun check-map-arguments (who proc lists)
+  "In Chez mode, check map's or for-each's arguments as Chez does: a
+procedure, and proper lists of one length.  (R7RS's stop at the
+shortest list.)"
+  (when ps:*chez-reader*
+    (check-procedure who proc)
+    (check-same-lengths who lists)))
+
 ;;; 3.  List utilities
 
 (defprim "find" (proc list)
@@ -30,6 +38,7 @@
     (when (truthy (funcall proc x)) (return x))))
 
 (defprim "for-all" (proc list &rest lists)
+  (check-procedure "for-all" proc)
   (let ((lists (cons list lists)))
     (check-same-lengths "for-all" lists)
     (if (null list)
@@ -42,6 +51,7 @@
 	    (when (null (car lists)) (return r)))))))
 
 (defprim "exists" (proc list &rest lists)
+  (check-procedure "exists" proc)
   (let ((lists (cons list lists)))
     (check-same-lengths "exists" lists)
     (loop
@@ -60,6 +70,7 @@
     (values (nreverse in) (nreverse out))))
 
 (defprim "fold-left" (combine nil-value list &rest lists)
+  (check-procedure "fold-left" combine)
   (let ((lists (cons list lists)) (acc nil-value))
     (check-same-lengths "fold-left" lists)
     (loop (when (null (car lists)) (return acc))
@@ -67,6 +78,7 @@
 		lists (mapcar #'cdr lists)))))
 
 (defprim "fold-right" (combine nil-value list &rest lists)
+  (check-procedure "fold-right" combine)
   (let ((lists (cons list lists)))
     (check-same-lengths "fold-right" lists)
     (let ((rows (apply #'mapcar #'list lists)) (acc nil-value))
@@ -122,11 +134,13 @@
 (defprim "map" (proc list &rest lists)
   ;; R6RS requires equal lengths; R7RS stops at the shortest.  Accept
   ;; R7RS behavior here (a superset) so shared code keeps working.
+  (check-map-arguments "map" proc (cons list lists))
   (if lists
       (apply #'mapcar proc list lists)
       (mapcar proc list)))
 
 (defprim "for-each" (proc list &rest lists)
+  (check-map-arguments "for-each" proc (cons list lists))
   (if lists
       (apply #'mapc proc list lists)
       (mapc proc list))

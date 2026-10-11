@@ -607,7 +607,8 @@ between two digits of RADIX; else NIL."
 (defun format-real (x radix)
   (cond ((rationalp x)
 	 (let ((s (let ((*print-base* radix) (*print-radix* nil)) (princ-to-string x))))
-	   (string-downcase s)))
+	   ;; Chez Scheme's digits past 9 are capitals: (number->string 255 16) is "FF"
+	   (if *chez-reader* s (string-downcase s))))
 	((nan-p x) "+nan.0")
 	((infinite-p x) (if (> x 0) "+inf.0" "-inf.0"))
 	(t (let ((*read-default-float-format* 'double-float))

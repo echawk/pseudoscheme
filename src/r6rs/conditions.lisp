@@ -235,7 +235,8 @@ that psyntax named with a gensym: the name the program gave it, else NIL."
   "The message and irritants a Scheme handler sees for Lisp condition C.
 Applying a non-procedure shows up in Lisp as calling an undefined
 function (#f is a symbol) or as a type error expecting a function."
-  (flet ((plain () (values (remove #\Newline (princ-to-string c)) '())))
+  ;; *print-circle*: an irritant may be a cyclic list
+  (flet ((plain () (values (remove #\Newline (let ((*print-circle* t)) (princ-to-string c))) '())))
     (typecase c
       ((or undefined-function unbound-variable)
        (if (eq (cell-error-name c) ps:false)
@@ -260,7 +261,8 @@ function (#f is a symbol) or as a type error expecting a function."
   "Print condition C the way a REPL reports an uncaught one:
   error in WHO: MESSAGE IRRITANT ...   [&type ...]"
   (when (condition-p* c)
-    (let ((who (component-of c "&who"))
+    (let ((*print-circle* t)
+	  (who (component-of c "&who"))
 	  (message (component-of c "&message"))
 	  (irritants (component-of c "&irritants"))
 	  (syntax (component-of c "&syntax")))

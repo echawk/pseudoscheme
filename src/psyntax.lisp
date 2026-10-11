@@ -99,8 +99,9 @@
   ;; SRFI 4's #s16(...), SRFI 88's foo:, and records (SRFI 163's array
   ;; literals)
   (defhost "host-literal?" (x)
+    ;; Chez's #!eof too: the end-of-file object is self-evaluating there
     (ps:true? (or (and (ps:numeric-vector-tag x) t) (ps:keyword-object-p x)
-		  (typep x 'ps-r6rs::record))))
+		  (typep x 'ps-r6rs::record) (eq x ps:eof-object))))
   (defhost "pretty-print" (x &optional (port *standard-output*))
     (funcall ps:*scheme-write* x port) (terpri port) ps:unspecific))
 
@@ -109,6 +110,13 @@
 built-ins but whose value the R6RS/R7RS layers replaced: OPEN-PRIMITIVES
 must leave them as (primitive x), or the translator would open-code the
 old built-in.")
+
+(defun closed-primitive-p (name)
+  "Whether primitive NAME (a string) is closed (*CLOSED-PRIMITIVES*):
+in Chez mode, map too, whose arguments Chez checks
+(PS-R6RS::CHECK-MAP-ARGUMENTS)."
+  (or (member name *closed-primitives* :test #'string=)
+      (and ps:*chez-reader* (string= name "map"))))
 
 (defparameter *extended-primitives* '()
   "(name min max): closed primitives (see *CLOSED-PRIMITIVES*) whose new
@@ -143,7 +151,7 @@ host global."
 	 (cons (cadr (car form)) (mapcar #'open-primitives-1 (cdr form))))
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
-	      (not (member (ps:scheme-symbol-name (cadr form)) *closed-primitives* :test #'string=)))
+	      (not (closed-primitive-p (ps:scheme-symbol-name (cadr form)))))
 	 (cadr form))
 	;; ((primitive void)), psyntax's unspecified value: the value itself
 	((and (consp (car form)) (null (cdr form))
@@ -596,7 +604,7 @@ be a fresh variable, called out of line."
 		   (eq (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" den))
 		       (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" base-den)))
 		   (not (member name overridden))
-		   (not (member (ps:scheme-symbol-name name) *closed-primitives* :test #'string=)))
+		   (not (closed-primitive-p (ps:scheme-symbol-name name))))
 	      (progn (psl:tr "PROGRAM-ENV-DEFINE!" env name base-den) (push name shared))
 	      (psl:copy-bindings! env ps-r7rs:*implementation-env* (list name))))))
     (setq *shared-primitives* shared)

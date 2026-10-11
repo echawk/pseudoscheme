@@ -331,6 +331,7 @@ ESTABLISH again when rebuilt."
   (mapn-loop f (list-cdrs lists) (cons value acc) t))
 
 (defun full-map (f list &rest lists)
+  (ps-r6rs::check-map-arguments "map" f (cons list lists))
   (if lists (mapn-loop f (cons list lists) '() nil) (map1-loop f list '() nil)))
 
 (defun for-each-loop (f lists)
@@ -358,6 +359,7 @@ ESTABLISH again when rebuilt."
   (for-each1-loop f (cdr list)))
 
 (defun full-for-each (f list &rest lists)
+  (ps-r6rs::check-map-arguments "for-each" f (cons list lists))
   (if lists (for-each-loop f (cons list lists)) (for-each1-loop f list)))
 
 ;;; vector-map, vector-for-each, string-map, string-for-each: KIND says

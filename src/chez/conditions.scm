@@ -1,22 +1,8 @@
 ;;; -*- Mode: Scheme -*-
-;;;; (chezscheme): format, and conditions as Chez Scheme displays them.
+;;;; (chezscheme): conditions as Chez Scheme displays them.
 ;;;; Part of the library's body (src/chez/chez.lisp).
 
-;;; format, printf and fprintf: Common Lisp's format, which Chez's
-;;; follows (~a ~s ~d ~x ~f ~e ~$ ~r ~{...~} ~^ ~% ...), with objects
-;;; printed as Scheme prints them (%chez:format-to-string, host.lisp).
-;;; (format #f fmt arg ...) and Chez's (format fmt arg ...) make a
-;;; string; (format #t ...) writes to the current output port, (format
-;;; port ...) to PORT.
-
-(define (format dest . rest)
-  (cond ((string? dest) (apply %chez:format-to-string dest rest))
-        ((eq? dest #f) (apply %chez:format-to-string rest))
-        ((eq? dest #t) (apply %chez:format-to-port (current-output-port) rest))
-        (else (apply %chez:format-to-port dest rest))))
-
-(define (printf fmt . args) (apply %chez:format-to-port (current-output-port) fmt args))
-(define (fprintf port fmt . args) (apply %chez:format-to-port port fmt args))
+;;; format, printf and fprintf are Chez's own (format.scm).
 
 ;; errorf and friends format their message (a format condition, in
 ;; Chez); error's message is taken as it is

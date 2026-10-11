@@ -396,6 +396,17 @@ bytevectors tagged with their type).")
 and the function comparing their parts: true if they are EQUAL?.  The
 Guile mode compares its structs with it.")
 
+(defvar *record-equal-hook* nil
+  "NIL, or a function of two structure objects and the function comparing
+their parts: whether they are EQUAL?, or :PASS to leave them to
+*EQUAL-EXTENSION*.  The Chez mode compares records with it, by the
+procedures of record-type-equal-procedure.")
+
+(defun structure-equal (obj1 obj2 recur)
+  (let ((r (if *record-equal-hook* (funcall *record-equal-hook* obj1 obj2 recur) :pass)))
+    (cond ((not (eq r :pass)) r)
+	  (*equal-extension* (funcall *equal-extension* obj1 obj2 recur)))))
+
 (defun scheme-equal-p (obj1 obj2)
   (let ((budget *equal-budget*))
     (declare (fixnum budget))
@@ -416,7 +427,8 @@ Guile mode compares its structs with it.")
 			 (setf (gethash x parents) root)
 			 root))))
 	       (walk (a b)
-		 (if (and (or (consp a) (simple-vector-p a)) (or (consp b) (simple-vector-p b)))
+		 (if (and (or (consp a) (simple-vector-p a) (typep a 'structure-object))
+			  (or (consp b) (simple-vector-p b) (typep b 'structure-object)))
 		     (let ((ra (class-root a)) (rb (class-root b)))
 		       (or (eq ra rb)
 			   (progn (setf (gethash ra parents) rb)
@@ -428,9 +440,9 @@ Guile mode compares its structs with it.")
   (cond ((eql obj1 obj2) t)
 	;; the extension's objects are structure instances, and may be
 	;; EQUAL? to vectors (a Guile array to the vector it views)
-	((and *equal-extension*
+	((and (or *equal-extension* *record-equal-hook*)
 	      (or (typep obj1 'structure-object) (typep obj2 'structure-object)))
-	 (funcall *equal-extension* obj1 obj2 recur))
+	 (structure-equal obj1 obj2 recur))
         ((consp obj1)			;pair?
          (and (consp obj2)
 	      (funcall recur (car obj1) (car obj2))

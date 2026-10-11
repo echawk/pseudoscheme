@@ -161,6 +161,11 @@
 (defprim "string-ci-hash" (s) (sxhash (string-downcase s)))
 (defprim "symbol-hash" (s) (sxhash s))
 
+(defvar *record-hash-hook* nil
+  "NIL, or a function of a structure object and the function hashing its
+parts: its hash, or NIL to hash it as SXHASH does.  The Chez mode hashes
+records with it, by the procedures of record-type-hash-procedure.")
+
 (defun sxhash-scheme (obj)
   ;; SXHASH is EQUAL-consistent; Scheme EQUAL? also descends vectors,
   ;; which CL EQUAL doesn't, so hash vectors by their contents.  Only the
@@ -178,6 +183,8 @@
 				      h))
 		     (cons (logand most-positive-fixnum
 				   (+ (* 31 (walk (car obj))) (walk (cdr obj)))))
+		     (structure-object (or (and *record-hash-hook* (funcall *record-hash-hook* obj #'walk))
+					   (sxhash obj)))
 		     (t (sxhash obj))))))
       (walk obj))))
 

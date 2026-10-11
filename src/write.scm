@@ -130,9 +130,19 @@
     (do ((i 0 (+ i 1)))
 	((= i len) (write-char #\" port))
       (let ((c (string-ref obj i)))
-	(if (or (char=? c #\\) (char=? c #\"))
-	    (write-char #\\ port))
-	(write-char c port)))))
+	(cond ((or (char=? c #\\) (char=? c #\"))
+	       (write-char #\\ port)
+	       (write-char c port))
+	      ;; Chez Scheme's write escapes control characters: "a\nb"
+	      ((and (< (char->integer c) 32) (ps:true? (ps:chez-reader-p)))
+	       (write-string (chez-string-escape c) port))
+	      (else (write-char c port)))))))
+
+(define (chez-string-escape c)
+  (let ((n (char->integer c)))
+    (case n
+      ((7) "\\a") ((8) "\\b") ((9) "\\t") ((10) "\\n") ((11) "\\v") ((12) "\\f") ((13) "\\r")
+      (else (string-append "\\x" (number->string n 16) ";")))))
 
 (define (write-list obj port recur)
   (cond ((and (quotation? obj)

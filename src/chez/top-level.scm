@@ -220,7 +220,7 @@
 ;;; Ports beyond R6RS
 
 (define port-closed? %chez:port-closed?)
-(define (fresh-line . port) (if #f #f))
+(define (fresh-line . port) (apply %chez:fresh-line port))
 (define get-bytevector-some! %chez:get-bytevector-some!)
 (define (put-bytevector-some port bv . range)
   (apply put-bytevector port bv range)

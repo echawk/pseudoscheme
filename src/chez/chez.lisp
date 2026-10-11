@@ -16,8 +16,8 @@
 (in-package "PSEUDOSCHEME-R7RS")
 
 (defparameter *chezscheme-sources*
-  '("chezscheme.scm" "lists.scm" "numbers.scm" "hashtables.scm" "threads.scm"
-    "conditions.scm" "top-level.scm" "ffi.scm")
+  '("chezscheme.scm" "lists.scm" "records.scm" "numbers.scm" "hashtables.scm" "threads.scm"
+    "conditions.scm" "top-level.scm" "format.scm" "ffi.scm")
   "The files of (chezscheme)'s body, in order.")
 
 (defparameter *chezscheme-extras*
@@ -47,7 +47,7 @@
     "subtract-duration!" "time=?" "time<?" "time<=?" "time>?" "time>=?"
     "stencil-vector" "stencil-vector?" "stencil-vector-mask" "stencil-vector-length"
     "stencil-vector-ref" "stencil-vector-set!" "stencil-vector-mask-width"
-    "stencil-vector-update" "stencil-vector-truncate!" "file-access-time" "pretty-format"
+    "stencil-vector-update" "stencil-vector-truncate!" "file-access-time" "pretty-format" "decode-float" "display-string"
     "r6rs:char=?" "r6rs:char<?" "r6rs:char>?" "r6rs:char<=?" "r6rs:char>=?"
     "r6rs:char-ci=?" "r6rs:char-ci<?" "r6rs:char-ci>?" "r6rs:char-ci<=?"
     "r6rs:char-ci>=?" "r6rs:string=?" "r6rs:string<?" "r6rs:string>?"
@@ -78,6 +78,13 @@
     "mutable-bytevector?" "immutable-bytevector?" "substring-fill!" "char-"
     "gensym->unique-string" "gensym?" "string->uninterned-symbol" "uninterned-symbol?"
     "property-list" "getprop" "putprop" "remprop"
+    ;; records.scm
+    "define-record" "type-descriptor" "make-record-type" "csv7:record-field-accessor"
+    "csv7:record-field-mutator" "csv7:record-field-accessible?" "csv7:record-field-mutable?"
+    "csv7:record-type-field-names" "csv7:record-type-field-decls" "record-type-equal-procedure"
+    "record-type-hash-procedure" "record-equal-procedure" "record-hash-procedure"
+    "default-record-equal-procedure" "default-record-hash-procedure"
+    "record-constructor-descriptor?" "r6rs:record-constructor" "r6rs:record?"
     "directory-separator?" "path-absolute?" "path-last" "path-parent" "path-first"
     "path-rest" "path-extension" "path-root" "path-build"
     ;; numbers.scm
@@ -248,6 +255,20 @@ calls with those are still open-coded."
 			       (lambda (old)
 				 (lambda (path &optional (arg nil arg-p))
 				   (if arg-p (funcall chez path arg) (funcall old path)))))))
+    ;; (record-constructor rtd): a procedure of every field's value
+    (let ((chez (psx:host-ref "chez:record-constructor")))
+      (extend-host-procedure "record-constructor"
+			     (lambda (old)
+			       (lambda (x) (funcall (if (ps-r6rs::rtd-p x) chez old) x)))))
+    ;; (record? x rtd): whether x is of type rtd, even if it is opaque
+    (extend-host-procedure "record?"
+			   (lambda (old)
+			     (lambda (x &optional (rtd nil rtd-p))
+			       (if rtd-p
+				   (progn (ps-r6rs::check-rtd "record?" rtd)
+					  (ps-r6rs::bool (ps-r6rs::record-of-type-p x rtd)))
+				   (funcall old x))))
+			   '(1 1))
     (extend-host-procedure "call-with-output-file" #'call-with-output)
     (extend-host-procedure "with-output-to-file" #'with-output)
     ;; (rnrs eval)'s eval is psyntax's: with one argument, or the

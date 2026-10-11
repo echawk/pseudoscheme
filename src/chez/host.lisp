@@ -9,9 +9,21 @@
 
 (defun path-string (x) (if (pathnamep x) (namestring x) x))
 
+(defparameter *posix-spawn-p*
+  (find "USE-POSIX-SPAWN" (sb-kernel:%fun-lambda-list #'sb-ext:run-program)
+	:key (lambda (x) (symbol-name (if (consp x) (car x) x))) :test #'string=)
+  "Whether this SBCL's RUN-PROGRAM can use posix_spawn (2.3 and later):
+much faster than fork for a process of a large heap, a few ms rather
+than a few hundred.")
+
 (defprim "chez:system" (command)
-  (nth-value 2 (uiop:run-program command :force-shell t :output :interactive
-					 :error-output :interactive :ignore-error-status t)))
+  ;; sh -c, its standard streams the process's own, written after what
+  ;; is already ours
+  (finish-output *standard-output*)
+  (sb-ext:process-exit-code
+   (apply #'sb-ext:run-program "/bin/sh" (list "-c" command)
+	  :input t :output t :error t :wait t
+	  (and *posix-spawn-p* '(:use-posix-spawn t)))))
 
 (defprim "chez:with-input-from-string" (string thunk)
   (let ((*standard-input* (make-string-input-stream string)))
@@ -588,3 +600,254 @@ nothing is ready.")
     (setf (ps:stencil-vector-elements sv) (subseq old 0 (logcount mask))
 	  (ps:stencil-vector-mask sv) mask)
     ps:unspecific))
+
+;;; ------------------------------------------------------------------
+;;; For format (src/chez/format.scm, Chez Scheme's own): its column-
+;;; tracking ports, fresh-line, and decode-float.
+
+(defclass format-port (trivial-gray-streams:fundamental-character-output-stream)
+  ((target :initarg :target :reader format-port-target)
+   (column :initform 0 :accessor format-port-column))
+  (:documentation "Chez's format port: what is written goes to TARGET,
+and the column is kept, from 0 when it's made, for ~t, ~& and ~<...~>."))
+
+(defmethod trivial-gray-streams:stream-write-char ((p format-port) c)
+  (write-char c (format-port-target p))
+  (setf (format-port-column p) (if (char= c #\Newline) 0 (1+ (format-port-column p))))
+  c)
+
+(defmethod trivial-gray-streams:stream-write-string ((p format-port) s &optional (start 0) end)
+  (let* ((end (or end (length s)))
+	 (newline (position #\Newline s :start start :end end :from-end t)))
+    (write-string s (format-port-target p) :start start :end end)
+    (setf (format-port-column p)
+	  (if newline (- end newline 1) (+ (format-port-column p) (- end start))))
+    s))
+
+(defmethod trivial-gray-streams:stream-line-column ((p format-port))
+  (format-port-column p))
+
+(defmethod trivial-gray-streams:stream-force-output ((p format-port))
+  (force-output (format-port-target p)))
+
+(defmethod trivial-gray-streams:stream-finish-output ((p format-port))
+  (finish-output (format-port-target p)))
+
+(defmethod close ((p format-port) &key abort)
+  (declare (ignore abort))
+  ;; the port, not its target, is closed
+  (call-next-method))
+
+(defprim "chez:make-format-port" (target)
+  (make-instance 'format-port :target target))
+
+(defprim "chez:format-port-column" (p)
+  (if (typep p 'format-port) (format-port-column p) 0))
+
+(defprim "chez:fresh-line" (&optional (port *standard-output*))
+  (fresh-line port)
+  ps:unspecific)
+
+(defprim "chez:decode-float" (x)
+  "Chez's decode-float: #(significand exponent sign), x being
+significand * 2^exponent * sign."
+  (multiple-value-bind (f e s) (integer-decode-float (float x 1d0))
+    (vector f e (if (minusp s) -1 1))))
+
+;;; Chez's older records (src/chez/records.scm): typed fields, as in
+;;; (immutable double-float a), whose values constructors and mutators
+;;; check; record-constructor of a record-type descriptor; and csv7:'s
+;;; field procedures, which name a field or number it among all of a
+;;; type's fields, its ancestors' first.
+
+(defvar *record-field-types* (make-hash-table :test 'eq :weakness :key)
+  "Record-type descriptor -> its own fields' types: names (strings), or
+NIL for any value.")
+
+(defun integer-field-bits (type)
+  "For an integer field type: (signed-p . bits), else NIL."
+  (flet ((suffix (prefix)
+	   (and (> (length type) (length prefix)) (string= prefix type :end2 (length prefix))
+		(parse-integer type :start (length prefix) :junk-allowed t))))
+    (let ((alias (assoc type '(("short" t . 16) ("int" t . 32) ("long" t . 64) ("long-long" t . 64)
+			       ("iptr" t . 64) ("ptrdiff_t" t . 64) ("ssize_t" t . 64)
+			       ("unsigned-short" nil . 16) ("unsigned" nil . 32) ("unsigned-int" nil . 32)
+			       ("unsigned-long" nil . 64) ("unsigned-long-long" nil . 64)
+			       ("uptr" nil . 64) ("size_t" nil . 64) ("void*" nil . 64))
+			:test #'string=)))
+      (cond (alias (cdr alias))
+	    ((suffix "integer-") (cons t (suffix "integer-")))
+	    ((suffix "unsigned-") (cons nil (suffix "unsigned-")))))))
+
+(defun field-type-ok-p (type x)
+  (let ((bits (and type (integer-field-bits type))))
+    (cond ((null type) t)
+	  (bits (and (integerp x)
+		     (if (car bits)
+			 (typep x `(signed-byte ,(cdr bits)))
+			 ;; Chez accepts a negative value of the width too
+			 (typep x `(integer ,(- (expt 2 (1- (cdr bits)))) ,(1- (expt 2 (cdr bits))))))))
+	  ((member type '("double-float" "double" "single-float" "float") :test #'string=) (floatp x))
+	  ((string= type "fixnum") (typep x 'fixnum))
+	  ((member type '("char" "wchar" "wchar_t") :test #'string=) (characterp x))
+	  (t t))))
+
+(defun check-field-value (who type x)
+  (unless (field-type-ok-p type x)
+    (ps:scheme-error "~A: invalid value ~S for ~A field" who x type)))
+
+(defprim "chez:set-record-field-types!" (rtd types)
+  "TYPES: a list, a type name or #f for each of RTD's own fields."
+  (setf (gethash rtd *record-field-types*)
+	(mapcar (lambda (ty) (if (eq ty ps:false) nil (ps:scheme-symbol-name ty))) types))
+  ps:unspecific)
+
+(defun all-fields (rtd)
+  "Every field of RTD's records, (mutable-p name type), its ancestors' first."
+  (let ((parent (rtd-parent rtd)))
+    (append (and parent (all-fields parent))
+	    (loop for (mutable-p . name) across (rtd-fields rtd)
+		  for types = (gethash rtd *record-field-types*) then (cdr types)
+		  collect (list mutable-p name (car types))))))
+
+(defprim "chez:record-constructor" (rtd)
+  "Chez's record-constructor of a record-type descriptor: a procedure of
+every field's value, its ancestors' first."
+  (check-rtd "record-constructor" rtd)
+  (let ((types (mapcar #'third (all-fields rtd)))
+	(n (rtd-count rtd))
+	(name (scheme-name (rtd-name rtd))))
+    (lambda (&rest args)
+      (unless (= (length args) n)
+	(ps:scheme-error "~A: incorrect number of arguments ~D (expected ~D)" name (length args) n))
+      (loop for type in types for x in args do (check-field-value name type x))
+      (%make-record rtd (coerce args 'simple-vector)))))
+
+(defun field-position (who rtd field)
+  "The index in RTD's records' values of FIELD, a name or an index, and
+the field, (mutable-p name type)."
+  (check-rtd who rtd)
+  (let* ((fields (all-fields rtd))
+	 (i (cond ((and (integerp field) (< -1 field (length fields))) field)
+		  ((symbolp field) (position field fields :key #'second :from-end t)))))
+    (unless i (ps:scheme-error "~A: invalid field ~S for ~A" who field (scheme-name (rtd-name rtd))))
+    (values i (nth i fields))))
+
+(defprim "chez:csv7-record-field-accessor" (rtd field)
+  (let ((i (field-position "record-field-accessor" rtd field)))
+    (lambda (r)
+      (unless (record-of-type-p r rtd)
+	(ps:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
+      (svref (record-values r) i))))
+
+(defprim "chez:csv7-record-field-mutator" (rtd field)
+  (multiple-value-bind (i f) (field-position "record-field-mutator" rtd field)
+    (unless (first f)
+      (ps:scheme-error "record-field-mutator: field ~S of ~A is immutable" field (scheme-name (rtd-name rtd))))
+    (lambda (r x)
+      (unless (record-of-type-p r rtd)
+	(ps:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
+      (check-field-value (scheme-name (rtd-name rtd)) (third f) x)
+      (setf (svref (record-values r) i) x)
+      ps:unspecific)))
+
+(defprim "chez:csv7-record-field-accessible?" (rtd field)
+  (field-position "record-field-accessible?" rtd field)
+  ps:true)
+
+(defprim "chez:csv7-record-field-mutable?" (rtd field)
+  (bool (first (nth-value 1 (field-position "record-field-mutable?" rtd field)))))
+
+(defprim "chez:csv7-record-type-field-names" (rtd)
+  (check-rtd "record-type-field-names" rtd)
+  (mapcar #'second (all-fields rtd)))
+
+(defprim "chez:csv7-record-type-field-decls" (rtd)
+  (check-rtd "record-type-field-decls" rtd)
+  (mapcar (lambda (f)
+	    (list (ps:intern-scheme-symbol (if (first f) "mutable" "immutable"))
+		  (ps:intern-scheme-symbol (or (third f) "scheme-object"))
+		  (second f)))
+	  (all-fields rtd)))
+
+;;; record-type-equal-procedure and record-type-hash-procedure: equal?
+;;; and equal-hash on records (through PS::*RECORD-EQUAL-HOOK* and
+;;; *RECORD-HASH-HOOK*, in the Chez mode only).  Two records are compared
+;;; by the procedure of the nearest ancestor type (inclusive) of both
+;;; that has one, if that is the same type for both; else by the
+;;; default-record-equal-procedure parameter's, else by eq?.
+
+(defvar *record-equal-procedures* (make-hash-table :test 'eq :weakness :key))
+(defvar *record-hash-procedures* (make-hash-table :test 'eq :weakness :key))
+(defvar *record-procedure-defaults* nil
+  "(default-record-equal-procedure . default-record-hash-procedure),
+the parameters of src/chez/records.scm.")
+
+(defun record-type-procedure (table who rtd args)
+  (check-rtd who rtd)
+  (if (null args)
+      (gethash rtd table ps:false)
+      (let ((proc (car args)))
+	(cond ((eq proc ps:false) (remhash rtd table))
+	      ((functionp proc) (setf (gethash rtd table) proc))
+	      (t (ps:scheme-error "~A: ~S is not a procedure or #f" who proc)))
+	ps:unspecific)))
+
+(defprim "chez:record-type-equal-procedure" (rtd &rest args)
+  (record-type-procedure *record-equal-procedures* "record-type-equal-procedure" rtd args))
+
+(defprim "chez:record-type-hash-procedure" (rtd &rest args)
+  (record-type-procedure *record-hash-procedures* "record-type-hash-procedure" rtd args))
+
+(defprim "chez:set-record-procedure-defaults!" (equal hash)
+  (setq *record-procedure-defaults* (cons equal hash))
+  ps:unspecific)
+
+(defun nearest-type-with (table rtd)
+  (loop for r = rtd then (rtd-parent r) while r when (gethash r table) return r))
+
+(defun record-procedure-default (key)
+  (let ((param (and *record-procedure-defaults* (funcall key *record-procedure-defaults*))))
+    (if param (funcall param) ps:false)))
+
+(defun check-record (who x)
+  (unless (record-p x) (ps:scheme-error "~A: ~S is not a record" who x)))
+
+(defun record-equal-procedure (r1 r2)
+  (check-record "record-equal-procedure" r1)
+  (check-record "record-equal-procedure" r2)
+  (let ((t1 (nearest-type-with *record-equal-procedures* (record-rtd r1)))
+	(t2 (nearest-type-with *record-equal-procedures* (record-rtd r2))))
+    (if (or t1 t2)
+	(if (eq t1 t2) (gethash t1 *record-equal-procedures*) ps:false)
+	(record-procedure-default #'car))))
+
+(defun record-hash-procedure (r)
+  (check-record "record-hash-procedure" r)
+  (let ((rtd (nearest-type-with *record-hash-procedures* (record-rtd r))))
+    (if rtd (gethash rtd *record-hash-procedures*) (record-procedure-default #'cdr))))
+
+(defprim "chez:record-equal-procedure" (r1 r2) (record-equal-procedure r1 r2))
+(defprim "chez:record-hash-procedure" (r) (record-hash-procedure r))
+
+(defun chez-record-equal (a b recur)
+  (if (and ps:*chez-reader* (record-p a) (record-p b))
+      (let ((proc (record-equal-procedure a b)))
+	(if (eq proc ps:false)
+	    (eq a b)
+	    (ps:truep (funcall proc a b (lambda (x y) (bool (funcall recur x y)))))))
+      :pass))
+
+(defun chez-record-hash (r walk)
+  (when (and ps:*chez-reader* (record-p r))
+    (let ((proc (record-hash-procedure r)))
+      (unless (eq proc ps:false)
+	(let ((h (funcall proc r (lambda (x) (funcall walk x)))))
+	  (unless (integerp h)
+	    (ps:scheme-error "record hash procedure returned ~S, not an exact integer" h))
+	  (logand most-positive-fixnum h))))))
+
+(setq ps::*record-equal-hook* 'chez-record-equal
+      *record-hash-hook* 'chez-record-hash)
+
+(defprim "chez:record-constructor-descriptor?" (x) (bool (rcd-p x)))
