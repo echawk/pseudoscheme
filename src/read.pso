@@ -1225,6 +1225,14 @@
                          (READING-ERROR PORT "bad #v syntax"))))))))))
 (AT-TOP-LEVEL
   (DEFINE-SHARP-MACRO
+   #\[
+   #'(LAMBDA (C PORT)
+       C
+       (.READ-CHAR PORT)
+       (IF (TRUEP (R6RS-STRICT? PORT)) (NOT-IN-R6RS PORT "#["))
+       (READ-RECORD-LITERAL (SUB-READ-LIST #\[ PORT)))))
+(AT-TOP-LEVEL
+  (DEFINE-SHARP-MACRO
    #\&
    #'(LAMBDA (C PORT) C (.READ-CHAR PORT) (MAKE-BOX (SUB-READ-CAREFULLY PORT)))))
 (AT-TOP-LEVEL

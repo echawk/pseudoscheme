@@ -887,6 +887,16 @@
 	     (ps:list->numeric-vector "f64" (sub-read-list c port)))
 	    (else (reading-error port "bad #v syntax"))))))
 
+; Chez Scheme's #[name field ...]: a record of the type record-reader
+; associates with name.
+
+(define-sharp-macro #\[
+  (lambda (c port)
+    c
+    (read-char port)
+    (if (r6rs-strict? port) (not-in-r6rs port "#["))
+    (ps:read-record-literal (sub-read-list #\[ port))))
+
 ; Chez Scheme's #&x (a box) and #%x (($primitive x): the system's x).
 
 (define-sharp-macro #\&

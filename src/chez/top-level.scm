@@ -216,6 +216,13 @@
 (define (debug) (if #f #f))
 (define (break . args) (if #f #f))
 (define procedure-arity-mask %chez:procedure-arity-mask)
+(define make-wrapper-procedure %chez:make-wrapper-procedure)
+(define make-arity-wrapper-procedure %chez:make-arity-wrapper-procedure)
+(define wrapper-procedure? %chez:wrapper-procedure?)
+(define wrapper-procedure-procedure %chez:wrapper-procedure-procedure)
+(define wrapper-procedure-data %chez:wrapper-procedure-data)
+(define set-wrapper-procedure-procedure! %chez:set-wrapper-procedure-procedure!)
+(define set-wrapper-procedure-data! %chez:set-wrapper-procedure-data!)
 
 ;;; Ports beyond R6RS
 

@@ -18,6 +18,30 @@
 (define (exact-integer? x) (and (integer? x) (exact? x)))
 (define (cflonum? x) (and (complex? x) (inexact? x)))
 
+;;; cfl operations: on flonums and inexact complex numbers
+
+(define (check-cflonum who x)
+  (unless (cflonum? x) (assertion-violation who "not a cflonum" x)))
+(define (check-cflonums who xs) (for-each (lambda (x) (check-cflonum who x)) xs))
+(define (cfl-real-part x) (check-cflonum 'cfl-real-part x) (inexact (real-part x)))
+(define (cfl-imag-part x) (check-cflonum 'cfl-imag-part x) (if (flonum? x) 0.0 (imag-part x)))
+(define (cfl-conjugate x)
+  (check-cflonum 'cfl-conjugate x)
+  (if (flonum? x) x (make-rectangular (real-part x) (fl- (imag-part x)))))
+(define (cfl-magnitude-squared x)
+  (check-cflonum 'cfl-magnitude-squared x)
+  (let ((r (cfl-real-part x)) (i (cfl-imag-part x)))
+    (fl+ (fl* r r) (fl* i i))))
+(define (fl-make-rectangular x y)
+  (unless (flonum? x) (assertion-violation 'fl-make-rectangular "not a flonum" x))
+  (unless (flonum? y) (assertion-violation 'fl-make-rectangular "not a flonum" y))
+  (make-rectangular x y))
+(define (cfl+ . xs) (check-cflonums 'cfl+ xs) (if (null? xs) 0.0 (apply + xs)))
+(define (cfl* . xs) (check-cflonums 'cfl* xs) (if (null? xs) 1.0 (apply * xs)))
+(define (cfl- x . xs) (check-cflonums 'cfl- (cons x xs)) (apply - x xs))
+(define (cfl/ x . xs) (check-cflonums 'cfl/ (cons x xs)) (apply / x xs))
+(define (cfl= x . xs) (check-cflonums 'cfl= (cons x xs)) (apply = x x xs))
+
 ;;; Bits, on exact integers of any size
 
 (define (logand . ns) (apply bitwise-and ns))
@@ -63,6 +87,15 @@
 (define fxlogior fxior)
 (define (fxsrl n k) (bitwise-arithmetic-shift-right (bitwise-and n (greatest-fixnum)) k))
 (define (fxpopcount n) (fxbit-count n))
+(define fxpopcount32 %chez:fxpopcount32)
+(define fxpopcount16 %chez:fxpopcount16)
+(define fxlogbit0 %chez:fxlogbit0)
+(define fxlogbit1 %chez:fxlogbit1)
+(define fx+/wraparound %chez:fx+/wraparound)
+(define fx-/wraparound %chez:fx-/wraparound)
+(define fx*/wraparound %chez:fx*/wraparound)
+(define fxsll/wraparound %chez:fxsll/wraparound)
+(define flbit-field %chez:flbit-field)
 
 (define fl= (chain-compare fl=?))
 (define fl< (chain-compare fl<?))

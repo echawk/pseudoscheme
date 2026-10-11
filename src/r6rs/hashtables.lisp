@@ -10,12 +10,47 @@
 
 (in-package "PSEUDOSCHEME-R6RS")
 
-(defstruct (hashtable (:constructor %make-hashtable (table kind hash equiv mutable)))
+(defstruct (hashtable (:constructor %make-hashtable (table kind hash equiv mutable &optional weakness side)))
   table		; CL hash table
   kind		; :eq, :eqv or :custom
   hash		; Scheme procedure, for :custom
   equiv		; Scheme procedure, for :custom
-  (mutable t))
+  (mutable t)
+  weakness	; NIL, or Chez's :weak or :ephemeron
+  side)		; for an :ephemeron :custom table, key -> value, weak on keys
+
+;;; A :custom table's TABLE maps hash codes to buckets, lists of cells
+;;; (key . value).  In a weak one, a cell's key is a weak pointer to the
+;;; key, and a cell whose key is gone is dead; in an ephemeron one, the
+;;; values are in SIDE, weak on its keys, so that a value doesn't keep
+;;; its key alive.
+
+(declaim (inline cell-key))
+(defun cell-key (cell)
+  "The key of CELL, and whether it is alive."
+  (let ((k (car cell)))
+    (if (sb-ext:weak-pointer-p k) (sb-ext:weak-pointer-value k) (values k t))))
+
+(defun cell-value (h cell)
+  (if (eq (hashtable-weakness h) :ephemeron)
+      (values (gethash (cell-key cell) (hashtable-side h)))
+      (cdr cell)))
+
+(defun set-cell-value (h cell value)
+  (if (eq (hashtable-weakness h) :ephemeron)
+      (setf (gethash (cell-key cell) (hashtable-side h)) value)
+      (setf (cdr cell) value)))
+
+(defun make-cell (h key value)
+  (if (hashtable-weakness h)
+      (let ((cell (cons (sb-ext:make-weak-pointer key) value)))
+	(when (eq (hashtable-weakness h) :ephemeron)
+	  (setf (cdr cell) nil (gethash key (hashtable-side h)) value))
+	cell)
+      (cons key value)))
+
+(defun live-cells (bucket)
+  (remove-if-not (lambda (cell) (nth-value 1 (cell-key cell))) bucket))
 
 (defmethod print-object ((h hashtable) stream)
   (print-unreadable-object (h stream)
@@ -23,7 +58,8 @@
 
 (defun hashtable-count* (h)
   (if (eq (hashtable-kind h) :custom)
-      (loop for bucket being the hash-values of (hashtable-table h) sum (length bucket))
+      (loop for bucket being the hash-values of (hashtable-table h)
+	    sum (count-if (lambda (cell) (nth-value 1 (cell-key cell))) bucket))
       (hash-table-count (hashtable-table h))))
 
 (defun check-hashtable (who h)
@@ -57,12 +93,14 @@
 
 (defun custom-cell (h key)
   (let ((equiv (hashtable-equiv h)))
-    (assoc-if (lambda (k) (truthy (funcall equiv k key)))
-	      (gethash (custom-hash h key) (hashtable-table h)))))
+    (find-if (lambda (cell)
+	       (multiple-value-bind (k alive) (cell-key cell)
+		 (and alive (truthy (funcall equiv k key)))))
+	     (gethash (custom-hash h key) (hashtable-table h)))))
 
 (defun table-ref (h key default)
   (if (eq (hashtable-kind h) :custom)
-      (let ((cell (custom-cell h key))) (if cell (cdr cell) default))
+      (let ((cell (custom-cell h key))) (if cell (cell-value h cell) default))
       (multiple-value-bind (v found) (gethash key (hashtable-table h))
 	(if found v default))))
 
@@ -70,22 +108,30 @@
   (if (eq (hashtable-kind h) :custom)
       (let ((cell (custom-cell h key)))
 	(if cell
-	    (setf (cdr cell) value)
-	    (push (cons key value) (gethash (custom-hash h key) (hashtable-table h)))))
+	    (set-cell-value h cell value)
+	    (let ((code (custom-hash h key)) (table (hashtable-table h)))
+	      (setf (gethash code table)
+		    (cons (make-cell h key value)
+			  (if (hashtable-weakness h) (live-cells (gethash code table)) (gethash code table)))))))
       (setf (gethash key (hashtable-table h)) value)))
 
 (defun table-delete (h key)
   (if (eq (hashtable-kind h) :custom)
       (let ((code (custom-hash h key)) (equiv (hashtable-equiv h)))
 	(setf (gethash code (hashtable-table h))
-	      (remove-if (lambda (cell) (truthy (funcall equiv (car cell) key)))
+	      (remove-if (lambda (cell)
+			   (multiple-value-bind (k alive) (cell-key cell)
+			     (or (not alive) (truthy (funcall equiv k key)))))
 			 (gethash code (hashtable-table h)))))
       (remhash key (hashtable-table h))))
 
 (defun table-entries (h)
   "List of (key . value)."
   (if (eq (hashtable-kind h) :custom)
-      (loop for bucket being the hash-values of (hashtable-table h) append (copy-list bucket))
+      (loop for bucket being the hash-values of (hashtable-table h)
+	    append (loop for cell in bucket
+			 for (k alive) = (multiple-value-list (cell-key cell))
+			 when alive collect (cons k (cell-value h cell))))
       (loop for k being the hash-keys of (hashtable-table h) using (hash-value v)
 	    collect (cons k v))))
 
@@ -115,18 +161,30 @@
   (table-set h key (funcall proc (table-ref h key default)))
   ps:unspecific)
 
+(defun make-table-like (h mutable)
+  "An empty hashtable of H's kind and weakness."
+  (let* ((weakness (hashtable-weakness h))
+	 (test (hash-table-test (hashtable-table h)))
+	 (custom (eq (hashtable-kind h) :custom)))
+    (%make-hashtable (if (and weakness (not custom))
+			 (trivial-garbage:make-weak-hash-table :test test :weakness :key)
+			 (make-hash-table :test test))
+		     (hashtable-kind h) (hashtable-hash h) (hashtable-equiv h) mutable weakness
+		     (and custom (eq weakness :ephemeron)
+			  (trivial-garbage:make-weak-hash-table :test 'eq :weakness :key)))))
+
 (defprim "hashtable-copy" (h &optional mutable)
   (check-hashtable "hashtable-copy" h)
-  (let ((new (make-hash-table :test (hash-table-test (hashtable-table h)))))
-    (maphash (lambda (k v) (setf (gethash k new) (if (listp v) (copy-alist v) v)))
-	     (hashtable-table h))
-    (%make-hashtable new (hashtable-kind h) (hashtable-hash h) (hashtable-equiv h)
-		     (and mutable (truthy mutable)))))
+  (let ((new (make-table-like h t)))
+    (loop for (k . v) in (table-entries h) do (table-set new k v))
+    (setf (hashtable-mutable new) (and mutable (truthy mutable)))
+    new))
 
 (defprim "hashtable-clear!" (h &optional k)
   (declare (ignore k))
   (check-mutable "hashtable-clear!" h)
   (clrhash (hashtable-table h))
+  (when (hashtable-side h) (clrhash (hashtable-side h)))
   ps:unspecific)
 
 (defprim "hashtable-keys" (h)

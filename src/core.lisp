@@ -524,6 +524,26 @@ symbols, not errors, and #!r6rs restricts a port to R6RS syntax.")
 
 (defun chez-reader-p () *chez-reader*)
 
+;;; Chez Scheme's record syntax, #[name field ...]: read by
+;;; src/read.scm and written by src/write.scm in --chez mode, through
+;;; these hooks, which src/chez/host.lisp sets (record-reader and
+;;; record-writer).
+
+(defvar *record-literal-hook* nil
+  "NIL, or a function of #[...]'s elements, a list: the record.")
+
+(defun read-record-literal (elements)
+  (if *record-literal-hook*
+      (funcall *record-literal-hook* elements)
+      (scheme-error "#[...]: no record reader")))
+
+(defvar *write-extension* nil
+  "NIL, or a function of an object, a port and the writer of its parts:
+true if it wrote the object.")
+
+(defun write-extension (obj port recur)
+  (if (and *write-extension* (funcall *write-extension* obj port recur)) true false))
+
 ;;; Chez Scheme's #!r6rs: after it, a port's syntax must be R6RS's
 ;;; (src/read.scm), in --chez mode; #!chezscheme lifts that.
 
@@ -725,6 +745,8 @@ braces; or with PORT's alternative reader, if it has one."
   (flet ((value (x) (if (label-placeholder-p x) (label-placeholder-datum x) x)))
     (let ((seen (make-hash-table :test 'eq)))
       (labels ((walk (x)
+		 ;; a record's parts are its fields' own vector
+		 (let ((x (or (datum-label-parts x) x)))
 		 (when (and (or (consp x) (simple-vector-p x))
 			    (not (gethash x seen)))
 		   (setf (gethash x seen) t)
@@ -733,16 +755,19 @@ braces; or with PORT's alternative reader, if it has one."
 			      (setf (cdr x) (value (cdr x))) (walk (cdr x)))
 		       (dotimes (i (length x))
 			 (setf (svref x i) (value (svref x i)))
-			 (walk (svref x i)))))))
+			 (walk (svref x i))))))))
 	(let ((datum (value datum)))
 	  (walk datum)
 	  datum)))))
 
 (defun replace-placeholder (datum placeholder)
-  "Replace PLACEHOLDER by the datum it stands for, in pairs and vectors."
+  "Replace PLACEHOLDER by the datum it stands for, in pairs and vectors
+(and the Chez mode's records)."
   (let ((seen (make-hash-table :test 'eq))
 	(value (label-placeholder-datum placeholder)))
     (labels ((walk (x)
+	       ;; a record's parts are its fields' own vector
+	       (let ((x (or (datum-label-parts x) x)))
 	       (when (and (or (consp x) (simple-vector-p x))
 			  (not (gethash x seen)))
 		 (setf (gethash x seen) t)
@@ -753,7 +778,7 @@ braces; or with PORT's alternative reader, if it has one."
 		     (dotimes (i (length x))
 		       (if (eq (svref x i) placeholder)
 			   (setf (svref x i) value)
-			   (walk (svref x i))))))))
+			   (walk (svref x i)))))))))
       (walk datum))))
 
 (defun signal-scheme-condition (fun message irritants)
@@ -779,6 +804,15 @@ braces; or with PORT's alternative reader, if it has one."
   "While writing, a table from the objects that need labels to their
 label numbers (NIL until written), or NIL if none do.")
 (defvar *write-label-count* 0)
+
+(defvar *datum-label-parts* nil
+  "NIL, or a function giving the parts, a simple vector, of an object
+other than a pair or vector that may be on a cycle (the Chez mode's
+records), or NIL.")
+
+(defun datum-label-parts (x)
+  (and *datum-label-parts* (not (consp x)) (not (simple-vector-p x))
+       (funcall *datum-label-parts* x)))
 
 (defun datum-labels (object shared)
   "A table of the pairs and vectors in OBJECT that need labels: those
@@ -808,7 +842,11 @@ reached more than once if SHARED, else those on a cycle.  NIL if none."
 			    (loop for e across x do (walk e))
 			    (setf (gethash x state) :done))
 			  (return))
-			 (t (return))))
+			 (t (let ((parts (datum-label-parts x)))
+			      (when (and parts (visit x))
+				(loop for e across parts do (walk e))
+				(setf (gethash x state) :done)))
+			    (return))))
 		 (dolist (p spine) (setf (gethash p state) :done)))))
       (walk object))
     labels))
@@ -816,7 +854,7 @@ reached more than once if SHARED, else those on a cycle.  NIL if none."
 (defun call-with-write-labels (object mode thunk)
   "Write OBJECT by calling THUNK, labelling as MODE says: 0, nothing; 1,
 what is on a cycle; 2, whatever is shared."
-  (let ((*write-labels* (and (or (consp object) (simple-vector-p object))
+  (let ((*write-labels* (and (or (consp object) (simple-vector-p object) (datum-label-parts object))
 			     (/= mode 0)
 			     (datum-labels object (= mode 2))))
 	(*write-label-count* 0))

@@ -63,6 +63,7 @@
     ;; hashtables.scm
     "make-weak-eq-hashtable" "make-weak-eqv-hashtable" "make-ephemeron-eq-hashtable"
     "make-ephemeron-eqv-hashtable" "hashtable-weak?" "hashtable-ephemeron?"
+    "make-weak-hashtable" "make-ephemeron-hashtable" "collect-maximum-generation"
     "eq-hashtable?" "eq-hashtable-weak?" "eq-hashtable-ephemeron?" "eq-hashtable-ref"
     "eq-hashtable-set!" "eq-hashtable-contains?" "eq-hashtable-delete!"
     "eq-hashtable-update!" "symbol-hashtable?" "symbol-hashtable-ref"
@@ -84,7 +85,17 @@
     "csv7:record-type-field-names" "csv7:record-type-field-decls" "record-type-equal-procedure"
     "record-type-hash-procedure" "record-equal-procedure" "record-hash-procedure"
     "default-record-equal-procedure" "default-record-hash-procedure"
-    "record-constructor-descriptor?" "r6rs:record-constructor" "r6rs:record?"
+    "record-constructor-descriptor?" "r6rs:record-constructor" "r6rs:record?" "record-reader"
+    ;; more of lists.scm, numbers.scm, chezscheme.scm
+    "fxvector-copy!" "flvector?" "make-flvector" "flvector" "list->flvector" "flvector-length"
+    "flvector-ref" "flvector-set!" "flvector->list" "flvector-fill!" "flvector-copy"
+    "flvector-copy!" "string-append-immutable" "immutable-vector-set/copy"
+    "list-assuming-immutable?" "fxpopcount32" "fxpopcount16" "fxlogbit0" "fxlogbit1"
+    "fx+/wraparound" "fx-/wraparound" "fx*/wraparound" "fxsll/wraparound" "flbit-field"
+    "cfl+" "cfl-" "cfl*" "cfl/" "cfl=" "cfl-real-part" "cfl-imag-part" "cfl-conjugate"
+    "cfl-magnitude-squared" "fl-make-rectangular" "make-sstats" "sstats-difference"
+    "sstats-print" "set-sstats-cpu!" "set-sstats-real!" "set-sstats-bytes!"
+    "set-sstats-gc-count!" "set-sstats-gc-cpu!" "set-sstats-gc-real!" "set-sstats-gc-bytes!"
     "directory-separator?" "path-absolute?" "path-last" "path-parent" "path-first"
     "path-rest" "path-extension" "path-root" "path-build"
     ;; numbers.scm
@@ -132,6 +143,9 @@
     "set-timer" "register-signal-handler" "make-engine"
     "datum" "rec" "eval-when" "$primitive" "syntax->list" "syntax->vector"
     "inspect" "inspect/object" "debug" "break" "procedure-arity-mask"
+    "make-wrapper-procedure" "make-arity-wrapper-procedure" "wrapper-procedure?"
+    "wrapper-procedure-procedure" "wrapper-procedure-data" "set-wrapper-procedure-procedure!"
+    "set-wrapper-procedure-data!"
     ;; ffi.scm
     "load-shared-object" "foreign-procedure" "foreign-entry?" "foreign-entry"
     "foreign-callable" "foreign-callable-entry-point" "foreign-callable-code-object"

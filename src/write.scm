@@ -226,12 +226,15 @@
 	((ps:true? (ps:numeric-vector-tag obj))  ;bytevectors, SRFI 4 vectors
 	 => (lambda (tag)
 	      (write-string "#" port)
-	      (write-string tag port)
+	      ;; Chez's flvectors are f64vectors
+	      (write-string (if (and (equal? tag "f64") (ps:true? (ps:chez-reader-p))) "vfl" tag) port)
 	      (let ((elements (ps:numeric-vector-elements obj)))
 		(if (null? elements)
 		    (write-string "()" port)
 		    (write-list elements port recur)))))
 	((eq? obj (if #f #f)) (write-string "#{Unspecific}" port))
+	;; Chez's records, written #[name field ...] (src/chez/host.lisp)
+	((ps:true? (ps:write-extension obj port recur)))
 	(else
 	 ;; (write-string "#{Random object}" port)
 	 (ps-lisp:prin1 obj port)

@@ -230,3 +230,23 @@
 (define fxvector->list %chez:fxvector->list)
 (define fxvector-fill! %chez:fxvector-fill!)
 (define fxvector-copy %chez:fxvector-copy)
+(define fxvector-copy! %chez:fxvector-copy!)
+
+;;; flvectors: SRFI 4's f64vectors, written #vfl(...) in this mode
+
+(define flvector? %chez:flvector?)
+(define make-flvector %chez:make-flvector)
+(define flvector %chez:flvector)
+(define list->flvector %chez:list->flvector)
+(define flvector-length %chez:flvector-length)
+(define flvector-ref %chez:flvector-ref)
+(define flvector-set! %chez:flvector-set!)
+(define flvector->list %chez:flvector->list)
+(define flvector-fill! %chez:flvector-fill!)
+(define flvector-copy %chez:flvector-copy)
+(define flvector-copy! %chez:flvector-copy!)
+
+;; immutable strings and vectors are the mutable kinds here
+(define (string-append-immutable . ss) (apply string-append ss))
+(define (immutable-vector-set/copy v i x) (vector-set/copy v i x))
+(define (list-assuming-immutable? x) (list? x))

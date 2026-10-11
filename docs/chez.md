@@ -22,7 +22,7 @@ All of it lives in `src/chez/`:
 | chezscheme.scm, lists.scm, records.scm, numbers.scm, hashtables.scm, threads.scm, conditions.scm, top-level.scm, ffi.scm | the library's body, in Scheme |
 | format.scm | Chez's own `format`, `printf` and `fprintf` (s/format.ss), made by boot/chez-format.py |
 
-`(chezscheme)` exports 1198 of the 1715 names Chez 10.4.1's does (803
+`(chezscheme)` exports 1253 of the 1715 names Chez 10.4.1's does (803
 before this work), with no extra names of its own. The comparison is
 `(library-exports '(chezscheme))` in Chez against psyntax's
 `library-export-bindings` here.
@@ -49,7 +49,7 @@ profile, windows) aren't counted in the totals. The latest run:
 
 | | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
-| **counted files** | **13372** | **1094** | **782** | **1453** | **6842** | **20** |
+| **counted files** | **13792** | **1006** | **786** | **1157** | **6802** | **20** |
 | first run | 7892 | 941 | 714 | 1798 | 4726 | 24 |
 
 The first run stopped reading nine files early, at reader syntax we
@@ -59,39 +59,39 @@ counted in every column, failures included. By file:
 | file | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
 | 3 | 468 | 58 | 0 | 4 | 150 | 0 |
-| 4 | 503 | 41 | 61 | 88 | 268 | 1 |
-| 5_1 | 382 | 0 | 3 | 16 | 4 | 0 |
+| 4 | 503 | 43 | 64 | 88 | 263 | 1 |
+| 5_1 | 390 | 0 | 3 | 8 | 4 | 0 |
 | 5_2 | 191 | 18 | 1 | 4 | 3 | 7 |
 | 5_3 | 98 | 0 | 0 | 6 | 0 | 0 |
-| 5_4 | 780 | 68 | 3 | 19 | 12 | 0 |
-| 5_5 | 425 | 62 | 0 | 9 | 54 | 1 |
-| 5_6 | 383 | 88 | 9 | 43 | 197 | 2 |
+| 5_4 | 780 | 69 | 3 | 18 | 12 | 0 |
+| 5_5 | 430 | 66 | 0 | 0 | 54 | 1 |
+| 5_6 | 416 | 96 | 9 | 2 | 197 | 2 |
 | 5_7 | 37 | 17 | 3 | 2 | 1 | 0 |
 | 5_8 | 19 | 3 | 0 | 0 | 0 | 0 |
-| 6 | 2603 | 117 | 39 | 55 | 62 | 0 |
-| 7 | 172 | 45 | 134 | 89 | 575 | 0 |
-| 8 | 684 | 154 | 239 | 220 | 919 | 3 |
+| 6 | 2607 | 116 | 38 | 53 | 62 | 0 |
+| 7 | 223 | 40 | 134 | 64 | 554 | 0 |
+| 8 | 684 | 154 | 239 | 221 | 918 | 3 |
 | bytevector | 863 | 50 | 12 | 13 | 1673 | 3 |
-| cfl | 59 | 0 | 0 | 123 | 81 | 0 |
+| cfl | 177 | 0 | 0 | 5 | 81 | 0 |
 | cp0 | 7 | 0 | 1 | 44 | 244 | 0 |
 | cptypes | 3 | 0 | 0 | 22 | 539 | 0 |
 | date | 75 | 35 | 1 | 2 | 159 | 0 |
 | enum | 41 | 3 | 0 | 2 | 0 | 0 |
 | examples | 8 | 2 | 54 | 314 | 0 | 0 |
 | exceptions | 12 | 0 | 0 | 2 | 71 | 0 |
-| fl | 737 | 14 | 0 | 16 | 125 | 0 |
+| fl | 751 | 14 | 0 | 2 | 125 | 0 |
 | foreign | 21 | 1 | 4 | 4 | 28 | 0 |
 | format | 1174 | 5 | 7 | 0 | 26 | 0 |
 | ftype | 18 | 0 | 0 | 79 | 1115 | 0 |
-| fx | 1122 | 18 | 19 | 49 | 597 | 0 |
-| hash | 665 | 145 | 1 | 12 | 443 | 0 |
+| fx | 1176 | 18 | 19 | 0 | 592 | 0 |
+| hash | 738 | 58 | 1 | 15 | 454 | 0 |
 | ieee | 481 | 22 | 1 | 12 | 4 | 0 |
-| io | 257 | 32 | 58 | 101 | 445 | 0 |
-| misc | 362 | 28 | 15 | 133 | 309 | 3 |
+| io | 257 | 32 | 58 | 102 | 444 | 0 |
+| misc | 393 | 19 | 20 | 110 | 305 | 3 |
 | oop | 70 | 0 | 97 | 75 | 0 | 0 |
-| primvars | 69 | 11 | 0 | 9 | 43 | 0 |
-| profile | 7 | 6 | 1 | 13 | 181 | 0 |
-| record | 553 | 41 | 19 | 31 | 539 | 0 |
+| primvars | 72 | 11 | 0 | 16 | 33 | 0 |
+| profile | 8 | 6 | 1 | 13 | 180 | 0 |
+| record | 579 | 40 | 16 | 13 | 535 | 0 |
 | thread | 19 | 0 | 2 | 4 | 70 | 0 |
 | unix | 60 | 17 | 4 | 0 | 12 | 0 |
 | windows | 15 | 0 | 0 | 0 | 0 | 0 |
@@ -150,9 +150,9 @@ The largest groups left:
   introspection, `eval-when` and `meta`.
 - format: the printer parameters (`print-radix`, `print-level`, ...),
   which the writer doesn't consult yet.
-- hash: weak and ephemeron tables, which are ordinary tables here.
-- record: R6RS record-syntax details, `#[...]` record literals,
-  `record-reader`, and `$record` system procedures.
+- hash: the argument checks Chez makes and the hash values its
+  `equal-hash` gives.
+- record: R6RS record-syntax details and `$record` system procedures.
 - oop: oop.ss builds `define-class` on `$make-record-type`, a system
   procedure, so its library doesn't load.
 - examples: Chez's example programs, which the mats expect to find and
@@ -336,6 +336,35 @@ constructors and mutators; host.lisp keeps each type's field types.
 `equal?` (`ps::*record-equal-hook*`, which joins records to its
 cycle-safe pass) and in `equal-hash`.
 
+Records are written `#[name field ...]`, with datum labels when one is
+on a cycle (`#0=#[foo #0#]`), unless their type or an ancestor has a
+`record-writer`. `record-reader` names a type for the reader, so
+`#[name field ...]` reads back as a record. These go through hooks in
+core.lisp (`*write-extension*`, `*record-literal-hook*`,
+`*datum-label-parts*`) that only this mode sets.
+
+### More of Chez 10
+
+- Wrapper procedures (`make-wrapper-procedure`,
+  `make-arity-wrapper-procedure`, ...) are SBCL funcallable instances,
+  so they are procedures, and `procedure-arity-mask` reports their mask.
+- Hashtables can be weak or ephemeron with any hash function
+  (`make-weak-hashtable`, `make-ephemeron-hashtable`): the buckets hold
+  weak pointers to their keys, and an ephemeron table keeps its values
+  in a table weak on its keys. `hashtable-weak?` and
+  `hashtable-ephemeron?` now tell the two apart. A weak eq or eqv table
+  is SBCL's weak table, which is ephemeral: unlike Chez's, its values
+  don't keep its keys alive.
+- `collect` is a full SBCL collection, so the mats about weak tables
+  and weak pairs run for real.
+- There are flvectors (SRFI 4's f64vectors, written `#vfl(...)`), the
+  `cfl` operations on inexact complex numbers, `flbit-field`, the
+  `/wraparound` fixnum operations, `fxpopcount32`, `fxlogbit0` and the
+  like, and `sstats` as Chez checks them, with `sstats-difference` and
+  `statistics` from SBCL's allocation and GC counters.
+- `system` runs `sh -c` through posix_spawn where SBCL supports it,
+  which costs 3 ms rather than the 200 a fork of the image costs.
+
 In this mode `map`, `for-each`, `fold-left`, `fold-right`, `for-all` and
 `exists` check their arguments as Chez does: a procedure, and proper
 lists of one length. Cyclic lists are errors, not endless loops. (R7RS's
@@ -400,7 +429,7 @@ The main causes:
 
 ## Not planned
 
-Of the 517 names still missing, most are Chez's internals: `$`-system
+Of the 462 names still missing, most are Chez's internals: `$`-system
 procedures, compiler knobs (`cp0-*`, `enable-*`), boot files, fasl,
 profiling and cost centers, the inspector, the 56 port-buffer
 accessors, phantom bytevectors. The ones that matter
@@ -409,7 +438,7 @@ to programs, in rough order:
 1. engines and timer interrupts (above);
 2. ftypes (`define-ftype`, `ftype-ref`), on CFFI's structs;
 3. annotations and source objects;
-4. `record-case` and `#[...]` record literals;
+4. `record-case`;
 5. `meta-cond`, `extend-syntax`, `define-structure`;
 6. continuation marks (Chez 10's), which would share prompts' frames
    (docs/continuations.md).

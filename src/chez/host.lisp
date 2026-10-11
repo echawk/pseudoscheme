@@ -200,25 +200,173 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 (defprim "chez:fxvector-fill!" (v x) (check-fxvector "fxvector-fill!" v) (fill v x) ps:unspecific)
 (defprim "chez:fxvector-copy" (v) (check-fxvector "fxvector-copy" v) (copy-seq v))
 
+(defun vector-copy! (who check src src-start dst dst-start n)
+  "Chez's fxvector-copy! and flvector-copy!: N elements, as memmove."
+  (funcall check who src)
+  (funcall check who dst)
+  (unless (and (typep src-start '(integer 0)) (typep dst-start '(integer 0)) (typep n '(integer 0))
+	       (<= (+ src-start n) (length src)) (<= (+ dst-start n) (length dst)))
+    (r6rs-assertion-violation who "invalid range" (list src-start dst-start n)))
+  (replace dst src :start1 dst-start :end1 (+ dst-start n) :start2 src-start)
+  ps:unspecific)
+
+(defprim "chez:fxvector-copy!" (src src-start dst dst-start n)
+  (vector-copy! "fxvector-copy!" #'check-fxvector src src-start dst dst-start n))
+
+(defun flvector-p (x) (typep x '(simple-array double-float (*))))
+(defun check-flvector (who v)
+  (unless (flvector-p v) (r6rs-assertion-violation who "not an flvector" v)))
+(defun check-flonum (who x)
+  (unless (typep x 'double-float) (r6rs-assertion-violation who "not a flonum" x)))
+(defun list->flvector (who xs)
+  (dolist (x xs) (check-flonum who x))
+  (make-array (length xs) :element-type 'double-float :initial-contents xs))
+
+(defprim "chez:flvector?" (x) (bool (flvector-p x)))
+(defprim "chez:make-flvector" (n &optional (fill 0d0))
+  (unless (typep n '(integer 0 #.array-dimension-limit))
+    (r6rs-assertion-violation "make-flvector" "invalid length" n))
+  (check-flonum "make-flvector" fill)
+  (make-array n :element-type 'double-float :initial-element fill))
+(defprim "chez:flvector" (&rest xs) (list->flvector "flvector" xs))
+(defprim "chez:list->flvector" (xs)
+  (unless (and (listp xs) (handler-case (list-length xs) (error () nil)))
+    (r6rs-assertion-violation "list->flvector" "not a proper list" xs))
+  (list->flvector "list->flvector" xs))
+(defprim "chez:flvector-length" (v) (check-flvector "flvector-length" v) (length v))
+(defun check-flvector-index (who v i)
+  (check-flvector who v)
+  (unless (and (integerp i) (< -1 i (length v)))
+    (r6rs-assertion-violation who "invalid index" i)))
+(defprim "chez:flvector-ref" (v i) (check-flvector-index "flvector-ref" v i) (aref v i))
+(defprim "chez:flvector-set!" (v i x)
+  (check-flvector-index "flvector-set!" v i)
+  (check-flonum "flvector-set!" x)
+  (setf (aref v i) x)
+  ps:unspecific)
+(defprim "chez:flvector->list" (v) (check-flvector "flvector->list" v) (coerce v 'list))
+(defprim "chez:flvector-fill!" (v x)
+  (check-flvector "flvector-fill!" v)
+  (check-flonum "flvector-fill!" x)
+  (fill v x)
+  ps:unspecific)
+(defprim "chez:flvector-copy" (v) (check-flvector "flvector-copy" v) (copy-seq v))
+(defprim "chez:flvector-copy!" (src src-start dst dst-start n)
+  (vector-copy! "flvector-copy!" #'check-flvector src src-start dst dst-start n))
+
+;;; (flbit-field fl start end): bits start to end (exclusive) of fl's
+;;; IEEE double representation
+
+(defprim "chez:flbit-field" (x start end)
+  (check-flonum "flbit-field" x)
+  (unless (and (typep start '(integer 0 64)) (typep end '(integer 0 64)) (<= start end))
+    (r6rs-assertion-violation "flbit-field" "invalid range" (list start end)))
+  (ldb (byte (- end start) start)
+       (logior (ash (ldb (byte 32 0) (sb-kernel:double-float-high-bits x)) 32)
+	       (sb-kernel:double-float-low-bits x))))
+
+;;; Fixnum operations that wrap around rather than overflow
+
+(defun check-fixnum (who x)
+  (unless (typep x 'fixnum) (r6rs-assertion-violation who "not a fixnum" x)))
+
+(defun wrap-fixnum (n)
+  (let ((m (ldb (byte sb-vm:n-fixnum-bits 0) n)))
+    (if (logbitp (1- sb-vm:n-fixnum-bits) m) (- m (ash 1 sb-vm:n-fixnum-bits)) m)))
+
+(macrolet ((wrapping (name op)
+	     `(defprim ,name (x y)
+		(check-fixnum ,name x)
+		(check-fixnum ,name y)
+		(wrap-fixnum (,op x y)))))
+  (wrapping "chez:fx+/wraparound" +)
+  (wrapping "chez:fx*/wraparound" *))
+
+(defprim "chez:fx-/wraparound" (x &optional (y nil y-p))
+  (check-fixnum "fx-/wraparound" x)
+  (if y-p
+      (progn (check-fixnum "fx-/wraparound" y) (wrap-fixnum (- x y)))
+      (wrap-fixnum (- x))))
+
+(defprim "chez:fxsll/wraparound" (x k)
+  (check-fixnum "fxsll/wraparound" x)
+  (unless (typep k `(integer 0 ,sb-vm:n-fixnum-bits))
+    (r6rs-assertion-violation "fxsll/wraparound" "invalid shift" k))
+  (wrap-fixnum (ash x k)))
+
+(defun check-bit-index (who i)
+  ;; below the sign bit
+  (unless (typep i `(integer 0 (,(1- sb-vm:n-fixnum-bits))))
+    (r6rs-assertion-violation who "invalid bit index" i)))
+
+(defprim "chez:fxlogbit0" (i x)
+  (check-bit-index "fxlogbit0" i) (check-fixnum "fxlogbit0" x)
+  (logandc2 x (ash 1 i)))
+(defprim "chez:fxlogbit1" (i x)
+  (check-bit-index "fxlogbit1" i) (check-fixnum "fxlogbit1" x)
+  (wrap-fixnum (logior x (ash 1 i))))
+
+(macrolet ((popcount (name bits)
+	     `(defprim ,name (x)
+		(unless (typep x '(integer 0 ,(1- (expt 2 bits))))
+		  (r6rs-assertion-violation ,name ,(format nil "not a nonnegative ~D-bit fixnum" bits) x))
+		(logcount x))))
+  (popcount "chez:fxpopcount32" 32)
+  (popcount "chez:fxpopcount16" 16))
+
+;;; statistics: bytes allocated, and collections and the time they took
+
+(defvar *gc-count* 0)
+(defun count-gc () (incf *gc-count*))
+(pushnew 'count-gc sb-ext:*after-gc-hooks*)
+
+(defprim "chez:bytes-consed" () (sb-ext:get-bytes-consed))
+(defprim "chez:collect" () (sb-ext:gc :full t) ps:unspecific)
+(defprim "chez:gc-statistics" ()
+  (vector *gc-count* (/ sb-ext:*gc-run-time* internal-time-units-per-second)))
+
 ;;; ------------------------------------------------------------------
 ;;; Weak and ephemeron hashtables: R6RS hashtables whose CL table is weak
 ;;; on its keys (in SBCL an entry so held is an ephemeron: its value
 ;;; doesn't keep its key alive)
 
-(defun make-weak-table (who kind test)
-  (declare (ignore who))
+(defun make-weak-table (kind test weakness)
   (%make-hashtable (trivial-garbage:make-weak-hash-table :test test :weakness :key)
-		   kind nil nil t))
+		   kind nil nil t weakness))
 
 (defprim "chez:make-weak-eq-hashtable" (&optional k)
   (declare (ignore k))
-  (make-weak-table "make-weak-eq-hashtable" :eq 'eq))
+  (make-weak-table :eq 'eq :weak))
 (defprim "chez:make-weak-eqv-hashtable" (&optional k)
   (declare (ignore k))
-  (make-weak-table "make-weak-eqv-hashtable" :eqv 'eql))
+  (make-weak-table :eqv 'eql :weak))
+(defprim "chez:make-ephemeron-eq-hashtable" (&optional k)
+  (declare (ignore k))
+  (make-weak-table :eq 'eq :ephemeron))
+(defprim "chez:make-ephemeron-eqv-hashtable" (&optional k)
+  (declare (ignore k))
+  (make-weak-table :eqv 'eql :ephemeron))
+
+(defun make-weak-custom-table (who hash equiv weakness)
+  (check-procedure who hash)
+  (check-procedure who equiv)
+  (%make-hashtable (make-hash-table :test 'eql) :custom hash equiv t weakness
+		   (and (eq weakness :ephemeron)
+			(trivial-garbage:make-weak-hash-table :test 'eq :weakness :key))))
+
+(defprim "chez:make-weak-hashtable" (hash equiv &optional k)
+  (declare (ignore k))
+  (make-weak-custom-table "make-weak-hashtable" hash equiv :weak))
+(defprim "chez:make-ephemeron-hashtable" (hash equiv &optional k)
+  (declare (ignore k))
+  (make-weak-custom-table "make-ephemeron-hashtable" hash equiv :ephemeron))
+
 (defprim "chez:hashtable-weak?" (h)
   (check-hashtable "hashtable-weak?" h)
-  (bool (trivial-garbage:hash-table-weakness (hashtable-table h))))
+  (bool (eq (hashtable-weakness h) :weak)))
+(defprim "chez:hashtable-ephemeron?" (h)
+  (check-hashtable "hashtable-ephemeron?" h)
+  (bool (eq (hashtable-weakness h) :ephemeron)))
 
 ;;; ------------------------------------------------------------------
 ;;; Threads, on bordeaux-threads.  A thread made here runs with float
@@ -404,9 +552,54 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 (defprim "chez:uninterned-symbol?" (x) (bool (and (symbolp x) x (null (symbol-package x)))))
 (defprim "chez:string->uninterned-symbol" (s) (make-symbol (ps:invert-case s)))
 
-(defprim "chez:procedure-arity-mask" (proc)
-  ;; bit N set if PROC accepts N arguments (all bits from some on, a
-  ;; negative mask, for a rest argument)
+;;; Chez 10's wrapper procedures: a procedure that calls another, with
+;;; data and an arity mask of its own; an arity wrapper checks its
+;;; arguments' count against the mask.
+
+(defclass wrapper-procedure (sb-mop:funcallable-standard-object)
+  ((proc :initarg :proc :accessor wrapper-proc)
+   (mask :initarg :mask :reader wrapper-mask)
+   (data :initarg :data :accessor wrapper-data))
+  (:metaclass sb-mop:funcallable-standard-class))
+
+(defun make-wrapper (who proc mask data check-arity)
+  (unless (functionp proc) (r6rs-assertion-violation who "not a procedure" proc))
+  (unless (integerp mask) (r6rs-assertion-violation who "not an exact integer" mask))
+  (let ((w (make-instance 'wrapper-procedure :proc proc :mask mask :data data)))
+    (sb-mop:set-funcallable-instance-function
+     w (if check-arity
+	   (lambda (&rest args)
+	     (unless (logbitp (length args) mask)
+	       (r6rs-assertion-violation nil "incorrect number of arguments" (length args)))
+	     (apply (wrapper-proc w) args))
+	   (lambda (&rest args) (apply (wrapper-proc w) args))))
+    w))
+
+(defun check-wrapper (who x)
+  (unless (typep x 'wrapper-procedure) (r6rs-assertion-violation who "not a wrapper procedure" x)))
+
+(defprim "chez:make-wrapper-procedure" (proc mask data)
+  (make-wrapper "make-wrapper-procedure" proc mask data nil))
+(defprim "chez:make-arity-wrapper-procedure" (proc mask data)
+  (make-wrapper "make-arity-wrapper-procedure" proc mask data t))
+(defprim "chez:wrapper-procedure?" (x) (bool (typep x 'wrapper-procedure)))
+(defprim "chez:wrapper-procedure-procedure" (w)
+  (check-wrapper "wrapper-procedure-procedure" w) (wrapper-proc w))
+(defprim "chez:wrapper-procedure-data" (w)
+  (check-wrapper "wrapper-procedure-data" w) (wrapper-data w))
+(defprim "chez:set-wrapper-procedure-procedure!" (w proc)
+  (check-wrapper "set-wrapper-procedure-procedure!" w)
+  (unless (functionp proc) (r6rs-assertion-violation "set-wrapper-procedure-procedure!" "not a procedure" proc))
+  (setf (wrapper-proc w) proc)
+  ps:unspecific)
+(defprim "chez:set-wrapper-procedure-data!" (w data)
+  (check-wrapper "set-wrapper-procedure-data!" w)
+  (setf (wrapper-data w) data)
+  ps:unspecific)
+
+(defun lambda-list-arity-mask (proc)
+  "Bit N set if PROC accepts N arguments (all bits from some on, a
+negative mask, for a rest argument)."
   (let ((lambda-list #+sbcl (sb-kernel:%fun-lambda-list (if (functionp proc) proc (fdefinition proc)))
 		     #-sbcl :unknown))
     (if (not (listp lambda-list))
@@ -423,6 +616,11 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 	  (if rest
 	      (- (ash 1 required))
 	      (- (ash 1 (+ required optional 1)) (ash 1 required)))))))
+
+(defprim "chez:procedure-arity-mask" (proc)
+  (if (typep proc 'wrapper-procedure)
+      (wrapper-mask proc)
+      (lambda-list-arity-mask proc)))
 
 ;;; ------------------------------------------------------------------
 ;;; Parameters, as Chez's: R7RS's (parameterize works on them), and
@@ -710,7 +908,7 @@ NIL for any value.")
 		  for types = (gethash rtd *record-field-types*) then (cdr types)
 		  collect (list mutable-p name (car types))))))
 
-(defprim "chez:record-constructor" (rtd)
+(defun rtd-record-constructor (rtd)
   "Chez's record-constructor of a record-type descriptor: a procedure of
 every field's value, its ancestors' first."
   (check-rtd "record-constructor" rtd)
@@ -722,6 +920,8 @@ every field's value, its ancestors' first."
 	(ps:scheme-error "~A: incorrect number of arguments ~D (expected ~D)" name (length args) n))
       (loop for type in types for x in args do (check-field-value name type x))
       (%make-record rtd (coerce args 'simple-vector)))))
+
+(defprim "chez:record-constructor" (rtd) (rtd-record-constructor rtd))
 
 (defun field-position (who rtd field)
   "The index in RTD's records' values of FIELD, a name or an index, and
@@ -851,3 +1051,80 @@ the parameters of src/chez/records.scm.")
       *record-hash-hook* 'chez-record-hash)
 
 (defprim "chez:record-constructor-descriptor?" (x) (bool (rcd-p x)))
+
+;;; record-reader and record-writer: #[name field ...], read and written
+;;; in this mode (PS::*RECORD-LITERAL-HOOK*, PS::*WRITE-EXTENSION*).  A
+;;; record is written as #[name field ...] unless its type, or an
+;;; ancestor, has a writer of its own.
+
+(defvar *record-readers* (make-hash-table :test 'eq)
+  "Name -> record-type descriptor, for #[name field ...].")
+(defvar *record-reader-names* (make-hash-table :test 'eq :weakness :key)
+  "Record-type descriptor -> its name in *RECORD-READERS*.")
+(defvar *record-writers* (make-hash-table :test 'eq :weakness :key))
+
+(defun record-reader-name-p (x) (and (ps:scheme-symbol-p x) (not (eq x ps:false))))
+
+(defprim "chez:record-reader" (x &optional (y nil y-p))
+  ;; a name may be a string
+  (when (stringp x) (setq x (ps:intern-scheme-symbol x)))
+  (cond ((not y-p)
+	 (cond ((rtd-p x) (gethash x *record-reader-names* ps:false))
+	       ((record-reader-name-p x) (gethash x *record-readers* ps:false))
+	       (t (r6rs-assertion-violation "record-reader" "not a name or record-type descriptor" x))))
+	((and (record-reader-name-p x) (rtd-p y))
+	 (let ((old (gethash x *record-readers*)))
+	   (when old (remhash old *record-reader-names*)))
+	 (let ((old-name (gethash y *record-reader-names*)))
+	   (when old-name (remhash old-name *record-readers*)))
+	 (setf (gethash x *record-readers*) y (gethash y *record-reader-names*) x)
+	 ps:unspecific)
+	((and (eq y ps:false) (or (rtd-p x) (record-reader-name-p x)))
+	 (let ((other (if (rtd-p x) (gethash x *record-reader-names*) (gethash x *record-readers*))))
+	   (when other
+	     (if (rtd-p x)
+		 (progn (remhash x *record-reader-names*) (remhash other *record-readers*))
+		 (progn (remhash x *record-readers*) (remhash other *record-reader-names*)))))
+	 ps:unspecific)
+	(t (r6rs-assertion-violation "record-reader" "invalid arguments" (list x y)))))
+
+(defun read-record-literal (elements)
+  (let ((rtd (and (consp elements) (gethash (car elements) *record-readers*))))
+    (unless rtd
+      (ps:scheme-error "#[...]: no record type is named ~S" (if (consp elements) (car elements) elements)))
+    ;; the record is made before its labels are resolved, so a field can't
+    ;; be one: Chez's #0=#[foo #0#] is an error
+    (when (some #'ps::label-placeholder-p (cdr elements))
+      (ps:scheme-error "#[...]: a datum label can't be a field of the record it labels"))
+    (apply (rtd-record-constructor rtd) (cdr elements))))
+
+(defprim "chez:record-writer" (rtd &optional (proc nil proc-p))
+  (check-rtd "record-writer" rtd)
+  (cond ((not proc-p) (gethash rtd *record-writers* ps:false))
+	((eq proc ps:false) (remhash rtd *record-writers*) ps:unspecific)
+	((functionp proc) (setf (gethash rtd *record-writers*) proc) ps:unspecific)
+	(t (r6rs-assertion-violation "record-writer" "not a procedure or #f" proc))))
+
+(defun write-record (obj port recur)
+  "Write record OBJ as Chez does, in the Chez mode; NIL otherwise."
+  (when (and ps:*chez-reader* (record-p obj) (not (condition-p* obj)))
+    (let* ((rtd (record-rtd obj))
+	   (writer (loop for r = rtd then (rtd-parent r) while r
+			 thereis (gethash r *record-writers*))))
+      (if writer
+	  (funcall writer obj port (lambda (x p) (declare (ignore p)) (funcall recur x)))
+	  (progn
+	    (write-string "#[" port)
+	    (funcall recur (rtd-name rtd))
+	    (loop for x across (record-values obj)
+		  do (write-char #\Space port) (funcall recur x))
+	    (write-string "]" port)))
+      t)))
+
+(defun record-parts (x)
+  "A record's fields, for datum labels (#0=#[foo #0#])."
+  (and ps:*chez-reader* (record-p x) (not (condition-p* x)) (record-values x)))
+
+(setq ps::*record-literal-hook* 'read-record-literal
+      ps::*write-extension* 'write-record
+      ps::*datum-label-parts* 'record-parts)

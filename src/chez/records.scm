@@ -191,3 +191,6 @@
     (assertion-violation 'record-constructor "not a record constructor descriptor" rcd))
   (record-constructor rcd))
 (define (r6rs:record? x) (record? x))
+
+;; #[name field ...]: host.lisp
+(define record-reader %chez:record-reader)

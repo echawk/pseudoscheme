@@ -64,7 +64,8 @@
     "(compile " "interpret" "cp0" "generate-inspector" "generate-procedure-source"
     "enable-object-counts" "object-counts" "code-object" "(inspect " "profile-"
     "compile-profile" "source-table" "make-boot" "heap-check" "(exit" "(emergency-exit" "(abort" "foreign-callable"
-    "foreign-procedure" "ftype" "load-shared-object" "collect-" "optimize-level"
+    "foreign-procedure" "ftype" "load-shared-object" "collect-request-handler" "collect-trip-bytes"
+    "collect-generation-radix" "collect-notify" "collect-rendezvous" "optimize-level"
     "generate-wpo" "wpo-" "compile-interpret-simple" "(expand " "expand-output"
     "debug-level" "enable-type-recovery" "check-loop-allocation"))
 
