@@ -7,7 +7,7 @@ written in Lisp and a Tree-IL compiler. After that, `define-module`,
 `use-modules` and Guile's own modules are Guile's own code: `(ice-9 match)`,
 `(ice-9 format)`, `(ice-9 pretty-print)`, `(ice-9 regex)`, `(srfi srfi-1)`
 and the rest. On Guile's own test suite (vendored,
-`vendor/guile-test-suite/`), **42,685 tests pass** so far. See "Where it
+`vendor/guile-test-suite/`), **42,702 tests pass** so far. See "Where it
 stands" below. Emacs Lisp runs too: `,language elisp` at the REPL, and
 Guile's three elisp test files pass in full (below).
 
@@ -457,8 +457,8 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 42,685 |
-| fail | 191 | 29 |
+| pass | 5,982 | 42,702 |
+| fail | 191 | 27 |
 | error (an exception where a result was expected) | 465 | 32 |
 | unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 96 / 10 / 11 / 6 |
 | files that crashed or hit the time limit | 32 | 0 (with the module cache filled) |
@@ -481,8 +481,10 @@ What fails now, by cause:
   libguile lays it out.
 - **Native code, not bytecode**: code a test file defines, and boot-9,
   are SBCL code here, so the VM's hooks don't see them (2 of
-  `coverage`); a stack made in an exception handler misses the VM's
-  frames (`error-handling`).
+  `coverage`).
+- **Conservative stack scanning**: a dead object whose last reference
+  is still in the running procedure's frame survives `(gc)` (`weaks`'
+  "weak-key dies").
 - **libguile's internals**: copy-on-write shared substrings
   (`substring/shared` copies: a Scheme string is a simple Lisp string)
   and string buffers (`strings`, 10), guardians and collection
@@ -491,7 +493,7 @@ What fails now, by cause:
 - **The environment**: locales not installed here (`i18n`, `time`,
   `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`).
 - **A short tail**: suspendable ports (`suspendable-ports`: ports keep
-  their own buffers), `srfi-119`'s source properties.
+  their own buffers).
 
 ### Differences from Guile that remain
 

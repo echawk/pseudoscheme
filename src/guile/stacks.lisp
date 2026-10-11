@@ -115,7 +115,8 @@ file that isn't Lisp's (a Scheme file, or the module cache's)."
 	  else collect (if (typep a 'sb-debug::unprintable-object) (ssym "_") a))))
 
 (defun lisp-scheme-frame (frame)
-  "A gframe for FRAME of Lisp's stack, if it is a Scheme procedure's."
+  "A gframe for FRAME of Lisp's stack, if it is a Scheme procedure's;
+:inline if it is a body Guile compiles inline in its caller."
   (let* ((df (sb-di:frame-debug-fun frame))
 	 (debug-name (sb-di:debug-fun-name df))
 	 (code (ignore-errors (sb-di:debug-fun-fun df)))
@@ -125,7 +126,17 @@ file that isn't Lisp's (a Scheme file, or the module cache's)."
 			  (cond ((null n) nil)
 				((string= n +inline-body-name+) :inline)
 				(t (ssym n))))))))
-    (when (and (not (eq name :inline)) (or name (scheme-debug-name-p debug-name)))
+    (when (eq debug-name 'call-throw)
+      ;; boot-9's throw is Scheme in Guile, with a frame of its own
+      (destructuring-bind (&optional key args) (lisp-frame-arguments frame)
+	(let ((g (make-gframe :lisp (ssym "throw") (gethash "throw" *guile-primitives*)
+			      (coerce (list* ps:false key (if (listp args) args '())) 'simple-vector)
+			      nil)))
+	  (setf (gframe-ip g) (lisp-frame-ip g))
+	  (return-from lisp-scheme-frame g))))
+    (when (eq name :inline)
+      (return-from lisp-scheme-frame :inline))
+    (when (or name (scheme-debug-name-p debug-name))
       (let ((args (lisp-frame-arguments frame)))
 	(when (machine-debug-name-p debug-name)
 	  (setq args (nthcdr 3 args))
@@ -197,11 +208,17 @@ a prompt is."
   (let ((entries '())
 	(runs *vm-runs*)
 	(vm *vm*)
-	(cursor (and *vm* (vm-fp *vm*))))
+	(cursor (and *vm* (vm-fp *vm*)))
+	;; a prompt's body compiled inline (call-with-prompt's thunk) runs
+	;; in its caller's frame in Guile, so that frame is inside the
+	;; prompt: the next Scheme frame goes inside the prompt's marker
+	(inline nil)
+	(move-in nil))
     (sb-debug::map-backtrace
      (lambda (frame)
        (let ((name (sb-di:debug-fun-name (sb-di:frame-debug-fun frame))))
 	 (cond ((eq name 'run-vm-1)
+		(setq inline nil move-in nil)
 		(let ((run (pop runs)))
 		  (when (and run vm cursor)
 		    (multiple-value-bind (frames next) (vm-run-frames vm cursor run)
@@ -209,9 +226,17 @@ a prompt is."
 		      (setq cursor next)))))
 	       ((eq name 'psx::prompt-extent)
 		(let ((marker (prompt-marker frame)))
-		  (when marker (push marker entries))))
+		  (when marker
+		    (push marker entries)
+		    (setq move-in inline inline nil))))
 	       (t (let ((g (lisp-scheme-frame frame)))
-		    (when g (push g entries))))))))
+		    (cond ((eq g :inline) (setq inline t))
+			  (g (if (and move-in (consp (car entries)) (eq (caar entries) :prompt))
+				 (let ((marker (pop entries)))
+				   (push g entries)
+				   (push marker entries))
+				 (push g entries))
+			     (setq inline nil move-in nil)))))))))
     (nreverse entries)))
 
 ;;; Cutting
