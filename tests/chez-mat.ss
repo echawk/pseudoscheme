@@ -296,5 +296,7 @@
     (close-port port)))
 
 (let ([args (command-line-arguments)])
+  ;; as in Chez's mats, run from its REPL: no script on the command line
+  (command-line '(""))
   (for-each run-mat-file args)
   (printf "MATDONE\n"))

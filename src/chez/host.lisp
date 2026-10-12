@@ -131,13 +131,16 @@ error if ERROR? is true."
 	  (error "can't stat ~A" name)))))
 
 (defprim "chez:get-mode" (name &optional (follow? t))
-  (declare (ignore follow?))
+  #+sbcl
+  (let ((path (namestring (uiop:parse-native-namestring name))))
+    (logand #o7777 (sb-posix:stat-mode (if (ps:truep follow?) (sb-posix:stat path) (sb-posix:lstat path)))))
   ;; GNU's %a is octal digits; BSD's %Lp too.
-  (parse-integer (princ-to-string (stat-field name "%a" "%Lp")) :radix 8))
+  #-sbcl (parse-integer (princ-to-string (stat-field name "%a" "%Lp")) :radix 8))
 
 (defprim "chez:chmod" (name mode)
-  (uiop:run-program (list "chmod" (format nil "~O" mode)
-			  (namestring (uiop:parse-native-namestring name))))
+  #+sbcl (sb-posix:chmod (namestring (uiop:parse-native-namestring name)) mode)
+  #-sbcl (uiop:run-program (list "chmod" (format nil "~O" mode)
+				 (namestring (uiop:parse-native-namestring name))))
   ps:unspecific)
 
 (defprim "chez:machine-type" ()

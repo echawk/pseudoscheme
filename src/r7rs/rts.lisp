@@ -594,9 +594,13 @@ to the script name and its arguments); else the process's arguments.")
   "The absolute name of the program the command-line program is running,
 for SRFI 193's script-file.")
 
-(defprim "command-line" ()
-  (or *command-line*
-      (cons "pseudoscheme" (copy-list (uiop:command-line-arguments)))))
+(defprim "command-line" (&optional (args nil args-p))
+  ;; with an argument, as Chez's command-line parameter, set it (so
+  ;; parameterize can bind it)
+  (if args-p
+      (progn (setq *command-line* args) ps:unspecific)
+      (or *command-line*
+	  (cons "pseudoscheme" (copy-list (uiop:command-line-arguments))))))
 (defprim "get-environment-variable" (name)
   (or (uiop:getenv name) ps:false))
 ;; No portability library lists the whole environment.

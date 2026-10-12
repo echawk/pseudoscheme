@@ -123,7 +123,7 @@
     "top-level-value" "set-top-level-value!" "define-top-level-value"
     "top-level-bound?" "top-level-mutable?"
     "load" "load-program" "load-library" "visit" "revisit" "compile-file"
-    "compile-library" "compile-program" "compile-script" "compile-to-file"
+    "compile-library" "compile-program" "compile-script" "compile-to-file" "compile-to-port" "load-compiled-from-port" "r6rs:command-line"
     "maybe-compile-file" "maybe-compile-library" "maybe-compile-program"
     "library-directories" "library-extensions" "compile-imported-libraries"
     "compile-file-message" "compile-interpret-simple" "optimize-level" "debug-level"
@@ -343,7 +343,11 @@ calls with those are still open-coded."
 	(extend-host-procedure name
 			       (lambda (old)
 				 (lambda (path &optional (arg nil arg-p))
-				   (if arg-p (funcall chez path arg) (funcall old path)))))))
+				   (cond (arg-p (funcall chez path arg))
+					 ;; Chez's delete-file: #f if it can't, unless error?
+					 ((and ps:*chez-reader* (string= name "delete-file"))
+					  (funcall chez path ps:false))
+					 (t (funcall old path))))))))
     ;; (record-constructor rtd): a procedure of every field's value
     (let ((chez (psx:host-ref "chez:record-constructor")))
       (extend-host-procedure "record-constructor"

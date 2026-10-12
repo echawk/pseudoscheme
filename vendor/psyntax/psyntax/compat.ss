@@ -158,7 +158,8 @@
   (define (file-options-spec x)
     (for-each
       (lambda (o)
-        (unless (memq o '(no-create no-fail no-truncate))
+        ;; and Chez's append, compressed, exclusive and replace
+        (unless (memq o '(no-create no-fail no-truncate append compressed exclusive replace))
           (error 'file-options "invalid file option" o)))
       x)
     x)

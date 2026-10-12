@@ -109,7 +109,22 @@
     (%chez:compile-program in out)
     '()))
 (define (compile-script in . out) (copy-to-object-file 'compile-script in (and (pair? out) (car out))))
-(define (compile-to-file . args) (if #f #f))
+;; Compiled code written to a file or a binary port is the forms' text,
+;; which load and load-compiled-from-port evaluate
+(define (write-forms forms p)
+  (for-each (lambda (x) (write x p) (newline p)) forms))
+(define (compile-to-file forms out . libs)
+  (when (file-exists? out) (delete-file out))
+  (call-with-output-file out (lambda (p) (write-forms forms p)))
+  (if #f #f))
+(define (compile-to-port forms bp . rest)
+  (put-bytevector bp (string->utf8 (call-with-string-output-port (lambda (p) (write-forms forms p)))))
+  (if #f #f))
+(define (load-compiled-from-port bp)
+  (let ([p (transcoded-port bp (make-transcoder (utf-8-codec)))])
+    (let loop ([v (if #f #f)])
+      (let ([x (read p)])
+        (if (eof-object? x) v (loop (eval x)))))))
 (define (maybe-compile-file in . out) (apply compile-file in out))
 (define (maybe-compile-library in . out) (apply compile-library in out))
 (define (maybe-compile-program in . out) (apply compile-program in out))
@@ -171,9 +186,11 @@
 
 ;;; The system
 
-(define (command-line-arguments)
-  (let ((cl (command-line)))
-    (if (pair? cl) (cdr cl) '())))
+(define command-line-arguments
+  (case-lambda
+    (() (let ((cl (command-line))) (if (pair? cl) (cdr cl) '())))
+    ((args) (let ((cl (command-line)))
+              (command-line (cons (if (pair? cl) (car cl) "") args))))))
 
 (define get-process-id %chez:get-process-id)
 (define char-ready? %char-ready?)
@@ -286,3 +303,4 @@
 
 (define compile-library-handler (make-parameter (lambda args (if #f #f))))
 (define (engine-block) (if #f #f))
+(define (r6rs:command-line) (command-line))
