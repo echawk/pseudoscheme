@@ -379,6 +379,26 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 (defun our-modules-directory ()
   (asdf:system-relative-pathname :pseudoscheme "src/guile/modules/"))
 
+;;; GUILE_LOAD_PATH and GUILE_LOAD_COMPILED_PATH, as libguile reads them
+;;; when it starts: their directories (colon-separated) go before
+;;; %load-path's and %load-compiled-path's.  %load-compiled-path also has
+;;; the module cache's directory (cache.lisp), as Guile's has its ccache:
+;;; programs expect it not to be empty (Guix's (guix describe)).  Called
+;;; when a program starts, not when the image is built (contrib/cli/cli.lisp).
+(defun add-environment-load-path ()
+  (flet ((prepend (variable-name env-name &optional default)
+	   (let ((dirs (remove "" (uiop:split-string (or (uiop:getenv env-name) "") :separator ":")
+			       :test #'string=))
+		 (v (obarray-variable (ssym variable-name))))
+	     (when v
+	       (let ((old (let ((x (gvariable-value v))) (if (listp x) x '()))))
+		 (when (and default (null old)) (setq old (list default)))
+		 (setf (gvariable-value v)
+		       (append dirs (remove-if (lambda (d) (member d dirs :test #'equal)) old))))))))
+    (prepend "%load-path" "GUILE_LOAD_PATH")
+    (prepend "%load-compiled-path" "GUILE_LOAD_COMPILED_PATH"
+	     (string-right-trim "/" (namestring (guile-cache-directory))))))
+
 (defun load-path ()
   (let ((v (obarray-variable (ssym "%load-path"))))
     (if v (gvariable-value v) '())))
@@ -761,6 +781,8 @@ not with Guile's behaviour.")
 		    "EMLINK" "EPIPE" "EDOM" "ERANGE" "EWOULDBLOCK" "EINPROGRESS" "EALREADY" "ENOSYS"
 		    "ENOTEMPTY" "ELOOP" "ENAMETOOLONG" "ECONNREFUSED" "ECONNRESET" "ETIMEDOUT"
 		    "EADDRINUSE" "ENOTSOCK" "ENOTCONN" "EHOSTUNREACH"
+		    ;; waitpid options
+		    "WNOHANG" "WUNTRACED"
 		    ;; signals
 		    "SIGHUP" "SIGINT" "SIGQUIT" "SIGILL" "SIGTRAP" "SIGABRT" "SIGFPE" "SIGKILL"
 		    "SIGBUS" "SIGSEGV" "SIGSYS" "SIGPIPE" "SIGALRM" "SIGTERM" "SIGURG" "SIGSTOP"

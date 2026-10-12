@@ -243,6 +243,41 @@ go as %default-port-conversion-strategy says."
 			      (if (eq (second r) :void) (list :void :void) r))
 			    :errno errno)))
 
+;;; C functions some Guile programs dlsym that the platform's C library
+;;; may lack (glibc's, on macOS): Guix's (guix utils) compares versions
+;;; with strverscmp.  dlsym gives these when the library hasn't one.
+
+(defun strverscmp* (a b)
+  "glibc's strverscmp: A and B compared as strings, except that runs of
+digits compare as numbers (a run with leading zeros as a fraction)."
+  (let ((i 0) (j 0) (la (length a)) (lb (length b)))
+    (flet ((run-end (s k) (or (position-if-not #'digit-char-p s :start k) (length s))))
+      (loop
+	(cond ((and (= i la) (= j lb)) (return 0))
+	      ((= i la) (return -1))
+	      ((= j lb) (return 1)))
+	(let ((ca (char a i)) (cb (char b j)))
+	  (if (and (digit-char-p ca) (digit-char-p cb))
+	      (let* ((ea (run-end a i)) (eb (run-end b j))
+		     (ra (subseq a i ea)) (rb (subseq b j eb)))
+		(if (or (char= ca #\0) (char= cb #\0))
+		    ;; fractional parts: compare as strings, shorter first on a tie
+		    (let ((c (cond ((string< ra rb) -1) ((string> ra rb) 1) (t 0))))
+		      (unless (zerop c) (return c)))
+		    (let ((na (parse-integer ra)) (nb (parse-integer rb)))
+		      (cond ((< na nb) (return -1)) ((> na nb) (return 1)))))
+		(setq i ea j eb))
+	      (progn
+		(cond ((char< ca cb) (return -1)) ((char> ca cb) (return 1)))
+		(incf i) (incf j))))))))
+
+(cffi:defcallback strverscmp-callback :int ((a :string) (b :string))
+  (strverscmp* a b))
+
+(defparameter *libc-fallbacks*
+  (list (cons "strverscmp" (lambda () (cffi:callback strverscmp-callback))))
+  "Name -> a thunk giving the address of our version of a C function.")
+
 (defextension "scm_init_system_foreign_library"
   (list
    (cons "dlopen" (lambda (name flags)
@@ -255,11 +290,36 @@ go as %default-port-conversion-strategy says."
    (cons "dlsym" (lambda (handle name)
 		   (multiple-value-bind (address message)
 		       (psffi:dlsym (pointer-address* (check-pointer "dlsym" handle)) name)
-		     (if address
-			 (make-pointer* address)
-			 (guile-error (ssym "misc-error") "dlsym" "Error resolving ~S: ~S"
-				      (list name message))))))
+		     (let ((fallback (and (not address) (stringp name)
+					  (cdr (assoc name *libc-fallbacks* :test #'string=)))))
+		       (cond (address (make-pointer* address))
+			     (fallback (make-pointer* (cffi:pointer-address (funcall fallback))))
+			     (t (guile-error (ssym "misc-error") "dlsym" "Error resolving ~S: ~S"
+					     (list name message))))))))
    (cons "RTLD_LAZY" psffi:+rtld-lazy+)
    (cons "RTLD_NOW" psffi:+rtld-now+)
    (cons "RTLD_GLOBAL" psffi:+rtld-global+)
    (cons "RTLD_LOCAL" psffi:+rtld-local+)))
+
+;;; The older dynamic-link interface, as libguile defines it (dynl.c): the
+;;; root's procedures, calling (system foreign-library)'s.
+
+(defun foreign-library-procedure (name)
+  (let* ((iface (funcall (root-value "resolve-interface")
+			 (list (ssym "system") (ssym "foreign-library"))))
+	 (v (module-variable* iface (ssym name))))
+    (unless v (guile-error (ssym "misc-error") name "no ~A in (system foreign-library)" (list name)))
+    (gvariable-value v)))
+
+(defguile "dynamic-link" (&rest filename)
+  (apply (foreign-library-procedure "load-foreign-library") filename))
+(defguile "dynamic-object?" (x)
+  (funcall (foreign-library-procedure "foreign-library?") x))
+(defguile "dynamic-pointer" (name library)
+  (funcall (foreign-library-procedure "foreign-library-pointer") library name))
+(defguile "dynamic-func" (name library)
+  (funcall (foreign-library-procedure "foreign-library-pointer") library name))
+(defguile "dynamic-call" (name library)
+  (let ((pointer (funcall (foreign-library-procedure "foreign-library-pointer") library name)))
+    (cffi:foreign-funcall-pointer (pointer-address* pointer) () :void)
+    *unspecified*))

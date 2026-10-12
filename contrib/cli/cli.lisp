@@ -503,6 +503,7 @@ is reported, and the program runs anyway."
       (setf ps-r7rs:*script-file*
             (namestring (merge-pathnames (uiop:parse-native-namestring file) (uiop:getcwd)))))
     (when (member *standard* '(:r5rs :r4rs :ieee :r3rs :r2rs :rrs)) (setf ps:*fold-case* t))
+    (when (eq *standard* :guile) (psg::add-environment-load-path))
     (handler-bind ((serious-condition
 		     (lambda (e)
 		       (if (interrupt-p e)

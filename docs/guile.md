@@ -290,6 +290,36 @@ derivation file name (`/gnu/store/...-hello-<version>.drv`) that
 evaluation, records, G-expressions, monads, the store protocol and
 hashing all match Guile byte for byte.
 
+### A first trial (2026-10-12, on macOS)
+
+Guix from its Git repository, with guile-json, guile-gcrypt,
+guile-sqlite3, guile-git and guile-bytestructures from theirs. Their
+`.in` files were filled in by hand, since configure wasn't run. They are
+found through `GUILE_LOAD_PATH`. guile-zlib wasn't found under its old
+address, and is only needed for compression.
+- **What loads:**
+  - `(guix utils)`, `(guix records)`, `(guix gexp)`, `(guix store)`,
+    `(guix packages)` and `(guix build-system gnu)`;
+  - then, from `(gnu packages base)`, dozens of package modules: perl,
+    python, golang and rust, in about 6½ minutes cold.
+- **Where it stops:** at Guix's own Linux and Hurd assumptions.
+  - `rust.scm` asks for the `i686-linux-gnu` platform.
+  - Platforms are discovered by listing `guix/platforms/` with
+    `scandir*`, which calls glibc's `readdir64` and decodes Linux's
+    `struct dirent`. Neither exists on macOS.
+  - Going further needs Linux (a container), not more of Guile.
+- **Fixed in Guile mode along the way:**
+  - `GUILE_LOAD_PATH` and `GUILE_LOAD_COMPILED_PATH` are read at start-up.
+  - `%load-compiled-path` holds the module cache's directory. Guix
+    expects it not to be empty.
+  - `dynamic-link`, `dynamic-func`, `dynamic-pointer`, `dynamic-call` and
+    `dynamic-object?` are libguile's wrappers of `(system foreign-library)`.
+  - `dlsym` falls back to our own `strverscmp`, which macOS's libc lacks
+    and `(guix utils)` uses.
+  - A file whose forms total more than 1.5M conses isn't put in the module
+    cache: one COMPILE-FILE of `(guix build syscalls)` (2M) exhausted
+    8 GB, though compiling its forms as it loads takes 28 s.
+
 ## Alternatives considered
 
 - **A compatibility library on our own psyntax** (a `(guile)` library
@@ -487,9 +517,15 @@ What fails now, by cause:
   "weak-key dies").
 - **libguile's internals**: copy-on-write shared substrings
   (`substring/shared` copies: a Scheme string is a simple Lisp string)
-  and string buffers (`strings`, 10), guardians and collection
-  (`guardians`, `weaks`, `fluids`, `threads`: SBCL can't give back
-  a collected object).
+  and string buffers (`strings`, 10).
+- **Collection**: guardians work: they hold their objects and ask SBCL's
+  heap tracer which of them only guardians reach (src/r6rs/guardians.lisp;
+  `guardians`: 16 pass, 5 unresolved). Still failing:
+  - `fluids`' "fluids are GC'd" waits for collections without calling
+    `(gc)`, and its allocations never trigger one of SBCL's, whose
+    nursery is far bigger than Guile's.
+  - `threads`' "mutex with owner not retained": a locked mutex stays
+    reachable from its owner here.
 - **The environment**: locales not installed here (`i18n`, `time`,
   `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`).
 - **A short tail**: suspendable ports (`suspendable-ports`: ports keep
@@ -502,7 +538,7 @@ What fails now, by cause:
 | compiling | Tree-IL → CPS → bytecode (`.go` files cached) | Tree-IL → core Scheme → SBCL native code (fasls cached) |
 | `(system vm ...)`, `(language cps)`, the optimizer | present | Guile's passes run when compiling to `cps` or `bytecode`; bytecode can't be loaded. To `value` (`compile`'s default), Tree-IL goes to native code as it is |
 | GOOPS | present | present (`goops.test`: all 237) |
-| `(system foreign)` | present | present on CFFI (`foreign.test`: 79 pass, 0 fail). Structs aren't passed by value; `pointer->bytevector` of C's memory copies it; the deprecated `dynamic-link`/`dynamic-func` are absent |
+| `(system foreign)` | present | present on CFFI (`foreign.test`: 79 pass, 0 fail). Structs aren't passed by value; `pointer->bytevector` of C's memory copies it |
 | `bytevector-slice` | shares the bytes | copies them |
 | port buffers, `(ice-9 suspendable-ports)` | Guile's | ports have their own buffers, which `(ice-9 ports internal)` doesn't expose: suspendable ports are absent |
 | stacks, frames, backtraces | Guile's VM's | frames from the VM and from native code (stacks.lisp); the VM's next and apply hooks (`(system vm coverage)`, statprof) run while the trace level is above zero |

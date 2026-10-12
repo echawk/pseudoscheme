@@ -7,10 +7,12 @@
 ;;;; SBCL can't give back an object it has collected, so a guardian holds
 ;;;; its objects, and asks SBCL's own heap tracer (SB-EXT:SEARCH-ROOTS)
 ;;;; which of them are reachable other than through guardians.  That
-;;;; walks the whole heap, so it is done at most once per full collection
-;;;; that Scheme asked for (Chez's collect, Guile's gc: NOTE-FULL-COLLECTION),
-;;;; the next time a guardian is asked for an object -- not after each of
-;;;; SBCL's own collections.  An object a stale slot of the stack still
+;;;; walks the whole heap, so it is done only when a guardian is asked
+;;;; for an object and there has been a collection since the last search:
+;;;; at once after one Scheme asked for (Chez's collect, Guile's gc:
+;;;; NOTE-FULL-COLLECTION), after SBCL's own at most once a second.  An
+;;;; object registered since the last collection isn't a candidate yet.
+;;;; An object a stale slot of the stack still
 ;;;; points to (SBCL scans the stack conservatively) stays reachable, as
 ;;;; under a conservative collector.
 ;;;;
@@ -23,19 +25,29 @@
 (defstruct (guardian (:constructor %make-guardian (ordered)))
   ordered
   (entries '())		; ((object representative collections) ...), newest first:
-			; COLLECTIONS, *FULL-COLLECTIONS* when it was registered
+			; COLLECTIONS, *COLLECTIONS* when it was registered
   (ready '()))		; representatives found inaccessible, to give back
 
 (defvar *guardians* '() "Weak pointers to the guardians.")
 (defvar *guardian-lock* (sb-thread:make-mutex :name "guardians"))
-(defvar *full-collections* 0 "Full collections Scheme asked for.")
-(defvar *guardians-checked-at* 0 "*FULL-COLLECTIONS* when guardians were last checked.")
+(defvar *collections* 0 "Collections, SBCL's own and those Scheme asked for.")
+(defvar *guardians-checked-at* 0 "*COLLECTIONS* when guardians were last checked.")
+(defvar *asked-collection* nil "Has Scheme asked for a collection since then?")
+(defvar *last-search-time* 0 "GET-INTERNAL-REAL-TIME of the last search.")
+
+(defun count-collection () (incf *collections*))
+(pushnew 'count-collection sb-ext:*after-gc-hooks*)
 
 (defun note-full-collection ()
   "After a full collection that Scheme asked for: guardians look for
 inaccessible objects the next time they're asked."
   (sb-thread:with-mutex (*guardian-lock*)
-    (incf *full-collections*)))
+    (setq *asked-collection* t)))
+
+(defun search-due-p ()
+  (and (/= *guardians-checked-at* *collections*)
+       (or *asked-collection*
+	   (> (- (get-internal-real-time) *last-search-time*) internal-time-units-per-second))))
 
 (defun new-guardian (&optional ordered)
   (let ((g (%make-guardian ordered)))
@@ -49,7 +61,7 @@ inaccessible objects the next time they're asked."
 
 (defun guardian-register (g object &optional (representative object))
   (sb-thread:with-mutex (*guardian-lock*)
-    (push (list object representative *full-collections*) (guardian-entries g)))
+    (push (list object representative *collections*) (guardian-entries g)))
   ps:unspecific)
 
 (defun live-guardians ()
@@ -59,8 +71,8 @@ inaccessible objects the next time they're asked."
 (declaim (notinline guarded-weak-pointers))
 (defun candidate-p (entry)
   "Could ENTRY's object have become inaccessible: is it a heap object,
-registered before the last full collection?"
-  (and (heap-object-p (first entry)) (< (third entry) *full-collections*)))
+registered before the last collection?"
+  (and (heap-object-p (first entry)) (< (third entry) *collections*)))
 
 (defun guarded-weak-pointers (guardians)
   "A weak pointer to each candidate object the GUARDIANS hold."
@@ -102,9 +114,11 @@ guardians' ready lists."
   "The representative of an object G guards that has become inaccessible,
 or false."
   (sb-thread:with-mutex (*guardian-lock*)
-    (when (/= *guardians-checked-at* *full-collections*)
-      (setq *guardians-checked-at* *full-collections*)
-      (find-inaccessible-objects))
+    (when (search-due-p)
+      (setq *guardians-checked-at* *collections*
+	    *asked-collection* nil)
+      (find-inaccessible-objects)
+      (setq *last-search-time* (get-internal-real-time)))
     (if (guardian-ready g) (pop (guardian-ready g)) ps:false)))
 
 (defun guardian-unregister (g)

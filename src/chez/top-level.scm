@@ -92,7 +92,9 @@
       (printf "compiling ~a with output to ~a\n" in out))
     (let ((text (call-with-input-file in get-string-all)))
       (when (file-exists? out) (delete-file out))
-      (call-with-output-file out (lambda (p) (unless (eof-object? text) (put-string p text)))))
+      (call-with-output-file out (lambda (p) (unless (eof-object? text) (put-string p text))))
+      ;; as Chez's: a program with a #! line can be run
+      (chmod out (get-mode in)))
     (if #f #f)))
 (define (compile-file in . out) (copy-to-object-file 'compile-file in (and (pair? out) (car out))))
 (define (compile-library in . out) (copy-to-object-file 'compile-library in (and (pair? out) (car out))))

@@ -152,7 +152,16 @@ code to KEPT (a list in a cons, newest first)."
   "The Nth form being compiled, with its literals as they are."
   `(run-cached (lambda () ,(svref *cache-forms* n))))
 
+(defparameter *cache-size-limit* 1500000
+  "The most code, in conses, a file's forms may have to be cached: SBCL's
+COMPILE-FILE of more (Guix's (guix build syscalls), 2M) can exhaust an
+8 GB heap, where compiling the same forms one at a time as they load
+doesn't.  A bigger file is compiled each time it is loaded.")
+
 (defun write-cached-file (fasl source forms)
+  (when (> (reduce #'+ forms :key #'psx::tree-size) *cache-size-limit*)
+    (when *trace-cache* (format *trace-output* "~&;; not cached ~A: too big~%" source))
+    (return-from write-cached-file nil))
   (let* ((temp (format nil "~A-~36R" (pathname-name fasl) (random (expt 36 8) (make-random-state t))))
 	 (lisp (make-pathname :name temp :type "lisp" :defaults fasl))
 	 (temp-fasl (make-pathname :name temp :type "fasl" :defaults fasl)))

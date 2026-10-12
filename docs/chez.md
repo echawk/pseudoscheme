@@ -22,7 +22,7 @@ All of it lives in `src/chez/`:
 | chezscheme.scm, lists.scm, records.scm, numbers.scm, hashtables.scm, threads.scm, conditions.scm, top-level.scm, ffi.scm | the library's body, in Scheme |
 | format.scm | Chez's own `format`, `printf` and `fprintf` (s/format.ss), made by boot/chez-format.py |
 
-`(chezscheme)` exports 1253 of the 1715 names Chez 10.4.1's does (803
+`(chezscheme)` exports 1257 of the 1715 names Chez 10.4.1's does (803
 before this work), with no extra names of its own. The comparison is
 `(library-exports '(chezscheme))` in Chez against psyntax's
 `library-export-bindings` here.
@@ -370,6 +370,55 @@ In this mode `map`, `for-each`, `fold-left`, `fold-right`, `for-all` and
 lists of one length. Cyclic lists are errors, not endless loops. (R7RS's
 `map` stops at the shortest list, so other modes don't check map's
 lengths.)
+
+### Guardians, and running as `chez`
+
+- **Guardians** (`make-guardian`, `guardian?`, `unregister-guardian`)
+  live in src/r6rs/guardians.lisp, shared with the Guile mode.
+  - SBCL can't give back an object it has collected. So a guardian holds
+    its objects, and after a collection it asks SBCL's heap tracer
+    (`sb-ext:search-roots`, told to ignore the guardians) which of them
+    nothing else reaches.
+  - It searches when a guardian is asked for an object: at once after
+    `collect`, and after SBCL's own collections at most once a second.
+  - Guardians are unordered, and a stale stack slot keeps an object
+    reachable, as with a conservative collector.
+- **`bin/chez`** is a link to the program that takes Chez's own command line:
+  - `--script FILE ARG ...`, `--program FILE ARG ...`;
+  - `-q`/`--quiet`, which also turns off the REPL's prompts when it isn't on
+    a terminal (`echo '(threaded?)' | chez -q` prints `#t`);
+  - `--libdirs`; and the rest of Chez's options, accepted.
+- **`compile-file`, `compile-program`, `compile-library` and
+  `compile-script`** write the `.so` that Chez would. Here it is a copy of
+  the source, with its mode, so `--script`, `--program` and `load` run it,
+  and a program with a `#!` line can be run directly. It's compiled by SBCL
+  as it loads.
+
+### Idris 2
+
+Idris 2 0.8.0, from [its repository](https://github.com/idris-lang/Idris2),
+bootstraps with `make bootstrap SCHEME=bin/chez`, with `CHEZ=bin/chez` in
+the environment so that its code generator uses this Chez too:
+- **Stage 1:** its bootstrap compiler, `bootstrap/idris2_app/idris2.ss`
+  (one 9 MB `(let () ...)` of 11,000 definitions), runs here.
+  `idris2 --version` takes 90 s, almost all of it compiling the program, at
+  a 3.9 GB peak.
+- **Stage 2:** that compiler type-checks and compiles Idris's libraries
+  (prelude, base, linear, network, test, contrib, papers) and then the
+  compiler itself, 289 modules. The whole bootstrap takes about an hour, at
+  3.1 GB.
+- **A program:** the compiler, running here, compiles `Hello.idr`, and the
+  result runs here: `Hello from Idris 2 on Pseudoscheme`.
+
+What Idris needed:
+- **Hoisting through `(let () ...)`**: psyntax expands it to
+  `((lambda () body))`, which hid the body's definitions from the hoisting
+  that compiles a big top-level form one definition at a time. As one
+  function, SBCL needed more than 16 GB to compile it. (A form past 2M
+  conses is now interpreted rather than compiled.)
+- `bytes-allocated`, which the generated GC handler calls.
+- The `chez` command, `compile-program`, and the support library found
+  through `DYLD_LIBRARY_PATH`, which Idris's launcher sets.
 
 ### Reader syntax
 
