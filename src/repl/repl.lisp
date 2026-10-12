@@ -56,6 +56,7 @@
 (defvar *last-backtrace* nil "The backtrace of the last error, as text.")
 (defvar *last-error* nil)
 (defvar *interactive* nil "Is the line editor in use?")
+(defvar *quiet* nil "No prompts when the line editor isn't in use (Chez's --quiet).")
 (defvar *quit* nil "Set by ,quit: the tag to throw to.")
 
 (defun history-for (language)
@@ -283,7 +284,7 @@ comma, beginning with PREFIX."
 				  :complete-p (lambda (s) (or (command-p s) (input-complete-p s))))))
 	    (unless (eq text :interrupt) (return text))))
 	(progn
-	  (format (out) "~A" prompt)
+	  (unless *quiet* (format (out) "~A" prompt))
 	  (finish-output (out))
 	  ;; lines until the input is complete
 	  (let ((text nil))

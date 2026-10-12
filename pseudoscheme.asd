@@ -184,6 +184,7 @@
 		:components ((:file "rts")
 			     (:file "lists" :depends-on ("rts"))
 			     (:file "hashtables" :depends-on ("lists"))
+			     (:file "guardians" :depends-on ("rts"))
 			     (:file "records" :depends-on ("lists"))
 			     (:file "conditions" :depends-on ("records"))
 			     (:file "arithmetic" :depends-on ("conditions"))

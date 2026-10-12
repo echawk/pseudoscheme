@@ -187,6 +187,56 @@ skipped when FILE is read."
     ;; Chez Scheme's script interpreter (its scripts have no main)
     ("scheme-script" . :chez)))
 
+;;; Chez Scheme's own command: run as chez, scheme or petite (a link to
+;;; this program), the arguments are Chez's (chez --help), for programs
+;;; that drive Chez, such as Idris 2's build.
+(defparameter *chez-commands* '("chez" "scheme" "petite" "chez-scheme" "chezscheme"))
+
+(defun chez-command-p ()
+  (let ((argv0 (car (uiop:raw-command-line-arguments))))
+    (and argv0 (member (file-namestring argv0) *chez-commands* :test #'string=))))
+
+(defvar *chez-quiet* nil)
+
+(defun parse-chez-arguments (args)
+  "Chez's command line: [option ...] [file ...], or --script/--program
+FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
+--script or --program are loaded first, as actions."
+  (let ((actions '()))
+    (loop
+      (when (null args) (return))
+      (let ((a (pop args)))
+	(flet ((value () (or (pop args) (die "~A needs an argument" a))))
+	  (cond ((string= a "--") (return))
+		((member a '("-q" "--quiet") :test #'string=) (setq *chez-quiet* t))
+		((member a '("--script" "--program") :test #'string=)
+		 (let ((file (value)))
+		   (setq *script* t)
+		   (return-from parse-chez-arguments
+		     (values (nreverse actions) file args nil))))
+		((string= a "--libdirs")
+		 (dolist (dir (uiop:split-string (value) :separator ":"))
+		   (when (plusp (length dir)) (add-library-path dir))))
+		((member a '("--optimize-level" "--libexts" "-b" "--boot" "--eehistory")
+			 :test #'string=)
+		 (value))
+		((member a '("--compile-imported-libraries" "--import-notify" "--debug-on-exception"
+			     "--enable-object-counts" "--retain-static-relocation" "--verbose"
+			     "--eedisable" "--enable-arithmetic-left-associative"
+			     "--enable-error-source-expression" "--disable-library-timestamps")
+			 :test #'string=))
+		((string= a "--version")
+		 (format *error-output* "~A~%" "10.2.0") (uiop:quit 0))
+		((member a '("-h" "--help") :test #'string=)
+		 (format t "usage: ~A [option ...] [file ...] | --script FILE ARG ... | --program FILE ARG ...~%~
+                            (Pseudoscheme's Chez mode: docs/chez.md)~%"
+			 (file-namestring (car (uiop:raw-command-line-arguments))))
+		 (uiop:quit 0))
+		((and (> (length a) 1) (char= (char a 0) #\-))
+		 (die "unknown Chez option ~A" a))
+		(t (push (list :load a) actions))))))
+    (values (nreverse actions) nil '() t)))
+
 (defun script-interpreter-standard ()
   (let ((argv0 (car (uiop:raw-command-line-arguments))))
     (and argv0
@@ -272,10 +322,12 @@ start as an inferior Lisp and load Swank or Slynk into."
 (defun repl ()
   "The REPL, in the language of *STANDARD* (src/repl/): ,language moves
 to the others, ,help lists the commands."
+  (setq pseudoscheme-repl:*quiet* *chez-quiet*)
   (pseudoscheme-repl:run-repl
    *standard*
-   :banner (format nil "Pseudoscheme ~A (~(~A~)) on ~A ~A" *version* *standard*
-		   (lisp-implementation-type) (lisp-implementation-version))))
+   :banner (and (not *chez-quiet*)
+		(format nil "Pseudoscheme ~A (~(~A~)) on ~A ~A" *version* *standard*
+		   (lisp-implementation-type) (lisp-implementation-version)))))
 
 (defun print-version-alist ()
   "SRFI 176's version output: one property to a line.  If the output goes
@@ -430,7 +482,12 @@ is reported, and the program runs anyway."
   (multiple-value-bind (actions file file-args interactive)
       (let ((standard (script-interpreter-standard))
 	    (args (uiop:command-line-arguments)))
-	(cond ((null standard) (parse-arguments args))
+	(cond ((chez-command-p)
+	       (setq *standard* :chez)
+	       (multiple-value-bind (actions file file-args interactive) (parse-chez-arguments args)
+		 ;; Chez's REPL runs after files loaded, unless a script ran
+		 (values actions file file-args (and interactive (null file)))))
+	      ((null standard) (parse-arguments args))
 	      ((null args) (die "usage: ~A FILE [ARGUMENT ...]"
 				(file-namestring (car (uiop:raw-command-line-arguments)))))
 	      (t (setq *standard* standard *script* t)
@@ -456,6 +513,8 @@ is reported, and the program runs anyway."
 	  (case kind
 	    (:lisp-system (pseudoscheme-interop:load-lisp-system text))
 	    (:quicklisp (load-quicklisp))
+	    (:load (unless (probe-file text) (die "no such file: ~A" text))
+		   (run-file text))
 	    (:precompile
 	     (multiple-value-bind (ok failed)
 		 (if text

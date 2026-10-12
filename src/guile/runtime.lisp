@@ -1115,6 +1115,7 @@ like, compile.lisp), or else its Lisp lambda list."
 (defguile "%warn-auto-compilation-enabled" () *unspecified*)
 (defguile "gc" ()
   (sb-ext:gc :full t)
+  (ps-r6rs::note-full-collection)
   ;; the hook has run when gc returns, as in Guile
   (funcall 'run-after-gc-hook-1)
   *unspecified*)

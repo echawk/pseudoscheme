@@ -31,6 +31,7 @@ else
 endif
 
 SCRIPT_INTERPRETERS = scheme-r4rs scheme-r5rs scheme-ieee-1178-1990 scheme-srfi-0 scheme-r6rs scheme-r7rs scheme-script
+# chez: Chez Scheme's own command line (cli.lisp, PARSE-CHEZ-ARGUMENTS)
 
 all: $(ROOT)/bin/pseudoscheme
 
@@ -39,7 +40,7 @@ $(ROOT)/bin/pseudoscheme: FORCE
 	rm -f $(ROOT)/bin/pseudoscheme.new  # else ASDF thinks it's up to date after a Makefile-only change
 	$(RUN) build.lisp
 	mv -f $(ROOT)/bin/pseudoscheme.new $(ROOT)/bin/pseudoscheme  # atomically, for programs running the old one
-	for name in $(SCRIPT_INTERPRETERS) compile-r7rs; do ln -sf pseudoscheme $(ROOT)/bin/$$name; done
+	for name in $(SCRIPT_INTERPRETERS) compile-r7rs chez; do ln -sf pseudoscheme $(ROOT)/bin/$$name; done
 
 test: $(ROOT)/bin/pseudoscheme
 	sh ./test.sh $(ROOT)/bin/pseudoscheme

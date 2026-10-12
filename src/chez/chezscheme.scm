@@ -55,6 +55,22 @@
        (assertion-violation 'collect "invalid target generation" tg))
      (%chez:collect))
     ((g tg objs) (collect g tg) (if #f #f))))
+;; (bytes-allocated [g [space]]): the heap in use; SBCL's generations
+;; aren't Chez's, so every generation and space is all of it
+(define bytes-allocated
+  (case-lambda
+    (() (%chez:bytes-allocated))
+    ((g) (unless (or (not g) (eq? g 'static) (and (fixnum? g) (<= 0 g (collect-maximum-generation))))
+           (assertion-violation 'bytes-allocated "invalid generation" g))
+         (%chez:bytes-allocated))
+    ((g space) (bytes-allocated g))))
+;; guardians: src/r6rs/guardians.lisp, checked after a collect
+(define make-guardian
+  (case-lambda
+    (() (%chez:make-guardian #f))
+    ((ordered?) (%chez:make-guardian ordered?))))
+(define guardian? %chez:guardian?)
+(define unregister-guardian %chez:unregister-guardian)
 (define open-input-string %open-input-string)
 (define open-output-string %open-output-string)
 (define get-output-string %get-output-string)

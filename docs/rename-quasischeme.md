@@ -128,7 +128,7 @@ The bench script's `PSEUDOSCHEME=` variable becomes `QUASISCHEME=`.
 | `src/pseudoscheme-features.scm`, `src/pseudoscheme-record.scm` | `src/quasischeme-features.scm`, `src/quasischeme-record.scm` |
 | `vendor/psyntax/README-pseudoscheme.md`, `psyntax-pseudoscheme.pp` | `README-quasischeme.md`, `psyntax-quasischeme.pp` |
 | `bench/r7rs-benchmarks/src/Pseudoscheme-postlude.scm` | `Quasischeme-postlude.scm` (the bench script builds this name from the system name) |
-| the 23 `src/*.pso` | `src/*.qso` (recommended, since "pso" stands for Pseudoscheme; it is also fine to keep `.pso`) |
+| the 23 `src/*.pso` | `src/*.qso` (decided: the extension follows the name; update `.pso` in the Makefile, boot/, the .asd, CI's cache key and docs) |
 
 ### Emacs
 
@@ -187,7 +187,7 @@ perl -pi -e '
   s/(?<![\w*%-])ps(::?)(?=[\w*%+&<>=!?\/-])/qs$1/g;
   s/(?<![\w*%-])PS(::?)(?=[\w*%+&<>=!?\/-])/QS$1/g;
   s/"PS"/"QS"/g;
-  s/\.pso\b/.qso/g;                                   # if .pso is renamed
+  s/\.pso\b/.qso/g;
   s/\bps-(symbol|package|exports)\b/qs-$1/g;            # internal helpers, for consistency
 ' $files
 ```

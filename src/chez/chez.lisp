@@ -28,6 +28,7 @@
     "mkdir" "delete-directory" "rename-file" "file-modification-time"
     "directory-separator" "machine-type" "get-mode" "chmod" "file-change-time"
     "source-directories" "record-writer" "collect" "weak-cons" "weak-pair?"
+    "make-guardian" "guardian?" "unregister-guardian" "bytes-allocated"
     "bwp-object?" "iota" "box" "box?" "unbox" "set-box!" "box-cas!" "pretty-print"
     "fxvector?" "make-fxvector" "fxvector" "list->fxvector" "fxvector-length" "fxvector-ref"
     "fxvector-set!" "fxvector->list" "fxvector-fill!" "fxvector-copy"

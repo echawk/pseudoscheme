@@ -75,14 +75,33 @@
 (define (load-library path) (%chez:load path))
 (define (visit path) (%chez:load path))
 (define (revisit path) (%chez:load path))
-(define (compile-file . args) (if #f #f))
-(define (compile-library . args) (if #f #f))
-(define (compile-program . args) (if #f #f))
-(define (compile-script . args) (if #f #f))
+;; Compiling a file: its "object file" is a copy of its source, which
+;; load and --script run as they do the source (and compile, as they go,
+;; with SBCL).  So programs that drive Chez's compiler, as Idris 2's
+;; build does, find the files they expect.
+(define (object-file-name in)
+  (let loop ((i (- (string-length in) 1)))
+    (cond ((< i 0) (string-append in ".so"))
+          ((char=? (string-ref in i) #\.) (string-append (substring in 0 i) ".so"))
+          ((char=? (string-ref in i) #\/) (string-append in ".so"))
+          (else (loop (- i 1))))))
+(define (copy-to-object-file who in out)
+  (unless (string? in) (assertion-violation who "not a string" in))
+  (let ((out (or out (object-file-name in))))
+    (when (compile-file-message)
+      (printf "compiling ~a with output to ~a\n" in out))
+    (let ((text (call-with-input-file in get-string-all)))
+      (when (file-exists? out) (delete-file out))
+      (call-with-output-file out (lambda (p) (unless (eof-object? text) (put-string p text)))))
+    (if #f #f)))
+(define (compile-file in . out) (copy-to-object-file 'compile-file in (and (pair? out) (car out))))
+(define (compile-library in . out) (copy-to-object-file 'compile-library in (and (pair? out) (car out))))
+(define (compile-program in . out) (copy-to-object-file 'compile-program in (and (pair? out) (car out))) '())
+(define (compile-script in . out) (copy-to-object-file 'compile-script in (and (pair? out) (car out))))
 (define (compile-to-file . args) (if #f #f))
-(define (maybe-compile-file . args) (if #f #f))
-(define (maybe-compile-library . args) (if #f #f))
-(define (maybe-compile-program . args) (if #f #f))
+(define (maybe-compile-file in . out) (apply compile-file in out))
+(define (maybe-compile-library in . out) (apply compile-library in out))
+(define (maybe-compile-program in . out) (apply compile-program in out))
 
 ;; (library-directories): the search path as Chez gives it, a list of
 ;; (source-directory . object-directory) pairs; set with a list of

@@ -365,6 +365,16 @@ body made top-level definitions; or FORM if it has no such body."
 		   (t (when (and (keyword-p (car e) "SET!") (consp (cdr e)))
 			(incf (gethash (cadr e) table 0)))
 		      (loop for x on e do (count-assignments (car x) table) while (consp (cdr x))))))
+	   (unwrap (e)
+	     ;; ((lambda () body)), as (let () body ...) is, is body at top level
+	     (loop while (and (consp e) (null (cdr e)) (lambda-p (car e))
+			      (consp (cdr (car e))) (null (cadr (car e)))
+			      (consp (cddr (car e))) (null (cdddr (car e))))
+		   do (setq e (caddr (car e))))
+	     (if (and (consp e) (keyword-p (car e) "BEGIN") (consp (cdr e)))
+		 (let ((last (unwrap (car (last e)))))
+		   (if (eq last (car (last e))) e `(,@(butlast e) ,last)))
+		 e))
 	   (hoist (e)
 	     (let* ((vars (cadr (car e))) (body (caddr (car e)))
 		    (statements (if (and (consp body) (keyword-p (car body) "BEGIN")) (cdr body) (list body)))
@@ -381,10 +391,11 @@ body made top-level definitions; or FORM if it has no such body."
 			   collect (if (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) defined))
 				       `(,(sym "define") ,(cadr s) ,(caddr s))
 				       s)))))))
-    (cond ((body-form-p form) `(,(sym "begin") ,@(hoist form)))
-	  ((and (consp form) (keyword-p (car form) "BEGIN") (body-form-p (car (last form))))
-	   `(,@(butlast form) ,@(hoist (car (last form)))))
-	  (t form))))
+    (let ((form (unwrap form)))
+      (cond ((body-form-p form) `(,(sym "begin") ,@(hoist form)))
+	    ((and (consp form) (keyword-p (car form) "BEGIN") (body-form-p (car (last form))))
+	     `(,@(butlast form) ,@(hoist (unwrap (car (last form))))))
+	    (t form)))))
 
 (defun open-top-level (form)
   "OPEN-PRIMITIVES for a form evaluated at top level, whose definitions
@@ -510,10 +521,22 @@ CANONICAL-LAMBDA)."
 				 (cddr key))))))
 	    (apply maker constants))))))
 
+(defparameter *interpret-limit* 2000000
+  "The largest Lisp form, in conses, that SBCL compiles at all: past this,
+its register allocation needs more than a 16 GB heap (a body of
+thousands of definitions that can't be hoisted, say), so a form is
+evaluated by SBCL's interpreter.")
+
 (defun eval-compiled-or-interpreted (form)
   "EVAL FORM, or, if SBCL's compiler fails on it (a procedure too big for
 one code object, past arm64's branch and constant reach), evaluate it
-with SBCL's interpreter: nothing of it has run when compiling fails."
+with SBCL's interpreter: nothing of it has run when compiling fails.  A
+form bigger than *INTERPRET-LIMIT* is interpreted."
+  #+sbcl
+  (when (> (tree-size form) *interpret-limit*)
+    (return-from eval-compiled-or-interpreted
+      (let ((sb-ext:*evaluator-mode* :interpret))
+	(eval form))))
   #+sbcl
   (let ((form form))
     (multiple-value-bind (values failure)

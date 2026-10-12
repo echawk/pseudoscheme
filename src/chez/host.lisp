@@ -321,7 +321,31 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 (pushnew 'count-gc sb-ext:*after-gc-hooks*)
 
 (defprim "chez:bytes-consed" () (sb-ext:get-bytes-consed))
-(defprim "chez:collect" () (sb-ext:gc :full t) ps:unspecific)
+(defprim "chez:bytes-allocated" () (sb-kernel:dynamic-usage))
+(defprim "chez:collect" ()
+  (sb-ext:gc :full t)
+  (ps-r6rs::note-full-collection)
+  ps:unspecific)
+
+;;; Guardians (src/r6rs/guardians.lisp): a guardian is a procedure
+
+(defvar *guardian-procedures* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t))
+
+(defprim "chez:make-guardian" (&optional (ordered ps:false))
+  (let* ((g (ps-r6rs::new-guardian (ps:true? ordered)))
+	 (procedure (lambda (&optional (object nil object-p) (representative object))
+		      (if object-p
+			  (ps-r6rs::guardian-register g object representative)
+			  (ps-r6rs::guardian-next g)))))
+    (setf (gethash procedure *guardian-procedures*) g)
+    procedure))
+
+(defprim "chez:guardian?" (x) (bool (and (functionp x) (gethash x *guardian-procedures*))))
+
+(defprim "chez:unregister-guardian" (procedure)
+  (let ((g (and (functionp procedure) (gethash procedure *guardian-procedures*))))
+    (unless g (ps:scheme-error "unregister-guardian: ~S is not a guardian" procedure))
+    (ps-r6rs::guardian-unregister g)))
 (defprim "chez:gc-statistics" ()
   (vector *gc-count* (/ sb-ext:*gc-run-time* internal-time-units-per-second)))
 
