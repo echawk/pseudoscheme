@@ -91,6 +91,12 @@
 	(setf (get symbol :source-name) (ps:scheme-symbol-name (first args))))
       symbol))
   (defhost "void" () ps:unspecific)
+  (defhost "%letrec-check" (flag value name)
+    (if (eq flag ps:false)
+	(ps-r6rs::r6rs-assertion-violation
+	 ps:false (format nil "attempt to reference undefined variable ~A"
+			  (or (get name :source-name) (ps:scheme-symbol-name name))))
+	value))
   (defhost "symbol-value" (s) (symbol-value (location s)))
   (defhost "set-symbol-value!" (s v) (host-set! s v) ps:unspecific)
   ;; the expanded code runs without the expander lock (CALL-WITH-EXPANDER-LOCK)
@@ -111,12 +117,37 @@ built-ins but whose value the R6RS/R7RS layers replaced: OPEN-PRIMITIVES
 must leave them as (primitive x), or the translator would open-code the
 old built-in.")
 
+(defparameter *chez-closed-primitives* '("map")
+  "Primitives closed in the Chez mode only: map, whose arguments Chez
+checks (PS-R6RS::CHECK-MAP-ARGUMENTS).")
+
+(defvar *chez-renamed-primitives* (make-hash-table :test 'equal)
+  "In the Chez mode, primitive name -> the host global that stands for it
+there (src/chez/chez.lisp): Chez's checking mutators and comparisons,
+and constructors that give the single empty object.  A reference to the
+primitive is one to that global, so calls are direct, and inlined where
+*INLINE-PRIMITIVES* says.  An entry (name . :nullary) renames only
+calls with no arguments.")
+
+(defun proper-length (l)
+  "L's length if it's a proper list, else NIL."
+  (loop for n from 0 for x = l then (cdr x)
+	do (cond ((null x) (return n)) ((atom x) (return nil)))))
+
+(defun chez-renamed-primitive (name nargs)
+  "The host global standing for primitive NAME called with NARGS
+arguments (NIL: not called) in the Chez mode, or NIL."
+  (when ps:*chez-reader*
+    (let ((r (gethash name *chez-renamed-primitives*)))
+      (cond ((null r) nil)
+	    ((consp r) (and (eql nargs 0) (car r)))
+	    (t r)))))
+
 (defun closed-primitive-p (name)
-  "Whether primitive NAME (a string) is closed (*CLOSED-PRIMITIVES*):
-in Chez mode, map too, whose arguments Chez checks
-(PS-R6RS::CHECK-MAP-ARGUMENTS)."
+  "Whether primitive NAME (a string) is closed (*CLOSED-PRIMITIVES*,
+and in the Chez mode *CHEZ-CLOSED-PRIMITIVES*)."
   (or (member name *closed-primitives* :test #'string=)
-      (and ps:*chez-reader* (string= name "map"))))
+      (and ps:*chez-reader* (member name *chez-closed-primitives* :test #'string=))))
 
 (defparameter *extended-primitives* '()
   "(name min max): closed primitives (see *CLOSED-PRIMITIVES*) whose new
@@ -132,6 +163,10 @@ does.  OPEN-PRIMITIVES still opens such calls, so they stay open-coded.")
 	       (n (and (listp (cdr form)) (length (cdr form)))))
 	   (and entry n (<= (second entry) n) (or (null (third entry)) (<= n (third entry))))))))
 
+(defvar *canonical-empty* nil
+  "In the Chez mode, a function of an empty vector, string or bytevector:
+the single one of its kind (src/chez/host.lisp).")
+
 (defun open-primitives (form)
   "FORM with each (primitive x) replaced by a reference to x (see
 OPEN-PRIMITIVES-1), and its internal definitions made letrecs (see
@@ -145,10 +180,31 @@ integrates x as it does in R5RS code ((primitive +) becomes CL's +
 rather than a call through a function named PRIMITIVE).  Safe because
 psyntax renames every user variable: nothing in its output can shadow a
 host global."
-  (cond ((atom form) form)
-	((and (symbolp (car form)) (string= (symbol-name (car form)) "QUOTE")) form)
+  (cond ((atom form)
+	 ;; a host global by name, as at Chez's top level
+	 (let ((r (and ps:*chez-reader* (symbolp form) form (chez-renamed-primitive (ps:scheme-symbol-name form) nil))))
+	   (if r (sym r) form)))
+	((and ps:*chez-reader* (symbolp (car form)) (car form) (proper-length (cdr form))
+	      (chez-renamed-primitive (ps:scheme-symbol-name (car form)) (proper-length (cdr form))))
+	 (cons (sym (chez-renamed-primitive (ps:scheme-symbol-name (car form)) (proper-length (cdr form))))
+	       (mapcar #'open-primitives-1 (cdr form))))
+	((and (symbolp (car form)) (string= (symbol-name (car form)) "QUOTE"))
+	 ;; '#() and "" are Chez's single empty vector and string
+	 (if (and ps:*chez-reader* *canonical-empty* (consp (cdr form))
+		  (typep (cadr form) '(simple-array * (0))))
+	     (list (car form) (funcall *canonical-empty* (cadr form)))
+	     form))
+	((and (consp (car form)) (symbolp (caar form)) (string= (symbol-name (caar form)) "PRIMITIVE")
+	      (consp (cdar form)) (symbolp (cadar form)) ps:*chez-reader* (proper-length (cdr form))
+	      (chez-renamed-primitive (ps:scheme-symbol-name (cadar form)) (proper-length (cdr form))))
+	 (cons (sym (chez-renamed-primitive (ps:scheme-symbol-name (cadar form)) (proper-length (cdr form))))
+	       (mapcar #'open-primitives-1 (cdr form))))
 	((open-call-of-extended-primitive-p form)
 	 (cons (cadr (car form)) (mapcar #'open-primitives-1 (cdr form))))
+	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
+	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
+	      (chez-renamed-primitive (ps:scheme-symbol-name (cadr form)) nil))
+	 (sym (chez-renamed-primitive (ps:scheme-symbol-name (cadr form)) nil)))
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
 	      (not (closed-primitive-p (ps:scheme-symbol-name (cadr form)))))
@@ -165,8 +221,15 @@ host global."
 	 (list (sym (if (string= (ps:scheme-symbol-name (cadr (car form))) "memv") "memq" "assq"))
 	       (open-primitives-1 (cadr form))
 	       (caddr form)))
-	(t (let ((a (open-primitives-1 (car form))) (d (open-primitives-1 (cdr form))))
+	(t (let ((a (open-primitives-1 (car form))) (d (open-primitives-list (cdr form))))
 	     (if (and (eq a (car form)) (eq d (cdr form))) form (cons a d))))))
+
+(defun open-primitives-list (l)
+  "OPEN-PRIMITIVES-1 of each element of L (a form's arguments, say)."
+  (if (consp l)
+      (let ((a (open-primitives-1 (car l))) (d (open-primitives-list (cdr l))))
+	(if (and (eq a (car l)) (eq d (cdr l))) l (cons a d)))
+      (open-primitives-1 l)))
 
 (defun eq-membership-p (form)
   "Whether FORM is ((primitive memv) x '(datum ...)) or ((primitive assv)
@@ -239,8 +302,150 @@ circular, R7RS 2.4)."
     (dolist (name (all-primitive-names)) (setf (gethash name *primitive-symbols*) t)))
   (gethash x *primitive-symbols*))
 
+;;; R6RS's restriction on letrec and letrec* (11.4.6): it must be
+;;; possible to evaluate each init without referring to or assigning a
+;;; variable whose init hasn't been evaluated -- for letrec, any of its
+;;; variables -- and an implementation must detect a violation.  The
+;;; translator checks a letrec variable an init refers to directly
+;;; (src/generate.scm); LETREC-CHECKS, before DEFINITIONS-AS-LETREC, the
+;;; rest:
+;;;
+;;;  - A letrec*, psyntax's body of definitions ((lambda (v ...) (begin
+;;;    (set! v init) ... body ...)) '#f ...): the body's own procedures
+;;;    can run before V is defined only from a statement before V's
+;;;    definition (or V's init) that refers to one of the body's
+;;;    variables and isn't a lambda definition.  If there is such a
+;;;    statement, each reference to V up to its definition (in a
+;;;    procedure defined earlier, say), and each assignment, checks a
+;;;    flag set just after the definition.  A body of procedure
+;;;    definitions and then expressions, the usual kind, gets no checks.
+;;;
+;;;  - A letrec whose inits aren't all lambdas: a reference to one of its
+;;;    variables in an init, in a procedure there included, checks a flag
+;;;    set once all of them have been evaluated.
+
+(defun letrec-checks (form)
+  (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
+	   (quote-p (x) (and (consp x) (keyword-p (car x) "QUOTE")))
+	   (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
+	   (false-p (x) (and (quote-p x) (eq (cadr x) ps:false)))
+	   (set-p (s vars) (and (consp s) (keyword-p (car s) "SET!") (consp (cdr s)) (consp (cddr s))
+				(member (cadr s) vars)))
+	   (flag-for (v) (sym (format nil "~A%defined" (ps:scheme-symbol-name v))))
+	   (check (flag v) `(,(sym "%letrec-check") ,flag ,v (,(sym "quote") ,v)))
+	   (mentioned (e table)
+	     ;; the variables of TABLE (a hash set) E mentions
+	     (let ((found '()))
+	       (labels ((scan (e)
+			  (cond ((symbolp e) (when (gethash e table) (pushnew e found)))
+				((atom e))
+				((quote-p e))
+				(t (loop for x on e
+					 do (scan (car x))
+					 while (consp (cdr x)))))))
+		 (scan e))
+	       found))
+	   (guard-references (e flags)
+	     ;; E with each reference to and assignment of a variable of
+	     ;; FLAGS, ((v . flag) ...), checking its flag
+	     (cond ((symbolp e) (let ((f (cdr (assoc e flags)))) (if f (check f e) e)))
+		   ((atom e) e)
+		   ((quote-p e) e)
+		   ((and (keyword-p (car e) "SET!") (consp (cdr e)) (assoc (cadr e) flags))
+		    `(,(sym "begin") ,(check (cdr (assoc (cadr e) flags)) (cadr e))
+		      (,(car e) ,(cadr e) ,@(guard-list (cddr e) flags))))
+		   ((and (keyword-p (car e) "LAMBDA") (consp (cdr e)))
+		    `(,(car e) ,(cadr e) ,@(guard-list (cddr e) flags)))
+		   (t (guard-list e flags))))
+	   (guard-list (l flags)
+	     (if (consp l)
+		 (let ((a (guard-references (car l) flags)) (d (guard-list (cdr l) flags)))
+		   (if (and (eq a (car l)) (eq d (cdr l))) l (cons a d)))
+		 l))
+	   (walk (e)
+	     (cond ((atom e) e)
+		   ((quote-p e) e)
+		   (t (let ((e (walk-list e)))
+			(or (letrec*-checked e) (letrec-checked e) e)))))
+	   (walk-list (l)
+	     (if (consp l)
+		 (let ((a (walk (car l))) (d (walk-list (cdr l))))
+		   (if (and (eq a (car l)) (eq d (cdr l))) l (cons a d)))
+		 l))
+	   (letrec*-checked (e)
+	     (when (and (lambda-p (car e)) (consp (cdr (car e))) (consp (cddr (car e)))
+			(null (cdddr (car e))))
+	       (let* ((vars (cadr (car e))) (body (caddr (car e))) (args (cdr e))
+		      (statements (if (and (consp body) (keyword-p (car body) "BEGIN"))
+				      (cdr body)
+				      (list body))))
+		 (when (and (listp vars) vars (null (cdr (last vars)))
+			    (= (length vars) (length args))
+			    (every #'false-p args))
+		   (let ((table (make-hash-table :test 'eq))
+			 (index (make-hash-table :test 'eq))
+			 (first-running nil)
+			 (early (make-hash-table :test 'eq)) ; v -> T if mentioned up to its definition
+			 (seen '()))
+		     (dolist (v vars) (setf (gethash v table) t))
+		     (loop for s in statements for j from 0
+			   do (let* ((definition (and (set-p s vars) (not (gethash (cadr s) index)) (cadr s)))
+				     (code (if definition (caddr s) s))
+				     (lambda-definition (and definition (lambda-p code)))
+				     (refs (mentioned code table)))
+				(when definition (setf (gethash definition index) j))
+				(when (and (null first-running) refs (not lambda-definition))
+				  (setq first-running j))
+				;; mentions of variables not yet defined, or of
+				;; the one this defines by a non-lambda init
+				(dolist (v (if (and (set-p s vars) (not definition)) (cons (cadr s) refs) refs))
+				  (unless (and (gethash v index) (or (< (gethash v index) j)
+								     (and (= (gethash v index) j) lambda-definition)))
+				    (setf (gethash v early) t)))
+				(push s seen)))
+		     (let ((checked (and first-running
+					 (loop for v in vars
+					       when (and (gethash v early) (gethash v index)
+							 (>= (gethash v index) first-running))
+						 collect (cons v (flag-for v))))))
+		       (when checked
+			 (let ((new '()))
+			   (loop for s in statements for j from 0
+				 do (let* ((pending (remove-if (lambda (c) (< (gethash (car c) index) j)) checked))
+					   (defines (and (set-p s vars) (= (gethash (cadr s) index -1) j) (cadr s)))
+					   (s (cond ((null pending) s)
+						    (defines
+						     `(,(car s) ,defines
+						       ,(guard-references (caddr s)
+									  (if (lambda-p (caddr s))
+									      (remove defines pending :key #'car)
+									      pending))))
+						    (t (guard-references s pending)))))
+				      (push s new)
+				      (let ((c (and defines (assoc defines checked))))
+					(when c (push `(,(sym "set!") ,(cdr c) (,(sym "quote") ,ps:true)) new)))))
+			   `((,(caar e) ,(append vars (mapcar #'cdr checked))
+			      (,(sym "begin") ,@(nreverse new)))
+			     ,@args
+			     ,@(mapcar (lambda (c) (declare (ignore c)) `(,(sym "quote") ,ps:false)) checked))))))))))
+	   (letrec-checked (e)
+	     (when (and (keyword-p (car e) "LETREC") (consp (cdr e)) (listp (cadr e)) (cadr e)
+			(every (lambda (b) (and (consp b) (consp (cdr b)))) (cadr e))
+			(notevery (lambda (b) (lambda-p (cadr b))) (cadr e)))
+	       (let* ((vars (mapcar #'car (cadr e)))
+		      (table (let ((h (make-hash-table :test 'eq))) (dolist (v vars h) (setf (gethash v h) t))))
+		      (flag (flag-for (car vars)))
+		      (flags (mapcar (lambda (v) (cons v flag)) vars)))
+		 (when (some (lambda (b) (mentioned (cadr b) table)) (cadr e))
+		   `((,(sym "lambda") (,flag)
+		      (,(car e) ,(mapcar (lambda (b) (list (car b) (guard-references (cadr b) flags))) (cadr e))
+		       (,(sym "begin") (,(sym "set!") ,flag (,(sym "quote") ,ps:true)) ,@(cddr e))))
+		     (,(sym "quote") ,ps:false)))))))
+    (walk form)))
+
 (defun definitions-as-letrec (form)
-  (let ((assignments (make-hash-table :test 'eq)))
+  (let ((form (letrec-checks form))
+	(assignments (make-hash-table :test 'eq)))
     (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
 	     (quote-p (x) (and (consp x) (keyword-p (car x) "QUOTE")))
 	     (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
@@ -716,7 +921,7 @@ the command line and exits; DROP-LAST skips it.)"
 ;;; otherwise.
 
 (defparameter *inline-primitives*
-  '(("bytevector-u8-ref" (bv k)
+  `(("bytevector-u8-ref" (bv k)
      (if (and (typep bv '(simple-array (unsigned-byte 8) (*)))
 	      (typep k 'fixnum) (< -1 k (length bv)))
 	 (aref bv k)
@@ -736,7 +941,33 @@ the command line and exits; DROP-LAST skips it.)"
     ("string<?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string< a b) t ps:false) :call))
     ("string>?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string> a b) t ps:false) :call))
     ("string<=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string<= a b) t ps:false) :call))
-    ("string>=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string>= a b) t ps:false) :call)))
+    ("string>=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string>= a b) t ps:false) :call))
+    ;; the Chez mode's mutators (src/chez/chez.lisp), which refuse an immutable
+    ;; object: one with the header flag of src/chez/host.lisp
+    ("chez:vector-set!" (v k obj)
+     (if (and (simple-vector-p v) (typep k 'fixnum) (< -1 k (length v))
+	      (not (logtest (ash sb-vm:+vector-shareable-nonstd+ 8) (sb-kernel:get-header-data v))))
+	 (progn (setf (svref v k) obj) ps:unspecific)
+	 :call))
+    ("chez:string-set!" (s k c)
+     (if (and (typep s '(simple-array character (*))) (typep k 'fixnum) (< -1 k (length s))
+	      (characterp c)
+	      (not (logtest (ash sb-vm:+vector-shareable-nonstd+ 8) (sb-kernel:get-header-data s))))
+	 (progn (setf (schar s k) c) ps:unspecific)
+	 :call))
+    ;; the Chez mode's comparisons, which check their arguments' types
+    ,@(loop for (name test type) in '(("char=?" char= character) ("char<?" char< character)
+				      ("char>?" char> character) ("char<=?" char<= character)
+				      ("char>=?" char>= character) ("char-ci=?" char-equal character)
+				      ("char-ci<?" char-lessp character) ("char-ci>?" char-greaterp character)
+				      ("char-ci<=?" char-not-greaterp character) ("char-ci>=?" char-not-lessp character)
+				      ("string=?" string= simple-string) ("string<?" string< simple-string)
+				      ("string>?" string> simple-string) ("string<=?" string<= simple-string)
+				      ("string>=?" string>= simple-string))
+	    collect `(,(concatenate 'string "chez:" name) (a b)
+		      (if (and (typep a ',type) (typep b ',type)) (if (,test a b) t ps:false) :call)))
+    ;; a letrec variable's reference that may come before its init (LETREC-CHECKS)
+    ("%letrec-check" (flag value name) (if (eq flag ps:false) :call value)))
   "(name lambda-list body): BODY, with the arguments bound to the
 variables of LAMBDA-LIST, is the inline code, in which :CALL stands for
 calling the primitive itself.")

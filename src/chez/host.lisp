@@ -366,16 +366,16 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 		   kind nil nil t weakness))
 
 (defprim "chez:make-weak-eq-hashtable" (&optional k)
-  (declare (ignore k))
+  (check-hashtable-size "make-weak-eq-hashtable" k)
   (make-weak-table :eq 'eq :weak))
 (defprim "chez:make-weak-eqv-hashtable" (&optional k)
-  (declare (ignore k))
+  (check-hashtable-size "make-weak-eqv-hashtable" k)
   (make-weak-table :eqv 'eql :weak))
 (defprim "chez:make-ephemeron-eq-hashtable" (&optional k)
-  (declare (ignore k))
+  (check-hashtable-size "make-ephemeron-eq-hashtable" k)
   (make-weak-table :eq 'eq :ephemeron))
 (defprim "chez:make-ephemeron-eqv-hashtable" (&optional k)
-  (declare (ignore k))
+  (check-hashtable-size "make-ephemeron-eqv-hashtable" k)
   (make-weak-table :eqv 'eql :ephemeron))
 
 (defun make-weak-custom-table (who hash equiv weakness)
@@ -1137,7 +1137,11 @@ the parameters of src/chez/records.scm.")
 	(t (r6rs-assertion-violation "record-writer" "not a procedure or #f" proc))))
 
 (defun write-record (obj port recur)
-  "Write record OBJ as Chez does, in the Chez mode; NIL otherwise."
+  "Write record OBJ as Chez does, in the Chez mode; NIL otherwise.  The
+unspecified value too: #<void>."
+  (when (and ps:*chez-reader* (eq obj ps:unspecific))
+    (write-string "#<void>" port)
+    (return-from write-record t))
   (when (and ps:*chez-reader* (record-p obj) (not (condition-p* obj)))
     (let* ((rtd (record-rtd obj))
 	   (writer (loop for r = rtd then (rtd-parent r) while r
@@ -1159,3 +1163,118 @@ the parameters of src/chez/records.scm.")
 (setq ps::*record-literal-hook* 'read-record-literal
       ps::*write-extension* 'write-record
       ps::*datum-label-parts* 'record-parts)
+
+;;; ------------------------------------------------------------------
+;;; Immutable vectors, strings and bytevectors, and the empty ones
+;;;
+;;; An immutable one carries a flag in its header that SBCL leaves to
+;;; implementations (+vector-shareable-nonstd+; its fasl loader marks
+;;; constants with the other one, +vector-shareable+), so telling costs a
+;;; read of the header.  In the Chez mode the mutators check it
+;;; (src/chez/chez.lisp, *CHEZ-CHECKED-MUTATORS*).  As in Chez, the
+;;; empty vector, string and bytevector are each a single object, and
+;;; immutable.
+
+(defconstant +immutable-flag+ (ash sb-vm:+vector-shareable-nonstd+ 8))
+
+(declaim (inline immutable-p))
+(defun immutable-p (x)
+  (and (typep x '(simple-array * (*)))
+       (logtest +immutable-flag+ (sb-kernel:get-header-data x))))
+
+(defun mark-immutable (x) (sb-impl::logically-readonlyize x nil))
+
+(defvar *empty-vector* (mark-immutable (make-array 0)))
+(defvar *empty-string* (mark-immutable (make-string 0)))
+(defvar *empty-bytevector* (mark-immutable (make-array 0 :element-type '(unsigned-byte 8))))
+
+(defun empty-like (x)
+  "The single empty object of empty X's kind, or X if it has none."
+  (typecase x
+    (simple-vector *empty-vector*)
+    (string *empty-string*)
+    ((simple-array (unsigned-byte 8) (*)) *empty-bytevector*)
+    (t x)))
+
+(defun immutable (x)
+  "X, a fresh vector, string or bytevector, made immutable (the empty
+one if it is empty)."
+  (if (zerop (length x)) (empty-like x) (mark-immutable x)))
+
+(defun mutable (x)
+  "X, a fresh vector, string or bytevector: the empty one if empty."
+  (if (zerop (length x)) (empty-like x) x))
+
+(defun check-mutable-object (who x kind)
+  (unless (cond ((string= kind "vector") (simple-vector-p x))
+		((string= kind "string") (stringp x))
+		(t (typep x '(simple-array (unsigned-byte 8) (*)))))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "~~s is not a ~A" kind) x))
+  ;; the empty ones are immutable, but nothing of them can be changed
+  (when (and (immutable-p x) (plusp (length x)))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "~~s is not a mutable ~A" kind) x)))
+
+(defun check-vector (who v)
+  (unless (simple-vector-p v)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a vector" v)))
+
+(defun vector-range (who v start n)
+  "START and N, defaulted and checked: Chez's vector-copy takes a start
+and a count."
+  (check-vector who v)
+  (let* ((len (length v))
+	 (start (or start 0)))
+    (unless (and (typep start 'fixnum) (<= 0 start len))
+      (r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "invalid start index ~S" start) start))
+    (let ((n (or n (- len start))))
+      (unless (and (typep n 'fixnum) (<= 0 n (- len start)))
+	(r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "invalid count ~S" n) n))
+      (values start n))))
+
+(defprim "chez:immutable?" (x) (bool (immutable-p x)))
+(defprim "chez:vector-copy" (v &optional start n)
+  (multiple-value-bind (start n) (vector-range "vector-copy" v start n)
+    (mutable (subseq v start (+ start n)))))
+(defprim "chez:immutable-vector-copy" (v &optional (start nil start-p) n)
+  (multiple-value-bind (start n) (vector-range "immutable-vector-copy" v start n)
+    (if (and (not start-p) (immutable-p v))
+	v
+	(immutable (subseq v start (+ start n))))))
+(defprim "chez:vector-append" (&rest vs)
+  (dolist (v vs) (check-vector "vector-append" v))
+  (mutable (apply #'concatenate 'simple-vector vs)))
+(defprim "chez:immutable-vector-append" (&rest vs)
+  (dolist (v vs) (check-vector "immutable-vector-append" v))
+  (if (and vs (null (cdr vs)) (immutable-p (car vs)))
+      (car vs)
+      (immutable (apply #'concatenate 'simple-vector vs))))
+(defprim "chez:vector->immutable-vector" (v)
+  (check-vector "vector->immutable-vector" v)
+  (if (immutable-p v) v (immutable (copy-seq v))))
+(defprim "chez:immutable-vector" (&rest xs) (immutable (coerce xs 'simple-vector)))
+(defprim "chez:vector-set/copy" (v i x)
+  (check-vector "vector-set/copy" v)
+  (unless (and (typep i 'fixnum) (< -1 i (length v)))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "vector-set/copy") (format nil "invalid index ~S" i) i))
+  (let ((new (copy-seq v))) (setf (svref new i) x) new))
+(defprim "chez:immutable-vector-set/copy" (v i x)
+  (immutable (funcall (prim "chez:vector-set/copy") v i x)))
+(defprim "chez:string->immutable-string" (s)
+  (unless (stringp s) (r6rs-assertion-violation (ps:intern-scheme-symbol "string->immutable-string") "not a string" s))
+  (if (immutable-p s) s (immutable (coerce s 'simple-string))))
+(defprim "chez:string-append-immutable" (&rest ss)
+  (dolist (s ss)
+    (unless (stringp s) (r6rs-assertion-violation (ps:intern-scheme-symbol "string-append-immutable") "not a string" s)))
+  (if (and ss (null (cdr ss)) (immutable-p (car ss)))
+      (car ss)
+      (immutable (coerce (apply #'concatenate 'string ss) 'simple-string))))
+(defprim "chez:bytevector->immutable-bytevector" (bv)
+  (unless (typep bv '(simple-array (unsigned-byte 8) (*)))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "bytevector->immutable-bytevector") "not a bytevector" bv))
+  (if (immutable-p bv) bv (immutable (copy-seq bv))))
+(defprim "chez:empty-vector" () *empty-vector*)
+(defprim "chez:empty-string" () *empty-string*)
+(defprim "chez:empty-bytevector" () *empty-bytevector*)
+(defprim "chez:check-mutable" (who x kind)
+  (check-mutable-object (if (symbolp who) (ps:scheme-symbol-name who) who) x kind)
+  ps:unspecific)

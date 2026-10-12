@@ -69,16 +69,21 @@
   (check-hashtable who h)
   (unless (hashtable-mutable h) (ps:scheme-error "~A: hashtable is immutable" who)))
 
+(defun check-hashtable-size (who k)
+  "K, a hashtable's initial capacity if given, is a nonnegative exact integer."
+  (unless (or (null k) (typep k '(integer 0)))
+    (ps:scheme-error "~A: invalid size ~S" who k)))
+
 (defprim "make-eq-hashtable" (&optional k)
-  (declare (ignore k))
+  (check-hashtable-size "make-eq-hashtable" k)
   (%make-hashtable (make-hash-table :test 'eq) :eq nil nil t))
 
 (defprim "make-eqv-hashtable" (&optional k)
-  (declare (ignore k))
+  (check-hashtable-size "make-eqv-hashtable" k)
   (%make-hashtable (make-hash-table :test 'eql) :eqv nil nil t))
 
 (defprim "make-hashtable" (hash equiv &optional k)
-  (declare (ignore k))
+  (check-hashtable-size "make-hashtable" k)
   (check-procedure "make-hashtable" hash)
   (check-procedure "make-hashtable" equiv)
   (%make-hashtable (make-hash-table :test 'eql) :custom hash equiv t))

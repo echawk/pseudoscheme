@@ -541,8 +541,10 @@ symbols, not errors, and #!r6rs restricts a port to R6RS syntax.")
   "NIL, or a function of an object, a port and the writer of its parts:
 true if it wrote the object.")
 
+;;; A Lisp boolean: the writer (write.pso) tests it with OR, where an
+;;; object it doesn't know is printed (PRIN1) if this is NIL.
 (defun write-extension (obj port recur)
-  (if (and *write-extension* (funcall *write-extension* obj port recur)) true false))
+  (and *write-extension* (funcall *write-extension* obj port recur) t))
 
 ;;; Chez Scheme's #!r6rs: after it, a port's syntax must be R6RS's
 ;;; (src/read.scm), in --chez mode; #!chezscheme lifts that.

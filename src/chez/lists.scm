@@ -40,39 +40,27 @@
 (define substq! substq)
 (define substv! substv)
 
-;;; Vectors and strings
+;;; Vectors and strings.  Chez's vector-copy takes a start and a count;
+;;; immutable vectors, strings and bytevectors are marked as such, and
+;;; the empty ones are each a single immutable object (src/chez/host.lisp).
 
-(define vector-copy
-  (case-lambda
-    ((v) (vector-copy v 0 (vector-length v)))
-    ((v start) (vector-copy v start (vector-length v)))
-    ((v start end)
-     (let ((new (make-vector (- end start))))
-       (do ((i start (+ i 1))) ((= i end) new)
-         (vector-set! new (- i start) (vector-ref v i)))))))
+(define vector-copy %chez:vector-copy)
+(define vector-append %chez:vector-append)
+(define vector-set/copy %chez:vector-set/copy)
 
-(define (vector-append . vs)
-  (list->vector (apply append (map vector->list vs))))
-
-(define (vector-set/copy v i x)
-  (let ((new (vector-copy v)))
-    (vector-set! new i x)
-    new))
-
-;; Immutable vectors, strings and bytevectors aren't a separate kind
-;; here: the conversions copy, and everything is mutable.
-(define (vector->immutable-vector v) v)
-(define (string->immutable-string s) s)
-(define (bytevector->immutable-bytevector bv) bv)
-(define (immutable-vector . xs) (list->vector xs))
-(define (mutable-vector? x) (vector? x))
-(define (immutable-vector? x) #f)
-(define (mutable-string? x) (string? x))
-(define (immutable-string? x) #f)
-(define (mutable-bytevector? x) (bytevector? x))
-(define (immutable-bytevector? x) #f)
+(define vector->immutable-vector %chez:vector->immutable-vector)
+(define string->immutable-string %chez:string->immutable-string)
+(define bytevector->immutable-bytevector %chez:bytevector->immutable-bytevector)
+(define immutable-vector %chez:immutable-vector)
+(define (mutable-vector? x) (and (vector? x) (not (%chez:immutable? x))))
+(define (immutable-vector? x) (and (vector? x) (%chez:immutable? x)))
+(define (mutable-string? x) (and (string? x) (not (%chez:immutable? x))))
+(define (immutable-string? x) (and (string? x) (%chez:immutable? x)))
+(define (mutable-bytevector? x) (and (bytevector? x) (not (%chez:immutable? x))))
+(define (immutable-bytevector? x) (and (bytevector? x) (%chez:immutable? x)))
 
 (define (substring-fill! s start end c)
+  (%chez:check-mutable 'substring-fill! s "string")
   (do ((i start (+ i 1))) ((= i end)) (string-set! s i c)))
 
 (define (char- a b) (- (char->integer a) (char->integer b)))
@@ -84,21 +72,25 @@
 (define string->uninterned-symbol %chez:string->uninterned-symbol)
 (define uninterned-symbol? gensym?)
 
-(define property-lists (make-eq-hashtable))
-(define (property-list s) (hashtable-ref property-lists s '()))
+(define property-lists (make-eq-hashtable))   ; symbol -> alist
+(define (properties s) (hashtable-ref property-lists s '()))
+;; as Chez gives it: a new list, (key value ...)
+(define (property-list s)
+  (let loop ((ps (properties s)))
+    (if (null? ps) '() (cons (caar ps) (cons (cdar ps) (loop (cdr ps)))))))
 (define (getprop s key . default)
-  (let ((p (assq key (property-list s))))
+  (let ((p (assq key (properties s))))
     (cond (p (cdr p))
           ((pair? default) (car default))
           (else #f))))
 (define (putprop s key value)
-  (let ((p (assq key (property-list s))))
+  (let ((p (assq key (properties s))))
     (if p
         (set-cdr! p value)
-        (hashtable-set! property-lists s (cons (cons key value) (property-list s))))))
+        (hashtable-set! property-lists s (cons (cons key value) (properties s))))))
 (define (remprop s key)
   (hashtable-set! property-lists s
-                  (remp (lambda (p) (eq? (car p) key)) (property-list s))))
+                  (remp (lambda (p) (eq? (car p) key)) (properties s))))
 
 ;;; Paths, as Chez's path procedures take them apart: separators are /,
 ;;; and runs of them count as one.
@@ -246,7 +238,6 @@
 (define flvector-copy %chez:flvector-copy)
 (define flvector-copy! %chez:flvector-copy!)
 
-;; immutable strings and vectors are the mutable kinds here
-(define (string-append-immutable . ss) (apply string-append ss))
-(define (immutable-vector-set/copy v i x) (vector-set/copy v i x))
+(define string-append-immutable %chez:string-append-immutable)
+(define immutable-vector-set/copy %chez:immutable-vector-set/copy)
 (define (list-assuming-immutable? x) (list? x))

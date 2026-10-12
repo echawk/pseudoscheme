@@ -30,7 +30,7 @@
           interaction-library-name interaction-source-name
           identifier-binding environment-symbols eval-hook
           interaction-symbols top-level-binding expand-top-level
-          expansion-lock-hook expand-r6rs-top-level)
+          expansion-lock-hook expand-r6rs-top-level mixed-bodies)
   (import
     ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
@@ -2815,8 +2815,12 @@
              (stx-error e* "no expression in body"))
            ;; PSEUDOSCHEME: SRFI 251: definitions after the first
            ;; expression begin a body of their own, in the scope of
-           ;; this one's definitions.
-           (let-values (((e* rest) (split-commands e* r rib)))
+           ;; this one's definitions -- unless (mixed-bodies) is #f, as
+           ;; at Chez's top level, which has them expanded as
+           ;; expressions (and so rejected).
+           (let-values (((e* rest) (if (mixed-bodies)
+                                       (split-commands e* r rib)
+                                       (values e* '()))))
              (let ((rhs* (chi-rhs* rhs* r mr))
                    (init* (chi-expr* (append (apply append (reverse mod**)) e*) r mr)))
                (build-letrec* no-source
@@ -2825,6 +2829,8 @@
                     (if (null? rest)
                         init*
                         (append init* (list (chi-internal rest r mr))))))))))))
+
+  (define mixed-bodies (make-parameter #t))
 
   ;;; PSEUDOSCHEME: E*, a body's forms from its first expression on, as
   ;;; the expressions before any definition and the forms from that

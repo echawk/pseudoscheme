@@ -393,7 +393,20 @@ ESTABLISH again when rebuilt."
 
 (defun full-index-loop (kind f sequence more)
   (let ((sequences (cons sequence more)))
+    (when ps:*chez-reader* (check-index-loop-arguments kind f sequences))
     (index-loop kind f sequences 0 (reduce #'min sequences :key #'length) '() nil)))
+
+(defun check-index-loop-arguments (kind f sequences)
+  "Chez's checks: a procedure, and vectors (or strings) of one length."
+  (let ((who (string-downcase (symbol-name kind)))
+	(type (if (member kind '(:vector-map :vector-for-each)) 'simple-vector 'string)))
+    (ps-r6rs::check-procedure who f)
+    (dolist (s sequences)
+      (unless (typep s type)
+	(ps-r6rs::r6rs-assertion-violation (ps:intern-scheme-symbol who)
+					   (format nil "~~s is not a ~A" (if (eq type 'string) "string" "vector")) s)))
+    (unless (every (lambda (s) (= (length s) (length (car sequences)))) sequences)
+      (ps-r6rs::r6rs-assertion-violation (ps:intern-scheme-symbol who) "lengths differ" sequences))))
 
 ;;; Calls to the other primitives that call procedures (*BARRIER-PRIMITIVES*)
 ;;; are made in a :BARRIER frame: re-entering a continuation captured in

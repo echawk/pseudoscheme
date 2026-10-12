@@ -98,6 +98,7 @@
 (define (remv! x l) (remv x l))
 (define (remove! x l) (remove x l))
 (define (string-copy! src s-start dst d-start n)   ; Chez's argument order
+  (%chez:check-mutable 'string-copy! dst "string")
   (do ((i 0 (+ i 1))) ((= i n)) (string-set! dst (+ d-start i) (string-ref src (+ s-start i)))))
 (define make-list %make-list)
 (define (fxabs n) (if (fx<? n 0) (fx- 0 n) n))
@@ -377,10 +378,10 @@
   (let ((b (make-bytevector 4)))
     (bytevector-ieee-single-native-set! b 0 x)
     (bytevector-ieee-single-native-ref b 0)))
-(define (immutable-vector-append . vs) (vector->immutable-vector (apply vector-append vs)))
-(define (immutable-vector-copy v . range)
-  (vector->immutable-vector (apply vector-copy v range)))
+(define immutable-vector-append %chez:immutable-vector-append)
+(define immutable-vector-copy %chez:immutable-vector-copy)
 (define (vector-cas! v i old new)
+  (%chez:check-mutable 'vector-cas! v "vector")
   (and (eq? (vector-ref v i) old) (begin (vector-set! v i new) #t)))
 
 ;; Bytevector integers of 3, 5, 6 and 7 bytes

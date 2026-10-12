@@ -49,7 +49,8 @@ copy of IN, which runs as the source does."
   (let* ((in (merge-pathnames in))
 	 (out (merge-pathnames out))
 	 (*include-directory* (make-pathname :name nil :type nil :defaults in))
-	 (expanded (funcall (psx:host-ref "psyntax:expand-r6rs-top-level") (read-forms in)))
+	 (expanded (with-psyntax-parameter ("psyntax:mixed-bodies" ps:false)
+		     (funcall (psx:host-ref "psyntax:expand-r6rs-top-level") (read-forms in))))
 	 (specs (first expanded)))
     (if (every (lambda (spec) (psx::stable-id-p (first spec))) specs)
 	(handler-case

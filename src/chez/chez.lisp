@@ -205,6 +205,79 @@ calls with those are still open-coded."
 (defun chez-file-options-p (options)
   (and options (not (eq (car options) ps:false))))
 
+;;; In the Chez mode, the mutators refuse immutable objects (host.lisp),
+;;; the comparisons check their arguments' types, the vector and string
+;;; iterators their arguments, and the constructors of an empty vector,
+;;; string or bytevector give the single one.  A reference to such a
+;;; primitive there is one to a host global chez:NAME
+;;; (psx::*chez-renamed-primitives*), called directly, its usual case
+;;; inlined (psx::*inline-primitives*).  Elsewhere they're as before.
+
+(defparameter *chez-checked-mutators*
+  '(("vector-set!" 0 "vector") ("vector-fill!" 0 "vector") ("string-set!" 0 "string")
+    ("string-fill!" 0 "string") ("bytevector-u8-set!" 0 "bytevector")
+    ("bytevector-s8-set!" 0 "bytevector") ("bytevector-fill!" 0 "bytevector")
+    ("bytevector-copy!" 2 "bytevector") ("vector-sort!" 1 "vector"))
+  "(name position kind): mutator NAME's argument at POSITION is a KIND.")
+
+(defparameter *chez-empty-constructors*
+  '("make-vector" "make-string" "make-bytevector" "list->vector" "list->string"
+    "substring" "string-append" "string-copy" "bytevector-copy"))
+
+(defparameter *chez-checked-comparisons*
+  '(("char=?" . characterp) ("char<?" . characterp) ("char>?" . characterp)
+    ("char<=?" . characterp) ("char>=?" . characterp) ("char-ci=?" . characterp)
+    ("char-ci<?" . characterp) ("char-ci>?" . characterp) ("char-ci<=?" . characterp)
+    ("char-ci>=?" . characterp) ("string=?" . stringp) ("string<?" . stringp)
+    ("string>?" . stringp) ("string<=?" . stringp) ("string>=?" . stringp)
+    ("string-ci=?" . stringp) ("string-ci<?" . stringp) ("string-ci>?" . stringp)
+    ("string-ci<=?" . stringp) ("string-ci>=?" . stringp)))
+
+(defun chez-rename (name function &optional nullary)
+  (let ((global (concatenate 'string "chez:" name)))
+    (psx:host-set! global function)
+    (setf (gethash name psx::*chez-renamed-primitives*) (if nullary (list global) global))))
+
+(defun wrong-argument (who x what)
+  (ps-r6rs::r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "~~s is not a ~A" what) x))
+
+(defun install-chez-mutators ()
+  (setq psx::*canonical-empty* 'ps-r6rs::empty-like)
+  (loop for (name position kind) in *chez-checked-mutators*
+	do (let ((old (psx:host-ref name)) (name name) (position position) (kind kind))
+	     (chez-rename name (lambda (&rest args)
+				 (ps-r6rs::check-mutable-object name (nth position args) kind)
+				 (apply old args)))))
+  (flet ((canonical (x)
+	   (if (and (typep x '(simple-array * (0))) (not (bit-vector-p x))) (ps-r6rs::empty-like x) x)))
+    (dolist (name *chez-empty-constructors*)
+      (let ((old (psx:host-ref name)))
+	(chez-rename name (lambda (&rest args) (canonical (apply old args))))))
+    ;; (vector) and (string): only calls with no arguments
+    (chez-rename "vector" (lambda () ps-r6rs::*empty-vector*) t)
+    (chez-rename "string" (lambda () ps-r6rs::*empty-string*) t))
+  (loop for (name . type) in *chez-checked-comparisons*
+	do (let ((old (psx:host-ref name)) (name name) (type type))
+	     (chez-rename name (lambda (a &rest more)
+				 (dolist (x (cons a more))
+				   (unless (funcall type x)
+				     (wrong-argument name x (if (eq type 'characterp) "character" "string"))))
+				 (apply old a more)))))
+  (flet ((iterator (name kind for-each)
+	   (let ((old (psx:host-ref name)))
+	     (chez-rename name (lambda (f s &rest more)
+				 (psx::check-index-loop-arguments kind f (cons s more))
+				 (let ((r (apply old f s more)))
+				   (if for-each ps:unspecific r)))))))
+    (iterator "vector-map" :vector-map nil)
+    (iterator "vector-for-each" :vector-for-each t)
+    (iterator "string-for-each" :string-for-each t))
+  (let ((old (psx:host-ref "vector-sort")))
+    (chez-rename "vector-sort" (lambda (proc v)
+				 (ps-r6rs::check-procedure "vector-sort" proc)
+				 (unless (simple-vector-p v) (wrong-argument "vector-sort" v "vector"))
+				 (funcall old proc v)))))
+
 (defun install-chez-extensions ()
   (flet ((dynamic-wind (old)
 	   (lambda (a b c &optional (d nil d-p))
@@ -301,6 +374,7 @@ calls with those are still open-coded."
   "Install (pseudoscheme chez host), (chezscheme) and Chez's top level.
 Called while the standard libraries are installed."
   (install-chez-extensions)
+  (install-chez-mutators)
   (install-chez-top-level-primitives)
   (install-host-library '("pseudoscheme" "chez" "host")
 			(mapcar (lambda (n) (cons n n)) (chez-host-names)))
@@ -361,7 +435,9 @@ the top level already running, or the main one."
 		     *chez-interaction-library*)))
     (with-psyntax-parameter ("psyntax:interaction-library-name" (mapcar #'ssym library))
       (with-psyntax-parameter ("psyntax:interaction-source-name" (list (ssym "chezscheme")))
-	(eval-top-level-forms form)))))
+	;; a body's definitions come before its expressions, as in Chez
+	(with-psyntax-parameter ("psyntax:mixed-bodies" ps:false)
+	  (eval-top-level-forms form))))))
 
 (defun eval-top-level-forms (form)
   "Evaluate FORM; a (begin form ...) one form at a time, as Chez does at
