@@ -403,12 +403,20 @@ the environment so that its code generator uses this Chez too:
   (one 9 MB `(let () ...)` of 11,000 definitions), runs here.
   `idris2 --version` takes 90 s, almost all of it compiling the program, at
   a 3.9 GB peak.
-- **Stage 2:** that compiler type-checks and compiles Idris's libraries
-  (prelude, base, linear, network, test, contrib, papers) and then the
-  compiler itself, 289 modules. The whole bootstrap takes about an hour, at
-  3.1 GB.
-- **A program:** the compiler, running here, compiles `Hello.idr`, and the
-  result runs here: `Hello from Idris 2 on Pseudoscheme`.
+- **Stage 2:**
+  - That compiler type-checks and compiles Idris's libraries (prelude, base,
+    linear, network, test, contrib, papers) and then the compiler itself, 289
+    modules.
+  - The compiler it builds (`build/exec/idris2`, version 0.8.0-1c630e67c, this
+    checkout's) then rebuilds the libraries.
+  - Every Scheme step runs here. The whole `make bootstrap` takes 2 hours,
+    at a 3.5 GB peak.
+- **A program:** the self-built compiler, running here, compiles
+  `Hello.idr` (`IDRIS2_PREFIX=bootstrap-build`, where the bootstrap
+  installed the libraries), and the program runs here:
+  `Hello from Idris 2 on Pseudoscheme`. Each start of the compiler takes
+  about 90 s, compiling its 9 MB of Scheme. Chez loads compiled code;
+  here the `.so` is the source.
 
 What Idris needed:
 - **Hoisting through `(let () ...)`**: psyntax expands it to
