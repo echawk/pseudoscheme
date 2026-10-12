@@ -347,7 +347,8 @@ defined once and never assigned (for src/continuations.lisp).")
 
 (defun hoist-definitions (form)
   "FORM, a top-level core form, with the definitions of its outermost
-body made top-level definitions; or FORM if it has no such body."
+body made top-level definitions, and those of any big body run once in
+that body, as (let () ...) is; or FORM if it has no such body."
   (setq *hoisted-procedures* '())
   (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
 	   (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
@@ -384,18 +385,26 @@ body made top-level definitions; or FORM if it has no such body."
 				    when (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) vars)
 					      (lambda-p (caddr s)) (= (gethash (cadr s) counts 0) 1))
 				      collect (cadr s))))
-		 (setq *hoisted-procedures* defined)
+		 (setq *hoisted-procedures* (append defined *hoisted-procedures*))
 		 `(,@(loop for v in vars unless (member v defined)
 			   collect `(,(sym "define") ,v (,(sym "quote") ,ps:false)))
 		   ,@(loop for s in statements
-			   collect (if (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) defined))
-				       `(,(sym "define") ,(cadr s) ,(caddr s))
-				       s)))))))
-    (let ((form (unwrap form)))
-      (cond ((body-form-p form) `(,(sym "begin") ,@(hoist form)))
-	    ((and (consp form) (keyword-p (car form) "BEGIN") (body-form-p (car (last form))))
-	     `(,@(butlast form) ,@(hoist (unwrap (car (last form))))))
-	    (t form)))))
+			   append (cond ((and (consp s) (keyword-p (car s) "SET!") (member (cadr s) defined))
+					 (list `(,(sym "define") ,(cadr s) ,(caddr s))))
+					;; a big (let () body ...) in the body, run
+					;; once where it is, is hoisted in its turn
+					((> (tree-size s) *letrec-definitions-limit*)
+					 (let ((h (hoist-form s)))
+					   (if (eq h s) (list s) (cdr h))))
+					(t (list s))))))))
+	   (hoist-form (form)
+	     ;; (begin form ...) of FORM's definitions and body, or FORM
+	     (let ((u (unwrap form)))
+	       (cond ((body-form-p u) `(,(sym "begin") ,@(hoist u)))
+		     ((and (consp u) (keyword-p (car u) "BEGIN") (body-form-p (car (last u))))
+		      `(,@(butlast u) ,@(hoist (unwrap (car (last u))))))
+		     (t form)))))
+    (hoist-form form)))
 
 (defun open-top-level (form)
   "OPEN-PRIMITIVES for a form evaluated at top level, whose definitions

@@ -124,5 +124,11 @@ mkdir -p $tmp/cache
 check "--precompile" "1 of 1 compiled" sh -c "PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS --precompile $tmp/lib | grep -o '1 of 1 compiled'"
 check "a precompiled library loads" "42" env PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS -L $tmp/lib $tmp/uselib.scm
 
+# Chez's command: compile-program writes a fasl, which runs as the program
+ln -s "$(cd "$(dirname "$PS")" && pwd)/$(basename "$PS")" $tmp/ib/chez
+printf '(import (chezscheme) (my lib))\n(define (f n) (if (= n 0) 1 (* n (f (- n 1)))))\n(printf "~a ~a ~a\\n" (f 20) (twice 4) (cdr (command-line)))\n' > $tmp/p.ss
+check "chez: compile-program" "# FASL" sh -c "echo '(compile-program \"$tmp/p.ss\")' | PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $tmp/ib/chez -q --libdirs $tmp/lib >/dev/null && sed -n 1p $tmp/p.so | cut -c1-6"
+check "chez: a compiled program runs" "2432902008176640000 8 (a b)" env PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $tmp/ib/chez --libdirs $tmp/lib --program $tmp/p.so a b
+
 echo "$((n-fail)) of $n CLI tests passed"
 [ $fail = 0 ]

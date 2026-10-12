@@ -210,6 +210,7 @@
 	       (:file "psyntax" :depends-on ("r6rs"))
 	       (:file "continuations" :depends-on ("psyntax"))
 	       (:file "library-cache" :depends-on ("psyntax" "continuations"))
+	       (:file "compiled-files" :depends-on ("psyntax" "continuations"))
 	       (psyntax-image "psyntax-pseudoscheme"
 		:pathname "../vendor/psyntax/psyntax-pseudoscheme"
 		:depends-on ("r6rs" "chez" "compat" "psyntax" "continuations" "library-cache"))))
@@ -262,7 +263,7 @@
 	       (:file "front")
 	       (:module "chez" :pathname "../chez/"
 		:depends-on ("front")
-		:components ((:file "chez")))
+		:components ((:file "chez") (:file "compile" :depends-on ("chez"))))
 	       (:module "reports" :pathname "../reports/"
 		:depends-on ("front" "chez")
 		:components ((:file "reports")

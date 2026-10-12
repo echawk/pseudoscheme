@@ -543,6 +543,9 @@ is reported, and the program runs anyway."
 ;;; Initialize everything now, at build time, so it's in the saved image:
 ;;; Guile's boot-9 too, if a Guile installation is there to load it from.
 (pseudoscheme-interop:boot)
+;;; and (chezscheme) invoked: a program importing it would otherwise run
+;;; its body, seconds of it, every time
+(funcall (psx:host-ref "psyntax:library-export-bindings") (list (ps:intern-scheme-symbol "chezscheme")))
 (handler-case (progn (psg:boot)
 		     ;; and Guile's REPL, (system repl repl), set up for the line
 		     ;; editor: loading it in a new build (its cache being stale)

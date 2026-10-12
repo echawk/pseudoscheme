@@ -67,49 +67,15 @@
   (declare (ignore environment))
   `(make-site ',(site-module s) ',(site-name s) ',(site-public s) ',(site-kind s)))
 
-(defvar *named-photons* '()
-  "The photons compiled code may hold, by name: they are unique objects.")
-
-(defun named-photon (name)
-  (unless *named-photons* (register-photons))
-  (or (cdr (assoc name *named-photons* :test #'string=))
-      (error "no photon named ~S" name)))
-
-(defun register-photons ()
-  (setq *named-photons*
-	(list (cons "unspecific" ps:unspecific) (cons "eof" ps:eof-object)
-	      (cons "nil" *elisp-nil*) (cons "unbound" +unbound+)
-	      ;; a letrec variable's value before its init (compile.lisp)
-	      (cons "unassigned" ps:unassigned))))
-
-(defmethod make-load-form ((p ps::photon) &optional environment)
-  (declare (ignore environment))
-  (register-photons)
-  (let ((entry (rassoc p *named-photons* :test #'eq)))
-    (if entry
-	`(named-photon ,(car entry))
-	(error "~S can't be in a compiled Guile file" p))))
+(psx::register-named-photon "nil" *elisp-nil*)
+(psx::register-named-photon "unbound" +unbound+)
 
 ;;; ------------------------------------------------------------------
 ;;; Evaluating a file's forms, keeping their code
 
-(defun translate-top-level (core)
-  "CORE's Lisp forms, to be evaluated in order, as HOST-EVAL evaluates it."
-  (handler-bind ((warning #'muffle-warning))
-    (if psx::*full-continuations*
-	(let ((form (psx::cc-transform (psx::open-top-level core))))
-	  (mapcar (lambda (f) (psx::translate-core f t))
-		  (if (and (consp form) (symbolp (car form))
-			   (string= (symbol-name (car form)) "BEGIN") (cdr form))
-		      (cdr form)
-		      (list form))))
-	(list (psx::translate-core (psx::open-top-level core) t)))))
+(defun translate-top-level (core) (psx::translate-top-level core))
 
-(defun run-cached (thunk)
-  "Run THUNK, a compiled top-level form, as HOST-EVAL runs one."
-  (if psx::*full-continuations*
-      (psx::call-with-continuation-base thunk)
-      (funcall thunk)))
+(defun run-cached (thunk) (psx::run-top-level thunk))
 
 (defun eval-translated (forms)
   (let ((values '()))

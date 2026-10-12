@@ -55,6 +55,14 @@
        (assertion-violation 'collect "invalid target generation" tg))
      (%chez:collect))
     ((g tg objs) (collect g tg) (if #f #f))))
+;; Virtual registers: 16 per thread, each initially 0
+(define (virtual-register-count) 16)
+(define (check-virtual-register who i)
+  (unless (and (fixnum? i) (fx<= 0 i 15)) (assertion-violation who "invalid virtual register" i)))
+(define (virtual-register i) (check-virtual-register 'virtual-register i) (%chez:virtual-register i))
+(define (set-virtual-register! i x)
+  (check-virtual-register 'set-virtual-register! i)
+  (%chez:set-virtual-register! i x))
 ;; (bytes-allocated [g [space]]): the heap in use; SBCL's generations
 ;; aren't Chez's, so every generation and space is all of it
 (define bytes-allocated

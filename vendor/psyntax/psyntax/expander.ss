@@ -30,7 +30,7 @@
           interaction-library-name interaction-source-name
           identifier-binding environment-symbols eval-hook
           interaction-symbols top-level-binding expand-top-level
-          expansion-lock-hook)
+          expansion-lock-hook expand-r6rs-top-level)
   (import
     ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
@@ -3974,6 +3974,16 @@
           (let-values (((lib* invoke-code) (top-level-expander x*)))
             (for-each invoke-library lib*)
             (eval-core (expanded->core invoke-code)))))))
+
+  ;;; PSEUDOSCHEME: a top-level program expanded but not run, for Chez's
+  ;;; compile-program: a list of the specs (id name version) of the
+  ;;; libraries it invokes, in order, and its core form.
+  (define expand-r6rs-top-level
+    (lambda (x*)
+      (with-expansion-lock
+        (lambda ()
+          (let-values (((lib* invoke-code) (top-level-expander x*)))
+            (list (map library-spec lib*) (expanded->core invoke-code)))))))
 
   ;;; The interaction-library is a parameter that is either #f 
   ;;; (the default, for r6rs scripts) or set to an extensible library

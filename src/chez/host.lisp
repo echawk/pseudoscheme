@@ -322,6 +322,13 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 
 (defprim "chez:bytes-consed" () (sb-ext:get-bytes-consed))
 (defprim "chez:bytes-allocated" () (sb-kernel:dynamic-usage))
+;;; Chez's virtual registers: 16 per thread
+(defvar *virtual-registers* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defun virtual-registers ()
+  (or (gethash sb-thread:*current-thread* *virtual-registers*)
+      (setf (gethash sb-thread:*current-thread* *virtual-registers*) (make-array 16 :initial-element 0))))
+(defprim "chez:virtual-register" (i) (svref (virtual-registers) i))
+(defprim "chez:set-virtual-register!" (i x) (setf (svref (virtual-registers) i) x) ps:unspecific)
 (defprim "chez:collect" ()
   (sb-ext:gc :full t)
   (ps-r6rs::note-full-collection)

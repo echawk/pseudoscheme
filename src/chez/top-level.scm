@@ -75,10 +75,13 @@
 (define (load-library path) (%chez:load path))
 (define (visit path) (%chez:load path))
 (define (revisit path) (%chez:load path))
-;; Compiling a file: its "object file" is a copy of its source, which
-;; load and --script run as they do the source (and compile, as they go,
-;; with SBCL).  So programs that drive Chez's compiler, as Idris 2's
-;; build does, find the files they expect.
+;; Compiling a program: its object file is an SBCL fasl
+;; (src/chez/compile.lisp).  Compiling another file: its "object file"
+;; is a copy of its source, which load and --script run as they do the
+;; source (and compile, as they go, with SBCL); a library's is compiled
+;; into the compiled-library cache when it's first imported.  So
+;; programs that drive Chez's compiler, as Idris 2's build does, find
+;; the files they expect.
 (define (object-file-name in)
   (let loop ((i (- (string-length in) 1)))
     (cond ((< i 0) (string-append in ".so"))
@@ -98,7 +101,13 @@
     (if #f #f)))
 (define (compile-file in . out) (copy-to-object-file 'compile-file in (and (pair? out) (car out))))
 (define (compile-library in . out) (copy-to-object-file 'compile-library in (and (pair? out) (car out))))
-(define (compile-program in . out) (copy-to-object-file 'compile-program in (and (pair? out) (car out))) '())
+(define (compile-program in . out)
+  (unless (string? in) (assertion-violation 'compile-program "not a string" in))
+  (let ((out (if (pair? out) (car out) (object-file-name in))))
+    (when (compile-file-message)
+      (printf "compiling ~a with output to ~a\n" in out))
+    (%chez:compile-program in out)
+    '()))
 (define (compile-script in . out) (copy-to-object-file 'compile-script in (and (pair? out) (car out))))
 (define (compile-to-file . args) (if #f #f))
 (define (maybe-compile-file in . out) (apply compile-file in out))

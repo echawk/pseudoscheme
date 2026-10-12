@@ -34,6 +34,8 @@
 
   ;; An R6RS top-level program: a list of forms beginning with (import ...).
   (set-symbol-value! 'psyntax:eval-r6rs-top-level eval-r6rs-top-level)
+  ;; One expanded, not run: ((lib-spec ...) core), for compile-program.
+  (set-symbol-value! 'psyntax:expand-r6rs-top-level expand-r6rs-top-level)
   ;; One REPL form, in the extensible (pseudoscheme interaction) library.
   (set-symbol-value! 'psyntax:eval-top-level eval-top-level)
   ;; Expand and install one (library ...) form.

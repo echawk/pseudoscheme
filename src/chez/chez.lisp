@@ -29,6 +29,7 @@
     "directory-separator" "machine-type" "get-mode" "chmod" "file-change-time"
     "source-directories" "record-writer" "collect" "weak-cons" "weak-pair?"
     "make-guardian" "guardian?" "unregister-guardian" "bytes-allocated"
+    "virtual-register-count" "virtual-register" "set-virtual-register!"
     "bwp-object?" "iota" "box" "box?" "unbox" "set-box!" "box-cas!" "pretty-print"
     "fxvector?" "make-fxvector" "fxvector" "list->fxvector" "fxvector-length" "fxvector-ref"
     "fxvector-set!" "fxvector->list" "fxvector-fill!" "fxvector-copy"
@@ -374,6 +375,8 @@ a library is invoked only when a form that runs references it."
 (defun load-file-at-chez-top-level (path &optional library)
   "Load PATH's forms one by one at Chez's top level (see
 EVAL-AT-CHEZ-TOP-LEVEL)."
+  (when (psx::compiled-file-p path)
+    (return-from load-file-at-chez-top-level (psx::load-compiled-file path)))
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
 	(value ps:unspecific))
     (dolist (form (read-forms path) value)
@@ -423,7 +426,7 @@ return true if that installed the library."
 ;;; The top level's host procedures
 
 (defparameter *chez-top-level-primitives*
-  '("chez:eval-at-top-level" "chez:load" "chez:library-directories" "chez:library-exports"
+  '("chez:eval-at-top-level" "chez:load" "chez:compile-program" "chez:library-directories" "chez:library-exports"
     "chez:set-library-directories!" "chez:top-level-symbols"
     "chez:set-top-level-value!" "chez:define-top-level-value!" "chez:top-level-bound?"))
 
@@ -434,6 +437,8 @@ return true if that installed the library."
   (psx:defhost "chez:load" (path)
     (load-file-at-chez-top-level (merge-pathnames path))
     ps:unspecific)
+  (psx:defhost "chez:compile-program" (in out)
+    (compile-chez-program in out))
   (psx:defhost "chez:set-top-level-value!" (symbol value)
     (eval-at-chez-top-level (list (ssym "set!") symbol (quoted value)))
     ps:unspecific)
