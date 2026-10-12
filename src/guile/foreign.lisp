@@ -69,6 +69,82 @@ static objects of its images.")
       (let ((a (incf *next-object-address* 16)))
 	(setf (gethash a *address-objects*) x (gethash x *object-addresses*) a))))
 
+(defun object-at-address (address)
+  (multiple-value-bind (x found) (gethash address *address-objects*)
+    (if found x (guile-error (ssym "misc-error") "scm->object" "no object at address ~S" (list address)))))
+
+;;; (system base types)'s scm->object (src/guile/modules/system/base/
+;;; types.scm): an object here, from its bits as object-address gives
+;;; them, as libguile's would be read from its memory: what can be
+;;; copied is, structs become inferior structs, the rest inferior
+;;; objects of Guile's kinds.  MAKE-OBJECT, MAKE-STRUCT and SET-FIELDS
+;;; are the module's constructors.
+
+(defun port-type-name (p)
+  (let ((data (port-data p)))
+    (cond ((memory-p data)
+	   (cond ((memory-string-p data) "string")
+		 ((port-input-p p) "r6rs-bytevector-input-port")
+		 (t "r6rs-bytevector-output-port")))
+	  (t (port-kind p)))))
+
+(defun scm-bits->object (bits make-object make-struct set-fields)
+  (let ((visited (make-hash-table :test 'eq)))
+    (labels ((io (kind sub x)
+	       (if sub (funcall make-object kind sub (object-address x)) (funcall make-object kind (object-address x))))
+	     (visit (x result) (setf (gethash x visited) result))
+	     (convert (x)
+	       (multiple-value-bind (seen found) (gethash x visited)
+		 (when found (return-from convert seen)))
+	       (cond ((integerp x)
+		      (if (<= (- -1 +guile-fixnum-max+) x +guile-fixnum-max+) x (io (ssym "bignum") nil x)))
+		     ((typep x 'double-float) x)
+		     ((numberp x) (io (ssym "number") nil x))
+		     ((or (characterp x) (null x) (assoc x *immediate-bits* :test #'eq)) x)
+		     ((stringp x) (copy-seq x))
+		     ((symbolp x) x)
+		     ((consp x)
+		      (let ((c (cons nil nil)))
+			(visit x c)
+			(setf (car c) (convert (car x)) (cdr c) (convert (cdr x)))
+			c))
+		     ((simple-vector-p x)
+		      (let ((v (make-array (length x))))
+			(visit x v)
+			(dotimes (i (length x) v) (setf (svref v i) (convert (svref x i))))))
+		     ((typep x '(simple-array (unsigned-byte 8) (*))) (copy-seq x))
+		     ((gpointer-p x) (make-pointer* (gpointer-address x)))
+		     ((struct-p x)
+		      (let* ((vtable (struct-vtable-of x))
+			     (name (svref (gstruct-slots vtable) +vtable-index-name+))
+			     (result (funcall make-struct name ps:false)))
+			(visit x result)
+			(funcall set-fields result
+				 (map 'list #'convert (subseq (struct-slots-of x) 0 (vtable-nfields vtable))))
+			result))
+		     ((gethash x *guardian-procedures*) (io (ssym "smob") 31 x))
+		     ((weak-vector-p x) (io (ssym "weak-vector") nil x))
+		     ((ghash-p x) (io (ssym (if (ghash-weakness x) "weak-table" "hash-table")) nil x))
+		     ((bit-vector-p x) (io (ssym "bitvector") nil x))
+		     ((or (garray-p x) (arrayp x)) (io (ssym "array") nil x))
+		     ((fluid-p x) (io (ssym "fluid") nil x))
+		     ((dynamic-state-p x) (io (ssym "dynamic-state") nil x))
+		     ((gvariable-p x) (io (ssym "variable") nil x))
+		     ((syntax-object-p x) (io (ssym "syntax") nil x))
+		     ((gport-p x)
+		      (io (ssym "port") (funcall make-object (ssym "port-type") (port-type-name x) 0) x))
+		     ((functionp x) (io (ssym "program") nil x))
+		     (t (io (ssym "smob") 0 x)))))
+      (cond ((= (logand bits 3) 2)
+	     (let ((n (ash bits -2))) (if (logbitp 61 n) (- n (ash 1 62)) n)))
+	    ((= (logand bits #xff) #x0c) (code-char (ash bits -8)))
+	    ((car (rassoc bits *immediate-bits*)))
+	    ((= (logand bits 7) 0) (convert (object-at-address bits)))
+	    (t (funcall make-object (ssym "unknown") bits))))))
+
+(defguile "%scm->object" (bits make-object make-struct set-fields)
+  (scm-bits->object bits make-object make-struct set-fields))
+
 ;;; ------------------------------------------------------------------
 ;;; Types: Guile's codes, '* for a pointer, a list for a struct
 

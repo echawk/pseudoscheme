@@ -1070,14 +1070,21 @@ fails over and over (boot-9 half loaded)."
 (defguile "bit-extract" (n start end) (ldb (byte (- end start) start) n))
 (defconstant +guile-fixnum-max+ (1- (ash 1 61)) "Guile's most-positive-fixnum, 62 bits.")
 
+(defparameter *immediate-bits*
+  `((,ps:false . #x4) (,*elisp-nil* . #x104) (,ps:true . #x404) (nil . #x304)
+    (,ps:unspecific . #x804) (,+unbound+ . #x904) (,ps:eof-object . #xa04))
+  "Guile's bits for the immediates other than fixnums and characters.")
+
 (defguile "object-address" (x)
   ;; Guile's bits for an immediate (a fixnum is n<<2 | 2, which (rnrs
-  ;; arithmetic fixnums) tests), an address otherwise
+  ;; arithmetic fixnums) tests); for an object in the heap, a number
+  ;; standing for it, the same as long as it lives (SBCL's collector
+  ;; moves objects), as an address is: 8-aligned, its tag bits 0
   (cond ((and (integerp x) (<= (- -1 +guile-fixnum-max+) x +guile-fixnum-max+))
 	 (ldb (byte 64 0) (logior (ash x 2) 2)))
 	((characterp x) (logior (ash (char-code x) 8) #x0c))
-	((eq x ps:false) #x4) ((eq x ps:true) #x404) ((null x) #x304)
-	(t (logandc2 (sb-kernel:get-lisp-obj-address x) 7))))
+	((cdr (assoc x *immediate-bits* :test #'eq)))
+	(t (object-address x))))
 (defguile "inf" () sb-ext:double-float-positive-infinity)
 (defguile "nan" () (- sb-ext:double-float-positive-infinity sb-ext:double-float-positive-infinity))
 (defun function-arity (f)
