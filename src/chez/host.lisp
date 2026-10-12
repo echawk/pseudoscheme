@@ -1282,3 +1282,21 @@ and a count."
   (if (truthy input) (clear-input port) (clear-output port))
   ps:unspecific)
 (defprim "chez:unread-char" (c port) (unread-char c port) ps:unspecific)
+
+;;; Small system procedures: the oblist, file ports and their lengths,
+;;; the installed libraries
+(defprim "chez:oblist" ()
+  (let ((symbols '()))
+    (do-symbols (s (find-package "SCHEME") symbols)
+      (when (eq (symbol-package s) (find-package "SCHEME")) (push s symbols)))))
+(defprim "chez:file-port?" (x) (bool (typep x 'sb-sys:fd-stream)))
+(defprim "chez:port-length" (p)
+  (or (ignore-errors (file-length p))
+      (r6rs-assertion-violation (ps:intern-scheme-symbol "port-length") "port does not support port-length" p)))
+(defprim "chez:port-has-port-length?" (p) (bool (ignore-errors (file-length p))))
+(defprim "chez:library-list" () (funcall (psx:host-ref "psyntax:library-names")))
+(defprim "chez:library-version" (name)
+  (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
+    (if (consp spec)
+	(third spec)
+	(r6rs-assertion-violation (ps:intern-scheme-symbol "library-version") "library not found" name))))

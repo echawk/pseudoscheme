@@ -22,7 +22,7 @@
 
 (defparameter *chezscheme-extras*
   '(;; chezscheme.scm
-    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-output-port" "define-structure" "syntax-error" "unread-char" "call/1cc" "gensym" "getenv" "system" "make-parameter"
+    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "call/1cc" "gensym" "getenv" "system" "make-parameter"
     "with-input-from-string" "with-output-to-string" "current-directory"
     "file-directory?" "file-regular?" "file-symbolic-link?" "directory-list"
     "mkdir" "delete-directory" "rename-file" "file-modification-time"
@@ -378,7 +378,13 @@ Called while the standard libraries are installed."
   (install-chez-top-level-primitives)
   (install-host-library '("pseudoscheme" "chez" "host")
 			(mapcar (lambda (n) (cons n n)) (chez-host-names)))
-  (install-chezscheme-library)
+  (let ((exports (install-chezscheme-library)))
+    ;; (scheme), Chez's library of all of Chez, which the top-level
+    ;; module scheme names too (import scheme)
+    (psx:eval-library
+     (list (ssym "library") (list (ssym "scheme"))
+	   (cons (ssym "export") (mapcar #'ssym exports))
+	   (list (ssym "import") (list (ssym "chezscheme"))))))
   (install-interaction-library *chez-interaction-library*)
   (pushnew 'load-library-file-at-top-level psx::*library-loaders*))
 
@@ -400,7 +406,8 @@ Called while the standard libraries are installed."
 				 *chezscheme-from-psyntax*))
 	    (loop for file in *chezscheme-sources*
 		  append (read-forms (asdf:system-relative-pathname
-				      :pseudoscheme (concatenate 'string "src/chez/" file))))))))
+				      :pseudoscheme (concatenate 'string "src/chez/" file))))))
+    exports))
 
 ;;; ------------------------------------------------------------------
 ;;; The top level

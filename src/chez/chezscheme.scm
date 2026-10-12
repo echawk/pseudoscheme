@@ -486,3 +486,47 @@
   (case-lambda
     ((c) (%chez:unread-char c (current-input-port)))
     ((c p) (%chez:unread-char c p))))
+
+;; Compile-time values: what (define-syntax id (make-compile-time-value
+;; x)) binds id to; a transformer's lookup procedure, (r id), gives x
+(define (make-compile-time-value x) (cons '$ctv x))
+(define (compile-time-value? x) (and (pair? x) (eq? (car x) '$ctv)))
+(define (compile-time-value-value x)
+  (unless (compile-time-value? x)
+    (assertion-violation 'compile-time-value-value "not a compile-time value" x))
+  (cdr x))
+
+;; Parameters of the system, mostly without effect here
+(define internal-defines-as-letrec* (make-parameter #t (lambda (x) (and x #t))))
+(define file-buffer-size
+  (make-parameter 65536
+    (lambda (n)
+      (unless (and (fixnum? n) (> n 0)) (assertion-violation 'file-buffer-size "invalid buffer size" n))
+      n)))
+(define print-select-flonum-exponential-format (make-parameter #f))
+(define compress-level
+  (make-parameter 'medium
+    (lambda (x)
+      (unless (memq x '(minimum low medium high maximum))
+        (assertion-violation 'compress-level "invalid compression level" x))
+      x)))
+(define compress-format
+  (make-parameter 'lz4
+    (lambda (x)
+      (unless (memq x '(lz4 gzip)) (assertion-violation 'compress-format "invalid compression format" x))
+      x)))
+(define console-input-port (make-parameter (current-input-port)))
+(define console-output-port (make-parameter (current-output-port)))
+(define console-error-port (make-parameter (current-error-port)))
+(define current-transcoder (make-parameter (native-transcoder)))
+(define (oblist) (%chez:oblist))
+(define r6rs:dynamic-wind (lambda (before thunk after) (dynamic-wind before thunk after)))
+(define file-port? %chez:file-port?)
+(define port-length %chez:port-length)
+(define port-has-port-length? %chez:port-has-port-length?)
+(define (port-has-set-port-length!? p) (file-port? p))
+(define ephemeron-cons cons)
+(define ephemeron-pair? pair?)
+(define (library-list) (%chez:library-list))
+(define (library-version name) (%chez:library-version name))
+(define (library-object-filename name) #f)

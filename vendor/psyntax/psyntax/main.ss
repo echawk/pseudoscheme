@@ -34,6 +34,9 @@
 
   ;; An R6RS top-level program: a list of forms beginning with (import ...).
   (set-symbol-value! 'psyntax:eval-r6rs-top-level eval-r6rs-top-level)
+  ;; The names of the libraries installed, visible ones (Chez's library-list)
+  (set-symbol-value! 'psyntax:library-names
+    (lambda () (map library-name (installed-libraries))))
   ;; Whether a body may define after an expression (SRFI 251)
   (set-symbol-value! 'psyntax:mixed-bodies mixed-bodies)
   ;; One expanded, not run: ((lib-spec ...) core), for compile-program.

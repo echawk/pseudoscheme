@@ -464,23 +464,33 @@
   ;;; entry here is (old-label . ((key-label . value) ...)): its
   ;;; properties, keyed by the key's base label, and its old label's.
   (define property-table (make-eq-hashtable))
+  ;; PSEUDOSCHEME: a property's key: its identifier's label, or, unbound,
+  ;; its name (free-identifier=? compares unbound identifiers by name)
+  (define (property-key id) (or (base-label (id->label id)) (id->sym id)))
 
   (define (base-label label)
     (let ((entry (and label (hashtable-ref property-table label #f))))
       (if entry (base-label (car entry)) label)))
 
-  (define (property-lookup id key)
-    (unless (and (id? id) (id? key))
-      (assertion-violation 'lookup "not an identifier" (if (id? id) key id)))
-    (let ((label (id->label id)) (key-label (base-label (id->label key))))
-      (unless label (error 'lookup "unbound identifier" (strip id '())))
-      (unless key-label (error 'lookup "unbound identifier" (strip key '())))
-      (let loop ((label label))
-        (let ((entry (hashtable-ref property-table label #f)))
-          (cond
-            ((not entry) #f)
-            ((assq key-label (cdr entry)) => cdr)
-            (else (loop (car entry))))))))
+  (define property-lookup
+    (case-lambda
+      ;; PSEUDOSCHEME: (r id), as in Chez: ID's compile-time value, or #f
+      ((id)
+       (unless (id? id) (assertion-violation 'lookup "not an identifier" id))
+       (let ((label (id->label id)))
+         (let ((b (and label (label->binding (base-label label) '()))))
+           (and (pair? b) (eq? (car b) '$ctv) (cdr b)))))
+      ((id key)
+       (unless (and (id? id) (id? key))
+         (assertion-violation 'lookup "not an identifier" (if (id? id) key id)))
+       (let ((label (id->label id)) (key-label (property-key key)))
+         (unless label (error 'lookup "unbound identifier" (strip id '())))
+         (let loop ((label label))
+           (let ((entry (hashtable-ref property-table label #f)))
+             (cond
+               ((not entry) #f)
+               ((assq key-label (cdr entry)) => cdr)
+               (else (loop (car entry))))))))))
 
   ;;; PSEUDOSCHEME: syntax parameters (SRFI 139).  syntax-parameterize
   ;;; binds a keyword's label in the environment R, which label->binding
@@ -700,6 +710,9 @@
         ((and (pair? x) (eq? (car x) 'macro!) (procedure? (cdr x)))
          (cons* 'local-macro! (cdr x) src))
         ((and (pair? x) (eq? (car x) '$rtd)) x)
+        ;; PSEUDOSCHEME: Chez's compile-time value, ($ctv . value)
+        ;; (make-compile-time-value), which (r id) gives a transformer
+        ((and (pair? x) (eq? (car x) '$ctv)) x)
         (else (error 'expand "invalid transformer" x)))))
   
   ;;; r6rs's make-variable-transformer:
@@ -3061,9 +3074,8 @@
                  ((define-property)
                   (syntax-match e ()
                     ((_ id key expr) (and (id? id) (id? key))
-                     (let ((old (id->label id)) (key-label (base-label (id->label key))))
+                     (let ((old (id->label id)) (key-label (property-key key)))
                        (unless old (stx-error id "unbound identifier"))
-                       (unless key-label (stx-error key "unbound identifier"))
                        (let ((b (label->binding old r))
                              (value (eval-core (expanded->core (expand-transformer expr mr))))
                              (new (gen-label id)))
@@ -3121,7 +3133,12 @@
                                  (for-each
                                    (lambda (id lab) (extend-rib! rib id lab))
                                    id* lab*))
-                               (let-values (((subst lib*) (parse-import-spec* (list (stx->datum spec)))))
+                               (let-values (((subst lib*)
+                                             (parse-import-spec*
+                                               (list (let ((d (stx->datum spec)))
+                                                       ;; a top-level module, as scheme is
+                                                       (cond ((and (symbol? d) (assq d (top-level-modules))) => cdr)
+                                                             (else d)))))))
                                  (for-each
                                    (lambda (x) (extend-rib! rib (datum->stx kwd (car x)) (cdr x)))
                                    subst)
@@ -3228,6 +3245,24 @@
                                 (else spec)))
                             (stx->datum imp*)))
                      (chi-top* (cdr e*) init*)))))
+               ;; PSEUDOSCHEME: (define-property id key expr) at top level:
+               ;; ID's name in the interaction library gets a new label,
+               ;; bound as the old one is, with the property
+               ((define-property)
+                (syntax-match e ()
+                  ((_ id key expr) (and (id? id) (id? key))
+                   (let ((old (id->label id)) (key-label (property-key key))
+                         (lib (interaction-library)))
+                     (unless old (stx-error id "unbound identifier"))
+                     (unless lib (stx-error e "invalid context for definition"))
+                     (let ((b (label->binding old '()))
+                           (value (eval-core (expanded->core (expand-transformer expr '()))))
+                           (new (gen-label id)))
+                       (hashtable-set! property-table new
+                         (cons old (list (cons key-label value))))
+                       (extend-library-subst! lib (id->sym id) new)
+                       (extend-library-env! lib new b)
+                       (chi-top* (cdr e*) init*))))))
                ;; PSEUDOSCHEME: Chez's (alias new old) at top level: NEW's
                ;; name in the interaction library is OLD's label
                ((alias)
@@ -3279,7 +3314,8 @@
 
   ;;; PSEUDOSCHEME: Chez's top-level modules, by name: (name . library
   ;;; name), for (import name).
-  (define top-level-modules (make-parameter '()))
+  ;; PSEUDOSCHEME: Chez's scheme module, all of (scheme) (src/chez/chez.lisp)
+  (define top-level-modules (make-parameter '((scheme scheme))))
 
   ;;; PSEUDOSCHEME: Chez's (module name (export ...) body ...) at top
   ;;; level, expanded as a library of its own that imports what the top
