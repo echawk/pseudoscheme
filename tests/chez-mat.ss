@@ -246,6 +246,13 @@
   (syntax-rules ()
     [(_ e) e]))
 
+;; Chez's example programs (vendor/chez-examples), which examples.ms and
+;; others load, as Chez's mats find them in ../examples
+(let ([root (getenv "ROOT")])
+  (when root
+    (source-directories
+      (append (source-directories) (list (string-append root "/vendor/chez-examples"))))))
+
 (define find-source
   (lambda (fn)
     (or (ormap (lambda (dir)

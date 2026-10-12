@@ -22,7 +22,7 @@
 
 (defparameter *chezscheme-extras*
   '(;; chezscheme.scm
-    "void" "add1" "sub1" "call/1cc" "gensym" "getenv" "system" "make-parameter"
+    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-output-port" "define-structure" "syntax-error" "unread-char" "call/1cc" "gensym" "getenv" "system" "make-parameter"
     "with-input-from-string" "with-output-to-string" "current-directory"
     "file-directory?" "file-regular?" "file-symbolic-link?" "directory-list"
     "mkdir" "delete-directory" "rename-file" "file-modification-time"

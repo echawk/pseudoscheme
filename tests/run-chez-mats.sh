@@ -28,6 +28,13 @@ if [ "$1" = "--one" ]; then
   work="$OUT/work-$name"
   rm -rf "$work"; mkdir -p "$work"
   for f in "$ROOT"/vendor/chez-mats/*; do ln -s "$f" "$work/"; done
+  # Chez's example programs, and their object files, as Chez's mats
+  # makefile leaves them (an object file here is the source, compile-file's)
+  for f in "$ROOT"/vendor/chez-examples/*.ss; do
+    b=$(basename "$f" .ss)
+    [ -e "$work/$b.ss" ] || ln -s "$f" "$work/$b.ss"
+    [ -e "$work/$b.so" ] || ln -s "$f" "$work/$b.so"
+  done
   skip=
   : > "$OUT/$name.out"
   : > "$OUT/$name.err"

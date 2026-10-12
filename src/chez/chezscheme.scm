@@ -12,6 +12,14 @@
                ((init converter) (%chez:make-parameter init converter))))
 (define (void) (if #f #f))
 (define (add1 n) (+ n 1))
+(define (atom? x) (not (pair? x)))
+(define (syntax-object->datum x) (syntax->datum x))
+(define (datum->syntax-object id x) (datum->syntax id x))
+;; buffered input and output discarded
+(define clear-input-port
+  (case-lambda (() (clear-input-port (current-input-port))) ((p) (%chez:clear-port p #t))))
+(define clear-output-port
+  (case-lambda (() (clear-output-port (current-output-port))) ((p) (%chez:clear-port p #f))))
 (define (sub1 n) (- n 1))
 (define call/1cc call/cc)
 (define gensym
@@ -32,7 +40,13 @@
 (define machine-type %chez:machine-type)
 (define get-mode %chez:get-mode)
 (define chmod %chez:chmod)
-(define (source-directories) '("."))
+;; where include and the like look for source files: a list of strings
+(define source-directories
+  (make-parameter '(".")
+    (lambda (x)
+      (unless (and (list? x) (for-all string? x))
+        (assertion-violation 'source-directories "not a list of strings" x))
+      x)))
 (define record-writer %chez:record-writer)
 ;; collect: a full collection, whatever the generations asked for
 (define collect-maximum-generation
@@ -406,3 +420,69 @@
   (case-lambda ((name) #f) ((name format) (if #f #f))))
 (define decode-float %chez:decode-float)
 (define (display-string s . port) (apply display s port))
+
+;; Tracing, as Chez prints it: each call and its value on a line of its
+;; own, after |, | , | |, ... for its depth
+(define trace-depth (make-parameter 0))
+(define (trace-prefix n)
+  (let loop ([i 0] [acc '()])
+    (if (> i n) (list->string (reverse acc)) (loop (+ i 1) (cons (if (even? i) #\| #\space) acc)))))
+(define (%trace-procedure name f)
+  (lambda args
+    (let ([depth (trace-depth)])
+      (display (trace-prefix depth) (trace-output-port))
+      (write (cons name args) (trace-output-port))
+      (newline (trace-output-port))
+      (call-with-values
+        (lambda () (parameterize ([trace-depth (+ depth 1)]) (apply f args)))
+        (lambda vals
+          (display (trace-prefix depth) (trace-output-port))
+          (for-each (lambda (v) (write v (trace-output-port))) vals)
+          (newline (trace-output-port))
+          (apply values vals))))))
+(define trace-output-port (make-parameter (current-output-port)))
+(define-syntax trace-lambda
+  (syntax-rules ()
+    [(_ name formals body1 body2 ...) (%trace-procedure 'name (lambda formals body1 body2 ...))]))
+(define-syntax trace-case-lambda
+  (syntax-rules ()
+    [(_ name clause ...) (%trace-procedure 'name (case-lambda clause ...))]))
+(define-syntax trace-define
+  (syntax-rules ()
+    [(_ (name . formals) body1 body2 ...) (define name (trace-lambda name formals body1 body2 ...))]
+    [(_ name expr) (define name (let ([f expr]) (%trace-procedure 'name f)))]))
+(define-syntax trace-let
+  (syntax-rules ()
+    [(_ name ([x e] ...) body1 body2 ...)
+     ((letrec ([name (trace-lambda name (x ...) body1 body2 ...)]) name) e ...)]))
+
+;; (define-structure (name field ...) ((field init) ...)): make-name of
+;; the first fields, name?, name-field and set-name-field! for all
+(define-syntax define-structure
+  (lambda (x)
+    (define (id k . parts)
+      (datum->syntax k
+        (string->symbol
+          (apply string-append
+            (map (lambda (p) (if (string? p) p (symbol->string (syntax->datum p)))) parts)))))
+    (syntax-case x ()
+      [(k (name field ...)) #'(k (name field ...) ())]
+      [(k (name field ...) ([afield init] ...))
+       (with-syntax ([make (id #'k "make-" #'name)]
+                     [pred (id #'k #'name "?")]
+                     [(get ...) (map (lambda (f) (id #'k #'name "-" f)) #'(field ... afield ...))]
+                     [(set ...) (map (lambda (f) (id #'k "set-" #'name "-" f "!")) #'(field ... afield ...))]
+                     [(f ...) #'(field ... afield ...)])
+         #'(module (make pred get ... set ...)
+             (define-record-type (name tmp pred)
+               (fields (mutable f get set) ...))
+             (define (make field ...) (let* ([afield init] ...) (tmp field ... afield ...)))))])))
+
+;; Chez's syntax-error, a procedure: a syntax violation about FORM
+(define (syntax-error form . strings)
+  (syntax-violation #f (if (null? strings) "invalid syntax" (apply string-append strings)) form))
+;; the character just read, put back
+(define unread-char
+  (case-lambda
+    ((c) (%chez:unread-char c (current-input-port)))
+    ((c p) (%chez:unread-char c p))))

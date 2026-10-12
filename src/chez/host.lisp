@@ -1278,3 +1278,7 @@ and a count."
 (defprim "chez:check-mutable" (who x kind)
   (check-mutable-object (if (symbolp who) (ps:scheme-symbol-name who) who) x kind)
   ps:unspecific)
+(defprim "chez:clear-port" (port input)
+  (if (truthy input) (clear-input port) (clear-output port))
+  ps:unspecific)
+(defprim "chez:unread-char" (c port) (unread-char c port) ps:unspecific)

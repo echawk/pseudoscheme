@@ -746,6 +746,14 @@
 	  (loop l (+ n 1) (read-char port) escaped?)))))
 
 (define (read-symbol-escape port)
+  ;; Chez Scheme's \c, any character but x, stands for c
+  (if (and (ps:true? (ps:chez-reader-p))
+	   (not (eqv? (peek-char port) #\x))
+	   (not (eof-object? (peek-char port))))
+      (read-char port)
+      (read-hex-symbol-escape port)))
+
+(define (read-hex-symbol-escape port)
   (if (not (eqv? (read-char port) #\x))
       (reading-error port "invalid escape in symbol: expected \\x"))
   (let loop ((digits '()))

@@ -1025,29 +1025,35 @@
  
   (define case-transformer ;;; go away
     (lambda (e r mr)
+      ;; PSEUDOSCHEME: as in Chez, a clause's keys may be one datum
+      ;; rather than a list of them, ([register ...])
+      (define else-id?
+        (lambda (x) (and (id? x) (free-id=? x (scheme-stx 'else)))))
       (define build-one
         (lambda (t cls rest)
           (syntax-match cls ()
-            (((d* ...) e e* ...)
-             (build-conditional no-source
-               (build-application no-source
-                 (build-primref no-source 'memv)
-                 (list t (build-data no-source (stx->datum d*))))
-               (build-sequence no-source
-                 (chi-expr* (cons e e*) r mr))
-               rest))
+            ((k e e* ...)
+             (let ((keys (stx->datum k)))
+               (when (or (else-id? k) (not (or (list? keys) (symbol? keys) (number? keys)
+                                               (char? keys) (boolean? keys) (string? keys))))
+                 (stx-error e))
+               (build-conditional no-source
+                 (build-application no-source
+                   (build-primref no-source 'memv)
+                   (list t (build-data no-source (if (list? keys) keys (list keys)))))
+                 (build-sequence no-source
+                   (chi-expr* (cons e e*) r mr))
+                 rest)))
             (else (stx-error e)))))
       (define build-last
         (lambda (t cls)
           (syntax-match cls ()
-            (((d* ...) e e* ...)
-             (build-one t cls (build-void)))
             ((else-kwd x x* ...)
-             (if (and (id? else-kwd)
-                      (free-id=? else-kwd (scheme-stx 'else)))
-                 (build-sequence no-source
-                   (chi-expr* (cons x x*) r mr))
-                 (stx-error e)))
+             (else-id? else-kwd)
+             (build-sequence no-source
+               (chi-expr* (cons x x*) r mr)))
+            ((k e e* ...)
+             (build-one t cls (build-void)))
             (else (stx-error e)))))
       (syntax-match e ()
         ((_ expr)
@@ -3221,6 +3227,15 @@
                                 ((and (symbol? spec) (assq spec (top-level-modules))) => cdr)
                                 (else spec)))
                             (stx->datum imp*)))
+                     (chi-top* (cdr e*) init*)))))
+               ;; PSEUDOSCHEME: Chez's (alias new old) at top level: NEW's
+               ;; name in the interaction library is OLD's label
+               ((alias)
+                (syntax-match e ()
+                  ((_ new old) (and (id? new) (id? old))
+                   (let ((label (id->label old)) (lib (interaction-library)))
+                     (unless (and label lib) (stx-error e "invalid alias"))
+                     (extend-library-subst! lib (id->sym new) label)
                      (chi-top* (cdr e*) init*)))))
                ;; PSEUDOSCHEME: Chez's module at top level (chi-top-module)
                ((module)
