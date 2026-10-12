@@ -514,9 +514,9 @@ square, else the nearest double, however big or small X is."
     (subseq s start end)))
 (defguile "substring/copy" (s start &optional (end (length s))) (subseq s start end))
 ;;; libguile's debugging dumps of a string's and a symbol's buffer, as
-;;; they are here: a string is its own buffer, never shared (a Scheme
-;;; string is a simple string, so substring/shared copies), mutable
-;;; unless read-only; "wide" if a character is past Latin-1.
+;;; they are here: a string is its own buffer, "shared" if it's a shared
+;;; substring (see SUBSTRING/SHARED), mutable once it has been changed;
+;;; "wide" if a character is past Latin-1.
 
 (defun wide-string-p (s) (some (lambda (c) (> (char-code c) 255)) s))
 
@@ -525,10 +525,11 @@ square, else the nearest double, however big or small X is."
   (flet ((entry (key value) (cons (ssym key) value)))
     (progn
       (list (entry "string" s) (entry "start" 0) (entry "length" (length s))
-	  (entry "shared" ps:false) (entry "read-only" (bool (read-only-string-p s)))
+	  (entry "shared" (let ((base (gethash s *shared-substrings*))) (if base (car base) ps:false)))
+	  (entry "read-only" (bool (read-only-string-p s)))
 	  (entry "stringbuf" s) (entry "stringbuf-chars" (copy-seq s))
 	  (entry "stringbuf-length" (length s)) (entry "stringbuf-shared" ps:false)
-	  (entry "stringbuf-mutable" (bool (not (read-only-string-p s))))
+	  (entry "stringbuf-mutable" (bool (gethash s *mutated-strings*)))
 	  (entry "stringbuf-wide" (bool (wide-string-p s)))))))
 
 (defguile "%symbol-dump" (sym)
@@ -629,8 +630,63 @@ bytevector mutators read-only bytevectors."
 	     (when (functionp f)
 	       (setf (gvariable-value v)
 		     (lambda (&rest args)
-		       (check-mutable-string (nth position args))
-		       (apply f args)))))))
+		       (let ((s (nth position args)))
+			 (check-mutable-string s)
+			 (multiple-value-prog1 (apply f args)
+			   (when (stringp s) (string-changed s)))))))))
+  (let ((v (obarray-variable (ssym "substring/shared"))))
+    (when v (setf (gvariable-value v) #'substring/shared))))
+
+;;; Shared substrings.  A Scheme string is a simple Lisp string, which
+;;; can't be a window on another, so substring/shared copies, and
+;;; remembers where from: after a root mutator changes a string, the
+;;; change is copied to the strings it shares characters with, the one
+;;; it is a substring of and those that are substrings of it, and so on.
+;;; (A string changed by vector-style open-coded code isn't seen.)  And a
+;;; string's buffer is "mutable", as %string-dump reports it, once it
+;;; has been changed.
+
+(defvar *shared-substrings* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t)
+  "A shared substring -> (string . start).")
+(defvar *string-sharers* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t)
+  "A string -> weak pointers to its shared substrings.")
+(defvar *mutated-strings* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t))
+
+(defun substring/shared (s start &optional end)
+  (unless (stringp s) (wrong-type "substring/shared" 1 s))
+  (unless (and (integerp start) (<= 0 start (length s))) (out-of-range "substring/shared" start))
+  (let ((end (if (or (null end) (eq end +unbound+)) (length s) end)))
+    (unless (and (integerp end) (<= start end (length s))) (out-of-range "substring/shared" end))
+    (if (and (= start 0) (= end (length s)))
+	s
+	(let ((sub (subseq s start end)))
+	  (setf (gethash sub *shared-substrings*) (cons s start))
+	  (push (trivial-garbage:make-weak-pointer sub) (gethash s *string-sharers*))
+	  sub))))
+
+(defun string-changed (s)
+  "S was changed: so were the strings it shares characters with."
+  (let ((done (list s)))
+    (labels ((changed (s)
+	       (setf (gethash s *mutated-strings*) t)
+	       (let ((base (gethash s *shared-substrings*)))
+		 (when (and base (not (member (car base) done)))
+		   (push (car base) done)
+		   (replace (car base) s :start1 (cdr base))
+		   (changed (car base))))
+	       (let ((live '()))
+		 (dolist (p (gethash s *string-sharers*))
+		   (let ((sub (trivial-garbage:weak-pointer-value p)))
+		     (when sub
+		       (push p live)
+		       (unless (member sub done)
+			 (push sub done)
+			 (replace sub s :start2 (cdr (gethash sub *shared-substrings*)))
+			 (changed sub)))))
+		 (if live
+		     (setf (gethash s *string-sharers*) live)
+		     (remhash s *string-sharers*)))))
+      (changed s))))
 
 (defguile "substring/read-only" (s start &optional (end (length s)))
   (read-only-string (subseq s start end)))

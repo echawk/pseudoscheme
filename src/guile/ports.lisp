@@ -39,25 +39,58 @@
    (truncate-fn :initarg :truncate :initform nil :accessor port-truncate-fn)
    (fd :initarg :fd :initform nil :accessor port-fd)
    (data :initarg :data :initform nil :accessor port-data)
-   (rbuf :initform (make-octets +buffer-size+) :accessor port-rbuf)
-   (rpos :initform 0 :accessor port-rpos)
-   (rend :initform 0 :accessor port-rend)
-   (wbuf :initform (make-octets +buffer-size+) :accessor port-wbuf)
-   (wend :initform 0 :accessor port-wend)
+   ;; the buffers, as Guile's: #(bytevector cur end has-eof? position),
+   ;; POSITION (line . column), the same for all three; (ice-9
+   ;; suspendable-ports) works on them as this file does
+   (rbuffer :accessor port-rbuffer)
+   (wbuffer :accessor port-wbuffer)
+   (aux-buffer :initform nil :accessor port-aux-buffer)
    (buffering :initarg :buffering :initform :full :accessor port-buffering) ; :none :line :full
    (encoding :initarg :encoding :initform "UTF-8" :accessor port-encoding-name)
    (codec :initform nil :accessor port-codec)
    (strategy :initarg :strategy :initform nil :accessor port-strategy)
    (bom-state :initform nil :accessor port-bom-state)	; for UTF-16 and UTF-32
-   (eof-pending :initform nil :accessor port-eof-pending)	; an end of file read, not yet returned twice
-   (line :initform 0 :accessor port-line*)
-   (column :initform 0 :accessor port-column*)
    (filename :initarg :filename :initform ps:false :accessor port-filename*)
    (open :initform t :accessor port-open-p)
    (revealed :initform 0 :accessor port-revealed*)
    (properties :initform '() :accessor port-properties)))
 
 (defun gport-p (x) (typep x 'gport))
+
+(defun make-port-buffer (size position)
+  (vector (make-octets size) 0 0 ps:false position))
+
+(defmethod initialize-instance :after ((p gport) &key)
+  (let ((position (cons 0 0)))
+    (setf (port-rbuffer p) (make-port-buffer +buffer-size+ position)
+	  (port-wbuffer p) (make-port-buffer (if (eq (port-buffering p) :none) 1 +buffer-size+) position))))
+
+;;; An unbuffered port's write buffer holds a byte, as Guile's: what
+;;; (ice-9 suspendable-ports) writes to it goes out at once.
+(defmethod (setf port-buffering) :after (mode (p gport))
+  (let ((size (if (eq mode :none) 1 +buffer-size+)))
+    (when (and (slot-boundp p 'wbuffer) (/= size (length (port-wbuf p))))
+      (flush-output p)
+      (setf (port-wbuf p) (make-octets size)))))
+
+(macrolet ((buffer-accessor (name buffer index &optional (get 'x) (set 'x))
+	     `(progn
+		(declaim (inline ,name (setf ,name)))
+		(defun ,name (p) (let ((x (svref (,buffer p) ,index))) ,get))
+		(defun (setf ,name) (x p) (setf (svref (,buffer p) ,index) ,set) x))))
+  (buffer-accessor port-rbuf port-rbuffer 0)
+  (buffer-accessor port-rpos port-rbuffer 1)
+  (buffer-accessor port-rend port-rbuffer 2)
+  ;; an end of file read, not yet returned twice
+  (buffer-accessor port-eof-pending port-rbuffer 3 (truthy x) (bool x))
+  (buffer-accessor port-wbuf port-wbuffer 0)
+  (buffer-accessor port-wend port-wbuffer 2))
+
+(declaim (inline port-line* (setf port-line*) port-column* (setf port-column*)))
+(defun port-line* (p) (car (svref (port-rbuffer p) 4)))
+(defun (setf port-line*) (x p) (setf (car (svref (port-rbuffer p) 4)) x))
+(defun port-column* (p) (cdr (svref (port-rbuffer p) 4)))
+(defun (setf port-column*) (x p) (setf (cdr (svref (port-rbuffer p) 4)) x))
 
 (defmethod input-stream-p ((p gport)) (port-input-p p))
 (defmethod output-stream-p ((p gport)) (port-output-p p))
@@ -228,10 +261,11 @@
   (when (eq (port-buffering port) :none) (flush-output port)))
 
 (defun flush-output (port)
-  (let ((wend (port-wend port)))
-    (when (plusp wend)
-      (setf (port-wend port) 0)
-      (let ((start 0))
+  (let ((wend (port-wend port))
+	(start (svref (port-wbuffer port) 1)))
+    (when (< start wend)
+      (setf (port-wend port) 0 (svref (port-wbuffer port) 1) 0)
+      (progn
 	(loop while (< start wend)
 	      do (let ((n (funcall (port-write-fn port) (port-wbuf port) start (- wend start))))
 		   (when (<= n 0) (return))
@@ -579,6 +613,8 @@ mark, as Guile writes."
 	  (let ((pos (funcall (port-seek-fn port) (if (= whence 1) (- offset pending) offset) whence)))
 	    ;; a byte-order mark is looked for again only at the start
 	    (setf (port-bom-state port) (if (eql pos 0) nil :done))
+	    ;; and the byte order it gave (specialize-port-encoding!) forgotten
+	    (when (eql pos 0) (setf (port-codec port) nil))
 	    pos)))))
 
 ;;; ------------------------------------------------------------------
@@ -984,6 +1020,7 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
    (cons "port-closed?" (lambda (x) (bool (not (open-stream-p (->port x "port-closed?"))))))
    (cons "close-input-port" (lambda (p) (close (->port p "close-input-port")) *unspecified*))
    (cons "close-output-port" (lambda (p) (close (->port p "close-output-port")) *unspecified*))
+   (cons "the-eof-object" ps:eof-object)
    (cons "%port-encoding" (lambda (p) (ssym (port-encoding-name (->port p "port-encoding")))))
    (cons "port-conversion-strategy"
 	 (lambda (p)
@@ -1080,29 +1117,143 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
 			     (make-port :kind "void" :input (and (find #\r mode) t) :output (and (find #\w mode) t)
 					:read (lambda (buf start count) (declare (ignore buf start count)) 0)
 					:write (lambda (buf start count) (declare (ignore buf start)) count)))))
-   ;; (ice-9 ports internal): what R6RS's ports and the custom textual
-   ;; ports ask of the buffers (their sizes); the rest are absent
+   ;; (ice-9 ports internal): the buffers themselves, which (ice-9
+   ;; suspendable-ports) reads and writes as this file does, and what
+   ;; that needs of a port's backend and encoding
    (list (cons "port-read-buffering"
-	       (lambda (p) (if (eq (port-buffering (->port p "port-read-buffering")) :none) 1 +buffer-size+)))
-	 (cons "port-write-buffer"
-	       (lambda (p) (vector (make-octets (if (eq (port-buffering (->port p "port-write-buffer")) :none)
-						    1 +buffer-size+))
-				   0 0 ps:false 0)))
+	       (lambda (p) (let ((p (->port p "port-read-buffering")))
+			     (if (eq (port-buffering p) :none) 1 (length (port-rbuf p))))))
 	 (cons "port-read-buffer"
-	       (lambda (p) (vector (make-octets (if (eq (port-buffering (->port p "port-read-buffer")) :none)
-						    1 +buffer-size+))
-				   0 0 ps:false 0)))
-	 (cons "port-line-buffered?" (lambda (p) (bool (eq (port-buffering (->port p "port-line-buffered?")) :line)))))
-   (mapcar (lambda (name)
-	     (cons name (lambda (&rest args)
-			  (declare (ignore args))
-			  (error "~A: port buffers aren't available here" name))))
-	   '("port-auxiliary-write-buffer"
-	     "expand-port-read-buffer!" "port-read" "port-write"
-	     "port-clear-stream-start-for-bom-read" "port-clear-stream-start-for-bom-write"
-	     "specialize-port-encoding!" "port-decode-char" "port-encode-char"
-	     "port-encode-chars" "port-random-access?" "port-poll"
-	     "port-read-wait-fd" "port-write-wait-fd"))))
+	       (lambda (p) (let ((p (->port p "port-read-buffer"))) (check-open p "read") (port-rbuffer p))))
+	 (cons "port-write-buffer"
+	       (lambda (p) (let ((p (->port p "port-write-buffer"))) (check-open p "write") (port-wbuffer p))))
+	 (cons "port-auxiliary-write-buffer"
+	       (lambda (p) (port-aux-buffer* (->port p "port-auxiliary-write-buffer"))))
+	 (cons "port-line-buffered?" (lambda (p) (bool (eq (port-buffering (->port p "port-line-buffered?")) :line))))
+	 (cons "expand-port-read-buffer!"
+	       (lambda (p size)
+		 (let ((p (->port p "expand-port-read-buffer!")))
+		   (when (< (length (port-rbuf p)) size)
+		     (let ((new (make-octets size)))
+		       (replace new (port-rbuf p) :start2 (port-rpos p) :end2 (port-rend p))
+		       (setf (port-rend p) (- (port-rend p) (port-rpos p)) (port-rpos p) 0
+			     (port-rbuf p) new)))
+		   *unspecified*)))
+	 (cons "port-read"
+	       (lambda (p)
+		 (check-open (->port p "port-read") "port-read")
+		 (lambda (port bv start count) (funcall (port-read-fn port) bv start count))))
+	 (cons "port-write"
+	       (lambda (p)
+		 (check-open (->port p "port-write") "port-write")
+		 (lambda (port bv start count) (funcall (port-write-fn port) bv start count))))
+	 (cons "port-random-access?" (lambda (p) (bool (port-random-access-p (->port p "port-random-access?")))))
+	 (cons "port-poll" (lambda (p mode &optional timeout) (declare (ignore p mode timeout)) ps:true))
+	 (cons "port-read-wait-fd" (lambda (p) (or (port-fd (->port p "port-read-wait-fd")) ps:false)))
+	 (cons "port-write-wait-fd" (lambda (p) (or (port-fd (->port p "port-write-wait-fd")) ps:false)))
+	 (cons "port-clear-stream-start-for-bom-read"
+	       (lambda (p)
+		 (let ((p (->port p "port-clear-stream-start-for-bom-read")))
+		   (bool (and (null (port-bom-state p))
+			      (member (encoding-codec (port-encoding-name p)) '(:utf-8 :utf-16 :utf-32))
+			      (setf (port-bom-state p) :done))))))
+	 (cons "port-clear-stream-start-for-bom-write"
+	       (lambda (p buf)
+		 (let ((p (->port p "port-clear-stream-start-for-bom-write")))
+		   (when (and (null (port-bom-state p)) (member (codec p) '(:utf-16 :utf-32)))
+		     (setf (port-bom-state p) :big)
+		     (buffer-put buf (if (eq (codec p) :utf-16) #(#xfe #xff) #(0 0 #xfe #xff))))
+		   *unspecified*)))
+	 (cons "specialize-port-encoding!"
+	       ;; the byte order a byte-order mark gave: the port's encoding
+	       ;; is still "UTF-16", its codec the specific one
+	       (lambda (p encoding)
+		 (let ((p (->port p "specialize-port-encoding!"))
+		       (name (canonical-encoding encoding)))
+		   (unless name (wrong-type "specialize-port-encoding!" 2 encoding))
+		   (setf (port-codec p) (encoding-codec name))
+		   *unspecified*)))
+	 (cons "port-decode-char"
+	       (lambda (p bv start count)
+		 (let* ((p (->port p "port-decode-char"))
+			(c (decode-octets-char (codec p) bv start count)))
+		   (case c
+		     (:incomplete ps:false)
+		     (:invalid (if (string= (strategy p) "substitute") (code-char #xfffd) (decoding-error p)))
+		     (t c)))))
+	 (cons "port-encode-char"
+	       (lambda (p buf char)
+		 (let ((p (->port p "port-encode-char")))
+		   (buffer-put buf (encode-char p char))
+		   (track-char p char)
+		   *unspecified*)))
+	 (cons "port-encode-chars"
+	       ;; as many of STRING's chars as fit in BUF: how many
+	       (lambda (p buf string start count)
+		 (let ((p (->port p "port-encode-chars")))
+		   (loop for i from start below (+ start count)
+			 for bytes = (encode-char p (char string i))
+			 while (<= (+ (svref buf 2) (length bytes)) (length (svref buf 0)))
+			 do (buffer-put buf bytes) (track-char p (char string i))
+			 finally (return (- i start)))))))))
+
+(defun port-aux-buffer* (p)
+  (or (port-aux-buffer p)
+      (setf (port-aux-buffer p) (make-port-buffer +buffer-size+ (svref (port-rbuffer p) 4)))))
+
+(defun buffer-put (buf bytes)
+  "Add BYTES at the end of a port buffer, growing it if need be."
+  (let ((end (svref buf 2)))
+    (when (> (+ end (length bytes)) (length (svref buf 0)))
+      (let ((new (make-octets (max (* 2 (length (svref buf 0))) (+ end (length bytes))))))
+	(replace new (svref buf 0))
+	(setf (svref buf 0) new)))
+    (replace (svref buf 0) bytes :start1 end)
+    (setf (svref buf 2) (+ end (length bytes)))))
+
+(defun decode-octets-char (codec bv start count)
+  "The character BV[START, START+COUNT) is in CODEC, or :INCOMPLETE if
+those bytes begin one, or :INVALID."
+  (flet ((unit (size big at)
+	   (let ((u 0))
+	     (dotimes (k size u)
+	       (setq u (logior (ash u 8) (aref bv (+ start at (if big k (- size k 1))))))))))
+    (case codec
+      ((:utf-16 :utf-16be :utf-16le)
+       (let ((big (not (eq codec :utf-16le))))
+	 (if (< count 2)
+	     :incomplete
+	     (let ((u (unit 2 big 0)))
+	       (cond ((<= #xd800 u #xdbff)
+		      (if (< count 4)
+			  :incomplete
+			  (let ((lo (unit 2 big 2)))
+			    (if (and (= count 4) (<= #xdc00 lo #xdfff))
+				(code-char (+ #x10000 (ash (- u #xd800) 10) (- lo #xdc00)))
+				:invalid))))
+		     ((or (<= #xdc00 u #xdfff) (/= count 2)) :invalid)
+		     (t (code-char u)))))))
+      ((:utf-32 :utf-32be :utf-32le)
+       (if (< count 4)
+	   :incomplete
+	   (let ((u (unit 4 (not (eq codec :utf-32le)) 0)))
+	     (if (or (/= count 4) (<= #xd800 u #xdfff) (> u #x10ffff)) :invalid (code-char u)))))
+      (:utf-8
+       (let* ((b0 (aref bv start))
+	      (n (cond ((< b0 #x80) 1) ((< b0 #xc2) 0) ((< b0 #xe0) 2) ((< b0 #xf0) 3) ((< b0 #xf5) 4) (t 0))))
+	 (cond ((= n 0) :invalid)
+	       ((loop for i from 1 below (min n count)
+		      for b = (aref bv (+ start i))
+		      thereis (or (/= (logand b #xc0) #x80)
+				  (and (= i 1) (or (and (= b0 #xe0) (< b #xa0)) (and (= b0 #xed) (>= b #xa0))
+						   (and (= b0 #xf0) (< b #x90)) (and (= b0 #xf4) (>= b #x90))))))
+		:invalid)
+	       ((< count n) :incomplete)
+	       ((> count n) :invalid)
+	       (t (char (sb-ext:octets-to-string bv :external-format :utf-8 :start start :end (+ start n)) 0)))))
+      (:latin-1 (if (= count 1) (code-char (aref bv start)) :invalid))
+      (:ascii (if (and (= count 1) (< (aref bv start) 128)) (code-char (aref bv start)) :invalid))
+      (t (if (= count 1) (or (svref (third codec) (aref bv start)) :invalid) :invalid)))))
 
 (defextension "scm_init_ice_9_fports"
   (list (cons "file-port?" (lambda (x) (bool (and (gport-p x) (port-fd x)))))
