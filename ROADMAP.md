@@ -309,24 +309,22 @@ uses usocket and SRFI 170 osicat when they're installed. What is left per implem
 
 ## 7. Racket (`--racket`)
 
-docs/racket.md has the investigation and plan. In short: make
-Pseudoscheme a third backend for Racket's linklet layer, beside Racket
-CS and BC, and run Racket's own expander on it, so that the module
-system, `#lang`, macros and `racket/base` are Racket's own code.
-
-- **Target linklets, not schemify's output.** Linklets are the
-  documented interface (`racket/linklet`) that the expander hands to a
-  backend. Schemify's output is Chez Scheme that depends on rumble,
-  Racket CS's internal runtime.
-- **Stages:** a linklet compiler to Lisp (reusing the translator's back
-  end); the primitive instances (`#%kernel` has 1070 names, about 1650
-  across all instances in Racket 9.3); hosting the expander linklet,
-  built from Racket's source with an installed Racket as Chez builds
-  psyntax's seed; then the command line and the Lisp bridge.
-- **Depends on:** continuation marks and prompts (section 3; Racket's
-  `parameterize` and exception handling are built on them), and the
+Tabled (October 2026); docs/racket.md has the design. In short:
+- **The Chez mode is the platform.** It plays the part of the Chez Scheme
+  Racket CS is built on. Racket CS's own layers run on it unchanged:
+  rumble, the schemified thread, io, regexp, schemify and expander
+  layers, and the linklet layer.
+- **What we write:**
+  - the additions Racket's fork of Chez makes that rumble uses
+    (continuation attachments, engines, wrapper procedures, ...);
+  - the hook that compiles a schemified linklet: first through psyntax
+    and the translator, then straight to the translator's core forms;
+  - start-up.
+- **Racket's sources** come from a shallow clone of a pinned release,
+  made by a setup script (`utils/racket/setup.sh`), never vendored.
+- **Depends on:** the Chez mode's continuation marks and engines, and the
   compiled-library cache (section 2), since `racket/base` can't be
-  expanded from source on every start.
+  compiled from source on every start.
 
 ## 8. Guile (`--guile`), and Guix
 

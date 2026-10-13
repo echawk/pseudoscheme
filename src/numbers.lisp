@@ -193,7 +193,10 @@ compute an exact one in single floats."
   (if (eql angle 0) magnitude (* magnitude (cis (arg angle)))))
 
 (defun scheme-expt (base power)
-  (dbl (cond ((and (rationalp base) (floatp power)) (expt (arg base) power))
+  (dbl (cond ;; one, inexact if either is: CL leaves a zero base to an
+	     ;; inexact zero power undefined, and SBCL before 2.6 signals
+	     ((and (zerop power) (not (rationalp power))) (+ 1 (* 0 base) power))
+	     ((and (rationalp base) (floatp power)) (expt (arg base) power))
 	     ;; CL computes an exact base to a ratio power in single floats
 	     ((typep power 'ratio) (expt (arg base) (arg power)))
 	     (t (expt base power)))))

@@ -38,6 +38,11 @@
   --guile          GNU Guile: Guile's own boot-9 and modules, loaded from
                    a Guile installation (docs/guile.md); FILE is loaded
                    in (guile-user), -e/-p evaluate there
+  --racket[=STRATEGY]
+                   Racket (docs/racket.md; not working yet): STRATEGY is
+                   cs (Racket CS's own layers, the default), linklet (our
+                   linklet compiler) or hybrid; or set
+                   PSEUDOSCHEME_RACKET_STRATEGY
   -e, --eval EXPR  evaluate EXPR (Scheme text); may be repeated
   -p, --print EXPR evaluate EXPR and write its value
   -L, --library-path DIR
@@ -111,6 +116,7 @@ definition holds for the next -e too); the last one's values."
        (dolist (form (pseudoscheme-api:read-scheme-forms text) (values-list values))
 	 (setq values (multiple-value-list (ps-r7rs::eval-at-report-top-level *standard* form))))))
     (:guile (psg:eval-string text))
+    (:racket (psr:eval-string text))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (let ((values (list ps:unspecific)))
 	     (dolist (form (pseudoscheme-api:read-scheme-forms text) (values-list values))
@@ -125,6 +131,7 @@ definition holds for the next -e too); the last one's values."
      (pseudoscheme-api::ensure-psyntax)
      (ps-r7rs::load-file-at-report-top-level *standard* path))
     (:guile (psg:load-file path))
+    (:racket (psr:load-file path))
     (:chez (pseudoscheme-api::ensure-psyntax)
 	   (ps-r7rs::load-file-at-chez-top-level path))))
 
@@ -382,6 +389,10 @@ list of (:eval text) / (:print text)."
 		((string= a "--rrs") (setq *standard* :rrs))
 		((string= a "--chez") (setq *standard* :chez))
 		((string= a "--guile") (setq *standard* :guile))
+		((or (string= a "--racket") (uiop:string-prefix-p "--racket=" a))
+		 (setq *standard* :racket)
+		 (handler-case (psr:select-strategy (and (find #\= a) (subseq a (1+ (position #\= a)))))
+		   (error (e) (die "~A" e))))
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
 		((member a '("-p" "--print") :test #'string=) (push (list :print (value)) actions))
 		((member a '("-L" "--library-path") :test #'string=) (add-library-path (value)))

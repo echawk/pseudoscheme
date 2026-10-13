@@ -386,6 +386,9 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 ;;; programs expect it not to be empty (Guix's (guix describe)).  Called
 ;;; when a program starts, not when the image is built (contrib/cli/cli.lisp).
 (defun add-environment-load-path ()
+  (let ((trace (uiop:getenv "PSEUDOSCHEME_GUILE_TRACE_THROWS")))
+    (when (and trace (plusp (length trace)))
+      (setq *trace-throws* (if (string-equal trace "backtrace") :backtrace t))))
   (flet ((prepend (variable-name env-name &optional default)
 	   (let ((dirs (remove "" (uiop:split-string (or (uiop:getenv env-name) "") :separator ":")
 			       :test #'string=))

@@ -1,34 +1,57 @@
 # Racket on Pseudoscheme: a `--racket` mode
 
-Status: investigation and plan; nothing implemented yet.
+Status: **design only; tabled** (October 2026). Nothing in this
+document is implemented except the experiment in contrib/racket-linklets,
+which this design retires. When the work resumes, it starts at
+"Milestones", step 0.
 
-The goal: `pseudoscheme --racket prog.rkt` runs Racket programs, with
-`racket/base` and the libraries on the package server, by reusing as
-much of Racket's own implementation as possible. Racket code would then
-be one more thing a Common Lisp program can call, like Scheme today
+The goal: `pseudoscheme --racket prog.rkt` runs Racket programs with
+`racket/base` and the packages on the package server, by reusing as much
+of Racket's own implementation as possible. Racket code then becomes one
+more thing a Common Lisp program can call, as Scheme is today
 (docs/interop.md).
 
 ## Summary
 
-Make Pseudoscheme a **third backend for Racket's linklet layer**, next
-to Racket CS (Chez Scheme) and Racket BC (C). Concretely:
+**Our Chez mode plays the part of the Chez Scheme that Racket CS is
+built on.** Racket CS's own layers then run on it unchanged:
+- rumble, the core runtime;
+- the schemified thread, io, regexp, schemify and expander layers;
+- the linklet layer.
 
-1. a compiler from **linklets** (Racket's small core language) to Common
-   Lisp;
-2. the **primitive instances** that linklets refer to (`#%kernel`,
-   `#%unsafe`, `#%paramz`, ...), written in Lisp, mostly on top of the
-   R6RS/R7RS runtime we already have;
-3. **Racket's own expander**, loaded as one big linklet, running on 1
-   and 2. It provides the module system, `#lang`, the reader, macros,
-   `eval` and `compile`. Everything from `racket/base` up is then
-   Racket's own code, unchanged.
+Only the bottom layer is ours:
+- `--chez` itself (docs/chez.md);
+- the additions Racket's fork of Chez Scheme makes, which rumble uses;
+- one replaced hook, the step that compiles a schemified linklet into
+  machine code.
 
-The output of `schemify` is the wrong layer to target (see "Why
-linklets"). The hard runtime problems are continuation marks and
-prompts (Racket's `parameterize`, exception handlers and `with-handlers`
-are built on them), structs with properties, and ports. Full
-re-entrant continuations exist now (docs/continuations.md); marks and
-prompts would go on the frames they already push.
+There is one pipeline, for Racket's runtime and for user code alike:
+
+```
+  .rkt --expander--> linklet --schemify--> core Scheme --(the hook)--> SBCL
+```
+
+The hook is the only choice we make:
+1. **First:** the route that already works. Schemified code is treated
+   as Chez source: psyntax, then the translator, then SBCL. Racket CS's
+   schemified regexp and schemify linklets already ran this way on the
+   Chez mode (contrib/racket-linklets).
+2. **Then the fast path.** Schemify's output is already fully expanded
+   core Scheme, so psyntax has nothing to do. It goes straight to the
+   translator's core-form entry (`translate-core`, src/psyntax.lisp).
+   That gives "linklets to Common Lisp" without a linklet compiler of
+   our own. Schemify keeps doing the Racket-specific lowering we would
+   otherwise rewrite:
+   - `letrec` checks;
+   - known-procedure and known-constant information across linklets;
+   - recognizing struct types, so accessors inline;
+   - finding mutated variables, the only ones that need boxes;
+   - lifting closures.
+
+This supersedes this document's earlier plan: a linklet-to-Lisp compiler
+plus primitive instances written in Lisp. That plan is under
+"Alternatives considered", and the reason for the change is under "Why
+Racket CS's layers, not our own".
 
 ## How Racket is layered
 
@@ -50,7 +73,278 @@ Racket but are each *extracted* into a single linklet with no
 dependencies other than primitives, which is how Racket CS bootstraps
 them on Chez Scheme. A different backend can do the same.
 
+## Why Racket CS's layers, not our own
+
+The earlier plan targeted linklets and wrote everything under them
+ourselves: a linklet compiler and the primitive instances in Lisp,
+about 1,650 primitives in all. Its argument against schemify's output
+was that the output calls rumble's internals:
+- variable objects, `#%app` variants, record operations, `$value`;
+- Chez's `#3%` unsafe primitives;
+- continuation attachments and engines.
+
+So running it seemed to mean reimplementing rumble. That argument
+assumed rumble would be ours. If rumble is Racket's own, running on
+`--chez`, the objection goes away.
+
+The comparison:
+
+| | our own layers (earlier plan) | Racket CS's layers (this plan) |
+|---|---|---|
+| what we write | a linklet compiler; about 1,650 primitives done to Racket's specification: structs and properties, impersonators, continuation marks, ports, threads | the Chez fork's additions that rumble uses (dozens, mostly control); one compile hook; start-up |
+| what stays Racket's | the expander and the collects | rumble, thread, io, regexp, schemify, the linklet layer, the expander, the collects |
+| fidelity | as good as our reimplementation of `#%kernel` | Racket's own code, so Racket's own behaviour |
+| following new Racket releases | re-check about 1,650 primitives | re-check the fork's additions and the hook |
+| speed | depends on our linklet compiler's inference | schemify's inference, which Racket CS ships |
+
+There is also one reason that is about the project. The Guile mode runs
+Guile's own boot-9, psyntax and modules on libguile's primitives
+written in Lisp (docs/guile.md). The Chez mode runs Chez's own mats.
+Running Racket CS's own runtime on the Chez mode is the same move, one
+layer further down.
+
+## Three strategies, and which should be fastest
+
+The strategies are kept separate, each buildable and selectable on its
+own (decision 8), so that they can be measured side by side rather than
+argued about:
+
+| | strategy | lowering | runtime underneath | document |
+|---|---|---|---|---|
+| **A** | Racket CS's layers | schemify | rumble itself, on `--chez` and the Chez fork's additions | this one |
+| **B** | our linklet compiler | our passes 1 to 4 | rumble's exports written natively in Lisp | docs/racket-linklet-compiler.md |
+| **C** | hybrid | schemify | rumble, with its hot procedures replaced by native Lisp versions of the same interface | this section |
+
+**Assessment (October 2026; a judgement, not yet measured).**
+
+*Where A and B are equal.* User code and the layers above rumble (the
+expander, io, thread, regexp) end up in the same place either way: core
+Scheme, through the translator, to SBCL. For straight-line computation,
+what differs is only the quality of the lowering. Schemify's analysis
+is mature: known calls, struct recognition, boxing only mutated
+variables, `letrec` handling. Strategy B's pass 3 would start out behind
+it and have to catch up. So on such code A is ahead early, and at best
+the two tie later.
+
+*Where B should win: the runtime under the code.* In A, rumble runs
+through the Chez mode, which adds a layer of emulation exactly where
+Racket code spends its time:
+- **Structs.** rumble's structs are Chez records, which are a struct
+  holding a vector here: two allocations and an extra load per field
+  (docs/optimizations.md, idea 2). B would make each Racket struct type
+  an SBCL struct of its own.
+- **`parameterize`, exception handlers, `with-handlers`.** rumble builds
+  continuation marks on the fork's continuation attachments. A emulates
+  attachments on top of the Chez mode's marks, which are themselves on
+  our frames: two layers where B has one.
+- **Applicable structs, keyword procedures, impersonators, contracts.**
+  rumble uses the fork's wrapper procedures. In B these are SBCL
+  funcallable instances, which dispatch directly.
+- **Chez's optimizer.** rumble is written to be compiled by it:
+  `define-inline`, cp0's inlining, unchecked code at `optimize-level
+  3`. The Chez mode has no cp0, so rumble's small hot helpers become real
+  calls.
+- **Hash tables.** rumble's are written for Chez; B's would be built on
+  SBCL's.
+
+Idiomatic Racket (contracts, keyword arguments, `for` over generic
+sequences, structs, deep `parameterize`) leans on exactly these. On such
+programs B could plausibly be 1.5 to 2 times faster than A. **B has the
+higher ceiling; A runs well sooner.**
+
+*C should approach B's speed with A's cost.* schemify's output calls
+rumble's procedures by name. So after A runs, a profile of `racket/base`
+loading and of bench/'s programs as Racket modules picks out rumble's
+hot procedures, and each can be replaced by a native Lisp version with
+the same interface. The likely first candidates are struct operations,
+attachments and marks, wrapper procedures, and hash tables. C keeps
+schemify's analysis and gets a native runtime where it matters, with
+no linklet compiler of our own.
+
+*Two improvements help A and C regardless*, and the Chez and R6RS modes
+too:
+- records as one object (docs/optimizations.md, idea 2);
+- a cp0-style inlining pass in the Chez mode, which recovers what rumble
+  expects from Chez's optimizer (part of idea 6).
+
+**Measuring.** The first comparison is milestone 2 in each document:
+Racket's regexp linklet running `rx.rktl`'s 6,866 checks,
+- under A: schemify on rumble itself;
+- under B: our compiler on our native runtime;
+- under C: once rumble's regexp-relevant hot spots are replaced.
+
+After milestone 5 (`racket/base`), the comparison is the time to load
+and compile `racket/base`, and bench/'s programs as Racket modules.
+
+## Decisions
+
+1. **The Chez mode is the platform.** Racket CS's Scheme sources
+   (`racket/src/cs/`) are compiled and run by `--chez`, and nothing else
+   of Chez Scheme is needed. Everything Racket's fork of Chez adds that
+   rumble uses is added to `--chez` (src/racket/fork, below), not
+   imitated in Racket's code.
+2. **Racket's sources come from a pinned release**, fetched by a script,
+   never vendored, and never searched for on the machine:
+   - `utils/racket/setup.sh` makes a shallow clone of the
+     racket/racket repository at a release tag (`git clone --depth 1
+     --branch vX.Y`) into `build/external/racket/`, which is gitignored;
+   - `utils/racket/teardown.sh` removes it;
+   - the tag is set in one place, the setup script, and moving to a new
+     release is a deliberate change.
+3. **An installed Racket is used only through its executable**, and only
+   where the design needs it: the collection paths, through `racket -e
+   '(display (find-system-path (quote collects-dir)))'`, or through
+   `PLTCOLLECTS`. The installed `.zo` files are Chez machine code, which
+   we can't use, so they are never read.
+4. **One compile hook, in two stages:**
+   - stage A: schemified code goes through psyntax, the translator and
+     SBCL, as today;
+   - stage B: schemified code goes straight to `translate-core`;
+   - stage A stays available behind a switch, to compare against.
+5. **The runtime is built into the image.** rumble and the schemified
+   layers are compiled once, when the image is built, as the R6RS and
+   Chez layers are now. Loading the expander from source at every
+   start-up would take minutes.
+6. **Compiled user code is cached** in two parts (see "Compiled
+   code"):
+   - the `.zo` holds the schemified S-expression;
+   - the library cache holds the SBCL fasl.
+7. **contrib/racket-linklets retires.** Its racket-lite stand-in for
+   rumble is replaced by rumble itself. What remains of it moves to
+   `src/racket/` and `tests/racket/`. Nothing more goes into contrib/.
+8. **The strategies stay separate and selectable** ("Three
+   strategies"), so that they can be compared on the same programs:
+   - `--racket=cs` (A), `--racket=linklet` (B) and `--racket=hybrid`
+     (C), or `PSEUDOSCHEME_RACKET_STRATEGY`;
+   - A and C share rumble and schemify; C only adds overrides;
+   - B shares everything above rumble.
+
+   Each is built and tested on its own, and none is merged into
+   another.
+
+## Structure
+
+The skeleton exists (October 2026): every file below is in place and
+`--racket=NAME` selects a strategy, but each reports what isn't
+implemented yet.
+
+```
+utils/racket/
+  setup.sh              shallow clone of racket/racket at v9.3 (commit pinned) -> build/external/racket/
+  teardown.sh           removes it
+src/racket/             (ASDF system pseudoscheme/racket)
+  racket.lisp           shared: the strategy registry, Racket's sources and collections, entry points
+  instances.lisp        shared: the primitive instances (#%kernel, ...)
+  cache.lisp            shared: compiled linklets, the .zo format, the fasl cache
+  native/               the native runtime: B's rumble, C's overrides (DEFNATIVE, with rumble's names)
+    native.lisp           DEFNATIVE and its table
+    structs.lisp          struct types and properties
+    procedures.lisp       arity, wrappers, impersonators and chaperones
+    control.lisp          marks, prompts, composable continuations, #%paramz
+    hash.lisp             mutable and immutable (persistent) hash tables
+    exn.lisp              the exn hierarchy, raise
+    rktio.lisp            Racket's OS layer, built from source and bound with CFFI
+  cs/                   A: Racket CS's layers on --chez
+    fork.lisp, fork.scm   the Chez fork's additions (and milestone 0's inventory)
+    layers.lisp           the layers in build order
+    hook.lisp             the compile hook: stage A and stage B
+    boot.lisp             our main.sps
+  linklet/              B: our linklet compiler (docs/racket-linklet-compiler.md)
+    api.lisp              #%linklet: instances, variables, the interface
+    compiler.lisp         passes 1 to 4
+    boot.lisp
+  hybrid/               C: A plus native overrides
+    overrides.lisp
+  strategies.lisp       the three, registered
+tests/racket/
+  run.sh                each strategy on the same steps: hand-written linklets, rx.rktl, the test suite
+  linklets/*.rktl       hand-written linklets and their expected values
+```
+
+In the command line (contrib/cli/cli.lisp):
+- `--racket[=cs|linklet|hybrid]` selects the mode and the strategy;
+- `PSEUDOSCHEME_RACKET_STRATEGY` selects the strategy otherwise;
+- `--precompile COLLECTION` will compile a collection into the cache,
+  as `--precompile-srfi` does for the SRFIs.
+
+## Build time
+
+`make racket` (needs `utils/racket/setup.sh` to have been run):
+1. Load `--chez`, then src/racket/fork.
+2. Compile the layers in Racket CS's order:
+   - rumble (`racket/src/cs/rumble.sls` and its `rumble/*.ss`);
+   - the schemified thread, io, regexp, schemify and expander layers;
+   - the linklet layer (`racket/src/cs/linklet.sls`), with
+     src/racket/backend's hook.
+
+   Each is compiled as a whole library (`compile-whole-library`, Chez
+   mode). The expander's file is very large, so hoisting definitions
+   (`hoist-definitions`, src/psyntax.lisp) splits it into pieces SBCL
+   can compile.
+3. Save the result into the image, so that start-up only instantiates.
+
+## Run time
+
+`pseudoscheme --racket prog.rkt`:
+1. Initialize rumble. Instantiate the primitive instances (`#%kernel`,
+   `#%unsafe`, `#%flfxnum`, `#%paramz`, `#%foreign`, …, built by rumble
+   and the layers above it as in Racket CS), then the io, thread and
+   expander instances.
+2. Set the collection paths from `PLTCOLLECTS` or the installed `racket`
+   executable (decision 3). Set `use-compiled-file-paths` to our own
+   `compiled/pseudoscheme/` directories, so that we never read or
+   overwrite Racket's.
+3. Run `(dynamic-require 'racket/base)`, then the program. A module with
+   no compiled form of ours is compiled from its `.rkt` source and
+   cached. Racket's own compilation manager decides when, as `raco make`
+   would.
+
+The first run of a collection is slow. `racket/base` is a few hundred
+modules, and SBCL compiles much more slowly than Chez. So:
+- `pseudoscheme --racket --precompile racket/base` compiles them ahead
+  of time;
+- stage B (decision 4) is the main lever on this cost.
+
+## Compiled code
+
+Racket CS writes a compiled linklet into a `.zo` as fasl'd Chez code
+objects. SBCL code doesn't belong in Racket's byte stream, so:
+- **A `.zo` holds each linklet's schemified S-expression.** This is
+  machine-independent, close to what `racket -M` produces. Racket's
+  compilation manager, its dependency hashes and `raco make` work
+  unchanged.
+- **The SBCL fasl for a linklet is in the library cache**
+  (src/library-cache.lisp, `~/.cache/pseudoscheme/`). Its key is a hash
+  of the S-expression, the build signature and the continuations mode,
+  as the cache's keys are now.
+- **Loading a linklet** finds its fasl by hash, or else translates and
+  compiles it and writes the fasl.
+- `(system-type 'vm)` answers `pseudoscheme`, so code that checks for
+  `chez-scheme` doesn't take paths meant for Racket CS's machine code.
+
+## The Chez fork's additions
+
+This decides feasibility; milestone 0's inventory gives the exact list.
+What is known, from the regexp and schemify experiments (about 61 of
+Chez's internal `$` names, mostly continuation attachments):
+
+| addition | what rumble uses it for | on --chez |
+|---|---|---|
+| continuation attachments (`call-setting-continuation-attachment`, `call-getting-continuation-attachment`, `call-consuming-continuation-attachment`, …) | continuation marks, so `parameterize`, exception handlers, `with-handlers` | onto the continuation marks the Chez mode has (ac9fb00) |
+| engines and timer interrupts | green threads (the thread layer), `break` | the Chez mode's engines (ac9fb00) |
+| wrapper procedures (`make-wrapper-procedure`, `$app`, arity masks) | impersonators and chaperones, keyword procedures, `procedure-reduce-arity` | new: funcallable instances, as Guile mode's applicable structs are |
+| record internals (`$record-ref`, sealed and opaque types, record-type properties) | structs, struct properties | mostly present since the `oop.ms` work |
+| weak and ephemeron hash tables, guardians, phantom bytevectors | weak boxes, wills, memory accounting | on SBCL's weak tables and finalizers |
+| `foreign-procedure`, ftypes | `ffi/unsafe` | onto CFFI, as Guile mode's `(system foreign)` is |
+| `fasl-read`, `fasl-write` | serialization of compiled code | not needed: see "Compiled code" |
+
+rumble is compiled at `optimize-level 3` in Racket CS, and may rely on
+unchecked behaviour that `--chez`'s checks reject. The inventory should
+find such places too.
+
 ## Linklets
+
+These facts about the interface hold whichever compile hook is used.
 
 A linklet is the unit the expander hands to the backend. Its language is
 fully expanded core Racket:
@@ -122,7 +416,9 @@ runtime, which is one more reason to host the real expander rather than
 reimplement a loader.
 
 The primitive instances, counted in Racket 9.3 with
-`(primitive-table '#%kernel)` etc.:
+`(primitive-table '#%kernel)` etc. In this design rumble and the layers
+above it provide them, as in Racket CS. The counts show what the earlier
+plan would have had to write, and the notes are what it would have done:
 
 | instance | names | notes |
 |---|---|---|
@@ -138,231 +434,80 @@ The primitive instances, counted in Racket 9.3 with
 | `#%place` | 14 | can be single-place |
 | `#%paramz` | 10 | parameterization internals |
 
-## Why linklets, not schemify output
+## Milestones
 
-The todo suggested either linklets or schemify's output. Linklets are
-the better target:
+Each ends in something that runs, and in a test.
 
-- **They're the documented, stable boundary.** Both Racket backends
-  consume them, and the expander produces them. Schemify is an internal
-  pass of the CS backend.
-- **Schemify's output is Chez- and rumble-specific.** It calls rumble
-  internals (variable objects, `#%app` variants, record operations,
-  `$value`, Chez's `#3%` unsafe primitives) and assumes Chez's
-  `define-record-type`, `call/cc`, attachments and engines. Running it
-  would mean reimplementing rumble's internal API, which is larger and
-  less specified than the primitive instances.
-- **We need `compile-linklet` anyway.** Once the expander is hosted, it
-  produces linklets at run time (`eval`, macros, REPL). Whatever we
-  consume ahead of time must also be compilable then.
-
-Schemify is still worth reading, for what our linklet compiler should
-do: inferring known procedures and constants across linklets,
-recognizing struct-type definitions so that accessors can be inlined,
-finding mutated variables (only those need boxes), checking `letrec`
-for use before definition, and lifting closures.
-
-## The plan
-
-### Stage 1: a linklet compiler
-
-`src/racket/linklet.lisp`: `compile-linklet` from the S-expression form
-to a Lisp function, compiled with `compile`.
-
-- **Shape.** A linklet becomes `(lambda (self import-1 ... import-n) ...)`.
-  Imports are read from the import instances into local variables when
-  the linklet is instantiated, or through `variable` cells when they
-  may be mutated.
-- **Definitions.** Exported variables live in cells owned by the
-  instance (`instance-variable-value` reads them). A definition that is
-  never `set!` and is defined once can be referenced directly inside
-  the linklet. Internal definitions become `let`s/`labels`.
-- **Forms.** `case-lambda` becomes one `&rest` function that dispatches
-  on argument count (or a funcallable object carrying its arity, for
-  `procedure-arity`). `begin0` is `multiple-value-prog1`, `let-values`
-  is `multiple-value-call`/`multiple-value-bind`.
-  `with-continuation-mark` is described under stage 2.
-- **Reuse.** psyntax's output is the same kind of language, and the
-  translator (src/*.scm) already compiles it to Lisp: lambdas, `if`,
-  `letrec`, calls, proper handling of `set!`. The linklet compiler can
-  be a front end to the translator's back end rather than new code.
-  The open-coding of primitives (the translator's built-ins,
-  src/builtin.scm, and the host's inline primitives,
-  `*inline-primitives*` in src/psyntax.lisp) carries over.
-
-Test it on linklets dumped from a real Racket: a `boot/racket/` script,
-like the one used above, that compiles modules with
-`current-compile-target-machine` set to `#f` and writes their linklets
-as S-expressions. That's also a test corpus for stage 2.
-
-### Stage 2: the primitive instances
-
-`src/racket/kernel.lisp` and friends. A coverage check like
-tests/check-r7rs-exports.py, listing `(primitive-table '#%kernel)`
-against what's defined, keeps track of progress. Much is already there
-in the R6RS/R7RS runtime: numbers (src/numbers.lisp), characters and
-strings with Unicode, bytevectors (byte strings), hash tables, records,
-conditions. What's new:
-
-- **Continuation marks and prompts.** These are used everywhere:
-  `parameterize` (`#%paramz`), exception handlers
-  (`call-with-exception-handler` is a mark), `with-handlers` (an escape
-  plus marks), error reporting (`continuation-mark-set->context`),
-  `dynamic-wind`, the default prompt around each module body and REPL
-  interaction, `call-with-continuation-prompt` and
-  `abort-current-continuation`.
-  - In direct style, marks can be a special variable holding a list of
-    mark frames. `with-continuation-mark` pushes a frame, or replaces
-    the key in the current one when it's in tail position with respect
-    to another `with-continuation-mark` in the same frame. The linklet
-    compiler can see that, as schemify does.
-  - A dynamic binding isn't a tail call, so `(let loop () (wcm k v
-    (loop)))` would grow the stack where Racket runs it in constant
-    space. Code like this is rare outside the runtime, but it exists.
-  - Prompts and aborts, and escaping continuations
-    (`call-with-escape-continuation`, which is most `call/cc` use in
-    practice) map onto `catch`/`throw`, as an escape-only `call/cc`
-    does today (one the analysis proves is only used to escape, or any
-    with `--continuations=escape`).
-  - **Composable and re-entrant continuations** (`racket/control`,
-    `racket/generator`, the web server's `send/suspend`). Re-entrant
-    ones exist: the generalized-stack-inspection transformation of
-    docs/continuations.md is the default. Composable ones exist only in
-    SRFI 226's library implementation on top of `call/cc`; natively, a
-    composable continuation would copy the frames up to a prompt frame
-    and rebuild them on top of the current stack, and marks would be a
-    slot in each frame (docs/continuations.md, "Further work").
-- **Structs.** `make-struct-type` with properties, guards, inspectors,
-  prefab structs, and `prop:procedure`: applicable structs. Keyword
-  procedures (`make-optional-keyword-procedure` above) are applicable
-  structs. On CL, a funcallable instance (closer-mop's
-  `funcallable-standard-class`) is an object that is also a function,
-  so Racket's applicable structs stay callable from Lisp. Our R6RS
-  records (src/r6rs/records.lisp) are the starting point.
-- **Impersonators and chaperones** (contracts use them): wrapper
-  objects that the struct, vector, hash and procedure primitives look
-  through.
-- **Hash tables.** Racket's immutable hashes (`hash-set`) need a
-  persistent map. rumble's is a HAMT written in Scheme, which could go
-  through our translator. Mutable and weak tables need
-  `hash-iterate-first`/`-next`, iteration by position, which CL's
-  tables don't offer directly.
-- **Ports.** Racket's `io` layer is written for rktio, a C library. It's
-  simpler to implement the port primitives on our ports (Gray streams,
-  src/r6rs/ports.lisp): peeking, line counting, special values, custom
-  ports (`make-input-port` with its callbacks), progress events.
-- **Threads.** Racket's threads are green threads that the `thread`
-  layer schedules with engines (preemption via continuations and timer
-  interrupts). Two options: map them onto Lisp threads (simplest, but
-  the runtime's shared state then needs locking; see ROADMAP.md 4,
-  thread safety), or host the `thread` layer on full continuations,
-  which exist (SRFI 226's own threads already run that way). Start
-  with Lisp threads.
-- **Keywords.** Racket's keywords can be Lisp keywords: `#:name` reads
-  as `:NAME` today (docs/interop.md), so a Racket keyword argument is
-  already the Lisp spelling.
-- **Strings and pairs.** Racket pairs are immutable and `mcons` pairs
-  are a separate type, so CL conses are fine. Racket strings can be
-  immutable (literals, `string->immutable-string`), which CL can't
-  mark. A weak set of immutable strings, or a wrapper type, is needed
-  for `immutable?`.
-- Custodians, will executors, logging, security guards and plumbers
-  can start nearly empty.
-
-### Stage 3: host the expander
-
-Build the expander linklet from Racket's source
-(`racket/src/expander`, extracted into one linklet the way Racket CS's
-build does), with an installed Racket of the same version. This is the
-same pattern as boot/psyntax, where Chez builds psyntax's seed.
-Instantiate it with our primitive instances and `#%linklet`. Then we
-have Racket's `read-syntax`, `namespace-require`, `expand`, `compile`
-and `eval`, and `#lang` works.
-
-`racket/base` and its dependencies are a few hundred modules. Expanding
-them from source on every start is far too slow (it's slow even on
-Racket CS), so compiled linklets must be cached. That builds on the
-existing compiled-library cache (src/library-cache.lisp), which keeps
-Lisp fasls keyed by a library's form, a build signature and the ids of
-the libraries it was expanded against; for Racket the key would be the
-module's source hash, the versions of the modules it depends on, and
-the expander's version, the way Racket keys `compiled/*.zo`. Two ways
-to fill it:
-
-- compile from source with the hosted expander (always possible);
-- or, as a shortcut, load machine-independent `.zo` files that a real
-  Racket of the same version wrote (`racket -M`, `--compile-any`; with
-  `PLTCOMPILEDROOTS` pointing somewhere other than the installation's
-  own `compiled/` directories), and hand their linklets to our
-  `compile-linklet`/`recompile-linklet`. That skips our expansion of
-  the collections entirely.
-
-The thread, io and regexp layers could later be hosted the same way.
-regexp is the easiest of the three and would save reimplementing
-Racket's regexp syntax.
-
-### Stage 4: the command line and the bridge
-
-- `pseudoscheme --racket prog.rkt`, and a Racket REPL.
-- From Lisp: `(racket:require 'racket/list)`, Racket procedures called as
-  functions; keyword procedures called with Lisp keywords.
-- From Racket: a `(require (cl <package>))`-style bridge, in the spirit
-  of the Scheme one.
-- `raco pkg`: packages are directories of modules. Installing with a
-  real Racket's `raco pkg install` and pointing our collection paths at
-  the result is enough at first.
-
-## Alternatives considered
-
-- **Ahead of time only.** Use an installed Racket to compile modules to
-  machine-independent linklets, translate those to Lisp, and run them
-  with a small module loader of our own, with no expander at run time.
-  It's a smaller first step, but the `decl` and `stx-data` linklets
-  depend on the expander's runtime, so the loader would grow into a
-  partial reimplementation of the expander's module system. There would
-  be no `eval` or run-time macros either. It's worth doing only as the
-  cache-filling shortcut of stage 3.
-- **Translate Racket ourselves**, with psyntax or a new front end. Not
-  viable: Racket's macro system (scope sets, phases, submodules, `#lang`
-  readers, `syntax-parse`) is the expander, and reimplementing it would
-  be a project of the expander's size that's always behind.
-- **Talk to a Racket subprocess.** Libraries become reachable quickly,
-  but nothing is shared: no common heap, and data is copied in both
-  directions. Useful as a stopgap, not as `--racket`.
-
-Prior art: Racket BC and Racket CS are the two backends of this
-interface. Pycket, Racket on RPython, moved to the same approach in its
-later versions (loading the expander as a linklet and implementing the
-primitive instances), as I understand its history. That suggests the
-interface is workable for a third party.
+0. **Inventory.** `utils/racket/setup.sh` fetches the pinned tag. A
+   script lists every identifier that rumble and the schemified layers
+   use and `--chez` doesn't define. Then the table above becomes a work
+   list.
+   - **Settled when the skeleton was made:** the release tree has the
+     schemified layers checked in (`racket/src/cs/schemified/`:
+     `expander.scm` 5.3 MB, `io.scm` 1.8 MB, `schemify.scm` 3.6 MB,
+     `thread.scm`, `regexp.scm`, `known.scm`). So A and C need no Racket
+     to generate them.
+   - There is no Chez-only bootstrap directory under `racket/src/cs/`.
+     The bootstrap scripts (`racket/src/expander/bootstrap-run.rkt`,
+     `racket/src/thread/bootstrap.rkt`, …) are Racket programs, which
+     matters only if the schemified files ever have to be regenerated.
+1. **rumble loads** on `--chez`, with the fork's additions.
+2. **regexp and schemify run on rumble itself**, not racket-lite, and the
+   6,866 checks of Racket's `rx.rktl` pass again.
+3. **thread and io run**, on their own tests and demos from Racket's
+   source tree.
+4. **The expander instance evaluates** `(+ 1 2)` in a `#%kernel`
+   namespace, and the REPL's `,language racket` reaches it.
+5. **`racket/base` loads** from the collects, with the cache and
+   `--precompile`.
+6. **Stage B**, measured against stage A on the time to compile
+   `racket/base` and on bench/'s programs as Racket modules.
+7. **Racket's test suite**, `pkgs/racket-test-core`, run by
+   tests/racket/run.sh and tallied like the Chez mats.
 
 ## Risks and costs
 
-- **Size.** About 1,650 primitives, plus continuation marks, structs,
-  impersonators and ports done to Racket's specification. This is
-  larger than the R6RS and R7RS runtimes put together. It can be
-  incremental: each primitive can be checked against Racket's own test
-  suite (`pkgs/racket-test-core`).
-- **Version coupling.** The expander linklet, the primitive tables and
-  the `.zo` format change between Racket versions. Pin one version (9.3
-  is installed here) and move deliberately.
-- **Control.** Re-entrant continuations exist, so the risk is now
-  continuation marks and prompts in the runtime, and composable
-  continuations on the existing frames. Without them, `parameterize`,
-  exception handling, `racket/control` and the web server's
-  `send/suspend` won't run as Racket's own code expects.
-- **Speed.** Contracts, keyword procedures and generic sequences (`for`
-  over non-specialized sequences) are expensive without schemify-style
-  optimizations, so the linklet compiler's inference matters.
+- **Compile time.** The expander compiles once, when the image is built.
+  User modules rely on the cache and stage B. If SBCL is still too slow
+  on schemify's output, the fallback is a cheaper policy for code run
+  once (docs/optimizations.md, idea 8).
+- **Following the fork.** Racket's Chez fork changes between releases.
+  Pinning one tag (decision 2) keeps this to one deliberate update at a
+  time.
+- **Unchecked code.** rumble is written for `optimize-level 3` (above).
+- **Control.** Continuation attachments carry every
+  `parameterize` and exception handler, so their cost on our frames
+  (docs/continuations.md) matters for all Racket code, not just code
+  that captures continuations.
+- **Size of the image.** The expander and the layers under it are large
+  compiled code. `--racket` may want an image of its own, built by
+  `make racket`, rather than growing bin/pseudoscheme for every mode.
 
-## First steps
+## Alternatives considered
 
-1. `boot/racket/dump-linklets.rkt`: compile a module and its
-   dependencies machine-independently and write their linklets as
-   S-expressions (the snippet above, generalized).
-2. The linklet compiler and `#%linklet`, tested on hand-written linklets
-   and on `fact`/`greet`, with the few primitives they use.
-3. Continuation marks and prompts in the runtime, on the frames full
-   continuations push (docs/continuations.md, "Further work").
-4. A primitive-coverage script, then `#%kernel` until the expander
-   linklet instantiates, then until `racket/base` instantiates.
+- **Our own layers** (this document's earlier plan): a linklet-to-Lisp
+  compiler and the primitive instances written in Lisp, with Racket's
+  expander on top. docs/racket-linklet-compiler.md designs it in detail,
+  as the fallback if schemify can't be used. It was rejected for the reasons in "Why Racket CS's
+  layers, not our own". Its linklet compiler survives as an option for
+  the hook, if schemify's output ever fits SBCL badly. Its design notes
+  stay useful, since they are what schemify does: known procedures,
+  struct inlining, mutated variables, `letrec` checks.
+- **Ahead of time only.** Use an installed Racket to compile modules to
+  machine-independent linklets, and run them with a small loader of our
+  own and no expander. But the `decl` and `stx-data` linklets need the
+  expander's runtime (see "Linklets"), and there would be no `eval` or
+  run-time macros.
+- **Translating Racket ourselves**, with psyntax or a new front end. Not
+  viable: Racket's macro system (scope sets, phases, submodules, `#lang`
+  readers, `syntax-parse`) is the expander, and a reimplementation would
+  always be behind it.
+- **Talking to a Racket subprocess.** Libraries become reachable quickly,
+  but nothing is shared: no common heap, and data copied both ways.
+
+Prior art: Racket BC and Racket CS are the two backends of the linklet
+interface. Pycket (Racket on RPython) moved, in its later versions, to
+loading the expander as a linklet and implementing the primitive
+instances, as I understand its history. That is the earlier plan's
+shape. This plan differs in reusing Racket CS's runtime as well, which
+only works because the host can be made to look like Chez Scheme.

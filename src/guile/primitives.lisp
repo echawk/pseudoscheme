@@ -1263,18 +1263,25 @@ and SBCL's own run, later, in another thread, then skips it.")
 (defmacro defextension (name &body body)
   `(setf (gethash ,name *extensions*) (lambda () ,@body)))
 
+(defvar *c-extension-loader* nil
+  "With our libguile (src/libguile/, docs/libguile.md) loaded: a function
+of a library and an init function's names that runs a C extension, or
+returns NIL if there is no such library.")
+
 (defguile "load-extension" (library init)
-  (declare (ignore library))
-  (let ((ext (gethash init *extensions*)))
-    (when ext
-      (loop for (name . value) in (funcall ext)
-	    do (define-in-module *current-module* (ssym name) value)))
-    (fill-unbound-exports init)
-    ;; (rnrs bytevectors)'s mutators refuse read-only bytevectors
-    (dolist (name +bytevector-mutators+)
-      (let ((v (module-local-variable* *current-module* (ssym name))))
-	(when v (wrap-bytevector-mutator v name))))
-    *unspecified*))
+  (block load-extension
+    (let ((ext (gethash init *extensions*)))
+      (cond (ext
+	     (loop for (name . value) in (funcall ext)
+		   do (define-in-module *current-module* (ssym name) value)))
+	    ((and *c-extension-loader* (funcall *c-extension-loader* library init))
+	     (return-from load-extension *unspecified*)))
+      (fill-unbound-exports init)
+      ;; (rnrs bytevectors)'s mutators refuse read-only bytevectors
+      (dolist (name +bytevector-mutators+)
+	(let ((v (module-local-variable* *current-module* (ssym name))))
+	  (when v (wrap-bytevector-mutator v name))))
+      *unspecified*)))
 
 (defvar *extension-primitives* (make-hash-table :test 'equal)
   "Procedures of Guile's C extensions that aren't in the root module:

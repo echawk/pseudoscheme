@@ -1,0 +1,6 @@
+/* Our libguile's symbols carry GNU Guile 3.0's version, as programs
+   linked against Guile ask for them (scm_cons@GUILE_2.0).  */
+GUILE_2.0 {
+  global: scm_*; psg_*;
+  local: *;
+};

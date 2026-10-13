@@ -315,6 +315,56 @@
 	       (:file "stacks" :depends-on ("vm"))
 	       (:static-file "root-primitives.txt")))
 
+;;; Our libguile (docs/libguile.md): the Lisp half of a libguile-3.0.so.1
+;;; that C programs and extensions built against GNU Guile 3.0 use.  The
+;;; C half is built apart: make -C src/libguile.
+(defsystem :pseudoscheme/libguile
+  :version "3.0"
+  :pathname #p"src/libguile/"
+  :depends-on (:pseudoscheme/guile)
+  :serial t
+  :components ((:file "table")
+	       (:file "scheme")
+	       (:file "missing")
+	       (:file "abi")
+	       (:file "bridge")
+	       (:file "impl")
+	       (:file "api")
+	       (:static-file "core.c")
+	       (:static-file "data.c")
+	       (:static-file "psg.h")
+	       (:static-file "libguile.map")
+	       (:static-file "exports-3.0.11.txt")))
+
+;;; --racket (docs/racket.md): three strategies, selected at run time.
+;;; Skeleton: --racket=NAME is accepted and each strategy reports what
+;;; isn't implemented yet.
+(defsystem :pseudoscheme/racket
+  :version "3.0"
+  :pathname #p"src/racket/"
+  :depends-on (:pseudoscheme/api)
+  :serial t
+  :components ((:file "racket")
+	       (:file "instances")
+	       (:file "cache")
+	       ;; B's runtime, and C's overrides
+	       (:module "native"
+		:serial t
+		:components ((:file "native") (:file "structs") (:file "procedures")
+			     (:file "control") (:file "hash") (:file "exn") (:file "rktio")))
+	       ;; A: Racket CS's layers on --chez
+	       (:module "cs"
+		:serial t
+		:components ((:file "fork") (:static-file "fork.scm") (:file "layers")
+			     (:file "hook") (:file "boot")))
+	       ;; B: our linklet compiler
+	       (:module "linklet"
+		:serial t
+		:components ((:file "api") (:file "compiler") (:file "boot")))
+	       ;; C: A plus native overrides
+	       (:module "hybrid" :components ((:file "overrides")))
+	       (:file "strategies")))
+
 ;;; The REPL every mode shares: a line editor, meta-commands, ,language;
 ;;; Guile's own REPL for --guile (src/repl/).
 (defsystem :pseudoscheme/repl

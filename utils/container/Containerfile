@@ -1,0 +1,95 @@
+# A Linux environment for Pseudoscheme (utils/container/README.md):
+# - SBCL 2.6.9 from source, with libsbcl.so; Quicklisp and the Lisp
+#   libraries the build needs;
+# - GNU Guile 3.0.11's sources (what --guile loads), and Guile 3.0.11
+#   built from them in /opt/guile, to compare with;
+# - GNU Guix 1.5.0 from its binary tarball (guix-daemon, the guix
+#   command, the Guile it runs on and its Guile libraries, all in
+#   /gnu/store), and its source tarball, for its tests.
+# Debian, not Alpine: Guix's libraries are linked against glibc, and
+# --guile loads them into SBCL's process through the FFI.
+
+FROM docker.io/library/debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      sbcl ca-certificates curl git make gcc g++ libc6-dev pkg-config \
+      rsync xz-utils bzip2 procps time file less \
+      libffi-dev zlib1g-dev libzstd-dev libgcrypt20 \
+      libgmp-dev libunistring-dev libgc-dev libtool \
+    && rm -rf /var/lib/apt/lists/*
+
+# SBCL 2.6.9, the version the project is developed on, built by
+# Debian's SBCL; with libsbcl.so, the runtime as a shared library, which
+# our libguile (src/libguile/) embeds
+ARG SBCL_VERSION=2.6.9
+ARG SBCL_SHA256=c6fd1d735570eb4ff34caf9609988ca77ed0bd12b55d09a4fed075be890da513
+RUN mkdir -p /opt/src && cd /opt/src \
+    && curl -fsSL -o sbcl-$SBCL_VERSION-source.tar.bz2 \
+         https://downloads.sourceforge.net/project/sbcl/sbcl/$SBCL_VERSION/sbcl-$SBCL_VERSION-source.tar.bz2 \
+    && echo "$SBCL_SHA256  sbcl-$SBCL_VERSION-source.tar.bz2" | sha256sum -c - \
+    && tar xjf sbcl-$SBCL_VERSION-source.tar.bz2 && rm sbcl-$SBCL_VERSION-source.tar.bz2 \
+    && cd sbcl-$SBCL_VERSION \
+    && sh make.sh --fancy --prefix=/usr/local > /opt/src/sbcl-build.log 2>&1 \
+    && make -C src/runtime libsbcl.so >> /opt/src/sbcl-build.log 2>&1 \
+    && sh install.sh >> /opt/src/sbcl-build.log 2>&1 \
+    && cp src/runtime/libsbcl.so /usr/local/lib/ && ldconfig \
+    && apt-get remove -y sbcl && /usr/local/bin/sbcl --version
+
+# Quicklisp and the build's dependencies, so that builds need no network
+ARG QUICKLISP_SHA256=4a7a5c2aebe0716417047854267397e24a44d0cce096127411e9ce9ccfeb2c17
+RUN curl -fsSLo /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp \
+    && echo "$QUICKLISP_SHA256  /tmp/quicklisp.lisp" | sha256sum -c - \
+    && sbcl --non-interactive --no-userinit --load /tmp/quicklisp.lisp \
+      --eval '(quicklisp-quickstart:install :path "/root/quicklisp/")' \
+      --eval '(ql:quickload (list :float-features :cl-unicode :cffi :bordeaux-threads :trivial-cltl2 :trivial-garbage :trivial-gray-streams) :silent t)'
+
+# Guile 3.0.11's Scheme sources: ice-9/boot-9.scm and the rest, which
+# --guile loads (GUILE_SOURCE_DIR, src/guile/boot.lisp)
+ARG GUILE_VERSION=3.0.11
+ARG GUILE_SHA256=818c79d236657a7fa96fb364137cc7b41b3bdee0d65c6174ca03769559579460
+RUN mkdir -p /opt/src && cd /opt/src \
+    && curl -fsSLO https://ftp.gnu.org/gnu/guile/guile-$GUILE_VERSION.tar.xz \
+    && echo "$GUILE_SHA256  guile-$GUILE_VERSION.tar.xz" | sha256sum -c - \
+    && tar xf guile-$GUILE_VERSION.tar.xz && rm guile-$GUILE_VERSION.tar.xz
+ENV GUILE_SOURCE_DIR=/opt/src/guile-3.0.11/module
+
+# Guix, installed as its manual's "Binary Installation" does
+ARG GUIX_VERSION=1.5.0
+ARG GUIX_BINARY_SHA256=a5d58b1d0294cad6adb1f2aff627d37feb5db763fdffbceb8551f2b12123cf39
+ARG GUIX_SOURCE_SHA256=df2102eed00aff0b17275654a42f094c8a1117ec065884eb1ff76005e47415c5
+RUN cd /tmp \
+    && curl -fsSLO https://ftp.gnu.org/gnu/guix/guix-binary-$GUIX_VERSION.aarch64-linux.tar.xz \
+    && echo "$GUIX_BINARY_SHA256  guix-binary-$GUIX_VERSION.aarch64-linux.tar.xz" | sha256sum -c - \
+    && tar xf guix-binary-$GUIX_VERSION.aarch64-linux.tar.xz \
+    && mv var/guix /var/ && mv gnu / && rm -f guix-binary-$GUIX_VERSION.aarch64-linux.tar.xz \
+    && mkdir -p /root/.config/guix \
+    && ln -sf /var/guix/profiles/per-user/root/current-guix /root/.config/guix/current \
+    && ln -sf /var/guix/profiles/per-user/root/current-guix/bin/guix /usr/local/bin/guix \
+    && ln -sf /var/guix/profiles/per-user/root/current-guix/bin/guix-daemon /usr/local/bin/guix-daemon \
+    && groupadd --system guixbuild \
+    && for i in 1 2 3 4 5 6 7 8 9 10; do \
+         useradd -g guixbuild -G guixbuild -d /var/empty -s /usr/sbin/nologin \
+                 -c "Guix build user $i" --system guixbuilder$i; done \
+    && for k in ci.guix.gnu.org bordeaux.guix.gnu.org; do \
+         guix archive --authorize < /root/.config/guix/current/share/guix/$k.pub; done
+RUN cd /opt/src \
+    && curl -fsSLO https://ftp.gnu.org/gnu/guix/guix-$GUIX_VERSION.tar.gz \
+    && echo "$GUIX_SOURCE_SHA256  guix-$GUIX_VERSION.tar.gz" | sha256sum -c - \
+    && tar xf guix-$GUIX_VERSION.tar.gz && rm guix-$GUIX_VERSION.tar.gz
+
+# Real Guile 3.0.11, built from the same tarball into /opt/guile: the
+# reference that src/libguile/'s ABI tests compare our libguile with
+RUN cd /opt/src && cp -a guile-$GUILE_VERSION guile-build && cd guile-build \
+    && ./configure --prefix=/opt/guile --disable-static > /opt/src/guile-build.log 2>&1 \
+    && make -j"$(nproc)" >> /opt/src/guile-build.log 2>&1 \
+    && make install >> /opt/src/guile-build.log 2>&1 \
+    && cd .. && rm -rf guile-build && /opt/guile/bin/guile --version | head -1
+
+# /etc/services and the like, which guix-daemon gives the builds that
+# download (getaddrinfo needs it).  Guix's tarball, unpacked in /tmp,
+# took /tmp's mode away.
+RUN chmod 1777 /tmp && apt-get update && apt-get install -y --no-install-recommends netbase \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work

@@ -1,0 +1,28 @@
+#!/bin/sh
+# Fetch Racket's source for --racket (docs/racket.md): a shallow clone of
+# racket/racket at the pinned release tag, into build/external/racket/
+# (gitignored).  Nothing else of the machine's is used; an installed
+# Racket is consulted only through its executable, at run time.
+#
+# Usage: sh utils/racket/setup.sh
+# RACKET_TAG overrides the pinned tag, for trying a newer release.
+set -e
+cd "$(dirname "$0")/../.."
+TAG=${RACKET_TAG:-v9.3}
+# the commit the tag names, checked after the clone
+COMMIT=${RACKET_COMMIT:-bbf7dea831df95922db23aaa51e13eed17dcf881}
+DIR=build/external/racket
+if [ -d "$DIR/.git" ]; then
+  have=$(git -C "$DIR" rev-parse HEAD)
+  [ "$have" = "$COMMIT" ] && { echo "Racket $TAG is already in $DIR."; exit 0; }
+  echo "$DIR holds $have, not $TAG; run utils/racket/teardown.sh first." >&2
+  exit 1
+fi
+mkdir -p build/external
+git clone --depth 1 --branch "$TAG" https://github.com/racket/racket "$DIR"
+have=$(git -C "$DIR" rev-parse HEAD)
+if [ -z "$RACKET_TAG" ] && [ "$have" != "$COMMIT" ]; then
+  echo "$TAG is $have, not the pinned $COMMIT: the tag moved?" >&2
+  exit 1
+fi
+echo "Racket $TAG ($have) is in $DIR."

@@ -1005,13 +1005,18 @@ character, boolean or () is an immediate)."
   "boot-9's throw, once it is defined (src/guile/boot.lisp).")
 
 (defvar *throw-depth* 0)
-(defvar *trace-throws* nil)
+(defvar *trace-throws* nil
+  "Print each throw to *trace-output*; :backtrace, with a Lisp backtrace.
+PSEUDOSCHEME_GUILE_TRACE_THROWS sets it when a program starts (boot.lisp,
+ADD-ENVIRONMENT-LOAD-PATH): \"backtrace\" for :backtrace, else T.")
 
 (defun call-throw (key args)
   "boot-9's throw, or a Lisp error before there is one, or when throwing
 fails over and over (boot-9 half loaded)."
   (when *trace-throws*
-    (format *trace-output* "~&;; throw ~A ~A~%" key (with-output-to-string (s) (guile-write args s))))
+    (format *trace-output* "~&;; throw ~A ~A~%" key (with-output-to-string (s) (guile-write args s)))
+    (when (eq *trace-throws* :backtrace)
+      (sb-debug:print-backtrace :count 60 :stream *trace-output*)))
   (if (and *throw* (< *throw-depth* 3))
       (let ((*throw-depth* (1+ *throw-depth*)))
 	(apply *throw* key args))
