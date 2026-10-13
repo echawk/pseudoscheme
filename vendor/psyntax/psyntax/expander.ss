@@ -989,17 +989,22 @@
   (define letrec*-transformer
     (lambda (e r mr) (letrec-helper e r mr build-letrec*)))
 
+  ;;; PSEUDOSCHEME: as Chez's type-descriptor too: of a
+  ;;; define-record-type name, its record type descriptor; of anything
+  ;;; else (a Chez define-record type's name is a variable), its value.
   (define type-descriptor-transformer
     (lambda (e r mr)
       (syntax-match e ()
         ((_ id) (id? id)
          (let* ((lab (id->label id))
-                (b (label->binding lab r))
-                (type (binding-type b)))
-           (unless lab (stx-error e "unbound identifier"))
-           (unless (and (eq? type '$rtd) (not (list? (binding-value b))))
-             (stx-error e "invalid type"))
-           (build-data no-source (binding-value b)))))))
+                (b (and lab (label->binding lab r)))
+                (type (and b (binding-type b))))
+           (cond
+             ((and (eq? type '$rtd) (not (list? (binding-value b))))
+              (build-data no-source (binding-value b)))
+             ((and (eq? type '$rtd) (list? (binding-value b)))
+              (chi-expr (car (binding-value b)) r mr))
+             (else (chi-expr id r mr))))))))
 
 
   (define record-type-descriptor-transformer
@@ -2921,16 +2926,19 @@
 
   ;;; PSEUDOSCHEME: Chez's (id indirect-id ...) in an export list
   ;;; exports id and the identifiers its expansions may refer to: here
-  ;;; they're all simply exported.
+  ;;; they're all simply exported, once each (several may name the
+  ;;; same indirect identifier).
   (define (flatten-module-exports e export*)
-    (let f ((ls export*))
+    (let f ((ls export*) (acc '()))
       (cond
-        ((null? ls) '())
-        ((id? (car ls)) (cons (car ls) (f (cdr ls))))
+        ((null? ls) (reverse acc))
+        ((id? (car ls))
+         (f (cdr ls)
+            (if (exists (lambda (x) (bound-id=? x (car ls))) acc) acc (cons (car ls) acc))))
         (else
          (let ((x (syntax->list (car ls))))
            (unless (and x (pair? x)) (stx-error e "module exports must be identifiers"))
-           (append (f x) (f (cdr ls))))))))
+           (f (cdr ls) (reverse (f x acc))))))))
 
   (define parse-module
     (lambda (e)
@@ -3387,7 +3395,20 @@
           (lambda () (if #f #f)) (lambda () (if #f #f)) #f)
         (library-expander-with
           (lambda ()
-            (core-library-expander-parts lib-name (map id->sym exp-id*) imp* b* #t)))
+            (parameterize ((expanding-top-module #t))
+              (core-library-expander-parts lib-name (map id->sym exp-id*) imp*
+                ;; an export a macro introduced is exported by its name,
+                ;; which this aliases to it (the top level goes by names)
+                (append b*
+                  (let f ((ids exp-id*))
+                    (cond
+                      ((null? ids) '())
+                      ((same-marks? (stx-mark* (car ids)) top-mark*) (f (cdr ids)))
+                      (else (cons (list (mkstx 'alias top-mark* '())
+                                        (mkstx (id->sym (car ids)) top-mark* '())
+                                        (car ids))
+                                  (f (cdr ids)))))))
+                #t))))
         (if name
             (top-level-modules (cons (cons (id->sym name) lib-name) (top-level-modules)))
             (import-at-top-level (list lib-name))))))
@@ -3636,6 +3657,10 @@
         ((x x* ...)
          (not (memq x '(for rename except only prefix library)))
          (get-import `(library (,x . ,x*))))
+        ;; PSEUDOSCHEME: a Chez top-level module's name, as in
+        ;; (only scheme list)
+        (spec (and (symbol? spec) (assq spec (top-level-modules)))
+         (get-import `(library ,(cdr (assq spec (top-level-modules))))))
         (spec (error 'import "invalid import spec" spec))))
     (let f ((imp* imp*) (subst '()))
       (cond
@@ -3770,6 +3795,10 @@
       (let-values (((name* exp* imp* b*) (parse-library e)))
         (core-library-expander-parts name* exp* imp* b* #f))))
 
+  ;;; PSEUDOSCHEME: whether the library being expanded is a top-level
+  ;;; module (chi-top-module)
+  (define expanding-top-module (make-parameter #f))
+
   (define core-library-expander-parts
     (lambda (name* exp* imp* b* wrapped?)
         (let-values (((name ver) (parse-library-name name*)))
@@ -3778,7 +3807,12 @@
                         ;; PSEUDOSCHEME: a library expanded while the REPL
                         ;; runs (imported there) doesn't see the REPL's
                         ;; bindings: its unbound identifiers stay unbound
-                        (parameterize ((interaction-library #f))
+                        ;; -- except a top-level module's: what a macro
+                        ;; defined at the top level introduces there is
+                        ;; the top level's
+                        (parameterize ((interaction-library
+                                        (and (expanding-top-module) (interaction-library)))
+                                       (expanding-top-module #f))
                           (library-body-expander exp* imp* b* wrapped?))))
              (values name ver imp* invoke-req* visit-req* 
                      invoke-code visit-code export-subst

@@ -22,7 +22,7 @@
 
 (defparameter *chezscheme-extras*
   '(;; chezscheme.scm
-    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-define-syntax" "indirect-export" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "transcoder?" "with-continuation-mark" "current-continuation-marks" "continuation-marks?" "continuation-next-marks" "continuation-marks-first" "continuation-marks->list" "continuation-marks->iterator" "call-with-immediate-continuation-mark" "port-file-compressed!" "r6rs:current-input-port" "r6rs:current-output-port" "r6rs:current-error-port" "call/1cc" "gensym" "getenv" "system" "make-parameter"
+    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-define-syntax" "indirect-export" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "transcoder?" "with-continuation-mark" "current-continuation-marks" "continuation-marks?" "continuation-next-marks" "continuation-marks-first" "continuation-marks->list" "continuation-marks->iterator" "call-with-immediate-continuation-mark" "port-file-compressed!" "r6rs:current-input-port" "r6rs:current-output-port" "r6rs:current-error-port" "call/1cc" "gensym" "getenv" "system" "open-process-ports" "process" "make-parameter"
     "with-input-from-string" "with-output-to-string" "current-directory"
     "file-directory?" "file-regular?" "file-symbolic-link?" "directory-list"
     "mkdir" "delete-directory" "rename-file" "file-modification-time"
@@ -82,7 +82,7 @@
     "gensym->unique-string" "gensym?" "string->uninterned-symbol" "uninterned-symbol?"
     "property-list" "getprop" "putprop" "remprop"
     ;; records.scm
-    "define-record" "type-descriptor" "make-record-type" "csv7:record-field-accessor"
+    "define-record" "prefix" "predicate" "constructor" "make-record-type" "csv7:record-field-accessor"
     "csv7:record-field-mutator" "csv7:record-field-accessible?" "csv7:record-field-mutable?"
     "csv7:record-type-field-names" "csv7:record-type-field-decls" "record-type-equal-procedure"
     "record-type-hash-procedure" "record-equal-procedure" "record-hash-procedure"
@@ -119,13 +119,14 @@
     ;; top-level.scm
     "interaction-environment" "eval" "interpret" "compile" "expand" "sc-expand"
     "scheme-environment" "copy-environment" "environment-symbols" "library-exports"
-    "library-requirements" "library-requirements-options" "char-ready?"
+    "library-requirements" "library-requirements-options" "enum-set?" "char-ready?"
     "top-level-value" "set-top-level-value!" "define-top-level-value"
     "top-level-bound?" "top-level-mutable?"
     "load" "load-program" "load-library" "visit" "revisit" "compile-file"
     "compile-library" "compile-program" "compile-script" "compile-to-file" "compile-to-port" "load-compiled-from-port" "r6rs:command-line"
-    "maybe-compile-file" "maybe-compile-library" "maybe-compile-program"
+    "maybe-compile-file" "maybe-compile-library" "maybe-compile-program" "compile-program-handler"
     "library-directories" "library-extensions" "compile-imported-libraries"
+    "generate-wpo-files" "library-search-handler" "default-library-search-handler" "compile-whole-library" "compile-whole-program" "concatenate-object-files" "verify-loadability"
     "compile-file-message" "compile-interpret-simple" "optimize-level" "debug-level"
     "commonization-level" "generate-inspector-information"
     "generate-procedure-source-information" "generate-interrupt-trap"
@@ -143,7 +144,7 @@
     "disable-interrupts" "enable-interrupts" "with-interrupts-disabled"
     "critical-section" "keyboard-interrupt-handler" "timer-interrupt-handler"
     "set-timer" "register-signal-handler" "make-engine"
-    "datum" "rec" "eval-when" "$primitive" "syntax->list" "syntax->vector"
+    "datum" "rec" "eval-when" "$primitive" "syntax->list" "syntax->vector" "literal-identifier=?" "fluid-let-syntax"
     "inspect" "inspect/object" "debug" "break" "procedure-arity-mask"
     "make-wrapper-procedure" "make-arity-wrapper-procedure" "wrapper-procedure?"
     "wrapper-procedure-procedure" "wrapper-procedure-data" "set-wrapper-procedure-procedure!"
@@ -171,7 +172,8 @@
   "What src/chez/*.scm defines that (chezscheme) exports, besides R6RS.")
 
 (defparameter *chezscheme-from-psyntax*
-  '("module" "import" "alias" "define-property" "library" "meta")
+  '("module" "import" "alias" "define-property" "library" "meta" "type-descriptor"
+    "syntax-parameterize")
   "Chez's syntax that psyntax has, exported from (chezscheme) too.")
 
 ;;; ------------------------------------------------------------------
@@ -249,6 +251,7 @@ calls with those are still open-coded."
 
 (defun install-chez-mutators ()
   (setq psx::*canonical-empty* 'ps-r6rs::empty-like)
+  (pushnew (cons "base-rtd" ps-r6rs::*base-rtd*) ps:*sharp-bang-data* :test #'equal)
   (loop for (name position kind) in *chez-checked-mutators*
 	do (let ((old (psx:host-ref name)) (name name) (position position) (kind kind))
 	     (chez-rename name (lambda (&rest args)
@@ -366,7 +369,10 @@ calls with those are still open-coded."
 			       (if rtd-p
 				   (progn (ps-r6rs::check-rtd "record?" rtd)
 					  (ps-r6rs::bool (ps-r6rs::record-of-type-p x rtd)))
-				   (funcall old x))))
+				   ;; a record type descriptor is a record in Chez
+				   (if (ps-r6rs::rtd-p x)
+				       (ps-r6rs::bool (not (ps-r6rs::rtd-opaque (ps-r6rs::record-rtd x))))
+				       (funcall old x)))))
 			   '(1 1))
     (extend-host-procedure "call-with-output-file" #'call-with-output)
     (extend-host-procedure "with-output-to-file" #'with-output)
@@ -560,15 +566,35 @@ return true if that installed the library."
   (psx:defhost "chez:library-exports" (name)
     (mapcar #'car (funcall (psx:host-ref "psyntax:library-export-bindings")
 			   (translate-name name))))
+  ;; Chez's library directories are (source . object) pairs: the sources
+  ;; are *LIBRARY-PATH*, which the other modes search too, and the object
+  ;; directories, where they differ, *OBJECT-DIRECTORIES*
   (psx:defhost "chez:library-directories" ()
-    (mapcar (lambda (d) (let ((s (if (pathnamep d) (namestring d) d))) (cons s s)))
+    (mapcar (lambda (d)
+	      (let* ((s (if (pathnamep d) (namestring d) d))
+		     (o (or (cdr (assoc s *object-directories* :test #'string=)) s)))
+		(flet ((chez (dir) (if (string= dir "./") "." dir))) ; as Chez shows it
+		  (cons (chez s) (chez o)))))
 	    psx:*library-path*))
   (psx:defhost "chez:set-library-directories!" (dirs)
-    (setf psx:*library-path*
-	  (cond ((stringp dirs)
-		 (remove "" (uiop:split-string dirs :separator ":") :test #'string=))
-		(t (mapcar (lambda (d) (if (consp d) (car d) d)) dirs))))
+    (let ((pairs (if (stringp dirs)
+		     ;; "src1:src2::obj2": :: separates a source and an object directory
+		     (let ((parts (uiop:split-string dirs :separator ":")) (pairs '()))
+		       (loop while parts
+			     do (let ((src (pop parts)))
+				  (cond ((and parts (string= (car parts) "") (cdr parts))
+					 (pop parts)
+					 (push (cons src (pop parts)) pairs))
+					((string/= src "") (push (cons src src) pairs)))))
+		       (nreverse pairs))
+		     (mapcar (lambda (d) (if (consp d) d (cons d d))) dirs))))
+      (setf psx:*library-path* (mapcar #'car pairs)
+	    *object-directories* (remove-if (lambda (p) (string= (car p) (cdr p))) pairs)))
     ps:unspecific))
+
+(defvar *object-directories* '()
+  "Chez's library directories' object directories, as (SOURCE . OBJECT),
+where they differ from their source directories.")
 
 ;;; ------------------------------------------------------------------
 ;;; Errors, as Chez reports them (src/chez/conditions.scm says it in

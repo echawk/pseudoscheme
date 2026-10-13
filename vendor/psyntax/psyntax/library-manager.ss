@@ -28,7 +28,9 @@
     ;; the file-name mapping (see psyntax/main.ss).
     library-path file-locator library-locator
     ;; PSEUDOSCHEME: for compiled libraries (src/library-cache.lisp).
-    library-loader library-expanded-hook)
+    library-loader library-expanded-hook
+    ;; PSEUDOSCHEME: for Chez's library-requirements
+    library-requirements)
   (import (rnrs) (psyntax compat) (rnrs r5rs))
 
   (define (make-collection)
@@ -53,6 +55,14 @@
         (unless (procedure? x)
           (error 'current-library-collection "not a procedure" x))
         x)))
+
+;;; PSEUDOSCHEME: library NAME's requirements, as specs (id name version):
+  ;;; (imported visit-required invoke-required)
+  (define (library-requirements name)
+    (let ((lib (find-library-by-name name)))
+      (list (map library-spec (library-imp* lib))
+            (map library-spec (library-vis* lib))
+            (map library-spec (library-inv* lib)))))
 
   (define-record library 
     (id name version imp* vis* inv* subst env visit-state invoke-state visible?)
@@ -271,10 +281,10 @@
     (let ((invoke (library-invoke-state lib)))
       (when (procedure? invoke)
         (set-library-invoke-state! lib 
-          (lambda () (error 'invoke "circularity detected" lib)))
+          (lambda () (error #f "attempt to invoke library while it is still being loaded" (library-name lib))))
         (for-each invoke-library (library-inv* lib))
         (set-library-invoke-state! lib 
-          (lambda () (error 'invoke "first invoke did not return" lib)))
+          (lambda () (error 'invoke "first invoke did not return" (library-name lib))))
         (invoke)
         (set-library-invoke-state! lib #t))))
 
@@ -283,10 +293,10 @@
     (let ((visit (library-visit-state lib)))
       (when (procedure? visit)
         (set-library-visit-state! lib 
-          (lambda () (error 'visit "circularity detected" lib)))
+          (lambda () (error #f "attempt to visit library while it is still being loaded" (library-name lib))))
         (for-each invoke-library (library-vis* lib))
         (set-library-visit-state! lib 
-          (lambda () (error 'invoke "first visit did not return" lib)))
+          (lambda () (error 'visit "first visit did not return" (library-name lib))))
         (visit)
         (set-library-visit-state! lib #t))))
 

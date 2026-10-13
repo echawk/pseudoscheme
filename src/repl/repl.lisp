@@ -109,7 +109,10 @@
 				(princ-to-string e))
 		(error () (format nil "~A" (type-of e))))))
     (fresh-line (out))
-    (format (out) "~A ~A~%" (colored ";; Error:" :bright-red :bold) (colored text :red))
+    (if (and (not *interactive*) (eq (language-name *language*) :chez))
+	;; as Chez's, reading a script from its standard input
+	(progn (finish-output (out)) (format *error-output* "~A~%" text) (finish-output *error-output*))
+	(format (out) "~A ~A~%" (colored ";; Error:" :bright-red :bold) (colored text :red)))
     (when *interactive*
       (format (out) "~A~%" (colored ";; ,bt shows the backtrace" :gray)))
     (finish-output (out))))

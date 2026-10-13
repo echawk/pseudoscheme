@@ -25,6 +25,38 @@ than a few hundred.")
 	  :input t :output t :error t :wait t
 	  (and *posix-spawn-p* '(:use-posix-spawn t)))))
 
+;;; open-process-ports and process: sh -c COMMAND, its standard streams
+;;; pipes; closing a port closes its pipe, so the process sees end of file.
+
+(defclass process-output-port (standard-binary-output-port) ())
+(defmethod close ((s process-output-port) &key abort)
+  (declare (ignore abort))
+  (when (port-open s)
+    (ignore-errors (finish-output (underlying s)))
+    (close (underlying s))
+    (setf (port-open s) nil))
+  t)
+
+(defclass process-input-port (octet-stream-input-port) ())
+(defmethod close ((s process-input-port) &key abort)
+  (declare (ignore abort))
+  (close (underlying s))
+  t)
+
+(defprim "chez:open-process-ports" (command transcoder)
+  ;; Values: the process's standard input, output and error, and its id
+  (let* ((process (apply #'sb-ext:run-program "/bin/sh" (list "-c" command)
+			 :input :stream :output :stream :error :stream :wait nil
+			 (and *posix-spawn-p* '(:use-posix-spawn t))))
+	 (in (make-instance 'process-output-port :stream (sb-ext:process-input process)))
+	 (out (make-instance 'process-input-port :stream (sb-ext:process-output process)))
+	 (err (make-instance 'process-input-port :stream (sb-ext:process-error process))))
+    (flet ((port (p)
+	     (cond ((not (transcoder-p transcoder)) p)
+		   ((input-stream-p p) (make-instance 'transcoded-input-port :binary p :transcoder transcoder))
+		   (t (make-instance 'transcoded-output-port :binary p :transcoder transcoder)))))
+      (values (port in) (port out) (port err) (sb-ext:process-pid process)))))
+
 (defprim "chez:with-input-from-string" (string thunk)
   (let ((*standard-input* (make-string-input-stream string)))
     (funcall thunk)))
@@ -32,12 +64,27 @@ than a few hundred.")
 (defprim "chez:with-output-to-string" (thunk)
   (let ((s (make-string-output-stream)))
     (let ((*standard-output* s)) (funcall thunk))
-    (coerce (get-output-stream-string s) 'simple-string)))
+    ;; as Chez's: no output is the one empty string
+    (let ((string (coerce (get-output-stream-string s) 'simple-string)))
+      (if (zerop (length string)) (empty-like string) string))))
 
 (defprim "chez:current-directory" (&optional dir)
+  ;; as Chez's: the process's directory too, and named without a final /
   (if dir
-      (progn (setf *default-pathname-defaults* (uiop:ensure-directory-pathname dir)) ps:unspecific)
-      (namestring *default-pathname-defaults*)))
+      (let ((path (uiop:ensure-directory-pathname
+		   (merge-pathnames (uiop:ensure-directory-pathname (uiop:parse-native-namestring dir))
+				    *default-pathname-defaults*))))
+	(unless (uiop:directory-exists-p path)
+	  (r6rs-assertion-violation (ps:intern-scheme-symbol "current-directory")
+				    (format nil "cannot set current directory to ~A" dir)))
+	(let ((path (truename path)))
+	  #+sbcl (sb-posix:chdir path)
+	  (setf *default-pathname-defaults* path))
+	ps:unspecific)
+      (let ((s (namestring *default-pathname-defaults*)))
+	(if (and (> (length s) 1) (char= (char s (1- (length s))) #\/))
+	    (subseq s 0 (1- (length s)))
+	    s))))
 
 ;;; stat(2) and lstat(2), through sb-posix: Chez's file predicates
 ;;; follow symbolic links unless their follow? argument is #f.
@@ -66,11 +113,57 @@ than a few hundred.")
 (defprim "chez:file-symbolic-link?" (name)
   (file-type-p name nil sb-posix:s-iflnk))
 
+;;; File times to the nanosecond, as Chez gives them: sb-posix's stat has
+;;; only seconds, so stat(2) is called here with sb-posix's layout of
+;;; struct stat, in which each time is a struct timespec (seconds, then
+;;; nanoseconds), as on Darwin and 64-bit Linux.
+
+(defun stat-time-offsets ()
+  "Byte offsets of struct stat's access, change and modification times."
+  (let ((fields (sb-alien::alien-record-type-fields
+		 (sb-alien::parse-alien-type '(sb-alien:struct sb-posix::alien-stat) nil))))
+    (mapcar (lambda (name)
+	      (floor (sb-alien::alien-record-field-offset
+		      (find name fields :key #'sb-alien::alien-record-field-name))
+		     8))
+	    '(sb-posix::atime sb-posix::ctime sb-posix::mtime))))
+
+(defun stat-function (follow?)
+  (loop for name in (if follow? '("stat$INODE64" "stat") '("lstat$INODE64" "lstat"))
+	for address = (sb-sys:find-dynamic-foreign-symbol-address name)
+	when address return address))
+
+(defun file-times-ns (path follow?)
+  "PATH's (access change modification) times as (seconds . nanoseconds),
+or NIL if it can't be had."
+  (let ((function (ignore-errors (stat-function follow?)))
+	(offsets (ignore-errors (stat-time-offsets))))
+    (when (and function offsets (= 64 sb-vm:n-word-bits))
+      (sb-alien:with-alien ((buf (array (sb-alien:unsigned 8) 1024)))
+	(let ((sap (sb-alien:alien-sap buf)))
+	  (when (zerop (sb-alien:alien-funcall
+			(sb-alien:sap-alien (sb-sys:int-sap function)
+					    (function sb-alien:int sb-alien:c-string sb-sys:system-area-pointer))
+			path sap))
+	    (mapcar (lambda (offset)
+		      (cons (sb-sys:signed-sap-ref-64 sap offset) (sb-sys:sap-ref-64 sap (+ offset 8))))
+		    offsets)))))))
+
+(defun file-write-time-ns (path)
+  "PATH's modification time in nanoseconds since the epoch, or NIL."
+  (let* ((name (namestring (uiop:parse-native-namestring (path-string path))))
+	 (times (file-times-ns name t)))
+    (cond (times (destructuring-bind (s . ns) (third times) (+ (* s 1000000000) ns)))
+	  ((probe-file name) (* 1000000000 (- (file-write-date name) 2208988800))))))
+
 (defprim "chez:file-times" (name &optional (follow? t))
-  "(access change modification), in seconds since the epoch."
-  (let ((stat (or (file-stat name (follow-arg follow?))
-		  (ps:scheme-error "failed for ~S: no such file or directory" name))))
-    (list (sb-posix:stat-atime stat) (sb-posix:stat-ctime stat) (sb-posix:stat-mtime stat))))
+  "(access change modification), each (seconds . nanoseconds) since the epoch."
+  (let ((native (namestring (uiop:parse-native-namestring name))))
+    (or (file-times-ns native (follow-arg follow?))
+	(let ((stat (or (file-stat name (follow-arg follow?))
+			(ps:scheme-error "failed for ~S: no such file or directory" name))))
+	  (list (cons (sb-posix:stat-atime stat) 0) (cons (sb-posix:stat-ctime stat) 0)
+		(cons (sb-posix:stat-mtime stat) 0))))))
 
 (defun call-for-file (who name error? function)
   "Call FUNCTION on NAME's native path: #t, or on failure #f, or an
@@ -105,8 +198,6 @@ error if ERROR? is true."
   (rename-file (uiop:parse-native-namestring old) (uiop:parse-native-namestring new))
   ps:unspecific)
 
-(defprim "chez:library-directories" ()
-  (mapcar (lambda (d) (cons (path-string d) (path-string d))) psx:*library-path*))
 
 (defprim "chez:timezone-offset" ()
   "Seconds east of UTC, now, daylight saving included."
@@ -957,6 +1048,50 @@ every field's value, its ancestors' first."
 
 (defprim "chez:record-constructor" (rtd) (rtd-record-constructor rtd))
 
+;;; Chez's $make-record-type and friends (src/chez/top-level.scm): record
+;;; types whose descriptors are records of a type descending from
+;;; #!base-rtd, with fields of their own; and fields by offset, here
+;;; 8 * (position + 1).
+
+(defprim "chez:set-record-type-type!" (rtd base extras sealed opaque)
+  (check-rtd "$make-record-type" rtd)
+  (check-rtd "$make-record-type" base)
+  (unless (or (eq base *base-rtd*) (rtd-descends-p base *base-rtd*))
+    (ps:scheme-error "$make-record-type: ~S is not a base record type" base))
+  (unless (= (length extras) (rtd-count base))
+    (ps:scheme-error "$make-record-type: ~D extra field values for ~D fields" (length extras) (rtd-count base)))
+  (setf (record-rtd rtd) base
+	(record-values rtd) (coerce extras 'simple-vector)
+	(rtd-sealed rtd) (truthy sealed)
+	(rtd-opaque rtd) (or (truthy opaque) (rtd-opaque rtd)))
+  ps:unspecific)
+
+(defprim "chez:make-record" (rtd values)
+  (check-rtd "$record" rtd)
+  (%make-record rtd (coerce values 'simple-vector)))
+
+(defprim "chez:record-type-field-offsets" (rtd)
+  (check-rtd "$record-type-field-offsets" rtd)
+  (loop for i below (rtd-count rtd) collect (* 8 (1+ i))))
+
+(defun offset-index (who x offset)
+  (unless (record-p x) (ps:scheme-error "~A: ~S is not a record" who x))
+  (let ((i (and (integerp offset) (1- (floor offset 8)))))
+    (unless (and i (< -1 i (length (record-values x))))
+      (ps:scheme-error "~A: invalid offset ~S for ~S" who offset x))
+    i))
+
+(defprim "chez:object-ref" (x offset)
+  (svref (record-values x) (offset-index "$object-ref" x offset)))
+
+(defprim "chez:object-set!" (x offset value)
+  (setf (svref (record-values x) (offset-index "$object-set!" x offset)) value)
+  ps:unspecific)
+
+(defprim "chez:record-type-of" (x)
+  (unless (record-p x) (ps:scheme-error "$record-type-descriptor: ~S is not a record" x))
+  (record-rtd x))
+
 (defun field-position (who rtd field)
   "The index in RTD's records' values of FIELD, a name or an index, and
 the field, (mutable-p name type)."
@@ -1145,7 +1280,7 @@ unspecified value too: #<void>."
   (when (and ps:*chez-reader* (eq obj ps:unspecific))
     (write-string "#<void>" port)
     (return-from write-record t))
-  (when (and ps:*chez-reader* (record-p obj) (not (condition-p* obj)))
+  (when (and ps:*chez-reader* (record-p obj) (not (rtd-p obj)) (not (condition-p* obj)))
     (let* ((rtd (record-rtd obj))
 	   (writer (loop for r = rtd then (rtd-parent r) while r
 			 thereis (gethash r *record-writers*))))
@@ -1161,7 +1296,7 @@ unspecified value too: #<void>."
 
 (defun record-parts (x)
   "A record's fields, for datum labels (#0=#[foo #0#])."
-  (and ps:*chez-reader* (record-p x) (not (condition-p* x)) (record-values x)))
+  (and ps:*chez-reader* (record-p x) (not (rtd-p x)) (not (condition-p* x)) (record-values x)))
 
 (setq ps::*record-literal-hook* 'read-record-literal
       ps::*write-extension* 'write-record
@@ -1303,6 +1438,24 @@ and a count."
   (or (port-length* p)
       (r6rs-assertion-violation (ps:intern-scheme-symbol "port-length") "port does not support port-length" p)))
 (defprim "chez:port-has-port-length?" (p) (bool (port-file-stream p)))
+;;; Object files (src/chez/top-level.scm's compile-library and
+;;; compile-whole-library; src/r7rs/front.lisp loads them)
+
+(defprim "chez:install-file-libraries" (path)
+  ;; compile-library's check: the libraries of file PATH not yet
+  ;; installed are expanded and installed, read as an import reads them
+  (dolist (form (ps-r7rs::read-forms path) ps:unspecific)
+    (let ((name (ps-r7rs::library-name-of form)))
+      (when (and name (ps-r7rs::head-is form "library") (not (ps-r7rs::library-installed-p name)))
+	(psx::eval-library (ps-r7rs::library-form-from-file path name))))))
+
+(defprim "chez:set-library-search!" (procedure)
+  (setf ps-r7rs::*chez-library-search* procedure)
+  ps:unspecific)
+
+(defprim "chez:library-exists?" (name)
+  (bool (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
+
 (defprim "chez:library-list" () (funcall (psx:host-ref "psyntax:library-names")))
 (defprim "chez:library-version" (name)
   (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
@@ -1602,3 +1755,23 @@ reaches it goes to the invoker.")
 (defprim "chez:source-object-column" (x) (or (ps::source-object-column x) ps:false))
 (defprim "chez:syntax->annotation" (x)
   (if (ps::annotation-p x) x (funcall (psx:host-ref "psyntax:syntax->annotation") x)))
+
+;;; Library introspection
+(defprim "chez:library-requirements" (name) (funcall (psx:host-ref "psyntax:library-requirements") name))
+(defprim "chez:system-library-id?" (id)
+  ;; the libraries of psyntax's image (g$123) and of boot (g$boot$...),
+  ;; not the program's
+  (let ((s (symbol-name id)))
+    (bool (or (and (> (length s) 7) (string= "g$boot$" s :end2 7))
+	      (and (> (length s) 2) (string= "g$" s :end2 2) (every #'digit-char-p (subseq s 2)))))))
+(defprim "chez:system-library-name?" (name)
+  ;; an installed library of Pseudoscheme's own, as (chezscheme) and
+  ;; (rnrs) are, which Chez's library search never looks for
+  (bool (and (ps-r7rs::library-installed-p name)
+	     (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
+	       (and (consp spec)
+		    (ps:truep (funcall (prim "chez:system-library-id?") (car spec))))))))
+(defprim "chez:enum-set?" (x) (bool (enum-set-p x)))
+(defprim "chez:library-id" (name)
+  (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
+    (if (consp spec) (first spec) ps:false)))

@@ -601,7 +601,13 @@
 
 (defprim "lookahead-u8" (port)
   (check-binary-in "lookahead-u8" port)
-  (let ((b (if (typep port 'binary-input-port) (peek-byte port) (read-byte port nil :eof))))
+  (let ((b (if (typep port 'binary-input-port)
+	       (peek-byte port)
+	       ;; an input/output file's stream: read, then back up
+	       (let ((b (read-byte port nil :eof)))
+		 (unless (eq b :eof)
+		   (file-position port (1- (file-position port))))
+		 b))))
     (if (eq b :eof) ps:eof-object b)))
 
 (defun read-bytes (port count)

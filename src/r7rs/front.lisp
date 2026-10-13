@@ -100,6 +100,18 @@ of the library or program being processed.")
 	    until (eq form ps:eof-object)
 	    collect form))))
 
+(defun source-directory-of (syntax)
+  "The directory of the file SYNTAX, a syntax object, was read from, if
+it has a source annotation (as the Chez mode reads files)."
+  (let* ((annotation (and syntax
+			  (ignore-errors (funcall (psx:host-ref "psyntax:syntax->annotation") syntax))))
+	 (source (and (ps::annotation-p annotation) (ps::annotation-source annotation)))
+	 (sfd (and (ps::source-object-p source) (ps::source-object-sfd source)))
+	 (path (and (ps::sfd-p sfd) (ps::sfd-path sfd))))
+    (and (stringp path)
+	 (make-pathname :name nil :type nil :version nil
+			:defaults (merge-pathnames (psx::native-path path))))))
+
 (defun include-path (file)
   "FILE relative to the including file's directory, or else, if it isn't
 there, to the current directory (as Chez Scheme's include finds it)."
@@ -247,6 +259,67 @@ source annotations, as Chez reads a library (src/chez/chez.lisp)."
 		    (equal (library-name-of (ps::annotation-stripped f)) name)))
 	     forms)))
 
+;;; Chez's object files and library search.  In the Chez mode a library
+;;; is looked for as Chez looks for it, by its library-search-handler
+;;; (src/chez/top-level.scm), through *CHEZ-LIBRARY-SEARCH*: a source file
+;;; and an object file (compile-library's).  The object file is used if
+;;; it is no older than the source, or there is no source.  An object
+;;; file here holds library forms as text, and may hold several
+;;; (compile-whole-library's): loading it installs all of them, those
+;;; before the one asked for first.  What it doesn't find is looked for
+;;; as in other modes (Pseudoscheme's own libraries, say).
+
+(defvar *chez-library-search* nil
+  "In the Chez mode, a Scheme procedure of a library name that returns
+the library's source and object file names (each a string or #f),
+having compiled the source to the object file if Chez would.")
+
+(defun usable-object-file-p (object source)
+  (and (probe-file object)
+       (not (psx::compiled-file-p object))
+       (or (null source)
+	   (not (probe-file source))
+	   (>= (ps-r6rs::file-write-time-ns object) (ps-r6rs::file-write-time-ns source)))))
+
+(defun object-library-form (object name)
+  "Library NAME's form from object file OBJECT, the libraries before it
+there installed, or NIL."
+  (let ((forms (handler-case (read-forms object) (error () nil))))
+    (when (find name forms :key #'library-name-of :test #'equal)
+      ;; each read as from its source (includes are relative to it)
+      (dolist (form forms)
+	(let ((n (library-name-of form)))
+	  (cond ((equal n name) (return (library-form-from-file object name)))
+		((and n (head-is form "library"))
+		 (when (library-installed-p n)
+		   (ps:scheme-error
+		    (format nil "attempting to re-install compile-time part of library ~A"
+			    (with-output-to-string (s) (funcall ps:*scheme-write* n s)))))
+		 (psx::eval-library (library-form-from-file object n)))))))))
+
+(defun chez-library-form (name)
+  (let* ((found (funcall *chez-library-search* name))
+	 (source (and (consp found) (stringp (first found)) (first found)))
+	 (object (and (consp found) (stringp (second found)) (second found))))
+    (or (and object (usable-object-file-p object source) (object-library-form object name))
+	(and source (probe-file source) (library-form-from-file source name)))))
+
+(defun library-installed-p (name)
+  (member name (funcall (psx:host-ref "psyntax:library-names")) :test #'equal))
+
+(defun library-form-from-file (path name)
+  "Library NAME's form, if file PATH has one, as an R6RS library."
+  (let ((form (find-if (lambda (f) (equal (library-name-of f) name))
+		       (handler-case (read-forms path)
+			 ;; reported, not taken for a missing library
+			 (error (e)
+			   (ps:scheme-error (format nil "~A: ~A" (namestring path)
+						    (remove #\Newline (princ-to-string e)))))))))
+    (when form
+      (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path))))
+	(or (and ps:*chez-reader* (head-is form "library") (annotated-library-form path name))
+	    (resolve-includes (library-form form)))))))
+
 (defun locate-library-form (name)
   "Find library NAME (psyntax-style) on the library path; return its
 form, translated to an R6RS library, or NIL."
@@ -254,20 +327,14 @@ form, translated to an R6RS library, or NIL."
     (dolist (hook *virtual-libraries*)
       (let ((form (funcall hook name)))
 	(when form (return-from locate-library-form form))))
+    (when (and ps:*chez-reader* *chez-library-search*)
+      (let ((form (chez-library-form name)))
+	(when form (return-from locate-library-form form))))
     (dolist (stem (stems name))
       (dolist (path (psx:candidate-files stem))
 	(when (probe-file path)
-	  (let ((form (find-if (lambda (f) (equal (library-name-of f) name))
-			       (handler-case (read-forms path)
-				 ;; reported, not taken for a missing library
-				 (error (e)
-				   (ps:scheme-error (format nil "~A: ~A" (namestring path)
-							    (remove #\Newline (princ-to-string e)))))))))
-	    (when form
-	      (return-from locate-library-form
-		(let ((*include-directory* (make-pathname :name nil :type nil :defaults path)))
-		  (or (and ps:*chez-reader* (head-is form "library") (annotated-library-form path name))
-		      (resolve-includes (library-form form))))))))))
+	  (let ((form (library-form-from-file path name)))
+	    (when form (return-from locate-library-form form))))))
     (srfi-alias-form name)))
 
 (defun library-exports (form)
@@ -488,8 +555,9 @@ cond-expand.")
   (dolist (name '("%parameterize"))
     (psx:host-set! name (primitive name)))
   (psx:defhost "cond-expand-satisfied?" (req) (ps:true? (feature-satisfied-p req)))
-  (psx:defhost "read-file-forms" (file fold-case)
-    (read-forms (include-path file) :fold-case (ps:truep fold-case)))
+  (psx:defhost "read-file-forms" (file fold-case &optional form)
+    (let ((*include-directory* (or (source-directory-of form) *include-directory*)))
+      (read-forms (include-path file) :fold-case (ps:truep fold-case))))
   (psx:defhost "r7rs:translate-import-set" (spec) (translate-import-set spec))
   ;; R7RS's load: the file's forms, one by one, at the REPL (in the
   ;; interaction environment), whatever the environment; at R5RS's top

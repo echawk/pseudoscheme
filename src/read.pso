@@ -580,10 +580,13 @@
                (NOT-IN-R6RS PORT (STRING-APPEND "#!" NAME)))
            (IF (STRING= NAME "eof")
                EOF-DATUM
-               (LET ((READER (READER-DIRECTIVE PORT NAME)))
-                 (IF (TRUEP READER)
-                     (CALL-ALTERNATIVE-READER READER PORT)
-                     (SUB-READ PORT)))))))))
+               (LET ((DATUM (SHARP-BANG-DATUM NAME)))
+                 (IF (TRUEP DATUM)
+                     DATUM
+                     (LET ((READER (READER-DIRECTIVE PORT NAME)))
+                       (IF (TRUEP READER)
+                           (CALL-ALTERNATIVE-READER READER PORT)
+                           (SUB-READ PORT)))))))))))
 (LOCALLY
   (DECLARE (SPECIAL VECTOR-LENGTH-LIMIT))
   (SETQ VECTOR-LENGTH-LIMIT (SCHEME-EXPT 2 32)))
@@ -640,8 +643,8 @@
                                                                   (GO .LAST))))))))
                                   (RETURN (PROG (I L)
                                             (PSETQ I 0 L ELEMENTS)
-                                            (GO |.loop.172|)
-                                            |.loop.172|
+                                            (GO |.loop.173|)
+                                            |.loop.173|
                                             (IF (NULL L)
                                                 (RETURN V)
                                                 (PROGN
@@ -652,7 +655,7 @@
                                                          (SCHEME+ I 1)
                                                          L
                                                          (CDR (THE CONS L)))
-                                                  (GO |.loop.172|))))))))
+                                                  (GO |.loop.173|))))))))
                             (IF (CHAR= D #\%)
                                 (RETURN (LIST 'SCHEME::$PRIMITIVE
                                               N

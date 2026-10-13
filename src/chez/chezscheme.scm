@@ -26,6 +26,16 @@
   (case-lambda (() (%chez:make-gensym "g")) ((name) (%chez:make-gensym name))))
 (define getenv %get-environment-variable)
 (define system %chez:system)
+(define open-process-ports
+  (case-lambda
+    ((command) (open-process-ports command (buffer-mode block) #f))
+    ((command mode) (open-process-ports command mode #f))
+    ((command mode transcoder) (%chez:open-process-ports command transcoder))))
+(define (process command)
+  (call-with-values
+    (lambda () (open-process-ports command (buffer-mode block) (native-transcoder)))
+    (lambda (to-stdin from-stdout from-stderr pid)
+      (list from-stdout to-stdin pid))))
 (define with-input-from-string %chez:with-input-from-string)
 (define with-output-to-string %chez:with-output-to-string)
 (define current-directory %chez:current-directory)
@@ -334,7 +344,8 @@
 ;; File times, as time-utc times
 (define (file-time i)
   (lambda (path . follow?)
-    (make-time 'time-utc 0 (list-ref (apply %chez:file-times path follow?) i))))
+    (let ((t (list-ref (apply %chez:file-times path follow?) i)))
+      (make-time 'time-utc (cdr t) (car t)))))
 (define file-access-time (file-time 0))
 (define file-change-time (file-time 1))
 (define file-modification-time (file-time 2))
@@ -528,8 +539,6 @@
 (define ephemeron-cons cons)
 (define ephemeron-pair? pair?)
 (define (library-list) (%chez:library-list))
-(define (library-version name) (%chez:library-version name))
-(define (library-object-filename name) #f)
 (define transcoder? %chez:transcoder?)
 ;; Compressed files aren't made here: a port marked compressed reads and
 ;; writes its file as it is (docs/chez.md)

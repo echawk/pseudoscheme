@@ -12,16 +12,23 @@
 ;;; Defined in conditions.lisp; records signal violations through it.
 (declaim (ftype function r6rs-assertion-violation))
 
-(defstruct (rtd (:constructor %make-rtd))
+(defstruct (record (:constructor %make-record (rtd values)))
+  rtd values)
+
+;;; A record type descriptor is itself a record, as in Chez Scheme: of
+;;; the type *BASE-RTD* (Chez's #!base-rtd), or of a type descending from
+;;; it whose fields each descriptor of it has besides (Chez's
+;;; $make-record-type, src/chez/host.lisp).
+(defvar *base-rtd*)
+
+(defstruct (rtd (:include record (rtd *base-rtd*) (values #()))
+		(:constructor %make-rtd))
   name parent uid sealed opaque
   fields			; simple-vector of (mutable-p . name), own fields only
   (count 0))			; number of fields including inherited ones
 
 (defstruct (rcd (:constructor %make-rcd (rtd parent protocol)))
   rtd parent protocol)
-
-(defstruct (record (:constructor %make-record (rtd values)))
-  rtd values)
 
 (defun scheme-name (x) (if (symbolp x) (ps:scheme-symbol-name x) x))
 
@@ -42,6 +49,12 @@
 
 (defvar *nongenerative-types* (make-hash-table :test 'eq)
   "uid -> rtd, for nongenerative record types (6.3).")
+
+(unless (boundp '*base-rtd*)
+  (let ((base (%make-rtd :rtd nil :name "base-rtd" :uid '$base-rtd :fields #())))
+    (setf (record-rtd base) base
+	  (gethash '$base-rtd *nongenerative-types*) base
+	  *base-rtd* base)))
 
 (defun field-spec (spec)
   (unless (and (consp spec) (consp (cdr spec)) (symbolp (cadr spec)))
@@ -222,7 +235,8 @@ type FINAL whose fields after RCD's type's are TAIL."
 
 ;;; 6.4 Inspection
 
-(defprim "record?" (x) (bool (and (record-p x) (not (rtd-opaque (record-rtd x))))))
+;; R6RS's: a record type descriptor is not a record (Chez's is: chez.lisp)
+(defprim "record?" (x) (bool (and (record-p x) (not (rtd-p x)) (not (rtd-opaque (record-rtd x))))))
 (defprim "record-rtd" (x)
   (unless (and (record-p x) (not (rtd-opaque (record-rtd x))))
     (r6rs-assertion-violation "record-rtd" "not a non-opaque record" x))

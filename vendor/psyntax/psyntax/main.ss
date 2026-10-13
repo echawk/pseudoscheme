@@ -37,6 +37,8 @@
   ;; The names of the libraries installed, visible ones (Chez's library-list)
   (set-symbol-value! 'psyntax:library-names
     (lambda () (map library-name (installed-libraries))))
+  ;; Chez's library-requirements: ((spec ...) (spec ...) (spec ...))
+  (set-symbol-value! 'psyntax:library-requirements library-requirements)
   ;; Chez's syntax->annotation
   (set-symbol-value! 'psyntax:syntax->annotation syntax->annotation)
   ;; Whether a body may define after an expression (SRFI 251)

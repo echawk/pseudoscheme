@@ -198,6 +198,9 @@ skipped when FILE is read."
 
 (defvar *chez-quiet* nil)
 
+(defvar *userinit* t
+  "Whether to load the Lisp's init file; --no-userinit clears it.")
+
 (defun parse-chez-arguments (args)
   "Chez's command line: [option ...] [file ...], or --script/--program
 FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
@@ -209,6 +212,7 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
 	(flet ((value () (or (pop args) (die "~A needs an argument" a))))
 	  (cond ((string= a "--") (return))
 		((member a '("-q" "--quiet") :test #'string=) (setq *chez-quiet* t))
+		((string= a "--no-userinit") (setq *userinit* nil)) ; ours, not Chez's
 		((member a '("--script" "--program") :test #'string=)
 		 (let ((file (value)))
 		   (setq *script* t)
@@ -420,8 +424,6 @@ system being loaded, may REQUIRE contribs such as SB-POSIX.")
       (when (has-contribs-p *build-sbcl-home*)
 	(setf sb-sys::*sbcl-homedir-pathname* *build-sbcl-home*)))))
 
-(defvar *userinit* t
-  "Whether to load the Lisp's init file; --no-userinit clears it.")
 
 (defun user-init-file ()
   "The init file the host Lisp itself would load, if there is one."

@@ -58,24 +58,65 @@
 ;; clauses that exercise what Pseudoscheme doesn't implement: Chez's
 ;; compiler and its files, the inspector, `#%$` system primitives
 (define unsupported-patterns
-  '("#%$" "($" " $" "'$" "mat/cf" "compile-file" "compile-script" "compile-library"
-    "compile-program" "expand/optimize" "inspect/object" "separate-eval"
-    "separate-compile" "run-script" "test-cp0-expansion" "fasl-" "strip-fasl"
+  '("#%$" "mat/cf" "compile-script"
+    "expand/optimize" "inspect/object" "test-cp0-expansion" "fasl-" "strip-fasl"
     "(compile " "interpret" "cp0" "generate-inspector" "generate-procedure-source"
     "enable-object-counts" "object-counts" "code-object" "(inspect " "profile-"
     "compile-profile" "source-table" "make-boot" "heap-check" "(exit" "(emergency-exit" "(abort" "foreign-callable"
     "foreign-procedure" "ftype" "load-shared-object" "collect-request-handler" "collect-trip-bytes"
     "collect-generation-radix" "collect-notify" "collect-rendezvous" "optimize-level"
-    "generate-wpo" "wpo-" "compile-interpret-simple" "(expand " "expand-output"
+    "compile-interpret-simple" "(expand " "expand-output"
     "debug-level" "enable-type-recovery" "check-loop-allocation"))
 
 (define (unsupported-clause? clause)
   (let ([s (guard (c [#t ""])
              (call-with-string-output-port (lambda (p) (write clause p))))])
-    (let loop ([ps unsupported-patterns])
-      (cond [(null? ps) #f]
-            [(string-contains? s (car ps)) #t]
-            [else (loop (cdr ps))]))))
+    (or (let loop ([ps unsupported-patterns])
+          (cond [(null? ps) #f]
+                [(string-contains? s (car ps)) #t]
+                [else (loop (cdr ps))]))
+        (uses-system-primitive? clause))))
+
+;; Chez's system primitives are named $...: a clause that uses one is
+;; unsupported, unless the clause binds that name itself (as a test's
+;; own (define $x ...) does)
+(define (uses-system-primitive? clause)
+  (define (dollar? x)
+    (and (symbol? x)
+         (let ([n (symbol->string x)])
+           (and (> (string-length n) 1) (char=? (string-ref n 0) #\$)))))
+  (define (formals x)
+    (cond [(symbol? x) (list x)]
+          [(pair? x) (append (formals (car x)) (formals (cdr x)))]
+          [else '()]))
+  (define bound '())
+  (define used '())
+  (define seen (make-eq-hashtable))     ; clauses may quote cyclic data
+  (let walk ([x clause])
+    (cond
+      [(dollar? x) (set! used (cons x used))]
+      [(or (not (or (pair? x) (vector? x))) (hashtable-contains? seen x)) #f]
+      [(begin (hashtable-set! seen x #t) (vector? x)) (vector-for-each walk x)]
+      [(pair? x)
+       (when (symbol? (car x))
+         (case (car x)
+           [(define define-syntax set! define-record-type define-structure)
+            (when (pair? (cdr x)) (set! bound (append (formals (cadr x)) bound)))]
+           [(lambda trace-lambda)
+            (when (pair? (cdr x)) (set! bound (append (formals (cadr x)) bound)))]
+           [(let let* letrec letrec* let-values let*-values fluid-let parameterize
+             let-syntax letrec-syntax fluid-let-syntax)
+            (when (pair? (cdr x))
+              (let ([b (if (symbol? (cadr x)) (cons (cadr x) (if (pair? (cddr x)) (caddr x) '())) (cadr x))])
+                (when (list? b)
+                  (for-each (lambda (b) (set! bound (append (formals (if (pair? b) (car b) b)) bound))) b))))]
+           [(case-lambda)
+            (for-each (lambda (c) (when (pair? c) (set! bound (append (formals (car c)) bound)))) (cdr x))]
+           [else #f]))
+       (walk (car x))
+       (walk (cdr x))]
+      [else #f]))
+  (exists (lambda (u) (not (memq u bound))) used))
 
 (define (condition-message-string c)
   (let ([s (call-with-string-output-port (lambda (p) (display-condition c p)))])
@@ -135,6 +176,17 @@
              (loop (+ i 1) (+ i 1) (if (> i start) (cons (substring s start i) acc) acc))]
             [else (loop (+ i 1) start acc)]))))
 
+;; CHEZ_MAT_VERBOSE set: a failed (equal? actual expected) reports actual
+(define mat-verbose (getenv "CHEZ_MAT_VERBOSE"))
+(define mat-actual #f)
+(define (recording-actual clause)
+  (if (and mat-verbose (list? clause) (= (length clause) 3)
+           (memq (car clause) '(equal? eqv? eq? string=?)))
+      `(let ([actual ,(cadr clause)])
+         (set-top-level-value! 'mat-actual actual)
+         (,(car clause) actual ,(caddr clause)))
+      clause))
+
 (define (mat-run name . clauses)
   (do ([clauses clauses (cdr clauses)]
        [count 1 (+ count 1)])
@@ -161,10 +213,14 @@
                   (mat-report 'unbound name count (cdr ans)))]
              [else (mat-report 'fail name count)]))]
         [else
-         (let ([ans (mat-one-exp #f (lambda () (eval clause)))])
+         (let ([ans (mat-one-exp #f (lambda () (eval (recording-actual clause))))])
            (cond
              [(equal? ans '(true)) (mat-report 'pass name count)]
-             [(equal? ans '(false)) (mat-report 'fail name count)]
+             [(equal? ans '(false))
+              (if mat-verbose
+                  (mat-report 'fail name count
+                    (format "got ~s" (top-level-value 'mat-actual)))
+                  (mat-report 'fail name count))]
              [(equal? ans '(bogus)) (mat-report 'fail name count "nonboolean")]
              [(and (unbound-message? (cdr ans)) (dollar-unbound? (cdr ans)))
               (mat-report 'unsup name count)]
@@ -222,7 +278,7 @@
 (define embedded? (lambda () #f))
 (define pb? (lambda () #f))
 
-(define *scheme* "scheme")
+(define *scheme* (or (getenv "CHEZ_MAT_SCHEME") "scheme"))
 (define *mats-dir* ".")
 (define $cat_flush "./cat_flush")
 
@@ -276,6 +332,51 @@
       (put-u8 p (lookahead-u8 p))
       (close-port p))
     #t))
+
+;; separate-eval and separate-compile, as Chez's mats define them: the
+;; expressions run in a fresh Scheme (CHEZ_MAT_SCHEME, this one), its
+;; standard output the result and anything on its standard error an error
+(module separate-eval-tools (separate-eval run-script separate-compile)
+  (define (slurp ip)
+    (with-output-to-string
+      (lambda ()
+        (let f ()
+          (let ([c (read-char ip)])
+            (unless (eof-object? c)
+              (write-char c)
+              (f)))))))
+  (define ($separate-eval who expr*)
+    (let-values ([(to-stdin from-stdout from-stderr pid)
+                  (open-process-ports (format "~a -q" *scheme*)
+                    (buffer-mode block)
+                    (native-transcoder))])
+      (for-each (lambda (expr) (pretty-print expr to-stdin)) expr*)
+      (close-port to-stdin)
+      (let* ([stdout-stuff (slurp from-stdout)]
+             [stderr-stuff (slurp from-stderr)])
+        (close-port from-stdout)
+        (close-port from-stderr)
+        (unless (string=? stderr-stuff "")
+          (errorf who "~a" stderr-stuff))
+        stdout-stuff)))
+  (define (separate-eval . expr*) ($separate-eval 'separate-eval expr*))
+  (define (run-script script)
+    (let-values ([(to-stdin from-stdout from-stderr pid)
+                  (open-process-ports script (buffer-mode block) (native-transcoder))])
+      (close-port to-stdin)
+      (let* ([stdout-stuff (slurp from-stdout)]
+             [stderr-stuff (slurp from-stderr)])
+        (unless (string=? stderr-stuff "")
+          (errorf 'run-script "~a" stderr-stuff))
+        (close-port from-stdout)
+        (close-port from-stderr)
+        stdout-stuff)))
+  (define separate-compile
+    (case-lambda
+      [(x) (separate-compile 'compile-file x)]
+      [(cf x) ($separate-eval 'separate-compile `((,cf ,(if (symbol? x) (format "testfile-~a" x) x))))])))
+
+(import separate-eval-tools)
 
 (define heap-check-interval (make-parameter 0))
 

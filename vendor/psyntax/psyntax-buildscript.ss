@@ -976,6 +976,7 @@
     (library                  ext)  ; PSEUDOSCHEME: Chez's top-level library form
     (meta                     ext)  ; PSEUDOSCHEME: Chez's meta definitions
     (syntax-parameterize      ext)  ; PSEUDOSCHEME: SRFI 139
+    (type-descriptor          ext)  ; PSEUDOSCHEME: Chez's
     (syntax-dispatch ) ; only goes to $all
     (%guard-reraise ) ; PSEUDOSCHEME: guard's expansion, so only $all
     ;; PSEUDOSCHEME: the run-time values behind the $core-rtd bindings

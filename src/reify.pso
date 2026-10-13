@@ -149,7 +149,7 @@
   (DECLARE (SPECIAL LISP-PACKAGE))
   (LET ((SCHEME::STRING FILENAME)
         (SCHEME::PROC #'(LAMBDA (PORT)
-                          (TERPRI)
+                          (SCHEME-NEWLINE)
                           (DISPLAY "Writing ")
                           (DISPLAY (TRUE-NAME PORT))
                           (MAPC #'(LAMBDA (STRUCT)
@@ -159,7 +159,7 @@
                                          (WRITE-FORM (GENERATE-STRUCTURE-DEFPACKAGE
                                                       STRUCT)
                                                      PORT)
-                                         (TERPRI PORT))))
+                                         (SCHEME-NEWLINE PORT))))
                                 STRUCT-LIST))))
     (WITH-OPEN-FILE (SCHEME::PORT (MERGE-PATHNAMES SCHEME::STRING)
                                   :DIRECTION

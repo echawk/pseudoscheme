@@ -21,7 +21,10 @@ OUT=${OUT:-/tmp/pseudoscheme-chez-mats}
 UNSUPPORTED_FILES="cp0 cptypes foreign ftype profile windows"
 mkdir -p "$OUT" || exit 1
 OUT=$(cd "$OUT" && pwd)
-export PS LIMIT OUT ROOT
+# separate-eval's Scheme: Pseudoscheme run as `chez`, its Chez mode
+ln -sf "$PS" "$OUT/chez"
+CHEZ_MAT_SCHEME="$OUT/chez --no-userinit"
+export PS LIMIT OUT ROOT CHEZ_MAT_SCHEME
 
 if [ "$1" = "--one" ]; then
   name=$2

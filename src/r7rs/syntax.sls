@@ -208,6 +208,8 @@
 
   ;; include / include-ci (R7RS 4.1.7): the forms of the files, read
   ;; now, in the context of the include form.
+  ;; A file name is relative to the directory of the file the include
+  ;; form is in, if its source is known (as Chez's include finds it).
   (define-syntax include
     (lambda (x)
       (syntax-case x ()
@@ -215,7 +217,7 @@
          (with-syntax (((form ...)
                         (datum->syntax #'k
                           (apply append
-                                 (map (lambda (f) (%read-file-forms f #f))
+                                 (map (lambda (f) (%read-file-forms f #f x))
                                       (syntax->datum #'(file ...)))))))
            #'(begin form ...))))))
 
@@ -226,7 +228,7 @@
          (with-syntax (((form ...)
                         (datum->syntax #'k
                           (apply append
-                                 (map (lambda (f) (%read-file-forms f #t))
+                                 (map (lambda (f) (%read-file-forms f #t x))
                                       (syntax->datum #'(file ...)))))))
            #'(begin form ...)))))))
 

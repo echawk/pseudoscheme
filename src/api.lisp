@@ -431,7 +431,9 @@ the message a Scheme handler would see (e.g. \"not a pair 5\")."
   (if (typep e 'ps-r7rs::uncaught-raise)
       (string-trim '(#\Newline #\Space) (princ-to-string e))
       (multiple-value-bind (message irritants) (ps-r6rs::foreign-condition-message e)
-	(format nil "~A~{ ~A~}" message (mapcar #'write-to-string irritants)))))
+	(format nil "~A~{ ~A~}" message
+		(mapcar (lambda (x) (with-output-to-string (s) (funcall ps:*scheme-write* x s)))
+			irritants)))))
 
 (defun report-error (e stream)
   (format stream "~&;; Error: ~A~%" (error-message e)))

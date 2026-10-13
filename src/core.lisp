@@ -339,6 +339,15 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
       (fmakunbound CL-sym))
   unspecific)
 
+; NEWLINE and WRITE-CHAR return no value worth printing, as in Scheme
+(defun scheme-newline (&optional (port *standard-output*))
+  (terpri port)
+  unspecific)
+
+(defun scheme-write-char (char &optional (port *standard-output*))
+  (write-char char port)
+  unspecific)
+
 (defmacro at-top-level (&rest forms)
   `(progn ,@forms))
 
@@ -576,6 +585,16 @@ Then tokens that begin like numbers but aren't, such as 2.a, are
 symbols, not errors, and #!r6rs restricts a port to R6RS syntax.")
 
 (defun chez-reader-p () *chez-reader*)
+
+; Chez Scheme's #!name data other than #!eof, as (name . object): the
+; Chez mode's #!base-rtd (src/chez/chez.lisp)
+(defvar *sharp-bang-data* '())
+
+(defun sharp-bang-datum (name)
+  "The object #!NAME reads as, or #f if it's a directive or a comment."
+  (let ((entry (and *chez-reader* (assoc name *sharp-bang-data* :test #'string=))))
+    (if entry (cdr entry) false)))
+
 
 ;;; Chez Scheme's record syntax, #[name field ...]: read by
 ;;; src/read.scm and written by src/write.scm in --chez mode, through

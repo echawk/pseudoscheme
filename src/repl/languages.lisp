@@ -108,14 +108,14 @@ variable's (psyntax's location), or NIL if it isn't a variable."
 
 (defmacro define-psyntax-language (name title prompt interaction source &rest keys)
   `(define-language ,name
+     ,@keys				; first, so that a key given here wins
      :title ,title :prompt ,prompt
      :names (lambda () (top-level-names ',interaction ',source))
      :describe (describe-top-level ',interaction ',source)
      :expand (expand-top-level ',interaction ',source)
      :cell (top-level-cell ',interaction ',source)
      :error-text #'pseudoscheme-api::error-message
-     :unspecified-p #'unspecific-p
-     ,@keys))
+     :unspecified-p #'unspecific-p))
 
 (define-psyntax-language :r7rs "R7RS-small" "r7rs> "
   ("pseudoscheme" "r7rs" "interaction") ("pseudoscheme" "r7rs")

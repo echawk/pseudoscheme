@@ -179,7 +179,7 @@
       (min                            (fun ps:scheme-min))
       (modulo                         (fun ps:scheme-modulo))
       (negative?                      (pred ps-lisp:minusp 1))
-      (newline                        (fun ps-lisp:terpri))
+      (newline                        (fun ps:scheme-newline))
       (not			      (special))
       (null?                          (pred ps-lisp:null 1))
       (number?                        (pred ps-lisp:numberp 1))
@@ -307,7 +307,7 @@
 				 :direction :output
 				 :if-exists :supersede)
 	    (ps-lisp:funcall thunk))))
-      (write-char                     (fun ps-lisp:write-char))
+      (write-char                     (fun ps:scheme-write-char))
       (zero?                          (pred ps:scheme-zerop 1))
 
       ;; Auxiliaries

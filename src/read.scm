@@ -477,11 +477,15 @@
       ;; Chez Scheme's #!eof: the end-of-file object
       (if (string=? name "eof")
 	  eof-datum
+      ;; Chez Scheme's #!base-rtd and the like
+      (let ((datum (ps:sharp-bang-datum name)))
+	(if datum
+	    datum
       ;; #!sweet and the like: the port's alternative reader reads on
       (let ((reader (ps:reader-directive port name)))
 	(if reader
 	    (ps:call-alternative-reader reader port)
-	    (sub-read port)))))))
+	    (sub-read port)))))))))
 
 ; Datum labels, #<n>=<datum> and #<n># (R7RS 2.4).
 

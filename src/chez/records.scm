@@ -132,13 +132,16 @@
        (and (identifier? #'name) (identifier? #'parent))
        (parse #'name #'parent #'(field ...) #'(init ...) #'(option ...))))))
 
-(define-syntax type-descriptor
-  (syntax-rules ()
-    ((_ name)
-     (let ((rtd name))
-       (if (record-type-descriptor? rtd)
-           rtd
-           (assertion-violation 'type-descriptor "not a record type" 'name))))))
+;; type-descriptor is psyntax's (vendor/psyntax/psyntax/expander.ss)
+
+;; define-record's options (prefix "string"), (constructor id) and
+;; (predicate id): auxiliary keywords that (chezscheme) exports
+(define-syntax prefix
+  (lambda (x) (syntax-violation #f "misplaced auxiliary keyword" x)))
+(define-syntax predicate
+  (lambda (x) (syntax-violation #f "misplaced auxiliary keyword" x)))
+(define-syntax constructor
+  (lambda (x) (syntax-violation #f "misplaced auxiliary keyword" x)))
 
 ;; (make-record-type [parent] name fields): a record type descriptor,
 ;; the fields as define-record's: a symbol or (mutable|immutable [type] name)

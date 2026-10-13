@@ -41,7 +41,7 @@ clause:
 | fail | false, or raised no error where it should have |
 | error | raised an unexpected condition |
 | unbound | referred to a name `(chezscheme)` doesn't export |
-| unsup | needs what isn't planned here: Chez's compiler and its files, the inspector, `$` system procedures |
+| unsup | needs what isn't planned here: Chez's compiler internals, the inspector, `$` system procedures |
 | crash | hung or killed its process, and was skipped on a retry |
 
 The files about the compiler or C (cp0, cptypes, foreign, ftype,
@@ -49,7 +49,8 @@ profile, windows) aren't counted in the totals. The latest run:
 
 | | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
-| **counted files** | **15045** | **989** | **591** | **663** | **6848** | **20** |
+| **counted files** | **16391** | **986** | **391** | **485** | **5880** | **22** |
+| before separate-eval, object files and oop (Oct 13) | 15045 | 989 | 591 | 663 | 6848 | 20 |
 | before compiled programs and the checks below (Oct 12) | 13792 | 1006 | 786 | 1157 | 6802 | 20 |
 | first run | 7892 | 941 | 714 | 1798 | 4726 | 24 |
 
@@ -59,42 +60,42 @@ counted in every column, failures included. By file:
 
 | file | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
-| 3 | 527 | 3 | 0 | 0 | 150 | 0 |
-| 4 | 526 | 60 | 64 | 48 | 263 | 1 |
-| 5_1 | 398 | 0 | 3 | 0 | 4 | 0 |
+| 3 | 541 | 3 | 0 | 0 | 136 | 0 |
+| 4 | 577 | 87 | 18 | 29 | 250 | 1 |
+| 5_1 | 400 | 0 | 2 | 0 | 3 | 0 |
 | 5_2 | 191 | 18 | 1 | 4 | 3 | 7 |
 | 5_3 | 98 | 0 | 0 | 6 | 0 | 0 |
-| 5_4 | 815 | 34 | 3 | 18 | 12 | 0 |
-| 5_5 | 472 | 24 | 0 | 0 | 54 | 1 |
-| 5_6 | 491 | 27 | 3 | 2 | 197 | 2 |
+| 5_4 | 821 | 34 | 3 | 18 | 6 | 0 |
+| 5_5 | 474 | 24 | 0 | 0 | 52 | 1 |
+| 5_6 | 506 | 27 | 3 | 2 | 182 | 2 |
 | 5_7 | 38 | 16 | 3 | 2 | 1 | 0 |
-| 5_8 | 19 | 3 | 0 | 0 | 0 | 0 |
-| 6 | 2840 | 169 | 59 | 75 | 98 | 0 |
-| 7 | 249 | 115 | 42 | 55 | 554 | 0 |
-| 8 | 775 | 186 | 196 | 141 | 918 | 3 |
-| bytevector | 944 | 39 | 22 | 33 | 1683 | 3 |
+| 5_8 | 22 | 0 | 0 | 0 | 0 | 0 |
+| 6 | 2859 | 160 | 60 | 70 | 89 | 3 |
+| 7 | 736 | 99 | 37 | 39 | 103 | 0 |
+| 8 | 1187 | 161 | 131 | 70 | 668 | 2 |
+| bytevector | 1027 | 39 | 22 | 34 | 1599 | 3 |
 | cfl | 177 | 0 | 0 | 5 | 81 | 0 |
-| cp0 | 10 | 0 | 0 | 42 | 244 | 0 |
+| cp0 | 16 | 0 | 0 | 42 | 238 | 0 |
 | cptypes | 3 | 0 | 0 | 22 | 539 | 0 |
-| date | 75 | 35 | 1 | 2 | 159 | 0 |
-| enum | 41 | 3 | 0 | 2 | 0 | 0 |
+| date | 87 | 35 | 4 | 2 | 144 | 0 |
+| enum | 43 | 3 | 0 | 0 | 0 | 0 |
 | examples | 365 | 7 | 2 | 2 | 0 | 0 |
-| exceptions | 12 | 0 | 0 | 2 | 71 | 0 |
-| fl | 751 | 14 | 0 | 2 | 125 | 0 |
-| foreign | 21 | 1 | 4 | 4 | 28 | 0 |
-| format | 1174 | 5 | 7 | 0 | 26 | 0 |
+| exceptions | 14 | 0 | 0 | 2 | 69 | 0 |
+| fl | 755 | 14 | 0 | 2 | 121 | 0 |
+| foreign | 21 | 1 | 5 | 4 | 27 | 0 |
+| format | 1194 | 5 | 7 | 0 | 6 | 0 |
 | ftype | 18 | 0 | 0 | 79 | 1115 | 0 |
-| fx | 1176 | 18 | 19 | 0 | 592 | 0 |
-| hash | 768 | 38 | 1 | 5 | 454 | 0 |
-| ieee | 481 | 22 | 1 | 12 | 4 | 0 |
-| io | 428 | 73 | 26 | 42 | 444 | 0 |
-| misc | 407 | 15 | 21 | 99 | 305 | 3 |
-| oop | 70 | 0 | 97 | 75 | 0 | 0 |
+| fx | 1184 | 18 | 19 | 0 | 584 | 0 |
+| hash | 773 | 40 | 2 | 9 | 442 | 0 |
+| ieee | 483 | 22 | 1 | 12 | 2 | 0 |
+| io | 445 | 73 | 26 | 43 | 426 | 0 |
+| misc | 422 | 23 | 23 | 103 | 276 | 3 |
+| oop | 230 | 10 | 2 | 0 | 0 | 0 |
 | primvars | 73 | 12 | 0 | 14 | 33 | 0 |
-| profile | 8 | 6 | 1 | 13 | 180 | 0 |
-| record | 579 | 40 | 16 | 13 | 535 | 0 |
+| profile | 10 | 6 | 2 | 11 | 179 | 0 |
+| record | 583 | 42 | 21 | 13 | 524 | 0 |
 | thread | 21 | 0 | 0 | 4 | 70 | 0 |
-| unix | 64 | 13 | 4 | 0 | 12 | 0 |
+| unix | 65 | 14 | 4 | 0 | 10 | 0 |
 | windows | 15 | 0 | 0 | 0 | 0 | 0 |
 
 What the fixes since the first run were:
@@ -141,8 +142,13 @@ What the fixes since the first run were:
   - `flonum->fixnum`, `flsingle`, `immutable-vector-append`,
     `immutable-vector-copy`, `vector-cas!` and `pretty-format`.
 - **The harness** loads oop.ss before oop.ms, as Chez's makefile does.
-  It counts clauses that reach `$` system procedures as unsup, and it
-  kills a hung clause's process rather than the shell around it.
+  It counts clauses that reach `$` system procedures as unsup (a `$`
+  name the clause binds itself is the test's own), and it kills a hung
+  clause's process rather than the shell around it. Its `separate-eval`
+  and `separate-compile` run the expressions in another `bin/chez -q`,
+  through `open-process-ports`, as Chez's mats do; with
+  `CHEZ_MAT_VERBOSE` set, a failed `(equal? actual expected)` reports
+  the actual value.
 
 Since: R6RS's letrec restriction is checked (3: 468 -> 527); immutable
 vectors, strings and bytevectors (an SBCL header bit), Chez's argument
@@ -154,18 +160,29 @@ file ports through their wrappers and Chez's file options (io: 257 ->
 428); `get-mode` and `chmod` no longer fork processes (6.ms took 6.6
 minutes and timed out under load; now 10 s).
 
+Then (15,045 -> 16,391): the harness runs `separate-eval` and
+`separate-compile` (601 uses), so the clauses about object files run:
+Chez's library search, `compile-whole-library` and friends (below; 7:
+249 -> 736, 8: 775 -> 1187); `cd` changes the process's directory;
+`lookahead-u8` on an input/output file port no longer moves its
+position; file times are to the nanosecond. And oop.ss's records:
+record type descriptors are records, of `#!base-rtd` or a type
+descending from it, with `$make-record-type`, `$record`,
+`$object-ref` and the like through `#%` (which now names the system's
+binding, not the user's), and `fluid-let-syntax`, `type-descriptor` of
+a `define-record-type` name, and macro-made top-level modules (oop: 70
+-> 230).
+
 The largest groups left:
-- 7 and 8: clauses that need the files of an earlier `compile-file`
-  or `compile-whole-library` (missing here; the harness can't tell
-  them from the clauses' text), `define-property`, library
-  introspection, `eval-when` and `meta`.
+- 7 and 8: object files where Chez's are more than text:
+  `concatenate-object-files` of a compiled program and a text object
+  file, `verify-loadability`'s compilation instances, syntax errors
+  `compile-file` would report; `eval-when` and `meta`.
 - format: the printer parameters (`print-radix`, `print-level`, ...),
   which the writer doesn't consult yet.
 - hash: the argument checks Chez makes and the hash values its
   `equal-hash` gives.
 - record: R6RS record-syntax details and `$record` system procedures.
-- oop: oop.ss defines classes with `#%$make-record-type` on `#!base-rtd`:
-  record types that are themselves records with fields of their own.
 
 ## Why Chez is the near one
 
@@ -398,10 +415,10 @@ lengths.)
     a terminal (`echo '(threaded?)' | chez -q` prints `#t`);
   - `--libdirs`; and the rest of Chez's options, accepted.
 - **`compile-file`, `compile-program`, `compile-library` and
-  `compile-script`** write the `.so` that Chez would. Here it is a copy of
-  the source, with its mode, so `--script`, `--program` and `load` run it,
-  and a program with a `#!` line can be run directly. It's compiled by SBCL
-  as it loads.
+  `compile-script`** write the `.so` that Chez would: `compile-program`'s
+  is an SBCL fasl (below); the others' is a copy of the source, with its
+  mode, so `--script`, `--program` and `load` run it, and a program with
+  a `#!` line can be run directly. It's compiled by SBCL as it loads.
 
 ### Idris 2
 
@@ -454,6 +471,44 @@ an object with no load form, gets a copy of its source instead.
 `compile-file`, `compile-library` and `compile-script` still copy;
 libraries are compiled into the compiled-library cache when first
 imported.
+
+### Object files and library search
+
+A library is looked for as Chez looks for it (src/chez/top-level.scm):
+`(library-search-handler)`, `default-library-search-handler` unless
+replaced, is given the library's name, `(library-directories)` (pairs
+of source and object directories, set with a list or a string such as
+`"src::obj:lib"`) and `(library-extensions)`, and returns the source
+file, the object file, and whether the object file exists.
+src/r7rs/front.lisp then uses the object file if it is no older than
+the source (to the nanosecond, from `stat`), or else the source; what
+the search doesn't find is looked for as in the other modes.
+
+- **An object file** holds library forms as text, and may hold several:
+  loading it installs each in turn. Includes are relative to the file
+  an `include` is in, through its source annotation, as Chez's are.
+- **`compile-library`** (and `compile-file`) also expands and installs
+  the file's libraries, as Chez's compiler leaves them, so a library
+  with an error leaves no object file. With `compile-imported-libraries`
+  it compiles the libraries the file imports (in it or in the files it
+  includes) whose object files are out of date, through
+  `compile-library-handler`, and so does an `import`.
+- **`generate-wpo-files`** writes `foo.wpo` beside `foo.so`; for this
+  implementation it is another copy of the source.
+- **`compile-whole-library`** and **`compile-whole-program`** write one
+  object file of the library or program and, before it, each library it
+  depends on (found by its imports, those in its body included) whose
+  `.wpo` file there is. The value is the list of those without one,
+  which stay separate. Loading such a file when one of its libraries is
+  already installed is an error, as in Chez.
+- **`maybe-compile-file`, `-library` and `-program`** compile only if
+  the object file is missing or older than the source, an included
+  file, or an imported library's object file (brought up to date first
+  with `compile-imported-libraries`), through `compile-program-handler`
+  and `compile-library-handler`.
+- **`concatenate-object-files`** concatenates text object files;
+  **`verify-loadability`** checks that each library the object files
+  import is among them or can be found.
 
 ### Reader syntax
 
