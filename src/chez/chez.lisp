@@ -22,7 +22,7 @@
 
 (defparameter *chezscheme-extras*
   '(;; chezscheme.scm
-    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "transcoder?" "with-continuation-mark" "current-continuation-marks" "continuation-marks?" "continuation-next-marks" "continuation-marks-first" "continuation-marks->list" "continuation-marks->iterator" "call-with-immediate-continuation-mark" "port-file-compressed!" "r6rs:current-input-port" "r6rs:current-output-port" "r6rs:current-error-port" "call/1cc" "gensym" "getenv" "system" "make-parameter"
+    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-define-syntax" "indirect-export" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "transcoder?" "with-continuation-mark" "current-continuation-marks" "continuation-marks?" "continuation-next-marks" "continuation-marks-first" "continuation-marks->list" "continuation-marks->iterator" "call-with-immediate-continuation-mark" "port-file-compressed!" "r6rs:current-input-port" "r6rs:current-output-port" "r6rs:current-error-port" "call/1cc" "gensym" "getenv" "system" "make-parameter"
     "with-input-from-string" "with-output-to-string" "current-directory"
     "file-directory?" "file-regular?" "file-symbolic-link?" "directory-list"
     "mkdir" "delete-directory" "rename-file" "file-modification-time"
@@ -160,6 +160,12 @@
     "put-bytevector-some" "truncate-file" "set-port-length!" "annotation?"
     "annotation-expression" "annotation-stripped" "annotation-source"
     "source-object-bfp" "source-object-efp" "source-file-descriptor"
+    "make-annotation" "annotation-option-set" "annotation-options" "syntax->annotation"
+    "source-file-descriptor?" "make-source-file-descriptor" "source-file-descriptor-path"
+    "source-file-descriptor-checksum" "make-source-object" "source-object?" "source-object-sfd"
+    "source-object-line" "source-object-column" "current-make-source-object"
+    "locate-source" "locate-source-object-source" "current-locate-source-object-source"
+    "open-source-file"
     "get-datum/annotations" "read-token" "compile-library-handler" "engine-block" "engine-return"
     "date->time-utc" "date-week-day" "define-values" "abort-handler")
   "What src/chez/*.scm defines that (chezscheme) exports, besides R6RS.")
@@ -454,19 +460,32 @@ the top level already running, or the main one."
   "Evaluate FORM; a (begin form ...) one form at a time, as Chez does at
 top level, so that each is expanded after the ones before it have run, and
 a library is invoked only when a form that runs references it."
+  (when (and (ps::annotation-p form) (head-is (ps::annotation-stripped form) "begin"))
+    ;; an annotated begin: its annotated forms
+    (let ((parts (ps::annotation-expression form)))
+      (when (and (consp parts) (consp (cdr parts)) (null (cdr (last parts))))
+	(return-from eval-top-level-forms
+	  (progn (mapc #'eval-top-level-forms (butlast (cdr parts)))
+		 (eval-top-level-forms (car (last parts))))))))
   (if (and (head-is form "begin") (consp (cdr form)) (null (cdr (last form))))
       (progn (mapc #'eval-top-level-forms (butlast (cdr form)))
 	     (eval-top-level-forms (car (last form))))
       (psx:eval-top-level form)))
 
-(defun load-file-at-chez-top-level (path &optional library)
+(defun read-annotated-forms (path name)
+  "PATH's forms, read as Chez's load reads them: each part annotated with
+its source (src/core.lisp), the file named NAME in its descriptor."
+  (let ((ps:*annotating-sfd* (ps::make-sfd name (ps::file-checksum path))))
+    (read-forms path)))
+
+(defun load-file-at-chez-top-level (path &optional library (name (namestring path)))
   "Load PATH's forms one by one at Chez's top level (see
-EVAL-AT-CHEZ-TOP-LEVEL)."
+EVAL-AT-CHEZ-TOP-LEVEL), annotated with their source in the Chez mode."
   (when (psx::compiled-file-p path)
     (return-from load-file-at-chez-top-level (psx::load-compiled-file path)))
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
 	(value ps:unspecific))
-    (dolist (form (read-forms path) value)
+    (dolist (form (if ps:*chez-reader* (read-annotated-forms path name) (read-forms path)) value)
       (setq value (eval-at-chez-top-level form library)))))
 
 ;;; Library files whose library a macro makes, at their own top level
@@ -522,7 +541,7 @@ return true if that installed the library."
 (defun install-chez-top-level-primitives ()
   (psx:defhost "chez:eval-at-top-level" (form) (eval-at-chez-top-level form))
   (psx:defhost "chez:load" (path)
-    (load-file-at-chez-top-level (merge-pathnames path))
+    (load-file-at-chez-top-level (merge-pathnames path) nil (if (stringp path) path (namestring path)))
     ps:unspecific)
   (psx:defhost "chez:compile-program" (in out)
     (compile-chez-program in out))

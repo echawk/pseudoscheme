@@ -238,6 +238,15 @@ let-optionals%2a."
 before the file search: libraries made on demand rather than read from
 files, such as (cl <package>) (src/interop.lisp).")
 
+(defun annotated-library-form (path name)
+  "In the Chez mode, R6RS library NAME's form from PATH read with its
+source annotations, as Chez reads a library (src/chez/chez.lisp)."
+  (let ((forms (read-annotated-forms path (namestring path))))
+    (find-if (lambda (f)
+	       (and (ps::annotation-p f)
+		    (equal (library-name-of (ps::annotation-stripped f)) name)))
+	     forms)))
+
 (defun locate-library-form (name)
   "Find library NAME (psyntax-style) on the library path; return its
 form, translated to an R6RS library, or NIL."
@@ -257,7 +266,8 @@ form, translated to an R6RS library, or NIL."
 	    (when form
 	      (return-from locate-library-form
 		(let ((*include-directory* (make-pathname :name nil :type nil :defaults path)))
-		  (resolve-includes (library-form form)))))))))
+		  (or (and ps:*chez-reader* (head-is form "library") (annotated-library-form path name))
+		      (resolve-includes (library-form form))))))))))
     (srfi-alias-form name)))
 
 (defun library-exports (form)

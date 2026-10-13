@@ -570,3 +570,10 @@
     [(key default proc)
      (unless (procedure? proc) (assertion-violation 'call-with-immediate-continuation-mark "not a procedure" proc))
      (%chez:call-with-immediate-mark key proc default)]))
+;; a macro whose expansions are traced (here: an ordinary macro)
+(define-syntax trace-define-syntax
+  (syntax-rules () [(_ name e) (define-syntax name e)]))
+;; (indirect-export id indirect-id ...): what a library's macros may refer
+;; to; library exports here are all visible to their expansions already
+(define-syntax indirect-export
+  (syntax-rules () [(_ id indirect ...) (begin)]))

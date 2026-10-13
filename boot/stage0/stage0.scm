@@ -137,7 +137,8 @@
 ;;; system $bootstrap)), defined below as s0:name.
 (define s0:bootstrap-names
   '(void gensym eval-core symbol-value set-symbol-value! pretty-print
-    lisp-keyword? host-literal?))
+    lisp-keyword? host-literal? annotation? annotation-expression annotation-stripped
+    strip-annotations))
 
 ;;; R6RS procedures defined below as r6:name.
 (define s0:r6rs-names
@@ -993,6 +994,10 @@
 
 (define (s0:lisp-keyword? x) #f)
 (define (s0:host-literal? x) #f)
+(define (s0:annotation? x) #f)
+(define (s0:annotation-expression x) x)
+(define (s0:annotation-stripped x) x)
+(define (s0:strip-annotations x) x)
 
 (define (s0:pretty-print x . port)
   (let ((p (if (null? port) (current-output-port) (car port))))

@@ -85,6 +85,56 @@
 ;;; Chez Scheme's boxes, #&x (src/chez/), and fxvectors, #vfx(...), a
 ;;; vector of fixnums.  Chez's flvectors are SRFI 4's f64vectors here.
 
+;;; Source annotations, as Chez Scheme has them: an annotation stands
+;;; for its expression, from SOURCE (a source object: a source file
+;;; descriptor and character positions), with STRIPPED the datum it
+;;; stands for without annotations.  psyntax looks through them; the
+;;; reader makes them while *ANNOTATING-SFD* is a descriptor.
+
+(defstruct (annotation (:constructor make-annotation (expression source stripped options)))
+  expression source stripped options)
+(defstruct (sfd (:constructor make-sfd (path checksum))) path checksum)
+(defstruct (source-object (:constructor make-source-object (sfd bfp efp &optional line column)))
+  sfd bfp efp line column)
+(defmethod make-load-form ((x annotation) &optional env) (make-load-form-saving-slots x :environment env))
+(defmethod make-load-form ((x sfd) &optional env) (make-load-form-saving-slots x :environment env))
+(defmethod make-load-form ((x source-object) &optional env) (make-load-form-saving-slots x :environment env))
+
+(defvar *annotations-made* nil "Has an annotation been made?  (Else stripping is a no-op.)")
+(defvar *annotating-sfd* nil "While the reader annotates: the descriptor of what it reads.")
+
+;; Lisp booleans: read.pso tests them with (ps:true? ...), which the
+;; translator compiles as a plain Lisp test
+(defun annotating-p () (and *annotating-sfd* t))
+(defun annotated-p (x) (annotation-p x))
+(defun call-without-annotating (thunk) (let ((*annotating-sfd* nil)) (funcall thunk)))
+
+(defun reader-position (port)
+  (or (ignore-errors (file-position port)) 0))
+
+(defun stripped (x)
+  "X with the annotations at its top (in a list or vector the reader just
+made of annotated parts) replaced by their stripped data."
+  (cond ((annotation-p x) (annotation-stripped x))
+	((consp x)
+	 (let ((a (stripped (car x))) (d (stripped (cdr x))))
+	   (if (and (eq a (car x)) (eq d (cdr x))) x (cons a d))))
+	((simple-vector-p x) (if (some #'annotation-p x) (map 'simple-vector #'stripped x) x))
+	(t x)))
+
+(defun reader-annotate (datum port start)
+  (setq *annotations-made* t)
+  (make-annotation datum (make-source-object *annotating-sfd* start (reader-position port))
+		   (stripped datum) :debug-profile))
+
+(defun file-checksum (path)
+  "Chez's source file descriptor checksum, here a hash of the file's bytes."
+  (with-open-file (in path :element-type '(unsigned-byte 8))
+    (let ((h 0))
+      (loop for b = (read-byte in nil) while b
+	    do (setq h (logand (+ (* h 31) b) #xffffffff)))
+      h)))
+
 (defstruct (box (:constructor make-box (contents)))
   contents)
 

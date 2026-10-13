@@ -37,6 +37,8 @@
   ;; The names of the libraries installed, visible ones (Chez's library-list)
   (set-symbol-value! 'psyntax:library-names
     (lambda () (map library-name (installed-libraries))))
+  ;; Chez's syntax->annotation
+  (set-symbol-value! 'psyntax:syntax->annotation syntax->annotation)
   ;; Whether a body may define after an expression (SRFI 251)
   (set-symbol-value! 'psyntax:mixed-bodies mixed-bodies)
   ;; One expanded, not run: ((lib-spec ...) core), for compile-program.

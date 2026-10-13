@@ -55,6 +55,11 @@
 	     (reading-error port (cdr form))
 	     (datum-of form)))))))
 
+; A datum the reader looks into itself (a character's name, a labelled
+; datum, a box's contents): read without annotations.
+(define (sub-read-plain port)
+  (ps:call-without-annotating (lambda () (sub-read-carefully port))))
+
 (define (sub-read-carefully port)
   (let ((form (sub-read port)))
     (cond ((eof-object? form)
@@ -95,9 +100,16 @@
 ; R6RS and R7RS allow for most of Unicode.
 
 (define (sub-read port)
-  (let ((form (sub-read-1 port)))
-    (if (and (ps:neoteric-p) (not (eof-object? form)) (not (reader-token? form)))
-	(neoteric-suffixes form port)
+  (let* ((start (and (ps:true? (ps:annotating-p)) (ps:reader-position port)))
+	 (form (sub-read-1 port))
+	 (form (if (and (ps:neoteric-p) (not (eof-object? form)) (not (reader-token? form)))
+		   (neoteric-suffixes form port)
+		   form)))
+    ;; Chez's annotations, while a file is read for them: a datum read
+    ;; after atmosphere already has its own
+    (if (and start (not (eof-object? form)) (not (reader-token? form))
+	     (not (eq? form eof-datum)) (not (ps:true? (ps:annotated-p form))))
+	(ps:reader-annotate form port start)
 	form)))
 
 (define (sub-read-1 port)
@@ -486,7 +498,7 @@
 	     (loop (+ (* n 10) (- (char->ascii d) (char->ascii #\0)))))
 	    ((char=? d #\=)
 	     (ps:read-labelled-datum port n
-	       (lambda () (sub-read-carefully port))))
+	       (lambda () (sub-read-plain port))))
 	    ((char=? d #\#)
 	     (ps:datum-label-reference port n))
 	    ;; Chez Scheme's #3(a b): a vector of length 3, the last
@@ -506,7 +518,7 @@
 		   (vector-set! v i (car l))))))
 	    ;; Chez Scheme's #3%car: ($primitive 3 car), at optimize level 3
 	    ((char=? d #\%)
-	     (list '$primitive n (sub-read-carefully port)))
+	     (list '$primitive n (sub-read-plain port)))
 	    ;; Chez Scheme's #12r-3b: a number in radix 12
 	    ((char-ci=? d #\r)
 	     (let* ((token (car (sub-read-token #\# port)))
@@ -550,7 +562,7 @@
 (define (sub-read-array-literal rank first port)
   (let* ((tag (read-array-tag first port))
 	 (bounds (read-array-bounds port))
-	 (datum (sub-read-carefully port)))
+	 (datum (sub-read-plain port)))
     (ps:make-array-literal rank tag bounds datum)))
 
 (define (read-array-tag first port)
@@ -633,7 +645,7 @@
       (cond ((eof-object? c)
 	     (reading-error port "end of file after #\\"))
 	    ((char-alphabetic? c)
-	     (let ((name (sub-read-carefully port)))
+	     (let ((name (sub-read-plain port)))
 	       (cond ((= (string-length (symbol->string name)) 1)
 		      c)
 		     ;; #\x<hex> (R6RS/R7RS)
@@ -911,13 +923,13 @@
   (lambda (c port)
     c
     (read-char port)
-    (ps:make-box (sub-read-carefully port))))
+    (ps:make-box (sub-read-plain port))))
 
 (define-sharp-macro #\%
   (lambda (c port)
     c
     (read-char port)
-    (list '$primitive (sub-read-carefully port))))
+    (list '$primitive (sub-read-plain port))))
 
 ; Chez Scheme's #{name unique}: a gensym.  The same unique name reads
 ; as the same symbol.

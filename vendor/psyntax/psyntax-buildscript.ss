@@ -960,6 +960,11 @@
     (set-symbol-value!        $boot)
     (lisp-keyword?            $boot)  ; PSEUDOSCHEME: self-evaluating Lisp keywords
     (host-literal?            $boot)  ; PSEUDOSCHEME: the host's other self-evaluating data
+    ;; PSEUDOSCHEME: Chez's source annotations, which psyntax looks through
+    (annotation?              $boot)
+    (annotation-expression    $boot)
+    (annotation-stripped      $boot)
+    (strip-annotations        $boot)
     (eval-core                $boot)
     (pretty-print             $boot)
     (module                   cm)

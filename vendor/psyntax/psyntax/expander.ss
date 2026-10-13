@@ -30,7 +30,7 @@
           interaction-library-name interaction-source-name
           identifier-binding environment-symbols eval-hook
           interaction-symbols top-level-binding expand-top-level
-          expansion-lock-hook expand-r6rs-top-level mixed-bodies)
+          expansion-lock-hook expand-r6rs-top-level mixed-bodies syntax->annotation)
   (import
     ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
@@ -375,11 +375,21 @@
       (mkstx e '() (list subst))))
 
   ;;; now are some deconstructors and predicates for syntax objects.
+  ;;; PSEUDOSCHEME: Chez's source annotations: an annotation in a datum
+  ;;; stands for its expression (and syntax->datum gives its stripped
+  ;;; form); syntax->annotation gives it back.
   (define syntax-kind?
     (lambda (x p?)
-      (if (stx? x)
-          (syntax-kind? (stx-expr x) p?)
-          (p? x))))
+      (cond
+        ((stx? x) (syntax-kind? (stx-expr x) p?))
+        ((annotation? x) (syntax-kind? (annotation-expression x) p?))
+        (else (p? x)))))
+  (define syntax->annotation
+    (lambda (x)
+      (cond
+        ((stx? x) (syntax->annotation (stx-expr x)))
+        ((annotation? x) x)
+        (else #f))))
   (define syntax-vector->list
     (lambda (x)
       (cond
@@ -388,6 +398,7 @@
                (m* (stx-mark* x)) (s* (stx-subst* x)))
            (map (lambda (x) (mkstx x m* s*)) ls)))
         ((vector? x) (vector->list x))
+        ((annotation? x) (syntax-vector->list (annotation-expression x)))
         (else (error 'syntax-vector->list "not a syntax vector" x)))))
   (define syntax-pair?
     (lambda (x) (syntax-kind? x pair?)))
@@ -403,9 +414,10 @@
     (lambda (x)
       (if (stx? x)
           (mkstx (syntax-car (stx-expr x)) (stx-mark* x) (stx-subst* x))
-          (if (pair? x)
-              (car x)
-              (error 'syntax-car "not a pair" x)))))
+          (cond
+            ((pair? x) (car x))
+            ((annotation? x) (syntax-car (annotation-expression x)))
+            (else (error 'syntax-car "not a pair" x))))))
   (define syntax->list
     (lambda (x)
       (if (syntax-pair? x)
@@ -417,20 +429,21 @@
     (lambda (x)
       (if (stx? x)
           (mkstx (syntax-cdr (stx-expr x)) (stx-mark* x) (stx-subst* x))
-          (if (pair? x)
-              (cdr x)
-              (error 'syntax-cdr "not a pair" x)))))
+          (cond
+            ((pair? x) (cdr x))
+            ((annotation? x) (syntax-cdr (annotation-expression x)))
+            (else (error 'syntax-cdr "not a pair" x))))))
   (define id?
     ;;; PSEUDOSCHEME: a Lisp keyword is a constant, not an identifier.
     (lambda (x) (syntax-kind? x (lambda (s) (and (symbol? s) (not (lisp-keyword? s)))))))
   
   (define id->sym
     (lambda (x)
-      (if (stx? x)
-          (id->sym (stx-expr x))
-          (if (symbol? x)
-              x
-              (error 'id->sym "not an id" x)))))
+      (cond
+        ((stx? x) (id->sym (stx-expr x)))
+        ((symbol? x) x)
+        ((annotation? x) (id->sym (annotation-expression x)))
+        (else (error 'id->sym "not an id" x)))))
 
   ;;; Two lists of marks are considered the same if they have the 
   ;;; same length and the corresponding marks on each are eq?.
@@ -475,12 +488,20 @@
   (define property-lookup
     (case-lambda
       ;; PSEUDOSCHEME: (r id), as in Chez: ID's compile-time value, or #f
-      ((id)
+      ((id r)
        (unless (id? id) (assertion-violation 'lookup "not an identifier" id))
        (let ((label (id->label id)))
-         (let ((b (and label (label->binding (base-label label) '()))))
-           (and (pair? b) (eq? (car b) '$ctv) (cdr b)))))
-      ((id key)
+         (let ((b (and label (label->binding (base-label label) r))))
+           (cond
+             ((and (pair? b) (eq? (car b) '$ctv)) (cadr b))
+             ;; a library's: its value is the ($ctv . value) pair
+             ((and (pair? b) (eq? (car b) 'global-macro))
+              (let ((lib (cadr b)) (loc (cddr b)))
+                (visit-library lib)
+                (let ((v (symbol-value loc)))
+                  (and (pair? v) (eq? (car v) '$ctv) (cdr v)))))
+             (else #f)))))
+      ((id key r)
        (unless (and (id? id) (id? key))
          (assertion-violation 'lookup "not an identifier" (if (id? id) key id)))
        (let ((label (id->label id)) (key-label (property-key key)))
@@ -534,10 +555,11 @@
   (define strip
     (lambda (x m*)
       (if (top-marked? m*)
-          x
+          (strip-annotations x)
           (let f ((x x))
             (cond
               ((stx? x) (strip (stx-expr x) (stx-mark* x)))
+              ((annotation? x) (annotation-stripped x))
               ((pair? x)
                (let ((a (f (car x))) (d (f (cdr x))))
                  (if (and (eq? a (car x)) (eq? d (cdr x)))
@@ -711,8 +733,10 @@
          (cons* 'local-macro! (cdr x) src))
         ((and (pair? x) (eq? (car x) '$rtd)) x)
         ;; PSEUDOSCHEME: Chez's compile-time value, ($ctv . value)
-        ;; (make-compile-time-value), which (r id) gives a transformer
-        ((and (pair? x) (eq? (car x) '$ctv)) x)
+        ;; (make-compile-time-value), which (r id) gives a transformer:
+        ;; bound as ($ctv value . expr), EXPR making it again (in a
+        ;; library's visit code)
+        ((and (pair? x) (eq? (car x) '$ctv)) (cons* '$ctv (cdr x) src))
         (else (error 'expand "invalid transformer" x)))))
   
   ;;; r6rs's make-variable-transformer:
@@ -2100,6 +2124,7 @@
             ((stx? e)
              (let-values (((m* s*) (join-wraps m* s* e)))
                (match-each (stx-expr e) p m* s*)))
+            ((annotation? e) (match-each (annotation-expression e) p m* s*))
             (else #f))))
       (define match-each+
         (lambda (e x-pat y-pat z-pat m* s* r)
@@ -2121,6 +2146,7 @@
               ((stx? e)
                (let-values (((m* s*) (join-wraps m* s* e)))
                  (f (stx-expr e) m* s*)))
+              ((annotation? e) (f (annotation-expression e) m* s*))
               (else (values '() y-pat (match e z-pat m* s* r)))))))
       (define match-each-any
         (lambda (e m* s*)
@@ -2132,6 +2158,7 @@
             ((stx? e)
              (let-values (((m* s*) (join-wraps m* s* e)))
                (match-each-any (stx-expr e) m* s*)))
+            ((annotation? e) (match-each-any (annotation-expression e) m* s*))
             (else #f))))
       (define match-empty
         (lambda (p r)
@@ -2202,6 +2229,7 @@
             ((stx? e)
              (let-values (((m* s*) (join-wraps m* s* e)))
                (match (stx-expr e) p m* s* r)))
+            ((annotation? e) (match (annotation-expression e) p m* s* r))
             (else (match* e p m* s* r)))))
       (match e p '() '() '())))
   
@@ -2607,19 +2635,26 @@
   ;;; PSEUDOSCHEME: a transformer may return a procedure, which is
   ;;; called with a lookup procedure for identifier properties, and
   ;;; returns the output (SRFI 213).
-  (define (call-transformer transformer e)
+  ;;; R is the expansion environment, which the lookup procedure
+  ;;; consults for a local compile-time value, (r id).
+  (define (call-transformer transformer e r)
     (let ((s (transformer (add-mark anti-mark e))))
-      (add-mark (gen-mark) (if (procedure? s) (s property-lookup) s))))
+      (add-mark (gen-mark)
+        (if (procedure? s)
+            (s (case-lambda
+                 ((id) (property-lookup id r))
+                 ((id key) (property-lookup id key r))))
+            s))))
 
   (define chi-macro
-    (lambda (p e)
-      (call-transformer (macro-transformer p) e)))
+    (lambda (p e r)
+      (call-transformer (macro-transformer p) e r)))
   
   (define chi-local-macro
-    (lambda (p e)
-      (call-transformer (local-macro-transformer p) e)))
+    (lambda (p e r)
+      (call-transformer (local-macro-transformer p) e r)))
   
-  (define (chi-global-macro p e)
+  (define (chi-global-macro p e r)
     ;;; FIXME: does not handle macro!?
     (let ((lib (car p))
           (loc (cdr p)))
@@ -2628,8 +2663,12 @@
         (let ((transformer
                (cond
                  ((procedure? x) x)
+                 ;; PSEUDOSCHEME: a library's variable transformer
+                 ((and (pair? x) (eq? (car x) 'macro!) (procedure? (cdr x))) (cdr x))
+                 ;; and a compile-time value isn't syntax to expand
+                 ((and (pair? x) (eq? (car x) '$ctv)) (stx-error e "invalid syntax"))
                  (else (error 'chi-global-macro "not a procedure")))))
-          (call-transformer transformer e)))))
+          (call-transformer transformer e r)))))
   
   (define chi-expr*
     (lambda (e* r mr)
@@ -2669,9 +2708,9 @@
            (let ((lex value))
              (build-lexical-reference no-source lex)))
           ((global-macro global-macro!)
-           (chi-expr (chi-global-macro value e) r mr))
-          ((local-macro local-macro!) (chi-expr (chi-local-macro value e) r mr))
-          ((macro macro!) (chi-expr (chi-macro value e) r mr))
+           (chi-expr (chi-global-macro value e r) r mr))
+          ((local-macro local-macro!) (chi-expr (chi-local-macro value e r) r mr))
+          ((macro macro!) (chi-expr (chi-macro value e r) r mr))
           ((constant)
            (let ((datum value))
              (build-data no-source datum)))
@@ -2736,9 +2775,9 @@
              ((core-prim)
               (stx-error e "cannot modify imported identifier in"))
              ((global-macro!)
-              (chi-expr (chi-global-macro value e) r mr))
+              (chi-expr (chi-global-macro value e r) r mr))
              ((local-macro!)
-              (chi-expr (chi-local-macro value e) r mr))
+              (chi-expr (chi-local-macro value e r) r mr))
              (else (stx-error e))))))))
   
   (define chi-lambda-clause
@@ -2873,11 +2912,11 @@
                    (syntax-match e ()
                      ((_ x* ...) (loop (append x* (cdr e*)) cmd*))))
                   ((global-macro global-macro!)
-                   (loop (cons (add-subst rib (chi-global-macro value e)) (cdr e*)) cmd*))
+                   (loop (cons (add-subst rib (chi-global-macro value e r)) (cdr e*)) cmd*))
                   ((local-macro local-macro!)
-                   (loop (cons (add-subst rib (chi-local-macro value e)) (cdr e*)) cmd*))
+                   (loop (cons (add-subst rib (chi-local-macro value e r)) (cdr e*)) cmd*))
                   ((macro macro!)
-                   (loop (cons (add-subst rib (chi-macro value e)) (cdr e*)) cmd*))
+                   (loop (cons (add-subst rib (chi-macro value e r)) (cdr e*)) cmd*))
                   (else (loop (cdr e*) (cons e cmd*))))))))))
 
   ;;; PSEUDOSCHEME: Chez's (id indirect-id ...) in an export list
@@ -3088,15 +3127,15 @@
                                     lex* rhs* mod** kwd* rib top?))))))
                  ((global-macro global-macro!)
                   (chi-body*
-                     (cons (add-subst rib (chi-global-macro value e)) (cdr e*))
+                     (cons (add-subst rib (chi-global-macro value e r)) (cdr e*))
                      r mr lex* rhs* mod** kwd* rib top?))
                  ((local-macro local-macro!)
                   (chi-body*
-                     (cons (add-subst rib (chi-local-macro value e)) (cdr e*))
+                     (cons (add-subst rib (chi-local-macro value e r)) (cdr e*))
                      r mr lex* rhs* mod** kwd* rib top?))
                  ((macro macro!)
                   (chi-body*
-                     (cons (add-subst rib (chi-macro value e)) (cdr e*))
+                     (cons (add-subst rib (chi-macro value e r)) (cdr e*))
                      r mr lex* rhs* mod** kwd* rib top?))
                  ((module)
                   (let-values (((lex* rhs* m-exp-id* m-exp-lab* r mr mod** kwd*)
@@ -3293,11 +3332,11 @@
                          (eval-core (expanded->core (chi-rhs rhs '() '()))))
                        (chi-top* (cdr e*) init*))))))
                ((global-macro global-macro!)
-                (chi-top* (cons (chi-global-macro value e) (cdr e*)) init*))
+                (chi-top* (cons (chi-global-macro value e '()) (cdr e*)) init*))
                ((local-macro local-macro!)
-                (chi-top* (cons (chi-local-macro value e) (cdr e*)) init*))
+                (chi-top* (cons (chi-local-macro value e '()) (cdr e*)) init*))
                ((macro macro!)
-                (chi-top* (cons (chi-macro value e) (cdr e*)) init*))
+                (chi-top* (cons (chi-macro value e '()) (cdr e*)) init*))
                (else
                 (chi-top* (cdr e*)
                    (cons (cons #f (chi-expr e '() '()))
@@ -3415,8 +3454,11 @@
             (export exp* ...)
             (import imp* ...)
             b* ...)
-         (and (eq? export 'export) (eq? import 'import) (eq? library 'library))
-         (values name* exp* imp* b*))
+         ;; PSEUDOSCHEME: an annotated form's header is data; its body
+         ;; keeps its annotations
+         (and (eq? (strip-annotations export) 'export) (eq? (strip-annotations import) 'import)
+              (eq? (strip-annotations library) 'library))
+         (values (strip-annotations name*) (strip-annotations exp*) (strip-annotations imp*) b*))
         (_ (stx-error e "malformed library")))))
 
   ;;; given a list of import-specs, return a subst and the list of
@@ -3977,6 +4019,14 @@
                      global*
                      (cons (cons loc (binding-value b)) macro*))))
                (($rtd $module) (f (cdr r) (cons x env) global* macro*))
+               ;; PSEUDOSCHEME: a compile-time value: a global macro whose
+               ;; value is ($ctv . value)
+               (($ctv)
+                (let ((loc (gensym)))
+                  (f (cdr r)
+                     (cons (cons* label 'global-macro loc) env)
+                     global*
+                     (cons (cons loc (cons (cons '$ctv (cadr b)) (cddr b))) macro*))))
                (else
                 (error 'expander "BUG: do not know how to export"
                        (binding-type b) (binding-value b))))))))))

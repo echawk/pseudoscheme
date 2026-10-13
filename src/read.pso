@@ -52,6 +52,9 @@
                (READING-ERROR PORT (CDR (THE CONS FORM)))
                (DATUM-OF FORM)))))))
 (SET-VALUE-FROM-FUNCTION 'SCHEME-READ 'SCHEME::SCHEME-READ)
+(DEFUN SUB-READ-PLAIN (PORT)
+  (CALL-WITHOUT-ANNOTATING #'(LAMBDA NIL (SUB-READ-CAREFULLY PORT))))
+(SET-VALUE-FROM-FUNCTION 'SUB-READ-PLAIN 'SCHEME::SUB-READ-PLAIN)
 (DEFUN SUB-READ-CAREFULLY (PORT)
   (LET ((FORM (SUB-READ PORT)))
     (IF (EQ FORM EOF-OBJECT)
@@ -109,12 +112,22 @@
   (SETQ DOT (MAKE-READER-TOKEN "unexpected \" . \"")))
 (SET-FUNCTION-FROM-VALUE 'DOT 'SCHEME::DOT)
 (DEFUN SUB-READ (PORT)
-  (LET ((FORM (SUB-READ-1 PORT)))
-    (IF (AND (TRUEP (NEOTERIC-P))
-             (NOT (EQ FORM EOF-OBJECT))
-             (NOT (TRUEP (READER-TOKEN? FORM))))
-        (NEOTERIC-SUFFIXES FORM PORT)
-        FORM)))
+  (DECLARE (SPECIAL EOF-DATUM))
+  (LET ((START (IF (ANNOTATING-P) (READER-POSITION PORT) FALSE)))
+    (LET ((FORM (SUB-READ-1 PORT)))
+      (LET ((.FORM.0 (IF (AND (TRUEP (NEOTERIC-P))
+                              (NOT (EQ FORM EOF-OBJECT))
+                              (NOT (TRUEP (READER-TOKEN? FORM))))
+                         (NEOTERIC-SUFFIXES FORM PORT)
+                         FORM)))
+        (LET NIL
+          (IF (AND (TRUEP START)
+                   (NOT (EQ .FORM.0 EOF-OBJECT))
+                   (NOT (TRUEP (READER-TOKEN? .FORM.0)))
+                   (NOT (EQ .FORM.0 EOF-DATUM))
+                   (NOT (ANNOTATED-P .FORM.0)))
+              (READER-ANNOTATE .FORM.0 PORT START)
+              .FORM.0))))))
 (SET-VALUE-FROM-FUNCTION 'SUB-READ 'SCHEME::SUB-READ)
 (DEFUN SUB-READ-1 (PORT)
   (DECLARE (SPECIAL READ-DISPATCH-VECTOR ASCII-LIMIT))
@@ -596,7 +609,7 @@
                     (RETURN (READ-LABELLED-DATUM
                              PORT
                              N
-                             #'(LAMBDA NIL (SUB-READ-CAREFULLY PORT))))
+                             #'(LAMBDA NIL (SUB-READ-PLAIN PORT))))
                     (IF (CHAR= D #\#)
                         (RETURN (DATUM-LABEL-REFERENCE PORT N))
                         (IF (CHAR= D #\()
@@ -627,8 +640,8 @@
                                                                   (GO .LAST))))))))
                                   (RETURN (PROG (I L)
                                             (PSETQ I 0 L ELEMENTS)
-                                            (GO |.loop.162|)
-                                            |.loop.162|
+                                            (GO |.loop.172|)
+                                            |.loop.172|
                                             (IF (NULL L)
                                                 (RETURN V)
                                                 (PROGN
@@ -639,11 +652,11 @@
                                                          (SCHEME+ I 1)
                                                          L
                                                          (CDR (THE CONS L)))
-                                                  (GO |.loop.162|))))))))
+                                                  (GO |.loop.172|))))))))
                             (IF (CHAR= D #\%)
                                 (RETURN (LIST 'SCHEME::$PRIMITIVE
                                               N
-                                              (SUB-READ-CAREFULLY PORT)))
+                                              (SUB-READ-PLAIN PORT)))
                                 (IF (CHAR-EQUAL D #\r)
                                     (LET ((TOKEN (CAR (THE CONS
                                                            (SUB-READ-TOKEN
@@ -762,7 +775,7 @@
 (DEFUN SUB-READ-ARRAY-LITERAL (RANK FIRST PORT)
   (LET ((TAG (READ-ARRAY-TAG FIRST PORT)))
     (LET ((BOUNDS (READ-ARRAY-BOUNDS PORT)))
-      (LET ((DATUM (SUB-READ-CAREFULLY PORT)))
+      (LET ((DATUM (SUB-READ-PLAIN PORT)))
         (LET NIL (MAKE-ARRAY-LITERAL RANK TAG BOUNDS DATUM))))))
 (SET-VALUE-FROM-FUNCTION
  'SUB-READ-ARRAY-LITERAL
@@ -916,7 +929,7 @@
            (IF (EQ .C.0 EOF-OBJECT)
                (READING-ERROR PORT "end of file after #\\")
                (IF (ALPHA-CHAR-P .C.0)
-                   (LET ((NAME (SUB-READ-CAREFULLY PORT)))
+                   (LET ((NAME (SUB-READ-PLAIN PORT)))
                      (IF (SCHEME= (LENGTH (THE SIMPLE-STRING
                                                (SYMBOL->STRING NAME)))
                                   1)
@@ -1243,14 +1256,14 @@
 (AT-TOP-LEVEL
   (DEFINE-SHARP-MACRO
    #\&
-   #'(LAMBDA (C PORT) C (.READ-CHAR PORT) (MAKE-BOX (SUB-READ-CAREFULLY PORT)))))
+   #'(LAMBDA (C PORT) C (.READ-CHAR PORT) (MAKE-BOX (SUB-READ-PLAIN PORT)))))
 (AT-TOP-LEVEL
   (DEFINE-SHARP-MACRO
    #\%
    #'(LAMBDA (C PORT)
        C
        (.READ-CHAR PORT)
-       (LIST 'SCHEME::$PRIMITIVE (SUB-READ-CAREFULLY PORT)))))
+       (LIST 'SCHEME::$PRIMITIVE (SUB-READ-PLAIN PORT)))))
 (LOCALLY (DECLARE (SPECIAL *READ-GENSYMS*)) (SETQ *READ-GENSYMS* 'NIL))
 (SET-FORWARDING-FUNCTION '*READ-GENSYMS* 'SCHEME::*READ-GENSYMS*)
 (AT-TOP-LEVEL

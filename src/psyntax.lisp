@@ -82,6 +82,25 @@
 (uiop:register-image-restore-hook
  (lambda () (setq *gensym-prefix* (session-gensym-prefix))) nil)
 
+(defun strip-annotations (x)
+  "X with each annotation in it replaced by its stripped datum."
+  (if (not ps::*annotations-made*)
+      x
+      (let ((seen (make-hash-table :test 'eq)))
+	(labels ((walk (x)
+		   (cond ((ps::annotation-p x) (ps::annotation-stripped x))
+			 ((gethash x seen) x)
+			 ((consp x)
+			  (setf (gethash x seen) t)
+			  (let ((a (walk (car x))) (d (walk (cdr x))))
+			    (if (and (eq a (car x)) (eq d (cdr x))) x (cons a d))))
+			 ((simple-vector-p x)
+			  (setf (gethash x seen) t)
+			  (let ((new (map 'simple-vector #'walk x)))
+			    (if (every #'eq new x) x new)))
+			 (t x))))
+	  (walk x)))))
+
 (defun install-adapter ()
   (defhost "gensym" (&rest args)
     ;; the source name, if one is given, is kept for messages about an
@@ -104,6 +123,11 @@
   (defhost "lisp-keyword?" (x) (ps:true? (keywordp x)))
   ;; SRFI 4's #s16(...), SRFI 88's foo:, and records (SRFI 163's array
   ;; literals)
+  ;; Chez's source annotations, which psyntax looks through
+  (defhost "annotation?" (x) (ps:true? (ps::annotation-p x)))
+  (defhost "annotation-expression" (x) (ps::annotation-expression x))
+  (defhost "annotation-stripped" (x) (ps::annotation-stripped x))
+  (defhost "strip-annotations" (x) (strip-annotations x))
   (defhost "host-literal?" (x)
     ;; Chez's #!eof too: the end-of-file object is self-evaluating there
     (ps:true? (or (and (ps:numeric-vector-tag x) t) (ps:keyword-object-p x)

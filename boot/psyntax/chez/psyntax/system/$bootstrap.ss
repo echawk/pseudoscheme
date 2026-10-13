@@ -5,8 +5,10 @@
 
 (library (psyntax system $bootstrap)
   (export void gensym eval-core symbol-value set-symbol-value!
-          pretty-print lisp-keyword? host-literal?)
-  (import (except (chezscheme) gensym pretty-print))
+          pretty-print lisp-keyword? host-literal?
+          annotation? annotation-expression annotation-stripped strip-annotations)
+  (import (except (chezscheme) gensym pretty-print
+                  annotation? annotation-expression annotation-stripped))
 
   ;; Interned, so the expanded code they end up in can be written out
   ;; and read back.  Distinct from the names Pseudoscheme's own gensym
@@ -33,7 +35,8 @@
                  identifier? environment environment? eval expand
                  generate-temporaries free-identifier=? bound-identifier=?
                  datum->syntax syntax-error syntax->datum
-                 make-variable-transformer null-environment)
+                 make-variable-transformer null-environment syntax->annotation
+                 annotation? annotation-expression annotation-stripped)
               '(psyntax expander)
               '(psyntax system $bootstrap))
              #t))
@@ -51,4 +54,9 @@
       (newline p)))
 
   (define (lisp-keyword? x) #f)
-  (define (host-literal? x) #f))
+  (define (host-literal? x) #f)
+  ;; source annotations: psyntax's sources have none here
+  (define (annotation? x) #f)
+  (define (annotation-expression x) x)
+  (define (annotation-stripped x) x)
+  (define (strip-annotations x) x))

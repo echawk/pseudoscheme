@@ -45,6 +45,12 @@
 (define (condition->chez-string c)
   (cond ((not (condition? c))
          (format #f "Exception occurred with non-condition value ~s" c))
+        ;; a syntax violation: its message and then its form
+        ((and (syntax-violation? c) (message-condition? c) (syntax-violation-form c))
+         (string-append
+          (condition-text "Exception" (and (who-condition? c) (condition-who c)) (condition-message c) '())
+          " "
+          (format #f "~s" (syntax->datum (syntax-violation-form c)))))
         ((message-condition? c)
          (condition-text (if (warning? c) "Warning" "Exception")
                          (and (who-condition? c) (condition-who c))
