@@ -223,8 +223,8 @@
 (define timer-interrupt-handler (make-parameter (lambda () (if #f #f))))
 (define (set-timer n) 0)
 (define (register-signal-handler sig proc) (if #f #f))
-(define (make-engine thunk)
-  (error 'make-engine "engines are not supported (they need a timer interrupt)"))
+(define make-engine %chez:make-engine)   ; engines run in threads (host.lisp)
+(define engine-return %chez:engine-return)
 
 ;;; Syntax
 
@@ -302,5 +302,5 @@
   (error 'read-token "not supported"))
 
 (define compile-library-handler (make-parameter (lambda args (if #f #f))))
-(define (engine-block) (if #f #f))
+(define engine-block %chez:engine-block)
 (define (r6rs:command-line) (command-line))

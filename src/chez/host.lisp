@@ -1310,3 +1310,270 @@ and a count."
 	(third spec)
 	(r6rs-assertion-violation (ps:intern-scheme-symbol "library-version") "library not found" name))))
 (defprim "chez:transcoder?" (x) (bool (transcoder-p x)))
+
+;;; ------------------------------------------------------------------
+;;; Continuation marks (Chez 10's with-continuation-mark and friends)
+;;;
+;;; A mark belongs to a frame of the continuation, and a mark set in tail
+;;; position replaces the frame's mark of the same key.  SBCL merges tail
+;;; calls, so code reached by tail calls from a mark's body runs in the
+;;; body's frame position: CALL-WITH-MARK records the frame pointer its
+;;; body will have, and a call reached that way finds its own frame
+;;; pointer equal to it.  *MARKS* is ((frame key . value) ...), innermost
+;;; first, bound for each body; continuations remember theirs.
+
+(defvar *marks* '())
+
+(defstruct (mark-set (:constructor make-mark-set (marks))) marks)
+
+(defmacro body-frame () `(sb-sys:sap-int (sb-vm::current-sp)))
+(defmacro own-frame () `(sb-sys:sap-int (sb-kernel:current-fp)))
+
+(declaim (notinline call-with-mark))
+(defun call-with-mark (key value thunk)
+  (declare (function thunk))
+  (let* ((fp (own-frame))
+	 (body (body-frame))
+	 (top (car *marks*))
+	 (marks (if (and top (= fp (car top)))
+		    ;; in tail position of the enclosing mark's body: this
+		    ;; frame's mark of KEY is replaced, and the frame's other
+		    ;; marks move with the body to its new position
+		    (let ((frame (car top)))
+		      (loop for m in *marks*
+			    unless (and (= (car m) frame) (eq (cadr m) key))
+			      collect (if (= (car m) frame) (cons body (cdr m)) m)))
+		    *marks*))
+	 (*marks* (cons (list* body key value) marks)))
+    (funcall thunk)))
+
+(declaim (notinline call-with-immediate-mark))
+(defun call-with-immediate-mark (key proc default)
+  (declare (function proc))
+  (let* ((fp (own-frame))
+	 (m (find-if (lambda (m) (and (= (car m) fp) (eq (cadr m) key))) *marks*)))
+    (funcall proc (if m (cddr m) default))))
+
+(defun mark-frames (marks)
+  "MARKS grouped by frame, innermost first: ((frame (key . value) ...) ...)."
+  (let ((frames '()))
+    (dolist (m marks (nreverse frames))
+      (if (and frames (= (car (car frames)) (car m)))
+	  (push (cdr m) (cdr (car frames)))
+	  (push (list (car m) (cdr m)) frames)))))
+
+(defun marks-of (set who)
+  (cond ((eq set ps:false) *marks*)
+	((mark-set-p set) (mark-set-marks set))
+	(t (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a continuation-marks object" set))))
+
+(defvar *continuation-marks* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "A continuation procedure -> the marks of its continuation.")
+
+(defprim "chez:call-with-mark" (key value thunk) (call-with-mark key value thunk))
+(defprim "chez:call-with-immediate-mark" (key proc default) (call-with-immediate-mark key proc default))
+(defprim "chez:current-continuation-marks" () (make-mark-set *marks*))
+(defprim "chez:continuation-marks?" (x) (bool (mark-set-p x)))
+(defprim "chez:continuation-next-marks" (k)
+  (unless (functionp k)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "continuation-next-marks") "~s is not a continuation" k))
+  (make-mark-set (gethash k *continuation-marks* '())))
+(defprim "chez:note-continuation-marks" (k) (setf (gethash k *continuation-marks*) *marks*) k)
+(defprim "chez:continuation-marks-first" (set key default)
+  (let ((m (find key (marks-of set "continuation-marks-first") :key #'cadr :test #'eq)))
+    (if m (cddr m) default)))
+(defprim "chez:continuation-marks->list" (set key)
+  (loop for m in (marks-of set "continuation-marks->list")
+	when (eq (cadr m) key) collect (cddr m)))
+(defprim "chez:continuation-marks->iterator" (set keys none)
+  ;; each call: a vector of KEYS' values in the next frame with any of
+  ;; them (NONE for one it lacks), or #f, and the next iterator
+  (let ((keys (coerce keys 'list)))
+    (labels ((iterator (frames)
+	       (lambda ()
+		 (loop for rest on frames
+		       for entries = (cdr (car rest))
+		       when (some (lambda (k) (assoc k entries :test #'eq)) keys)
+			 do (return (values (coerce (mapcar (lambda (k) (let ((e (assoc k entries :test #'eq))) (if e (cdr e) none))) keys)
+						    'simple-vector)
+					    (iterator (cdr rest))))
+		       finally (return (values ps:false (iterator '())))))))
+      (iterator (mark-frames (marks-of set "continuation-marks->iterator"))))))
+(setq psx::*continuation-hook*
+      ;; a call/cc in tail position of a mark's body (in its frame) has the
+      ;; continuation of the whole: without that frame's marks
+      (lambda (k frame)
+	(when ps:*chez-reader*
+	  (setf (gethash k *continuation-marks*)
+		(let ((top (car *marks*)))
+		  (if (and top (= frame (car top)))
+		      (remove frame *marks* :key #'car)
+		      *marks*))))))
+
+;;; ------------------------------------------------------------------
+;;; Engines
+;;;
+;;; Chez's engines run a computation for a number of ticks (calls, about)
+;;; and then hand back a new engine for the rest.  Here an engine's
+;;; computation runs in a thread of its own, and a tick is a span of time
+;;; (*TICK-SECONDS*): the invoker waits that long, then interrupts the
+;;; thread, which waits until the next engine resumes it.  An exception
+;;; the computation doesn't handle itself is raised in the invoker's
+;;; thread, with the invoker's handlers (which may escape from the engine
+;;; call, or, for raise-continuable, return a value to the computation).
+;;; Ticks don't count work: an operation on a big vector costs no more
+;;; than a small one, and the ticks left when an engine completes are an
+;;; estimate.
+
+(defparameter *tick-seconds* 1d-8)
+
+(defstruct (engine-state (:constructor make-engine-state (thunk)))
+  thunk
+  (thread nil)
+  (lock (sb-thread:make-mutex :name "engine"))
+  (cv (sb-thread:make-waitqueue))
+  (to-invoker '())		; messages for the invoker
+  (to-engine '())		; messages for the computation
+  (running nil))		; T while the computation runs its own code
+
+(defvar *current-engine* nil "In an engine's thread: its state.")
+
+(defun engine-send (e slot message)
+  (sb-thread:with-mutex ((engine-state-lock e))
+    (if (eq slot :invoker)
+	(setf (engine-state-to-invoker e) (append (engine-state-to-invoker e) (list message)))
+	(setf (engine-state-to-engine e) (append (engine-state-to-engine e) (list message))))
+    (sb-thread:condition-broadcast (engine-state-cv e))))
+
+(defun engine-receive (e slot &optional timeout)
+  "The next message for SLOT, or NIL if TIMEOUT seconds pass first."
+  (let ((deadline (and timeout (+ (get-internal-real-time)
+				  (ceiling (* timeout internal-time-units-per-second))))))
+    (sb-thread:with-mutex ((engine-state-lock e))
+      (loop
+	(let ((q (if (eq slot :invoker) (engine-state-to-invoker e) (engine-state-to-engine e))))
+	  (when q
+	    (if (eq slot :invoker)
+		(setf (engine-state-to-invoker e) (cdr q))
+		(setf (engine-state-to-engine e) (cdr q)))
+	    (return (car q))))
+	(let ((left (and deadline (/ (- deadline (get-internal-real-time)) internal-time-units-per-second))))
+	  (when (and left (<= left 0)) (return nil))
+	  (sb-thread:condition-wait (engine-state-cv e) (engine-state-lock e)
+				    :timeout (and left (max left 0.000001))))))))
+
+(defun engine-wait-for-resume (e)
+  "In the computation's thread: hand the invoker an expired engine and
+wait to be resumed."
+  (setf (engine-state-running e) nil)
+  (engine-send e :invoker '(:blocked))
+  (engine-receive e :engine)
+  (setf (engine-state-running e) t)
+  (engine-send e :invoker '(:running)))
+
+(defun engine-pause ()
+  "Run in the computation's thread by an interrupt from the invoker."
+  (let ((e *current-engine*))
+    (when (and e (engine-state-running e))
+      (engine-wait-for-resume e))))
+
+(defvar *engine-handler* (lambda (obj) obj)
+  "The handler at the bottom of an engine's computation: a raise that
+reaches it goes to the invoker.")
+
+(defun engine-call-handler (orig)
+  (lambda (handler outer obj continuable)
+    (if (eq handler *engine-handler*)
+	(let ((e *current-engine*))
+	  (setf (engine-state-running e) nil)
+	  (engine-send e :invoker (list :raise obj continuable))
+	  (let ((reply (engine-receive e :engine)))
+	    (setf (engine-state-running e) t)
+	    (second reply)))
+	(funcall orig handler outer obj continuable))))
+
+(defun engine-main (e)
+  (let ((*current-engine* e)
+	(ps-r7rs::*handlers* (list *engine-handler*))
+	(ps-r7rs::*call-handler* (engine-call-handler ps-r7rs::*call-handler*)))
+    (engine-receive e :engine)		; the first resume
+    (setf (engine-state-running e) t)
+    (engine-send e :invoker '(:running))
+    (let ((message
+	    (catch 'engine-return
+	      (handler-case
+		  (cons :done (multiple-value-list (funcall (engine-state-thunk e))))
+		(error (c) (list :error c))))))
+      (setf (engine-state-running e) nil)
+      (engine-send e :invoker message))))
+
+(defun engine-procedure (e)
+  "The engine, a procedure of ticks, complete and expire, for state E."
+  (lambda (ticks complete expire)
+    (unless (and (integerp ticks) (plusp ticks))
+      (r6rs-assertion-violation (ps:intern-scheme-symbol "engine") "invalid ticks" ticks))
+    (run-engine e ticks complete expire)))
+
+(defun run-engine (e ticks complete expire)
+  (let ((start (get-internal-real-time))
+	(quantum (* ticks *tick-seconds*))
+	(finished nil))
+    (unless (engine-state-thread e)
+      (let ((in *standard-input*) (out *standard-output*) (err *error-output*)
+	    (parameters (ps-r7rs::thread-parameters-snapshot)))
+	(setf (engine-state-thread e)
+	      (sb-thread:make-thread
+	       (lambda ()
+		 (ps:disable-float-traps)
+		 (let ((*standard-input* in) (*standard-output* out) (*error-output* err)
+		       (ps-r7rs::*thread-parameters* parameters)
+		       (psx::*fstack* '()) (psx::*winders* '()))
+		   (engine-main e)))
+	       :name "engine"))))
+    (engine-send e :engine '(:resume))
+    ;; the computation says when it runs: the ticks count from then
+    (engine-receive e :invoker)
+    (unwind-protect
+	 (let ((interrupted nil))
+	   (loop
+	     (let ((m (engine-receive e :invoker (if interrupted 0.001 quantum))))
+	       (case (car m)
+		 ((nil)
+		  ;; out of ticks: stop the computation where it is
+		  (setq interrupted t)
+		  (ignore-errors (sb-thread:interrupt-thread (engine-state-thread e) #'engine-pause)))
+		 (:done
+		  (setq finished t)
+		  (let ((left (max 1 (- ticks (floor (/ (- (get-internal-real-time) start) internal-time-units-per-second)
+						     *tick-seconds*)))))
+		    (return (apply complete left (cdr m)))))
+		 (:blocked
+		  (setq finished t)
+		  (return (funcall expire (engine-procedure e))))
+		 (:raise
+		  (let ((value (ps-r7rs::raise-object (second m) (third m))))
+		    (engine-send e :engine (list :value value))))
+		 (:error
+		  (setq finished t)
+		  (error (second m)))))))
+      ;; an escape from a handler abandons the computation
+      (unless finished
+	(ignore-errors (sb-thread:terminate-thread (engine-state-thread e)))))))
+
+(defprim "chez:make-engine" (thunk)
+  (unless (functionp thunk)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "make-engine") "~s is not a procedure" thunk))
+  ;; each call of a new engine starts the computation afresh
+  (lambda (ticks complete expire)
+    (funcall (engine-procedure (make-engine-state thunk)) ticks complete expire)))
+
+(defprim "chez:engine-block" ()
+  (let ((e *current-engine*))
+    (unless e (r6rs-assertion-violation (ps:intern-scheme-symbol "engine-block") "no engine active"))
+    (engine-wait-for-resume e)
+    ps:unspecific))
+
+(defprim "chez:engine-return" (&rest values)
+  (unless *current-engine*
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "engine-return") "no engine active"))
+  (throw 'engine-return (cons :done values)))

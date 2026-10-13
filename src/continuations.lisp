@@ -51,6 +51,15 @@
   "The frames of the calls in progress, innermost first.  A base binds
 it to (:BASE).")
 
+(defvar *continuation-hook* nil
+  "NIL, or a function called with each continuation call/cc makes, and
+the frame pointer of call/cc's frame, before the continuation is passed
+on (the Chez mode notes its continuation marks).")
+
+(defmacro caller-frame ()
+  #+sbcl `(sb-sys:sap-int (sb-kernel:current-fp))
+  #-sbcl 0)
+
 (defvar *winders* '()
   "The active dynamic-winds' (before . after) pairs, innermost first.")
 
@@ -432,10 +441,14 @@ inside is re-entered (and so the continuation still works there)."
     (declare (dynamic-extent frame))
     (catch tag
       (with-frame (frame)
-	(funcall f (lambda (&rest values)
+	(funcall f (note-continuation (caller-frame) (lambda (&rest values)
 		     (if (and values (eq (car values) :pseudoscheme-continuation-query))
 			 (cons tag nil)	; its identity (CONTINUATION=)
-			 (throw tag (values-list values)))))))))
+			 (throw tag (values-list values))))))))))
+
+(defun note-continuation (frame k)
+  (when *continuation-hook* (funcall *continuation-hook* k frame))
+  k)
 
 (defun continuation-procedure-p (f)
   "Whether F is a continuation FULL-CALL/CC or ESCAPE-CALL/CC made (as
@@ -576,8 +589,11 @@ with-continuation-barrier).  Other barriers only block re-entry."
 			(setq *shared-winders* shared)
 			(throw *base-tag* (lambda () (reenter frames winders values shared)))))
 		     (t (error 'continuation-not-reentrant)))))
+	(when *continuation-hook* (funcall *continuation-hook* #'k (caller-frame)))
 	(unwind-protect (catch tag (funcall f #'k))
 	  (setf (car live) nil))))))
+
+
 
 ;;; Delimited continuations: prompts, as Guile has them (call-with-prompt,
 ;;; abort-to-prompt), and Racket and SRFI 226 too.  A prompt is a frame,

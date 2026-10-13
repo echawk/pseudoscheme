@@ -438,6 +438,9 @@ procedures of record-type-equal-procedure.")
 
 (defun equal-step (obj1 obj2 recur)
   (cond ((eql obj1 obj2) t)
+	;; boxes are equal? when their contents are, as in Chez and Racket
+	((box-p obj1)
+	 (and (box-p obj2) (funcall recur (box-contents obj1) (box-contents obj2))))
 	;; the extension's objects are structure instances, and may be
 	;; EQUAL? to vectors (a Guile array to the vector it views)
 	((and (or *equal-extension* *record-equal-hook*)

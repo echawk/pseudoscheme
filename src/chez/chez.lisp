@@ -22,7 +22,7 @@
 
 (defparameter *chezscheme-extras*
   '(;; chezscheme.scm
-    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "transcoder?" "port-file-compressed!" "r6rs:current-input-port" "r6rs:current-output-port" "r6rs:current-error-port" "call/1cc" "gensym" "getenv" "system" "make-parameter"
+    "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "transcoder?" "with-continuation-mark" "current-continuation-marks" "continuation-marks?" "continuation-next-marks" "continuation-marks-first" "continuation-marks->list" "continuation-marks->iterator" "call-with-immediate-continuation-mark" "port-file-compressed!" "r6rs:current-input-port" "r6rs:current-output-port" "r6rs:current-error-port" "call/1cc" "gensym" "getenv" "system" "make-parameter"
     "with-input-from-string" "with-output-to-string" "current-directory"
     "file-directory?" "file-regular?" "file-symbolic-link?" "directory-list"
     "mkdir" "delete-directory" "rename-file" "file-modification-time"
@@ -160,7 +160,7 @@
     "put-bytevector-some" "truncate-file" "set-port-length!" "annotation?"
     "annotation-expression" "annotation-stripped" "annotation-source"
     "source-object-bfp" "source-object-efp" "source-file-descriptor"
-    "get-datum/annotations" "read-token" "compile-library-handler" "engine-block"
+    "get-datum/annotations" "read-token" "compile-library-handler" "engine-block" "engine-return"
     "date->time-utc" "date-week-day" "define-values" "abort-handler")
   "What src/chez/*.scm defines that (chezscheme) exports, besides R6RS.")
 

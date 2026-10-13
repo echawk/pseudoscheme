@@ -539,3 +539,34 @@
 (define (r6rs:current-input-port) (current-input-port))
 (define (r6rs:current-output-port) (current-output-port))
 (define (r6rs:current-error-port) (current-error-port))
+
+;; Continuation marks (src/chez/host.lisp)
+(define-syntax with-continuation-mark
+  (syntax-rules ()
+    [(_ key value body) (%chez:call-with-mark key value (lambda () body))]))
+(define (current-continuation-marks) (%chez:current-continuation-marks))
+(define (continuation-marks? x) (%chez:continuation-marks? x))
+(define (continuation-next-marks k) (%chez:continuation-next-marks k))
+(define (check-marks who set)
+  (unless (continuation-marks? set) (assertion-violation who "not a continuation-marks object" set)))
+(define continuation-marks-first
+  (case-lambda
+    [(set key) (continuation-marks-first set key #f)]
+    [(set key none) (check-marks 'continuation-marks-first set)
+     (%chez:continuation-marks-first set key none)]))
+(define (continuation-marks->list set key)
+  (check-marks 'continuation-marks->list set)
+  (%chez:continuation-marks->list set key))
+(define continuation-marks->iterator
+  (case-lambda
+    [(set keys) (continuation-marks->iterator set keys #f)]
+    [(set keys none)
+     (check-marks 'continuation-marks->iterator set)
+     (unless (vector? keys) (assertion-violation 'continuation-marks->iterator "not a vector" keys))
+     (%chez:continuation-marks->iterator set keys none)]))
+(define call-with-immediate-continuation-mark
+  (case-lambda
+    [(key proc) (call-with-immediate-continuation-mark key #f proc)]
+    [(key default proc)
+     (unless (procedure? proc) (assertion-violation 'call-with-immediate-continuation-mark "not a procedure" proc))
+     (%chez:call-with-immediate-mark key proc default)]))
