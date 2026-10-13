@@ -49,7 +49,8 @@ profile, windows) aren't counted in the totals. The latest run:
 
 | | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
-| **counted files** | **13792** | **1006** | **786** | **1157** | **6802** | **20** |
+| **counted files** | **15045** | **989** | **591** | **663** | **6848** | **20** |
+| before compiled programs and the checks below (Oct 12) | 13792 | 1006 | 786 | 1157 | 6802 | 20 |
 | first run | 7892 | 941 | 714 | 1798 | 4726 | 24 |
 
 The first run stopped reading nine files early, at reader syntax we
@@ -58,42 +59,42 @@ counted in every column, failures included. By file:
 
 | file | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
-| 3 | 468 | 58 | 0 | 4 | 150 | 0 |
-| 4 | 503 | 43 | 64 | 88 | 263 | 1 |
-| 5_1 | 390 | 0 | 3 | 8 | 4 | 0 |
+| 3 | 527 | 3 | 0 | 0 | 150 | 0 |
+| 4 | 526 | 60 | 64 | 48 | 263 | 1 |
+| 5_1 | 398 | 0 | 3 | 0 | 4 | 0 |
 | 5_2 | 191 | 18 | 1 | 4 | 3 | 7 |
 | 5_3 | 98 | 0 | 0 | 6 | 0 | 0 |
-| 5_4 | 780 | 69 | 3 | 18 | 12 | 0 |
-| 5_5 | 430 | 66 | 0 | 0 | 54 | 1 |
-| 5_6 | 416 | 96 | 9 | 2 | 197 | 2 |
-| 5_7 | 37 | 17 | 3 | 2 | 1 | 0 |
+| 5_4 | 815 | 34 | 3 | 18 | 12 | 0 |
+| 5_5 | 472 | 24 | 0 | 0 | 54 | 1 |
+| 5_6 | 491 | 27 | 3 | 2 | 197 | 2 |
+| 5_7 | 38 | 16 | 3 | 2 | 1 | 0 |
 | 5_8 | 19 | 3 | 0 | 0 | 0 | 0 |
-| 6 | 2607 | 116 | 38 | 53 | 62 | 0 |
-| 7 | 223 | 40 | 134 | 64 | 554 | 0 |
-| 8 | 684 | 154 | 239 | 221 | 918 | 3 |
-| bytevector | 863 | 50 | 12 | 13 | 1673 | 3 |
+| 6 | 2840 | 169 | 59 | 75 | 98 | 0 |
+| 7 | 249 | 115 | 42 | 55 | 554 | 0 |
+| 8 | 775 | 186 | 196 | 141 | 918 | 3 |
+| bytevector | 944 | 39 | 22 | 33 | 1683 | 3 |
 | cfl | 177 | 0 | 0 | 5 | 81 | 0 |
-| cp0 | 7 | 0 | 1 | 44 | 244 | 0 |
+| cp0 | 10 | 0 | 0 | 42 | 244 | 0 |
 | cptypes | 3 | 0 | 0 | 22 | 539 | 0 |
 | date | 75 | 35 | 1 | 2 | 159 | 0 |
 | enum | 41 | 3 | 0 | 2 | 0 | 0 |
-| examples | 8 | 2 | 54 | 314 | 0 | 0 |
+| examples | 365 | 7 | 2 | 2 | 0 | 0 |
 | exceptions | 12 | 0 | 0 | 2 | 71 | 0 |
 | fl | 751 | 14 | 0 | 2 | 125 | 0 |
 | foreign | 21 | 1 | 4 | 4 | 28 | 0 |
 | format | 1174 | 5 | 7 | 0 | 26 | 0 |
 | ftype | 18 | 0 | 0 | 79 | 1115 | 0 |
 | fx | 1176 | 18 | 19 | 0 | 592 | 0 |
-| hash | 738 | 58 | 1 | 15 | 454 | 0 |
+| hash | 768 | 38 | 1 | 5 | 454 | 0 |
 | ieee | 481 | 22 | 1 | 12 | 4 | 0 |
-| io | 257 | 32 | 58 | 102 | 444 | 0 |
-| misc | 393 | 19 | 20 | 110 | 305 | 3 |
+| io | 428 | 73 | 26 | 42 | 444 | 0 |
+| misc | 407 | 15 | 21 | 99 | 305 | 3 |
 | oop | 70 | 0 | 97 | 75 | 0 | 0 |
-| primvars | 72 | 11 | 0 | 16 | 33 | 0 |
+| primvars | 73 | 12 | 0 | 14 | 33 | 0 |
 | profile | 8 | 6 | 1 | 13 | 180 | 0 |
 | record | 579 | 40 | 16 | 13 | 535 | 0 |
-| thread | 19 | 0 | 2 | 4 | 70 | 0 |
-| unix | 60 | 17 | 4 | 0 | 12 | 0 |
+| thread | 21 | 0 | 0 | 4 | 70 | 0 |
+| unix | 64 | 13 | 4 | 0 | 12 | 0 |
 | windows | 15 | 0 | 0 | 0 | 0 | 0 |
 
 What the fixes since the first run were:
@@ -143,6 +144,16 @@ What the fixes since the first run were:
   It counts clauses that reach `$` system procedures as unsup, and it
   kills a hung clause's process rather than the shell around it.
 
+Since: R6RS's letrec restriction is checked (3: 468 -> 527); immutable
+vectors, strings and bytevectors (an SBCL header bit), Chez's argument
+checks for comparisons and iterators, its `vector-copy`, and its single
+empty objects (5_4, 5_5, 5_6); Chez's example programs are vendored in
+vendor/chez-examples and load (examples: 8 -> 365); top-level `alias`
+and `define-property`, compile-time values, the `(scheme)` library;
+file ports through their wrappers and Chez's file options (io: 257 ->
+428); `get-mode` and `chmod` no longer fork processes (6.ms took 6.6
+minutes and timed out under load; now 10 s).
+
 The largest groups left:
 - 7 and 8: clauses that need the files of an earlier `compile-file`
   or `compile-whole-library` (missing here; the harness can't tell
@@ -155,8 +166,8 @@ The largest groups left:
 - record: R6RS record-syntax details and `$record` system procedures.
 - oop: oop.ss builds `define-class` on `$make-record-type`, a system
   procedure, so its library doesn't load.
-- examples: Chez's example programs, which the mats expect to find and
-  load.
+- oop: oop.ss defines classes with `#%$make-record-type` on `#!base-rtd`:
+  record types that are themselves records with fields of their own.
 
 ## Why Chez is the near one
 
@@ -400,33 +411,51 @@ Idris 2 0.8.0, from [its repository](https://github.com/idris-lang/Idris2),
 bootstraps with `make bootstrap SCHEME=bin/chez`, with `CHEZ=bin/chez` in
 the environment so that its code generator uses this Chez too:
 - **Stage 1:** its bootstrap compiler, `bootstrap/idris2_app/idris2.ss`
-  (one 9 MB `(let () ...)` of 11,000 definitions), runs here.
-  `idris2 --version` takes 90 s, almost all of it compiling the program, at
-  a 3.9 GB peak.
+  (one 9 MB `(let () ...)` of 11,000 definitions), is compiled by
+  `compile-program` into a 58 MB fasl in about 100 s.
 - **Stage 2:**
   - That compiler type-checks and compiles Idris's libraries (prelude, base,
     linear, network, test, contrib, papers) and then the compiler itself, 289
     modules.
   - The compiler it builds (`build/exec/idris2`, version 0.8.0-1c630e67c, this
     checkout's) then rebuilds the libraries.
-  - Every Scheme step runs here. The whole `make bootstrap` takes 2 hours,
-    at a 3.5 GB peak.
+  - Every Scheme step runs here. The whole `make bootstrap` takes 84
+    minutes (2 hours when object files were copies of the source).
 - **A program:** the self-built compiler, running here, compiles
-  `Hello.idr` (`IDRIS2_PREFIX=bootstrap-build`, where the bootstrap
-  installed the libraries), and the program runs here:
-  `Hello from Idris 2 on Pseudoscheme`. Each start of the compiler takes
-  about 90 s, compiling its 9 MB of Scheme. Chez loads compiled code;
-  here the `.so` is the source.
+  `Hello.idr` in about 3 s (`IDRIS2_PREFIX=bootstrap-build`, where the
+  bootstrap installed the libraries), and the program runs here:
+  `Hello from Idris 2 on Pseudoscheme`. The compiler starts in 0.8 s.
 
 What Idris needed:
 - **Hoisting through `(let () ...)`**: psyntax expands it to
   `((lambda () body))`, which hid the body's definitions from the hoisting
-  that compiles a big top-level form one definition at a time. As one
-  function, SBCL needed more than 16 GB to compile it. (A form past 2M
-  conses is now interpreted rather than compiled.)
-- `bytes-allocated`, which the generated GC handler calls.
+  that compiles a big top-level form one definition at a time; and, as a
+  program, the `(let () ...)` is a statement of the program's body, so
+  hoisting recurses into big bodies there. As one function, SBCL needed
+  more than 16 GB to compile it. (A form past 2M conses is interpreted
+  rather than compiled.)
+- `bytes-allocated` and the virtual registers, which the generated code
+  uses.
 - The `chez` command, `compile-program`, and the support library found
   through `DYLD_LIBRARY_PATH`, which Idris's launcher sets.
+
+### Compiled programs
+
+`compile-program` expands the program with psyntax (its
+`expand-r6rs-top-level` entry point, without running it), translates it
+as `host-eval` would, and compiles it with `compile-file`, in chunks of
+about 500,000 conses, into one SBCL fasl after the source's `#!` line
+(src/chez/compile.lisp, src/compiled-files.lisp). `load`,
+`load-program`, `--program` and `--script` load such a file. Its first
+form checks that it was compiled by this build of Pseudoscheme and that
+each library it was expanded against still has the same id (the
+built-in ones and those of the compiled-library cache keep theirs), as
+Chez refuses object files of another version. A program that imports a
+library new in this session (the cache turned off), or whose code holds
+an object with no load form, gets a copy of its source instead.
+`compile-file`, `compile-library` and `compile-script` still copy;
+libraries are compiled into the compiled-library cache when first
+imported.
 
 ### Reader syntax
 

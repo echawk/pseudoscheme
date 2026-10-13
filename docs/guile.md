@@ -487,10 +487,10 @@ eight minutes.
 
 | | first run | now |
 |---|---|---|
-| pass | 5,982 | 42,702 |
-| fail | 191 | 27 |
-| error (an exception where a result was expected) | 465 | 32 |
-| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 96 / 10 / 11 / 6 |
+| pass | 5,982 | 43,278 |
+| fail | 191 | 4 |
+| error (an exception where a result was expected) | 465 | 1 |
+| unresolved / unsupported / untested / xfail | 14 / 12 / 1 / 3 | 89 / 10 / 15 / 6 |
 | files that crashed or hit the time limit | 32 | 0 (with the module cache filled) |
 
 The biggest files pass entirely or nearly: `numbers` (all 28,991),
@@ -507,29 +507,28 @@ The biggest files pass entirely or nearly: `numbers` (all 28,991),
 
 What fails now, by cause:
 
-- **libguile's heap layout**: `types` (43) reads objects' memory as
-  libguile lays it out.
 - **Native code, not bytecode**: code a test file defines, and boot-9,
   are SBCL code here, so the VM's hooks don't see them (2 of
   `coverage`).
 - **Conservative stack scanning**: a dead object whose last reference
-  is still in the running procedure's frame survives `(gc)` (`weaks`'
-  "weak-key dies").
-- **libguile's internals**: copy-on-write shared substrings
-  (`substring/shared` copies: a Scheme string is a simple Lisp string)
-  and string buffers (`strings`, 10).
-- **Collection**: guardians work: they hold their objects and ask SBCL's
-  heap tracer which of them only guardians reach (src/r6rs/guardians.lisp;
-  `guardians`: 16 pass, 5 unresolved). Still failing:
-  - `fluids`' "fluids are GC'd" waits for collections without calling
-    `(gc)`, and its allocations never trigger one of SBCL's, whose
-    nursery is far bigger than Guile's.
-  - `threads`' "mutex with owner not retained": a locked mutex stays
-    reachable from its owner here.
+  is a stale word in a live frame of the stack stays reachable, so a
+  guardian doesn't return it (`weaks`' "weak-key dies", and, depending on
+  how the frames fall, `fluids`' "fluids are GC'd" and `threads`' "mutex
+  with owner not retained"). SBCL reports such a root with no frame
+  around it, but a broken frame walk looks the same, so it can't be
+  ignored safely.
 - **The environment**: locales not installed here (`i18n`, `time`,
-  `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`).
-- **A short tail**: suspendable ports (`suspendable-ports`: ports keep
-  their own buffers).
+  `web-uri`, `encoding-escapes`, `regexp`), `fork` (`00-socket`): these
+  are unresolved, not failures.
+
+Fixed since the last count: `types` (all 47: a `(system base types)`
+written for Pseudoscheme decodes `object-address`'s bits, which are now
+Guile's for immediates and a stable number for heap objects),
+`strings` (all 136: `substring/shared` remembers where it came from, and
+a root mutator's change is copied to the strings sharing characters),
+and `suspendable-ports` (514 pass: a port's buffers are Guile's own
+`#(bytevector cur end has-eof? position)` vectors, shared with
+`(ice-9 suspendable-ports)`).
 
 ### Differences from Guile that remain
 
