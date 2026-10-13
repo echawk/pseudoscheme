@@ -164,8 +164,6 @@ The largest groups left:
 - hash: the argument checks Chez makes and the hash values its
   `equal-hash` gives.
 - record: R6RS record-syntax details and `$record` system procedures.
-- oop: oop.ss builds `define-class` on `$make-record-type`, a system
-  procedure, so its library doesn't load.
 - oop: oop.ss defines classes with `#%$make-record-type` on `#!base-rtd`:
   record types that are themselves records with fields of their own.
 
