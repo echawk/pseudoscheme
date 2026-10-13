@@ -653,14 +653,24 @@ waiting for the first unless NONBLOCKING; the number read, or :EOF."
       (loop while (and (< n count) (byte-ready-p port)) do (take))
       n)))
 
+(defun port-file-stream (port)
+  "The file stream under PORT (a binary or transcoded port over it), or NIL."
+  (flet ((inner (s)
+	   (loop for slot in '(stream binary)
+		 when (and (slot-exists-p s slot) (slot-boundp s slot))
+		   return (slot-value s slot))))
+    (loop for s = port then (and (typep s 'standard-object) (inner s))
+	  repeat 6
+	  while s
+	  do #+sbcl (when (typep s 'sb-sys:fd-stream) (return s))
+	     #-sbcl (when (typep s 'file-stream) (return s))
+	     (unless (typep s 'standard-object) (return nil)))))
+
 (defun port-descriptor (port)
   "The file descriptor under PORT, or NIL."
-  (loop for s = port then (and (typep s 'standard-object) (slot-exists-p s 'stream)
-			       (slot-boundp s 'stream) (slot-value s 'stream))
-	repeat 6
-	while s
-	do #+sbcl (when (typep s 'sb-sys:fd-stream) (return (sb-sys:fd-stream-fd s)))
-	   (unless (typep s 'standard-object) (return nil))))
+  (let ((s (port-file-stream port)))
+    #+sbcl (and s (sb-sys:fd-stream-fd s))
+    #-sbcl nil))
 
 (defprim "get-bytevector-some" (port)
   (check-binary-in "get-bytevector-some" port)

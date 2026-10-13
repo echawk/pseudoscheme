@@ -2541,7 +2541,8 @@
         ((_ opt* ...)
          (and (for-all id? opt*) (file-options-spec (map id->sym opt*)))
          (bless `((enum-set-constructor
-                     (make-enumeration '(no-create no-fail no-truncate)))
+                     ;; PSEUDOSCHEME: and Chez's (compat.ss, file-options-spec)
+                     (make-enumeration '(no-create no-fail no-truncate append compressed exclusive replace)))
                    '(,@(file-options-spec (map id->sym opt*)))))))))
 
   (define symbol-macro

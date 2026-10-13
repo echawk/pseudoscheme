@@ -530,3 +530,12 @@
 (define (library-list) (%chez:library-list))
 (define (library-version name) (%chez:library-version name))
 (define (library-object-filename name) #f)
+(define transcoder? %chez:transcoder?)
+;; Compressed files aren't made here: a port marked compressed reads and
+;; writes its file as it is (docs/chez.md)
+(define (port-file-compressed! p)
+  (unless (file-port? p) (assertion-violation 'port-file-compressed! "not a file port" p))
+  (if #f #f))
+(define (r6rs:current-input-port) (current-input-port))
+(define (r6rs:current-output-port) (current-output-port))
+(define (r6rs:current-error-port) (current-error-port))
