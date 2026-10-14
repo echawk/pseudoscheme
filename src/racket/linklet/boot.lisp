@@ -37,6 +37,7 @@ expander (src/racket/linklet/sources.lisp), about half a minute."
       (call-with-continuation-prompt
        (lambda () (with-racket-errors (setq values (multiple-value-list (expander-eval form)))))
        *default-prompt-tag* nil))
+    (print-stats)
     (when *uncaught* (finish-output) (uiop:quit 1))
     (values-list values)))
 

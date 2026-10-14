@@ -74,6 +74,21 @@ into the fasl at PATH."
       (error "~A doesn't hold all ~D forms" path n))
     (coerce *loading-split-functions* 'list)))
 
+(defun whole-function (compiled)
+  "The instantiation function of COMPILED, not split: from its fasl if
+there is one, else compiled now, into the cache if COMPILED has a key."
+  (let* ((form (compiled-linklet-form compiled))
+	 (key (linklet-key compiled))
+	 (fasl (and key (linklet-fasl key))))
+    (or (and fasl (probe-file fasl)
+	     (car (ignore-errors (load-split-fasl fasl 1))))
+	(and fasl
+	     (car (ignore-errors
+		   (ensure-directories-exist fasl)
+		   (write-split-fasl fasl (list form))
+		   (load-split-fasl fasl 1))))
+	(psx:host-eval form))))
+
 (defun split-functions (compiled)
   "The functions of split linklet COMPILED's forms: from its fasl if
 there is one, else compiled now, into the cache if COMPILED has a key."

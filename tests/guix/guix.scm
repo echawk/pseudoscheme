@@ -5,7 +5,8 @@
 ;;;
 ;;; GUIX_SCRIPT names the script (tests/guix/run.sh sets it).
 ;;; GUIX_TRACE_LOADS=1 prints each file primitive-load-path loads, and
-;;; when it's done, with the time, on the error port.
+;;; when it's done, with the time and the heap in use (MB), on the error
+;;; port.
 
 (when (getenv "GUIX_TRACE_LOADS")
   (let ((load-path-file primitive-load-path))
@@ -14,7 +15,10 @@
             (format (current-error-port) "~a load ~a~%" (current-time) name)
             (call-with-values (lambda () (apply load-path-file name rest))
               (lambda results
-                (format (current-error-port) "~a done ~a~%" (current-time) name)
+                (format (current-error-port) "~a done ~a ~aMB~%" (current-time) name
+                        (let ((stats (gc-stats)))
+                          (quotient (- (assq-ref stats 'heap-size) (assq-ref stats 'heap-free-size))
+                                    1048576)))
                 (apply values results)))))))
 
 (load (or (getenv "GUIX_SCRIPT") "/root/.config/guix/current/bin/guix"))

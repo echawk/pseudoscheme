@@ -72,20 +72,52 @@
 ;;; ------------------------------------------------------------------
 ;;; Linklets: compile, instantiate
 
+(defvar *stats* (list :lower 0 :compile 0 :linklets 0)
+  "Time spent lowering linklets and compiling them to Lisp (internal
+time units), and how many: PSEUDOSCHEME_RACKET_STATS prints them.")
+
+(defmacro timing ((key) &body body)
+  `(let ((t0 (get-internal-real-time)))
+     (multiple-value-prog1 (progn ,@body)
+       (incf (getf *stats* ,key) (- (get-internal-real-time) t0)))))
+
+(defun print-stats ()
+  (when (uiop:getenv "PSEUDOSCHEME_RACKET_STATS")
+    (format *error-output* "~&;; ~D linklets: lowered in ~,1Fs, compiled to Lisp in ~,1Fs~%"
+	    (getf *stats* :linklets)
+	    (/ (getf *stats* :lower) internal-time-units-per-second)
+	    (/ (getf *stats* :compile) internal-time-units-per-second))))
+
 (defun compile-linklet (form &optional name)
   "compile-linklet: FORM (an S-expression or correlated) to a linklet."
-  (compile-linklet-form form :name name))
+  (incf (getf *stats* :linklets))
+  (timing (:lower)
+    (let ((compiled (compile-linklet-form form :name name)))
+      ;; its compiled code is cached, keyed by the linklet as given
+      (unless (compiled-linklet-source-key compiled)
+	(setf (compiled-linklet-source-key compiled) (linklet-text form)))
+      compiled)))
+
+(defun linklet-text (form)
+  "FORM, a linklet, printed without its correlated objects' locations:
+what identifies it in the cache."
+  (with-standard-io-syntax
+    (let ((*package* (find-package "SCHEME")) (*print-circle* t) (*print-readably* nil))
+      (prin1-to-string (correlated->datum form)))))
 
 (defun linklet-function (compiled)
   "COMPILED's instantiation function, of the instance and the variable
 objects: compiled now if need be."
   (or (compiled-linklet-function compiled)
       (setf (compiled-linklet-function compiled)
-	    (let ((psx::*full-continuations* t)
+	    (timing (:compile) (linklet-function-1 compiled)))))
+
+(defun linklet-function-1 (compiled)
+  (let ((psx::*full-continuations* t)
 		  (form (compiled-linklet-form compiled)))
 	      (if (and (consp form) (eq (car form) (psx::sym "racket:split")))
 		  (split-function (cadr form) (split-functions compiled))
-		  (psx:host-eval form))))))
+		  (whole-function compiled))))
 
 (defun split-function (n functions)
   "A split linklet's instantiation: the cells (the variables given, then

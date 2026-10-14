@@ -125,7 +125,7 @@ step_modules() {
 
 step_derivation() {
   start_daemon
-  logged "$LOGS/derivation.log" $PS tests/guix/guix.scm build -d --no-grafts -e "$PACKAGE"
+  GUIX_TRACE_LOADS=1 logged "$LOGS/derivation.log" $PS tests/guix/guix.scm build -d --no-grafts -e "$PACKAGE"
   drv=$(grep '\.drv$' "$LOGS/derivation.log" | tail -1)
   ref=$(cat "$LOGS/reference.drv" 2>/dev/null)
   if [ -z "$drv" ]; then
