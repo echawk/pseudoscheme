@@ -309,22 +309,29 @@ uses usocket and SRFI 170 osicat when they're installed. What is left per implem
 
 ## 7. Racket (`--racket`)
 
-Tabled (October 2026); docs/racket.md has the design. In short:
-- **The Chez mode is the platform.** It plays the part of the Chez Scheme
-  Racket CS is built on. Racket CS's own layers run on it unchanged:
-  rumble, the schemified thread, io, regexp, schemify and expander
-  layers, and the linklet layer.
-- **What we write:**
-  - the additions Racket's fork of Chez makes that rumble uses
-    (continuation attachments, engines, wrapper procedures, ...);
-  - the hook that compiles a schemified linklet: first through psyntax
-    and the translator, then straight to the translator's core forms;
-  - start-up.
+Three strategies, kept separate and selectable with
+`--racket=cs|linklet|hybrid`. docs/racket.md and
+docs/racket-linklet-compiler.md have the design and the status.
+- **B, `--racket=linklet`: runs `#lang racket/base` programs.**
+  - Our linklet compiler compiles Racket's expander, which comes from
+    the raw linklet in Racket BC's `startup.inc`, so no Racket is
+    needed.
+  - Lisp stands in for Racket's runtime: structs, control, exceptions,
+    hashes, ports, paths, the printer, and regexps on CL-PPCRE.
+  - `racket/base` loads from the pinned source's collects, and compiled
+    linklets are cached as fasls.
+  - Next: `.zo` files, so racket/base isn't expanded on every start
+    (about 18 s now); then the rest of `#%kernel`, measured by
+    tests/racket/coverage.lisp.
+- **A, `--racket=cs`, and C, `--racket=hybrid`: milestone 0.**
+  - The inventory finds 70 Chez internals rumble uses that `--chez`
+    lacks.
+  - 63 of them are in upstream Chez 10, so they belong in the Chez mode
+    itself (`--chez` stays faithful to upstream). The rest go in
+    src/racket/cs/.
 - **Racket's sources** come from a shallow clone of a pinned release,
-  made by a setup script (`utils/racket/setup.sh`), never vendored.
-- **Depends on:** the Chez mode's continuation marks and engines, and the
-  compiled-library cache (section 2), since `racket/base` can't be
-  compiled from source on every start.
+  made by `utils/racket/setup.sh`, never vendored. Upstream Chez's
+  source, used only for the inventory, comes from `utils/chez/setup.sh`.
 
 ## 8. Guile (`--guile`), and Guix
 
