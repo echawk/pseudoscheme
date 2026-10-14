@@ -239,6 +239,52 @@ Reimplementing it on SBCL's `sb-posix` is the alternative.
 8. Pass 3's cross-linklet knowledge, measured on `racket/base`'s compile
    time and on bench/.
 
+## Status
+
+Milestone 1 runs; parts of milestone 3 and the control row are done.
+
+- **The compiler** (src/racket/linklet/compiler.lisp):
+  - passes 1 and 3 exist. Pass 3 records what each top-level name is
+    and which ones are `set!`. Known values and early use are still
+    to do.
+  - Passes 2 and 4 are one walk: lowering renames lexicals apart as it
+    goes. It handles every form in the table except quoted literals
+    that need rebuilding.
+  - A compiled linklet is a core lambda of its variable objects,
+    imports first and then exports. Its body is a `letrec*` of the
+    definitions.
+- **`#%linklet`** (src/racket/linklet/api.lisp): instances, variables,
+  correlated objects, `compile-linklet` and `instantiate-linklet`, with
+  and without a target. Bundles, directories and `.zo` reading and
+  writing are stubs.
+- **The native runtime** (src/racket/native/):
+  - structs: properties with supers and guards, auto fields, immutable
+    fields, and `prop:procedure` both ways, through funcallable
+    instances;
+  - the exn hierarchy, `raise`, `error`, and Lisp errors raised as
+    Racket exceptions;
+  - continuation marks, prompts with tags, parameters and
+    parameterizations;
+  - mutable hash tables, and immutable ones on a hash array mapped
+    trie.
+  - The host's procedures are used wherever Racket's mean the same
+    (`*host-shared*` in native.lisp).
+- **Tests:** `sh tests/racket/run.sh linklet` runs the linklets in
+  tests/racket/linklets/ and compares each with its `.expected` file.
+  A file there may also hold `(define-linklet NAME (linklet ...))`,
+  which the harness instantiates for later linklets to import from
+  instance NAME.
+- **Coverage:** `sbcl --script tests/racket/coverage.lisp [--missing]`
+  counts how much of each of Racket CS's primitive tables the instances
+  have. It reads the tables from the pinned source, which is the
+  checklist. It also lists the primitives whose arity mask differs from
+  the table's.
+
+Next:
+- milestone 2, the regexp linklet;
+- the rest of `#%kernel` that the extracted layers use, in the order the
+  coverage report's `--missing` list makes plain.
+
 ## How it compares with docs/racket.md's plan
 
 This is strategy B of docs/racket.md's "Three strategies"; that section

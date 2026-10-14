@@ -342,7 +342,7 @@
 (defsystem :pseudoscheme/racket
   :version "3.0"
   :pathname #p"src/racket/"
-  :depends-on (:pseudoscheme/api)
+  :depends-on (:pseudoscheme/api #+sbcl :sb-introspect)
   :serial t
   :components ((:file "racket")
 	       (:file "instances")
@@ -351,7 +351,9 @@
 	       (:module "native"
 		:serial t
 		:components ((:file "native") (:file "structs") (:file "procedures")
-			     (:file "control") (:file "hash") (:file "exn") (:file "rktio")))
+			     (:file "control") (:file "hash") (:file "exn") (:file "basics")
+			     (:file "rktio")))
+	       (:file "reader")
 	       ;; A: Racket CS's layers on --chez
 	       (:module "cs"
 		:serial t
@@ -360,7 +362,7 @@
 	       ;; B: our linklet compiler
 	       (:module "linklet"
 		:serial t
-		:components ((:file "api") (:file "compiler") (:file "boot")))
+		:components ((:file "api") (:file "compiler") (:file "sources") (:file "boot")))
 	       ;; C: A plus native overrides
 	       (:module "hybrid" :components ((:file "overrides")))
 	       (:file "strategies")))

@@ -39,3 +39,78 @@
   "Which of NAMES INSTANCE doesn't have: the coverage report, against
 Racket's own (primitive-table ...) lists."
   (remove-if (lambda (n) (nth-value 1 (gethash n (primitive-instance instance)))) names))
+
+;;; ------------------------------------------------------------------
+;;; Racket CS's primitive tables: what each instance must have
+;;;
+;;; racket/src/cs/primitive/NAME.ss in the pinned source has an entry
+;;; [name (known-KIND MASK ...)] per primitive: MASK is its arity mask
+;;; (bit N: accepts N arguments; negative: N or more).  These, not a
+;;; hand-made list, are what coverage is measured against.
+
+(defparameter *primitive-table-files*
+  '(("kernel" . "#%kernel") ("unsafe" . "#%unsafe") ("flfxnum" . "#%flfxnum")
+    ("extfl" . "#%extfl") ("paramz" . "#%paramz") ("foreign" . "#%foreign")
+    ("network" . "#%network") ("place" . "#%place") ("futures" . "#%futures")
+    ("terminal" . "#%terminal") ("linklet" . "#%linklet") ("internal" . "#%internal"))
+  "racket/src/cs/primitive/FILE.ss -> the instance it fills.")
+
+(defstruct (table-entry (:constructor make-table-entry (name kind mask)))
+  name kind mask)
+
+(defun read-primitive-table (file)
+  "FILE's entries, in order."
+  (with-open-file (in (racket-source (format nil "racket/src/cs/primitive/~A.ss" file)))
+    (loop for line = (read-line in nil)
+	  while line
+	  for start = (position #\[ line)
+	  when (and start (every (lambda (c) (member c '(#\Space #\Tab))) (subseq line 0 start)))
+	    collect (let* ((text (subseq line (1+ start)))
+			   (space (position #\Space text))
+			   (name (subseq text 0 space))
+			   (rest (string-left-trim " (" (subseq text space)))
+			   (words (uiop:split-string (string-right-trim ")] " rest) :separator " "))
+			   (mask (and (second words) (parse-integer (second words) :junk-allowed t))))
+		      (make-table-entry name (first words) mask)))))
+
+(defun primitive-tables ()
+  "Instance name -> its table's entries, for every table."
+  (loop for (file . instance) in *primitive-table-files*
+	collect (cons instance (read-primitive-table file))))
+
+(defun arity-mask (function)
+  "FUNCTION's arity mask, from its lambda list."
+  (multiple-value-bind (required optional rest)
+      (let ((required 0) (optional 0) (rest nil) (state :required))
+	(dolist (p (sb-introspect:function-lambda-list function) (values required optional rest))
+	  (case p
+	    (&optional (setq state :optional))
+	    ((&rest &key) (setq rest t state :done))
+	    (&aux (setq state :done))
+	    (t (case state (:required (incf required)) (:optional (incf optional)))))))
+    (if rest
+	(- (ash 1 required))
+	(loop for n from required to (+ required optional) sum (ash 1 n)))))
+
+(defun coverage-report (&key (stream *standard-output*) (missing nil))
+  "Per instance: how many of Racket CS's primitives this strategy's
+instances have, and how many have the wrong arity.  MISSING: list them."
+  (let ((total 0) (have 0))
+    (dolist (table (primitive-tables))
+      (destructuring-bind (instance . entries) table
+	(let ((absent '()) (wrong '()))
+	  (dolist (e entries)
+	    (multiple-value-bind (v found) (gethash (table-entry-name e) (primitive-instance instance))
+	      (cond ((not found) (push (table-entry-name e) absent))
+		    ((and (functionp v) (table-entry-mask e)
+			  (not (ignore-errors (= (arity-mask v) (table-entry-mask e))))
+			  ;; a host procedure's lambda list may be (&rest args)
+			  (not (eql (ignore-errors (arity-mask v)) -1)))
+		     (push (table-entry-name e) wrong)))))
+	  (incf total (length entries))
+	  (incf have (- (length entries) (length absent)))
+	  (format stream "~&~12A ~4D of ~4D~@[  (arity differs: ~{~A~^ ~})~]~%"
+		  instance (- (length entries) (length absent)) (length entries) (reverse wrong))
+	  (when missing
+	    (format stream "~&  missing: ~{~A~^ ~}~%" (reverse absent))))))
+    (format stream "~&~12A ~4D of ~4D~%" "total" have total)))

@@ -73,6 +73,16 @@ Racket but are each *extracted* into a single linklet with no
 dependencies other than primitives, which is how Racket CS bootstraps
 them on Chez Scheme. A different backend can do the same.
 
+Where each extracted layer is found in the pinned release:
+- **schemified**: racket/src/cs/schemified/ has all of them as
+  schemify's output. Strategies A and C run these.
+- **raw linklets**: racket/src/bc/src/startup.inc has only the
+  expander, flattened, as C string literals. Racket BC compiles it with
+  its own linklet compiler. Strategy B reads it from there
+  (src/racket/linklet/sources.lisp), so it needs no Racket to extract
+  the expander. BC has its thread, io and regexp layers in C, so for
+  those B still needs racket/src/expander/extract run on a Racket.
+
 ## Why Racket CS's layers, not our own
 
 The earlier plan targeted linklets and wrote everything under them
@@ -323,6 +333,20 @@ objects. SBCL code doesn't belong in Racket's byte stream, so:
   `chez-scheme` doesn't take paths meant for Racket CS's machine code.
 
 ## The Chez fork's additions
+
+**Where they go.** `--chez` stays faithful to upstream Chez Scheme:
+- if upstream Chez also has a name rumble uses (stencil vectors and
+  `$record-ref` are in Chez 10, for example), it is implemented in
+  src/chez/, as upstream defines it;
+- if only Racket's fork has it (continuation attachments,
+  `$app/no-inline`, wrapper procedures, …), it is defined in
+  src/racket/cs/ (fork.scm), in an environment only `--racket` uses.
+  It never goes into the Chez mode itself.
+
+`sbcl --script tests/racket/coverage.lisp --fork` is milestone 0's
+inventory. It lists the Chez internals that rumble and the schemified
+layers use and `--chez` lacks: 70 of 203 at v9.3. Each still has to be
+checked against upstream to see which side it goes on.
 
 This decides feasibility; milestone 0's inventory gives the exact list.
 What is known, from the regexp and schemify experiments (about 61 of

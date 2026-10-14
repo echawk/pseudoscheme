@@ -1,0 +1,31 @@
+;;; Structs as the expander emits them for (struct point (x y)) and a
+;;; subtype, with a guard, an auto field, a property with a super, and
+;;; prop:procedure (by field index and by procedure).
+(linklet
+ ()
+ ()
+ (define-values (struct:point make-point point? point-x point-y)
+   (let-values (((struct: make- ? -ref -set!)
+                 (make-struct-type 'point #f 2 0 #f '() #f #f '(0 1) #f)))
+     (values struct: make- ?
+             (make-struct-field-accessor -ref 0 'x)
+             (make-struct-field-accessor -ref 1 'y))))
+ (define-values (prop:color color? color-ref)
+   (make-struct-type-property 'color))
+ (define-values (prop:shade shade? shade-ref)
+   (make-struct-type-property 'shade #f (list (cons prop:color (lambda (v) (list 'from v))))))
+ (define-values (struct:point3 make-point3 point3? point3-ref point3-set!)
+   (make-struct-type 'point3 struct:point 1 1 'auto (list (cons prop:shade 'dark)) #f #f '()
+                     (lambda (x y z name) (values x y (* z 10)))))
+ (define-values (struct:adder make-adder adder? adder-ref adder-set!)
+   (make-struct-type 'adder #f 1 0 #f '() #f (lambda (self n) (+ n (adder-ref self 0)))))
+ (define-values (struct:wrapper make-wrapper wrapper? wrapper-ref wrapper-set!)
+   (make-struct-type 'wrapper #f 1 0 #f (list (cons prop:procedure 0))))
+ (define-values (p) (make-point 1 2))
+ (define-values (q) (make-point3 1 2 3))
+ (list (point-x p) (point-y p) (point? p) (point? q) (point3? p)
+       (point-x q) (point3-ref q 0) (point3-ref q 1)
+       (begin (point3-set! q 1 'changed) (point3-ref q 1))
+       (shade? q) (shade-ref q) (color-ref q) (color? p) (color-ref p 'none)
+       ((make-adder 10) 5) ((make-wrapper (lambda (a b) (list b a))) 1 2)
+       (procedure? (make-adder 1)) (struct? p) (struct->vector p)))

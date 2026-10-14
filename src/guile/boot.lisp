@@ -387,8 +387,17 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 ;;; when a program starts, not when the image is built (contrib/cli/cli.lisp).
 (defun add-environment-load-path ()
   (let ((trace (uiop:getenv "PSEUDOSCHEME_GUILE_TRACE_THROWS")))
+    ;; [backtrace][:KEY,...]: "1", "backtrace", "system-error",
+    ;; "backtrace:system-error,wrong-type-arg"
     (when (and trace (plusp (length trace)))
-      (setq *trace-throws* (if (string-equal trace "backtrace") :backtrace t))))
+      (let* ((colon (position #\: trace))
+	     (mode (if colon (subseq trace 0 colon) trace))
+	     (keys (if colon (subseq trace (1+ colon)) "")))
+	(unless (or colon (string-equal mode "backtrace") (every #'digit-char-p mode))
+	  (setq keys mode mode ""))
+	(setq *trace-throws* (if (string-equal mode "backtrace") :backtrace t)
+	      *trace-throw-keys* (mapcar #'ssym (remove "" (uiop:split-string keys :separator ",")
+							:test #'string=))))))
   (flet ((prepend (variable-name env-name &optional default)
 	   (let ((dirs (remove "" (uiop:split-string (or (uiop:getenv env-name) "") :separator ":")
 			       :test #'string=))
@@ -826,7 +835,7 @@ not with Guile's behaviour.")
     (def "%auto-compilation-options" '())
     (def "%file-port-name-canonicalization" (make-fluid* ps:false))
     (def "%guile-build-info" '())
-    (def "%host-type" "aarch64-apple-darwin")
+    (def "%host-type" (host-type))
     (def "*features*" (mapcar #'ssym '("guile" "r7rs" "srfi-0" "srfi-4" "srfi-6" "srfi-13" "srfi-14"
 				       ;; what libguile adds, less fork, effective
 				       ;; ids and O_PATH ports
@@ -877,6 +886,24 @@ not with Guile's behaviour.")
 			     (terpri port)
 			     *unspecified*))
     (def "macroexpanded?" (lambda (x) (bool (node-type x))))))
+
+(defun host-type ()
+  "%host-type: the GNU triplet Guile's configure would give this machine
+(programs test it: Guix's (guix build syscalls) picks the Linux or Hurd
+struct dirent layout by it)."
+  (format nil "~A-~A"
+	  (let ((m (string-downcase (machine-type))))
+	    (cond ((member m '("arm64" "aarch64") :test #'string=) "aarch64")
+		  ((member m '("x86-64" "x86_64" "amd64") :test #'string=) "x86_64")
+		  ((member m '("x86" "i386" "i686") :test #'string=) "i686")
+		  (t (substitute #\_ #\- m))))
+	  (cond ((uiop:os-macosx-p) "apple-darwin")
+		((uiop:featurep :linux) "unknown-linux-gnu")
+		((uiop:featurep :freebsd) "unknown-freebsd")
+		((uiop:featurep :openbsd) "unknown-openbsd")
+		((uiop:featurep :netbsd) "unknown-netbsd")
+		((uiop:os-windows-p) "w64-mingw32")
+		(t "unknown-unknown"))))
 
 (defun simple-format (destination message &rest args)
   "Guile's simple-format: ~A and ~S (and ~%, ~~)."
@@ -990,10 +1017,13 @@ boot); the last form's values."
 (defun error-text (condition)
   "CONDITION as Guile prints an uncaught exception: by print-exception."
   (if (and (typep condition 'guile-throw) (root-value "print-exception"))
-      (with-output-to-string (s)
+      ;; a Guile string port: boot-9's print-exception writes through
+      ;; Guile's port procedures, which a CL string stream isn't
+      (let ((port (open-output-string*)))
 	(ignore-errors
-	 (funcall (root-value "print-exception") s ps:false
-		  (guile-throw-key condition) (guile-throw-args condition))))
+	 (funcall (root-value "print-exception") port ps:false
+		  (guile-throw-key condition) (guile-throw-args condition)))
+	(port-output-string port))
       (princ-to-string condition)))
 
 (defun repl (&key (input *standard-input*) (output *standard-output*))

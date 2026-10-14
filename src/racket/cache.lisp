@@ -17,6 +17,9 @@
   form					; the lowered S-expression
   name
   strategy				; "cs" / "linklet" / "hybrid"
+  (imports '())				; per import set, the external names
+  (exports '())				; the external names of the exports
+  (export-internals '())		; ... and their names inside the linklet
   (function nil))			; once loaded: the instantiation function
 
 (defun linklet-key (compiled)

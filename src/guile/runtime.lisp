@@ -915,10 +915,11 @@ else the one that is its Lisp name, if one is."
   *unspecified*)
 (defun source-propertiable-p (x)
   "Guile's: a heap object that isn't a symbol or keyword (a fixnum,
-character, boolean or () is an immediate)."
-  (or (consp x) (vectorp x) (structure-object-p* x)
-      (and (numberp x)
-	   (not (and (integerp x) (<= (- (ash 1 61)) x (1- (ash 1 61))))))))
+character, boolean, (), the unspecified value or the end-of-file object
+is an immediate)."
+  (and (not (guile-immediate-p x))
+       (not (eq x ps:eof-object))
+       (or (consp x) (vectorp x) (structure-object-p* x) (numberp x))))
 
 (defun structure-object-p* (x) (typep x 'structure-object))
 
@@ -1009,11 +1010,13 @@ character, boolean or () is an immediate)."
   "Print each throw to *trace-output*; :backtrace, with a Lisp backtrace.
 PSEUDOSCHEME_GUILE_TRACE_THROWS sets it when a program starts (boot.lisp,
 ADD-ENVIRONMENT-LOAD-PATH): \"backtrace\" for :backtrace, else T.")
+(defvar *trace-throw-keys* '()
+  "The keys *TRACE-THROWS* traces; all of them if ().")
 
 (defun call-throw (key args)
   "boot-9's throw, or a Lisp error before there is one, or when throwing
 fails over and over (boot-9 half loaded)."
-  (when *trace-throws*
+  (when (and *trace-throws* (or (null *trace-throw-keys*) (member key *trace-throw-keys*)))
     (format *trace-output* "~&;; throw ~A ~A~%" key (with-output-to-string (s) (guile-write args s)))
     (when (eq *trace-throws* :backtrace)
       (sb-debug:print-backtrace :count 60 :stream *trace-output*)))

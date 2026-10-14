@@ -5,7 +5,7 @@
 #
 # Steps, each logging to /logs/STEP.log (build/container/logs/guix/ on
 # the host) and appending a line to /logs/summary.txt:
-#   build       build bin/pseudoscheme
+#   build       build bin/pseudoscheme and our libguile
 #   reference   real Guix (the store's Guile 3.0.9): `guix build -d
 #               --no-grafts hello', and `guix build hello' from substitutes
 #   modules     load each of Guix's modules on --guile, one process each
@@ -18,6 +18,13 @@
 #               Guile for comparison
 # guix-daemon is started first, if it isn't running.  LIMIT (seconds,
 # default 600) bounds each process.
+#
+# Guix's modules are compiled the first time they load, into the cache
+# volume, and a killed run keeps what it finished.  The cache is keyed
+# by the build signature (src/library-cache.lisp), which changes when a
+# file under src/guile/ (and the other directories it lists) changes:
+# then the first run compiles everything again, which takes longer than
+# the default LIMIT for derivation and hello.
 cd "$(dirname "$0")/../.." || exit 1
 LOGS=${LOGS:-/logs}
 LIMIT=${LIMIT:-600}
@@ -66,6 +73,9 @@ PS="bin/pseudoscheme --no-userinit --guile"
 step_build() {
   make -C contrib/cli > "$LOGS/build.log" 2>&1
   note "build: exit $?"
+  # our libguile, for Guix's C extensions (guile-gnutls, ...): docs/libguile.md
+  make -C src/libguile > "$LOGS/libguile-build.log" 2>&1
+  note "build libguile: exit $?"
 }
 
 step_reference() {

@@ -1,0 +1,28 @@
+;;; Hash tables: mutable and immutable, each equality, iteration, and
+;;; enough keys to make the immutable trie split and collapse.
+(linklet
+ ()
+ ()
+ (define-values (m) (make-hash))
+ (define-values (build)
+   (lambda (h i n) (if (= i n) h (build (hash-set h i (* i i)) (add1 i) n))))
+ (define-values (drop)
+   (lambda (h i n) (if (= i n) h (drop (hash-remove h i) (add1 i) n))))
+ (define-values (big) (build (hasheqv) 0 2000))
+ (define-values (sum)
+   (lambda (h)
+     (letrec-values (((loop) (lambda (i acc)
+                               (if i (loop (hash-iterate-next h i) (+ acc (hash-iterate-value h i))) acc))))
+       (loop (hash-iterate-first h) 0))))
+ (hash-set! m (list 1 2) 'a)
+ (hash-set! m "str" 'b)
+ (list
+  (hash-ref m (list 1 2)) (hash-ref m "str") (hash-ref m 'nope #f) (hash-ref m 'nope (lambda () 'thunk))
+  (hash-count m)
+  (let-values (((e) (make-hasheq))) (hash-set! e 'x 1) (hash-ref e 'x))
+  (hash-ref (hash "a" 1 "b" 2) "b")
+  (hash-count big) (hash-ref big 1999) (hash-ref big 2000 'none) (sum big)
+  (hash-count (drop big 0 1990)) (hash-ref (drop big 0 1990) 1995)
+  (hash-count (hash-set (hash 'k 1) 'k 2)) (hash-ref (hash-set (hash 'k 1) 'k 2) 'k)
+  (let-values (((h) (hash 'k 1))) (hash-set h 'j 2) (hash-count h))
+  (hash-ref (hash 1.0 'float 1 'exact) 1)))

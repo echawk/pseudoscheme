@@ -72,6 +72,27 @@ cs), made current."
   (funcall (strategy-load *strategy*) path))
 
 ;;; ------------------------------------------------------------------
+;;; Values and errors every strategy's Lisp side uses
+
+(defun rsym (name) "The Racket symbol named NAME." (ps:intern-scheme-symbol name))
+(defun rname (symbol) "SYMBOL's Racket name." (ps:scheme-symbol-name symbol))
+(defun bool (x) (if x ps:true ps:false))
+(defun truthy (x) (not (eq x ps:false)))
+
+(defvar *void* ps:unspecific "Racket's #<void>.")
+
+(define-condition racket-error (error)
+  ((who :initarg :who :reader racket-error-who)
+   (message :initarg :message :reader racket-error-message))
+  (:report (lambda (c stream)
+	     (format stream "~A: ~A" (racket-error-who c) (racket-error-message c)))))
+
+(defun racket-error (who format &rest args)
+  "Raise Racket's exn:fail (exn.lisp makes it a Racket exception once
+exceptions are written; a Lisp condition until then)."
+  (error 'racket-error :who who :message (apply #'format nil format args)))
+
+;;; ------------------------------------------------------------------
 ;;; Racket's sources and collections
 
 (defun racket-source-directory ()
