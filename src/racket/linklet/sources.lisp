@@ -92,8 +92,11 @@ it into *EXPANDER-INSTANCE*, saying how long each step took, or which
 top-level form failed and why."
   (flet ((seconds (start) (/ (- (get-internal-real-time) start) internal-time-units-per-second)))
     (let* ((start (get-internal-real-time))
-	   (form (read-expander-linklet))
+	   (text (expander-linklet-text))
+	   (form (with-input-from-string (in text) (read-racket in)))
 	   (compiled (compile-linklet-form form :name (rsym "expander"))))
+      ;; its compiled form is cached, keyed by its text (cache.lisp)
+      (setf (compiled-linklet-source-key compiled) text)
       (format stream "~&expander: read and lowered in ~,1Fs~%" (seconds start))
       (setq start (get-internal-real-time))
       (linklet-function compiled)

@@ -296,12 +296,14 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   through Racket's expander, in a namespace with `#%kernel`. That is the
   `boot`, `namespace-require` and `eval` that Racket CS's main.sps
   does. tests/racket/expander.rktd holds the expressions and values
-  tests/racket/run.sh checks: 10 of 10 pass. Each process compiles the
-  expander again (about 25 s) until its compiled form is cached.
+  tests/racket/run.sh checks: 10 of 10 pass.
+- **The compiled expander is cached** (src/racket/cache.lisp): a 21 MB
+  fasl under `~/.cache/pseudoscheme/racket/`. It is keyed by
+  startup.inc's text, the build signature and src/racket/'s file dates.
+  The first process compiles it (about 30 s); after that,
+  `--racket=linklet -p '(+ 1 2)'` takes 0.4 s.
 
 Next:
-- caching the compiled expander (cache.lisp), so a process starts in
-  seconds;
 - printing as Racket prints (procedures, structs, `print`'s quoting);
 - milestone 2, the regexp linklet;
 - the rest of `#%kernel` that the extracted layers use, in the order the

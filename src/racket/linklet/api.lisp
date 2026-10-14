@@ -84,7 +84,7 @@ objects: compiled now if need be."
 	    (let ((psx::*full-continuations* t)
 		  (form (compiled-linklet-form compiled)))
 	      (if (and (consp form) (eq (car form) (psx::sym "racket:split")))
-		  (split-function (cadr form) (mapcar #'psx:host-eval (cddr form)))
+		  (split-function (cadr form) (split-functions compiled))
 		  (psx:host-eval form))))))
 
 (defun split-function (n functions)
@@ -292,3 +292,6 @@ it with (primitive-table '#%linklet) of the pinned release.")
       (funcall (second (assoc "correlated-property" *linklet-functions* :test #'string=)) c key value)
       (let ((p (assoc key (correlated-props c)))) (if p (cdr p) ps:false))))
 (defnative "syntax-property-symbol-keys" (c) (:leaf t) (mapcar #'car (correlated-props c)))
+
+(defmethod make-load-form ((x correlated) &optional environment)
+  (make-load-form-saving-slots x :environment environment))

@@ -108,6 +108,8 @@ linklets (after every instance is filled: #%linklet's too)."
     (racket-error "set!" "assignment disallowed;~% cannot assign a primitive or imported variable: ~A" (rname name)))
   (psx:defhost "racket:arity-error" (args)
     (racket-error "#<procedure>" "arity mismatch;~% the expected number of arguments does not match the given number~%  given: ~D" (length args)))
+  (psx:defhost "racket:note-split-function" (i f)
+    (setf (svref *loading-split-functions* i) f))
   (psx:defhost "racket:call-with-mark" (key value thunk)
     (ps-r6rs::call-with-mark key value thunk))
   (psx::register-primitive-names
