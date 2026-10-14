@@ -134,6 +134,11 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
     (funcall (expander-export "boot"))
     (funcall (expander-export "namespace-require")
 	     (list (rsym "quote") (rsym "#%kernel")))
+    ;; the collections, as main.sps sets them up
+    (funcall (expander-export "eval")
+	     (read-racket (make-string-input-stream
+			   "(begin (current-library-collection-links (find-library-collection-links))
+                                   (current-library-collection-paths (find-library-collection-paths)))")))
     (setq *expander-booted* t))
   (funcall (expander-export "eval") datum))
 

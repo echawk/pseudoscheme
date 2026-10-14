@@ -72,9 +72,26 @@ written to OUTPUT."
 	   *default-prompt-tag* nil))))))
 
 (defun linklet-load (path)
-  (unless (equal (pathname-type path) "rktl")
-    (not-yet "strategy linklet: running a module (milestone 7)"))
+  "PATH: a file of linklets (.rktl, the test harness above), or a module,
+which is required (as racket FILE runs one: its #lang, its body, and
+its main submodule if it has one)."
   (setq *uncaught* nil)
-  (run-linklet-forms (read-racket-file path))
+  (if (equal (pathname-type path) "rktl")
+      (run-linklet-forms (read-racket-file path))
+      (let ((file (namestring (merge-pathnames path (uiop:getcwd)))))
+	(unless *expander-instance*
+	  (unless (instantiate-expander :stream nil)
+	    (racket-error "racket" "the expander didn't instantiate")))
+	(call-with-continuation-prompt
+	 (lambda ()
+	   (with-racket-errors
+	     (expander-eval (list (rsym "#%require") (list (rsym "file") file)))
+	     ;; racket runs a main submodule if the module has one
+	     (expander-eval
+	      (read-racket (make-string-input-stream
+			    (format nil "(if (module-declared? '(submod (file ~S) main) #t) (dynamic-require '(submod (file ~S) main) #f) (void))"
+				    file file))))))
+	 *default-prompt-tag* nil)))
+  (print-stats)
   ;; as racket's: an uncaught exception makes the exit status 1
   (when *uncaught* (finish-output) (uiop:quit 1)))

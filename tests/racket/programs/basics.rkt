@@ -1,0 +1,15 @@
+#lang racket/base
+;; racket/base basics: keywords, for loops, structs, exceptions, hashes, regexps
+
+(define (f #:x [x 1] y) (+ x y))
+(for ([i (in-range 3)]) (printf "~a: ~a\n" i (f i #:x 10)))
+(displayln (for/list ([s (list "a" "b")]) (string-upcase s)))
+(struct point (x y) #:transparent)
+(println (point 1 2))
+(displayln (with-handlers ([exn:fail? exn-message]) (error 'boom "bad ~a" 42)))
+(define h (make-hash))
+(hash-set! h 'a 1)
+(displayln (hash-ref h 'a))
+(displayln (let loop ([n 10] [acc 1]) (if (zero? n) acc (loop (sub1 n) (* acc n)))))
+(displayln (map (lambda (x) (* x x)) '(1 2 3)))
+(displayln (regexp-match #rx"[0-9]+" "abc123def"))

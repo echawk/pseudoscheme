@@ -314,9 +314,17 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   - `printer.lisp`;
   - `regexp.lisp`, on CL-PPCRE.
 
+- **Programs run**: `bin/pseudoscheme --racket=linklet prog.rkt` runs a
+  module as `racket prog.rkt` does, its `#lang`, its body and its `main`
+  submodule (tests/racket/programs/). Every linklet's compiled code is
+  cached, keyed by its text, so a `#lang racket/base` program starts in
+  about 18 s, which is the expansion of racket/base. The first run after
+  src/racket/ changes compiles everything again (about 100 s).
+
 Next:
-- caching compiled modules (compiled/pseudoscheme/ beside Racket's
-  compiled/), so racket/base loads in seconds;
+- .zo files (write-linklet-bundle-hash and read-linklet-bundle-hash, with
+  compiled/pseudoscheme/ beside Racket's compiled/), so racket/base
+  isn't expanded each time;
 - milestone 2, the regexp linklet;
 - the rest of `#%kernel` that the extracted layers use, in the order the
   coverage report's `--missing` list makes plain.
