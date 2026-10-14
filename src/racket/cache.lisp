@@ -34,20 +34,23 @@
 (defvar *racket-signature* nil)
 
 (defun racket-signature ()
-  "What compiled linklets depend on besides their source: the build
-signature, the continuations mode, and src/racket/'s files' dates.
-Computed once per process: it reads a directory."
+  "What compiled linklets depend on besides their source
+(COMPUTE-RACKET-SIGNATURE), computed once per process."
   (or *racket-signature* (setq *racket-signature* (compute-racket-signature))))
 
 (pushnew (lambda () (setq *racket-signature* nil)) sb-ext:*init-hooks*)
 
 (defun compute-racket-signature ()
+  "What compiled linklets depend on: the build signature, the
+continuations mode, the compiler's and this file's dates, and how
+primitive names lower (*HOST-SHARED*, *HOST-ALIASES*).  Not the natives
+themselves: compiled code calls every primitive by its name, a host
+global (native.lisp), whichever native is behind it."
   (let ((root (asdf:system-source-directory :pseudoscheme)))
-    (format nil "~A ~A~{ ~A~}" (psx::build-signature) psx::*full-continuations*
-	    (loop for file in (sort (mapcar #'namestring
-					    (directory (merge-pathnames "src/racket/**/*.lisp" root)))
-				    #'string<)
-		  collect (format nil "~A:~A" (file-namestring file) (file-write-date file))))))
+    (format nil "~A ~A~{ ~A~} ~36R" (psx::build-signature) psx::*full-continuations*
+	    (loop for file in '("src/racket/linklet/compiler.lisp" "src/racket/cache.lisp")
+		  collect (file-write-date (merge-pathnames file root)))
+	    (psx::fnv-1a (prin1-to-string (list *host-shared* *host-aliases*))))))
 
 (defun linklet-key (compiled)
   "The cache's key for COMPILED, if it has a source key."

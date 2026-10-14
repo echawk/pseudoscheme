@@ -160,7 +160,15 @@
   (declare (ignore realm))
   (make-parameter* value (and (truthy guard) guard) name))
 
-(defnative "parameter?" (x) (:leaf t) (bool (gethash x *parameters*)))
+(defun parameter-data-of (p)
+  "P's parameter data: P's own, or what P chaperones' (procedures.lisp)."
+  (loop for x = p then (impersonation-of i)
+	for data = (gethash x *parameters*)
+	for i = (and (not data) (impersonation x))
+	when data return data
+	while i))
+
+(defnative "parameter?" (x) (:leaf t) (bool (parameter-data-of x)))
 (defnative "parameterization?" (x) (:leaf t) (bool (parameterization-p x)))
 (defnative "current-parameterization" () (:leaf t) (current-parameterization))
 
@@ -170,7 +178,7 @@
     (:instance "#%paramz" :rumble "extend-parameterization")
   (let ((cells (parameterization-cells paramz)))
     (loop for (p v) on params-and-values by #'cddr
-	  do (let ((data (or (gethash p *parameters*)
+	  do (let ((data (or (parameter-data-of p)
 			     (racket-error "parameterize" "contract violation~%  expected: parameter?~%  given: ~S" p))))
 	       (push (cons data (list (if (parameter-data-guard data) (funcall (parameter-data-guard data) v) v)))
 		     cells)))
@@ -297,3 +305,24 @@
 	  ((and (realp timeout) (zerop timeout)) ps:false)
 	  ((functionp timeout) (funcall timeout))
 	  (t (racket-error "sync/timeout" "would block (one thread)")))))
+
+;;; One thread: holding the semaphore is calling the procedure
+(defnative "call-with-semaphore" (s proc &optional try-fail &rest args) ()
+  (declare (ignore s try-fail))
+  (apply proc args))
+(defnative "call-with-semaphore/enable-break" (s proc &optional try-fail &rest args) ()
+  (declare (ignore s try-fail))
+  (apply proc args))
+
+;;; Continuation mark keys: any value is a key; these are unique ones
+(defstruct (mark-key (:constructor make-mark-key (name))) name)
+(defnative "make-continuation-mark-key" (&optional (name nil)) (:leaf t) (make-mark-key name))
+(defnative "continuation-mark-key?" (x) (:leaf t) (bool (mark-key-p x)))
+(defnative "continuation-mark-set->list*" (marks keys &optional (none ps:false) prompt-tag) (:leaf t)
+  (declare (ignore prompt-tag))
+  ;; per frame with any of KEYS: a vector of their values (NONE if absent)
+  (let ((keys (coerce keys 'list)))
+    (loop for (nil . entries) in (ps-r6rs::mark-frames (marks-of marks))
+	  when (some (lambda (k) (assoc k entries :test #'eq)) keys)
+	    collect (coerce (mapcar (lambda (k) (let ((e (assoc k entries :test #'eq))) (if e (cdr e) none))) keys)
+			    'simple-vector))))

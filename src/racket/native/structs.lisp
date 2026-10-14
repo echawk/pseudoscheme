@@ -26,6 +26,7 @@
   (properties '())			; alist: property -> value, the ancestors' too
   inspector (immutables '()) guard constructor-name
   prefab-key
+  accessor mutator			; the general ones make-struct-type returned
   proc-spec				; prop:procedure's value: a field index or a procedure
   (class nil))				; later: the SBCL class its instances are
 
@@ -162,6 +163,13 @@ to VALUE, after PROPERTY's guard."
     (:rumble "make-struct-type")
   ;; a field that is the procedure (proc-spec, or prop:procedure's value,
   ;; an index) is immutable, as Racket makes it
+  (let ((trace (uiop:getenv "PSEUDOSCHEME_RACKET_TRACE_STRUCT")))
+    ;; for finding where a struct type is made (twice, when its
+    ;; instances aren't its own)
+    (when (and trace (string= trace (rname name)))
+      (format *error-output* "~&;; make-struct-type ~A~%" trace)
+      (let ((*print-length* 3) (*print-level* 2))
+	(sb-debug:print-backtrace :count 30 :stream *error-output*))))
   (let ((index (if (integerp proc-spec) proc-spec (cdr (assoc *prop-procedure* props)))))
     (when (and (integerp index) (not (member index immutables)))
       (setq immutables (cons index immutables))))
@@ -207,11 +215,24 @@ to VALUE, after PROPERTY's guard."
 	      (setq type existing)
 	      (setf (struct-type-prefab-key type) key
 		    (gethash (cons (rkey key) (struct-type-total type)) *prefab-types*) type))))
-      (values type
-	      (constructor type)
-	      (lambda (x) (bool (and (struct-instance-p x) (subtype-p (struct-of-type x) type))))
-	      accessor
-	      mutator))))
+      (let ((constructor (constructor type))
+	    (predicate (lambda (x) (bool (and (struct-instance-p x) (subtype-p (struct-of-type x) type))))))
+	(setf (struct-type-accessor type) accessor
+	      (struct-type-mutator type) mutator)
+	(note-struct-procedure constructor :constructor type)
+	(note-struct-procedure predicate :predicate type)
+	(note-struct-procedure accessor :accessor type)
+	(note-struct-procedure mutator :mutator type)
+	(values type constructor predicate accessor mutator)))))
+
+(defvar *struct-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "A struct type's constructor, predicate, accessor or mutator -> (kind . type).")
+
+(defun note-struct-procedure (f kind type)
+  (setf (gethash f *struct-procedures*) (cons kind type))
+  f)
+
+(defun struct-procedure-kind (f) (car (gethash f *struct-procedures*)))
 
 (defnative "make-struct-type-property" (name &optional (guard ps:false) (supers '())
 					     (can-impersonate? ps:false) (realm ps:false))
@@ -232,12 +253,39 @@ to VALUE, after PROPERTY's guard."
 (defnative "make-struct-field-accessor" (accessor-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-accessor")
   (declare (ignore field-name contract realm))
-  (lambda (s) (funcall accessor-proc s field-pos)))
+  (note-struct-procedure (lambda (s) (funcall accessor-proc s field-pos))
+			 :field-accessor (cdr (gethash accessor-proc *struct-procedures*))))
 
 (defnative "make-struct-field-mutator" (mutator-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-mutator")
   (declare (ignore field-name contract realm))
-  (lambda (s v) (funcall mutator-proc s field-pos v)))
+  (note-struct-procedure (lambda (s v) (funcall mutator-proc s field-pos v))
+			 :field-mutator (cdr (gethash mutator-proc *struct-procedures*))))
+
+(defnative "struct-predicate-procedure?" (f) (:leaf t) (bool (eq (struct-procedure-kind f) :predicate)))
+(defnative "struct-constructor-procedure?" (f) (:leaf t) (bool (eq (struct-procedure-kind f) :constructor)))
+(defnative "struct-accessor-procedure?" (f) (:leaf t)
+  (bool (member (struct-procedure-kind f) '(:accessor :field-accessor))))
+(defnative "struct-mutator-procedure?" (f) (:leaf t)
+  (bool (member (struct-procedure-kind f) '(:mutator :field-mutator))))
+(defnative "struct-type-info" (type) (:leaf t)
+  ;; name, init fields, auto fields, accessor, mutator, immutables,
+  ;; supertype, skipped?
+  (values (struct-type-name type) (struct-type-init-field-count type) (struct-type-auto-field-count type)
+	  (struct-type-accessor type) (struct-type-mutator type) (struct-type-immutables type)
+	  (or (struct-type-parent type) ps:false) ps:false))
+(defnative "struct-info" (v) (:leaf t)
+  (if (and (struct-instance-p v) (transparent-p (struct-of-type v)))
+      (values (struct-of-type v) ps:false)
+      (values ps:false ps:true)))
+(defnative "struct-type-make-constructor" (type &optional name) (:leaf t)
+  (declare (ignore name))
+  (note-struct-procedure (constructor type) :constructor type))
+(defnative "struct-type-make-predicate" (type) (:leaf t)
+  (note-struct-procedure (lambda (x) (bool (and (struct-instance-p x) (subtype-p (struct-of-type x) type))))
+			 :predicate type))
+(defnative "struct-type-authentic?" (type) (:leaf t) (declare (ignore type)) ps:false)
+(defnative "struct-type-sealed?" (type) (:leaf t) (declare (ignore type)) ps:false)
 
 (defnative "struct?" (x) (:leaf t) (bool (struct-instance-p x)))
 (defnative "struct-type?" (x) (:leaf t) (bool (struct-type-p x)))
@@ -276,7 +324,9 @@ to VALUE, after PROPERTY's guard."
 ;;; [(AUTO-N AUTO-V)] [#(MUTABLE-INDEX ...)] PARENT-KEY ...); the
 ;;; normalized key drops the defaults.  Not yet: auto fields in keys.
 
-(defvar *prefab-types* (make-hash-table :test 'equal :synchronized t))
+(defvar *prefab-types* (make-hash-table :test 'equalp :synchronized t)
+  "(key . field count) -> the prefab struct type.  EQUALP: a key is
+symbols, numbers and vectors of numbers.")
 
 (defun prefab-key-parts (key)
   "KEY's own name, its own field count (or NIL), its mutable indexes and
@@ -302,7 +352,7 @@ its parent key (or NIL)."
 	    (setf (struct-type-prefab-key type) (normalized-prefab-key name mutable parent)
 		  (gethash (cons (rkey key) field-count) *prefab-types*) type))))))
 
-(defun rkey (key) (format nil "~S" key))
+(defun rkey (key) key)
 
 (defun normalized-prefab-key (name mutable parent)
   (let ((own (append (list name) (and mutable (list (coerce mutable 'simple-vector))))))

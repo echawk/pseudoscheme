@@ -325,3 +325,11 @@
 (defmethod make-load-form ((x rregexp) &optional environment)
   (declare (ignore environment))
   `(make-rregexp ',(rregexp-source x) ',(rregexp-px x)))
+
+(defnative "system-big-endian?" () (:leaf t) (bool (eq sb-c::*backend-byte-order* :big-endian)))
+
+;;; The locale's encoding is UTF-8 here
+(defnative "bytes->string/locale" (b &optional (err-char ps:false) (start 0) end) (:leaf t)
+  (declare (ignore err-char))
+  (sb-ext:octets-to-string b :external-format '(:utf-8 :replacement #\?) :start start :end end))
+(defnative "locale-string-encoding" () (:leaf t) "UTF-8")

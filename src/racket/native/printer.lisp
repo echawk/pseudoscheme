@@ -170,3 +170,21 @@ writes straight to the port (compiled code writes its bytes so)."
 		     (unless (eq v *void*)
 		       (to-port nil (lambda (s) (print-quoted v s) (terpri s))))
 		     *void*)))
+
+;;; Port handlers: display, write and print through a port go through
+;;; these, by default the printer's own
+(defvar *port-handlers* (make-hash-table :test 'equal :weakness :key-or-value :synchronized t))
+
+(macrolet ((handler (name mode default)
+	     `(defnative ,name (port &optional (handler nil handler-p)) (:leaf t)
+		(if handler-p
+		    (progn (setf (gethash (cons ,mode port) *port-handlers*) handler) *void*)
+		    (or (gethash (cons ,mode port) *port-handlers*)
+			(lambda (v p &optional depth) (declare (ignore depth)) ,default))))))
+  (handler "port-display-handler" :display (write-with-mode v p ps:false :display))
+  (handler "port-write-handler" :write (write-with-mode v p ps:true :write))
+  (handler "port-print-handler" :print (write-with-mode v p 0 :print)))
+
+(defvar *global-port-print-handler*
+  (make-parameter* (lambda (v p &optional depth) (declare (ignore depth)) (write-with-mode v p 0 :print))))
+(define-primitive "#%kernel" "global-port-print-handler" *global-port-print-handler*)

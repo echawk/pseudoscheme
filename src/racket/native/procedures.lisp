@@ -1,28 +1,118 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
 
-;;;; Procedures, natively: arity masks, procedure-reduce-arity, keyword
-;;;; procedures' plumbing, and impersonators and chaperones of
-;;;; procedures, structs, vectors, boxes and hash tables.  The plan:
-;;;; SBCL funcallable instances, where rumble uses the Chez fork's
-;;;; wrapper procedures.
+;;;; Procedures, natively: impersonators and chaperones, impersonator
+;;;; properties, procedure-reduce-arity.
+;;;;
+;;;; A procedure's chaperone or impersonator is a new procedure, which
+;;;; passes the arguments through the wrapper (and the results through the
+;;;; result wrapper, when the wrapper returns one first), recorded in
+;;;; *IMPERSONATORS* with what it wraps and its impersonator properties.
+;;;; Racket's keyword procedures are structs racket/private/kw.rkt
+;;;; chaperones itself, on top of these.
+;;;; Not yet, and approximated: a chaperone of a struct, vector, box or
+;;;; hash table is the value itself (so racket/contract's contracts on
+;;;; them aren't enforced), procedure-reduce-arity doesn't reduce, and a
+;;;; chaperone's arity is the wrapper's lambda list's.
 
 (in-package "PSEUDOSCHEME-RACKET")
 
-(defnative "procedure-reduce-arity" (proc arity &optional name realm) (:rumble "procedure-reduce-arity")
-  (declare (ignore proc arity name realm))
-  (not-yet "procedure-reduce-arity"))
+(defstruct (impersonation (:constructor make-impersonation (kind of props)))
+  kind					; :chaperone or :impersonator
+  of					; what it wraps
+  props)				; alist: impersonator property -> value
 
-(defnative "impersonate-procedure" (proc wrapper &rest props) (:rumble "impersonate-procedure")
-  (declare (ignore proc wrapper props))
-  (not-yet "impersonate-procedure"))
+(defvar *impersonators* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "An impersonator or chaperone -> its IMPERSONATION.")
+
+(defun impersonation (x) (values (gethash x *impersonators*)))
+
+(defstruct (impersonator-property (:constructor make-impersonator-property* (name))) name)
+
+(defun plist->alist (props)
+  (loop for (p v) on props by #'cddr collect (cons p v)))
+
+(defun wrap-procedure (kind proc wrapper props)
+  (let ((new (if (truthy wrapper)
+		 (lambda (&rest args)
+		   (let ((results (multiple-value-list (apply wrapper args))))
+		     (if (and (= (length results) (1+ (length args))) (functionp (car results)))
+			 ;; a result wrapper first, then the arguments
+			 (multiple-value-call (car results) (apply proc (cdr results)))
+			 (apply proc results))))
+		 (lambda (&rest args) (apply proc args)))))
+    (setf (gethash new *impersonators*) (make-impersonation kind proc (plist->alist props)))
+    new))
 
 (defnative "chaperone-procedure" (proc wrapper &rest props) (:rumble "chaperone-procedure")
-  (declare (ignore proc wrapper props))
-  (not-yet "chaperone-procedure"))
+  (wrap-procedure :chaperone proc wrapper props))
+(defnative "impersonate-procedure" (proc wrapper &rest props) (:rumble "impersonate-procedure")
+  (wrap-procedure :impersonator proc wrapper props))
+(defnative "chaperone-procedure*" (proc wrapper &rest props) ()
+  (wrap-procedure :chaperone proc (and (truthy wrapper) (lambda (&rest args) (apply wrapper proc args))) props))
+(defnative "impersonate-procedure*" (proc wrapper &rest props) ()
+  (wrap-procedure :impersonator proc (and (truthy wrapper) (lambda (&rest args) (apply wrapper proc args))) props))
+;;; The unsafe ones: WRAPPER is called instead of PROC, which it stands for
+(defnative "unsafe-chaperone-procedure" (proc wrapper &rest props) (:instance "#%unsafe")
+  (let ((new (lambda (&rest args) (apply wrapper args))))
+    (setf (gethash new *impersonators*) (make-impersonation :chaperone proc (plist->alist props)))
+    new))
+(defnative "unsafe-impersonate-procedure" (proc wrapper &rest props) (:instance "#%unsafe")
+  (let ((new (lambda (&rest args) (apply wrapper args))))
+    (setf (gethash new *impersonators*) (make-impersonation :impersonator proc (plist->alist props)))
+    new))
 
-;;; There are no impersonators or chaperones yet: nothing is one
-(defnative "impersonator?" (x) (:leaf t) (declare (ignore x)) ps:false)
-(defnative "chaperone?" (x) (:leaf t) (declare (ignore x)) ps:false)
-(defnative "impersonator-of?" (a b) () (bool (equal* a b)))
-(defnative "chaperone-of?" (a b) () (bool (equal* a b)))
+(defnative "impersonator?" (x) (:leaf t) (bool (impersonation x)))
+(defnative "chaperone?" (x) (:leaf t)
+  (let ((i (impersonation x))) (bool (and i (eq (impersonation-kind i) :chaperone)))))
+(defun impersonates-p (a b)
+  "Whether A is B, or wraps it (through any number of layers)."
+  (loop for x = a then (impersonation-of i)
+	for i = (impersonation x)
+	thereis (or (eq x b) (equal* x b))
+	while i))
+(defnative "impersonator-of?" (a b) () (bool (impersonates-p a b)))
+(defnative "chaperone-of?" (a b) () (bool (impersonates-p a b)))
 
+;;; Impersonator properties: values a wrapper carries
+(defnative "make-impersonator-property" (name) (:leaf t)
+  (let ((p (make-impersonator-property* name)))
+    (flet ((lookup (x)
+	     (loop for i = (impersonation x) then (impersonation (impersonation-of i))
+		   while i
+		   do (let ((e (assoc p (impersonation-props i))))
+			(when e (return (values (cdr e) t)))))))
+      (values p
+	      (lambda (x) (bool (nth-value 1 (lookup x))))
+	      (lambda (x &optional (fail nil fail-p))
+		(multiple-value-bind (v found) (lookup x)
+		  (cond (found v)
+			((not fail-p) (racket-error (format nil "~A-accessor" (rname name))
+						    "contract violation~%  given: ~A" (written x)))
+			((functionp fail) (funcall fail))
+			(t fail))))))))
+(defnative "impersonator-property?" (x) (:leaf t) (bool (impersonator-property-p x)))
+(defnative "impersonator-property-accessor-procedure?" (x) (:leaf t) (declare (ignore x)) ps:false)
+
+;;; Chaperones of data: the value itself, for now (see above)
+(macrolet ((same (&rest names)
+	     `(progn ,@(loop for name in names
+			     collect `(defnative ,name (v &rest args) (:leaf t)
+					(declare (ignore args))
+					v)))))
+  (same "chaperone-struct" "impersonate-struct" "chaperone-vector" "impersonate-vector"
+	"chaperone-vector*" "impersonate-vector*" "chaperone-box" "impersonate-box"
+	"chaperone-hash" "impersonate-hash" "chaperone-struct-type" "chaperone-evt"
+	"chaperone-channel" "impersonate-channel" "chaperone-continuation-mark-key"
+	"impersonate-continuation-mark-key" "chaperone-prompt-tag" "impersonate-prompt-tag"))
+
+(defnative "procedure-reduce-arity" (proc arity &optional name realm) (:rumble "procedure-reduce-arity")
+  (declare (ignore arity name realm))
+  proc)
+
+;;; procedure-specialize: a hint to compile a closure for its values;
+;;; the procedure itself here
+(defnative "procedure-specialize" (f) (:leaf t) f)
+(defnative "procedure-impersonator*?" (f) (:leaf t) (declare (ignore f)) ps:false)
+(defnative "procedure-extract-target" (f) (:leaf t) (declare (ignore f)) ps:false)
+(defnative "procedure-result-arity" (f) (:leaf t) (declare (ignore f)) ps:false)
+(defnative "primitive-result-arity" (f) (:leaf t) (declare (ignore f)) ps:false)
