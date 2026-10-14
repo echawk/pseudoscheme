@@ -58,9 +58,15 @@ instance has, with how many times each."
   (let ((counts (make-hash-table :test 'eq)))
     (labels ((walk (x)
 	       (when (consp x)
-		 (if (and (eq (car x) (core "racket:unknown-primitive")) (consp (cdr x)))
-		     (incf (gethash (cadr (cadr x)) counts 0))
-		     (progn (walk (car x)) (walk (cdr x)))))))
+		 (cond ((and (eq (car x) (core "racket:unknown-primitive")) (consp (cdr x)))
+			(incf (gethash (cadr (cadr x)) counts 0)))
+		       ;; a stub's host global
+		       ((and (symbolp (car x)) (uiop:string-prefix-p "racket:" (rname (car x)))
+			     (gethash (subseq (rname (car x)) 7) *stubs*))
+			(incf (gethash (rsym (subseq (rname (car x)) 7)) counts 0))
+			(walk (cdr x)))
+		       (t
+		      (walk (car x)) (walk (cdr x)))))))
       (walk core))
     (sort (loop for k being the hash-keys of counts using (hash-value n) collect (cons (rname k) n))
 	  #'> :key #'cdr)))
@@ -77,3 +83,37 @@ whether it lowers, and which primitives it uses that we lack."
       (format stream "~&  missing (uses): ~{~A (~D)~^, ~}~%"
 	      (loop for (name . n) in unknown append (list name n))))
     unknown))
+
+(defvar *expander-instance* nil "The expander linklet's instance, once instantiated.")
+
+(defun instantiate-expander (&key (stream *standard-output*))
+  "Compile the expander linklet (form by form: it's big) and instantiate
+it into *EXPANDER-INSTANCE*, saying how long each step took, or which
+top-level form failed and why."
+  (flet ((seconds (start) (/ (- (get-internal-real-time) start) internal-time-units-per-second)))
+    (let* ((start (get-internal-real-time))
+	   (form (read-expander-linklet))
+	   (compiled (compile-linklet-form form :name (rsym "expander"))))
+      (format stream "~&expander: read and lowered in ~,1Fs~%" (seconds start))
+      (setq start (get-internal-real-time))
+      (linklet-function compiled)
+      (format stream "~&expander: compiled in ~,1Fs~%" (seconds start))
+      (setq start (get-internal-real-time))
+      (let ((instance (make-linklet-instance (rsym "expander"))))
+	(setq *uncaught* nil)
+	(handler-case
+	    (progn
+	      (call-with-continuation-prompt
+	       (lambda () (with-racket-errors (instantiate-linklet compiled '() instance)))
+	       *default-prompt-tag* nil)
+	      (if *uncaught*
+		  ;; the uncaught-exception handler printed it, and aborted
+		  (progn (format stream "~&expander: instantiating failed in top-level form ~A~%"
+				 *split-form-index*)
+			 nil)
+		  (progn (format stream "~&expander: instantiated in ~,1Fs~%" (seconds start))
+			 (setq *expander-instance* instance))))
+	  (error (e)
+	    (format stream "~&expander: instantiating failed in top-level form ~A: ~A~%"
+		    *split-form-index* e)
+	    nil))))))

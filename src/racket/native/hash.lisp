@@ -41,22 +41,10 @@
   (logand (+ (* h 31) x) most-positive-fixnum))
 
 (defun racket-equal-hash (x &optional (depth 0))
-  (cond ((> depth 16) 0)
-	((consp x) (mix (racket-equal-hash (car x) (1+ depth)) (racket-equal-hash (cdr x) (1+ depth))))
-	((stringp x) (logand (sxhash (coerce x 'simple-string)) most-positive-fixnum))
-	((simple-vector-p x)
-	 (let ((h (length x)))
-	   (loop for e across x for i below 8 do (setq h (mix h (racket-equal-hash e (1+ depth)))))
-	   h))
-	((typep x '(simple-array (unsigned-byte 8) (*)))
-	 (let ((h (length x)))
-	   (loop for b across x for i below 64 do (setq h (mix h b)))
-	   h))
-	((rbox-p x) (mix 7 (racket-equal-hash (rbox-value x) (1+ depth))))
-	(t (eqv-hash x))))
+  (equal-hash* x depth))
 
 (defun racket-equal (a b)
-  (truthy (funcall (psx:host-ref "equal?") a b)))
+  (equal* a b))
 
 (defun racket-eqv (a b)
   (or (eql a b)
@@ -403,3 +391,33 @@ differ, at SHIFT."
 (defnative "equal-hash-code" (x) (:leaf t) (racket-equal-hash x))
 (defnative "eqv-hash-code" (x) (:leaf t) (eqv-hash x))
 (defnative "eq-hash-code" (x) (:leaf t) (eq-hash x))
+
+;;; equal-always? tables are equal? ones here (equal-always? differs only
+;;; for mutable values, which equal? on our values compares by identity
+;;; already where it matters most); ephemeron tables are weak ones.
+(defnative "make-hashalw" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :equal assocs))
+(defnative "make-weak-hashalw" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :equal assocs t))
+(defnative "make-immutable-hashalw" (&optional (assocs '())) (:leaf t) (ihash-from-assocs :equal assocs))
+(defnative "hashalw" (&rest kvs) (:leaf t) (ihash-from-pairs :equal kvs))
+(defnative "hash-equal-always?" (h) (:leaf t) (declare (ignore h)) ps:false)
+(defnative "make-ephemeron-hash" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :equal assocs t))
+(defnative "make-ephemeron-hasheq" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :eq assocs t))
+(defnative "make-ephemeron-hasheqv" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :eqv assocs t))
+(defnative "make-ephemeron-hashalw" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :equal assocs t))
+(defnative "hash-ephemeron?" (h) (:leaf t) (bool (and (rhash-p h) (rhash-weak h))))
+(defnative "hash-keys-subset?" (a b) (:leaf t)
+  (bool (loop for (k) across (entries a) always (nth-value 1 (lookup* b k)))))
+
+;;; Unsafe immutable-hash iteration: the same positions
+(defnative "unsafe-immutable-hash-iterate-first" (h) (:instance "#%unsafe" :leaf t)
+  (if (plusp (length (entries h))) 0 ps:false))
+(defnative "unsafe-immutable-hash-iterate-next" (h i) (:instance "#%unsafe" :leaf t)
+  (if (< (1+ i) (length (entries h))) (1+ i) ps:false))
+(defnative "unsafe-immutable-hash-iterate-key" (h i) (:instance "#%unsafe" :leaf t)
+  (car (svref (entries h) i)))
+(defnative "unsafe-immutable-hash-iterate-value" (h i) (:instance "#%unsafe" :leaf t)
+  (cdr (svref (entries h) i)))
+(defnative "unsafe-immutable-hash-iterate-key+value" (h i) (:instance "#%unsafe" :leaf t)
+  (let ((e (svref (entries h) i))) (values (car e) (cdr e))))
+(defnative "unsafe-immutable-hash-iterate-pair" (h i) (:instance "#%unsafe" :leaf t)
+  (let ((e (svref (entries h) i))) (cons (car e) (cdr e))))

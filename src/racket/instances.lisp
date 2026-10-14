@@ -92,6 +92,11 @@ Racket's own (primitive-table ...) lists."
 	(- (ash 1 required))
 	(loop for n from required to (+ required optional) sum (ash 1 n)))))
 
+(defun real-primitive-p (instance name)
+  "Whether INSTANCE has NAME, and not as a stub."
+  (and (nth-value 1 (gethash name (primitive-instance instance)))
+       (not (gethash name *stubs*))))
+
 (defun coverage-report (&key (stream *standard-output*) (missing nil))
   "Per instance: how many of Racket CS's primitives this strategy's
 instances have, and how many have the wrong arity.  MISSING: list them."
@@ -101,7 +106,7 @@ instances have, and how many have the wrong arity.  MISSING: list them."
 	(let ((absent '()) (wrong '()))
 	  (dolist (e entries)
 	    (multiple-value-bind (v found) (gethash (table-entry-name e) (primitive-instance instance))
-	      (cond ((not found) (push (table-entry-name e) absent))
+	      (cond ((or (not found) (gethash (table-entry-name e) *stubs*)) (push (table-entry-name e) absent))
 		    ((and (functionp v) (table-entry-mask e)
 			  (not (ignore-errors (= (arity-mask v) (table-entry-mask e))))
 			  ;; a host procedure's lambda list may be (&rest args)
@@ -114,3 +119,31 @@ instances have, and how many have the wrong arity.  MISSING: list them."
 	  (when missing
 	    (format stream "~&  missing: ~{~A~^ ~}~%" (reverse absent))))))
     (format stream "~&~12A ~4D of ~4D~%" "total" have total)))
+
+(defvar *stubs* (make-hash-table :test 'equal)
+  "Name -> T for each primitive that is a stub (INSTALL-STUBS).")
+
+(defun install-stubs ()
+  "Each procedure of Racket CS's primitive tables that an instance lacks,
+as a stub that raises not-yet when called (not when referenced: a
+linklet may store a primitive without calling it).  Needs Racket's
+source; without it, nothing."
+  (when (ignore-errors (racket-source-directory))
+    (dolist (table (primitive-tables))
+      (destructuring-bind (instance . entries) table
+	(dolist (e entries)
+	  (let ((name (table-entry-name e)))
+	    (when (and (uiop:string-prefix-p "known-procedure" (table-entry-kind e))
+		       (not (nth-value 1 (gethash name (primitive-instance instance)))))
+	      (setf (gethash name *stubs*) t)
+	      (define-primitive instance name
+		(if (and (eql (table-entry-mask e) 3)
+			 (or (uiop:string-prefix-p "current-" name) (uiop:string-prefix-p "error-" name)
+			     (uiop:string-prefix-p "print-" name) (uiop:string-prefix-p "read-" name)
+			     (uiop:string-prefix-p "port-" name) (search "-handler" name)
+			     (search "enabled" name)))
+		    ;; parameter-shaped (a getter and setter, by name): a
+		    ;; parameter holding #f, which linklets read as they
+		    ;; instantiate
+		    (make-parameter* ps:false)
+		    (lambda (&rest args) (declare (ignore args)) (not-yet name)))))))))))

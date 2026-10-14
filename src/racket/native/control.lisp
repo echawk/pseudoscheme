@@ -176,3 +176,83 @@
 
 (defnative "call-with-parameterization" (paramz thunk) ()
   (ps-r6rs::call-with-mark *parameterization-key* paramz thunk))
+
+;;; ------------------------------------------------------------------
+;;; Thread cells.  One place, and threads (thread.lisp, later) will give
+;;; each its own values of the preserved cells; until then a cell is a
+;;; box.
+
+(defstruct (thread-cell (:constructor make-thread-cell* (value preserved))) value preserved)
+
+(defnative "make-thread-cell" (v &optional (preserved? ps:false)) (:leaf t)
+  (make-thread-cell* v (truthy preserved?)))
+(defnative "thread-cell?" (x) (:leaf t) (bool (thread-cell-p x)))
+(defnative "thread-cell-ref" (c) (:leaf t) (thread-cell-value c))
+(defnative "thread-cell-set!" (c v) (:leaf t) (setf (thread-cell-value c) v) *void*)
+(defnative "current-preserved-thread-cell-values" (&optional v) (:leaf t)
+  (declare (ignore v))
+  *void*)
+
+(defnative "call-with-continuation-barrier" (thunk) () (funcall thunk))
+(defnative "call-with-escape-continuation" (proc) ()
+  (funcall (psx:host-ref "call-with-current-continuation") proc))
+(defnative "check-for-break" () (:leaf t) *void*)
+(defnative "unsafe-root-continuation-prompt-tag" () (:instance "#%unsafe" :leaf t) *default-prompt-tag*)
+(defnative "reparameterize" (paramz) (:leaf t) paramz)
+
+;;; ------------------------------------------------------------------
+;;; What the thread layer would give, enough for the expander: locks,
+;;; semaphores, the current thread, plumbers and loggers.  One Racket
+;;; thread for now; locks and semaphores are SBCL's.
+
+(defnative "unsafe-make-uninterruptible-lock" () (:instance "#%unsafe" :leaf t)
+  (sb-thread:make-mutex :name "racket lock"))
+(defnative "unsafe-uninterruptible-lock-acquire" (l) (:instance "#%unsafe" :leaf t)
+  (unless (sb-thread:holding-mutex-p l) (sb-thread:grab-mutex l))
+  *void*)
+(defnative "unsafe-uninterruptible-lock-release" (l) (:instance "#%unsafe" :leaf t)
+  (when (sb-thread:holding-mutex-p l) (sb-thread:release-mutex l))
+  *void*)
+
+(defstruct (rsemaphore (:constructor make-rsemaphore (count))) (count 0))
+(defnative "make-semaphore" (&optional (n 0)) (:leaf t) (make-rsemaphore n))
+(defnative "semaphore?" (x) (:leaf t) (bool (rsemaphore-p x)))
+(defnative "semaphore-post" (s) (:leaf t) (incf (rsemaphore-count s)) *void*)
+(defnative "semaphore-try-wait?" (s) (:leaf t)
+  (if (plusp (rsemaphore-count s)) (progn (decf (rsemaphore-count s)) ps:true) ps:false))
+(defnative "semaphore-wait" (s) (:leaf t)
+  ;; one thread: a wait that would block never returns
+  (if (plusp (rsemaphore-count s))
+      (progn (decf (rsemaphore-count s)) *void*)
+      (racket-error "semaphore-wait" "would block forever (one thread)")))
+
+(defstruct (rthread (:constructor make-rthread (name))) name)
+(defvar *main-thread* (make-rthread (rsym "main")))
+(defnative "current-thread" () (:leaf t) *main-thread*)
+(defnative "thread?" (x) (:leaf t) (bool (rthread-p x)))
+
+(defstruct (plumber (:constructor make-plumber* ())) (flushes '()))
+(defvar *current-plumber* (make-parameter* (make-plumber*)))
+(define-primitive "#%kernel" "current-plumber" *current-plumber*)
+(defnative "make-plumber" () (:leaf t) (make-plumber*))
+(defnative "plumber-add-flush!" (p proc &optional weak?) (:leaf t)
+  (declare (ignore weak?))
+  (let ((handle (cons p proc)))
+    (push handle (plumber-flushes p))
+    handle))
+(defnative "plumber-flush-all" (p) ()
+  (dolist (h (plumber-flushes p)) (funcall (cdr h) h))
+  *void*)
+
+(defstruct (logger (:constructor make-logger* (name parent))) name parent)
+(defvar *current-logger* (make-parameter* (make-logger* ps:false nil)))
+(define-primitive "#%kernel" "current-logger" *current-logger*)
+(defnative "make-logger" (&optional (name ps:false) parent &rest more) (:leaf t)
+  (declare (ignore more))
+  (make-logger* name (and parent (truthy parent) parent)))
+(defnative "logger?" (x) (:leaf t) (bool (logger-p x)))
+(defnative "logger-name" (l) (:leaf t) (logger-name l))
+;; no log receivers yet: nothing is ever logged
+(defnative "log-level?" (l level &optional topic) (:leaf t) (declare (ignore l level topic)) ps:false)
+(defnative "log-max-level" (l &optional topic) (:leaf t) (declare (ignore l topic)) ps:false)
+(defnative "log-message" (l level &rest more) (:leaf t) (declare (ignore l level more)) *void*)

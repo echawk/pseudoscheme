@@ -11,7 +11,9 @@
 ;;;; host.  Later (docs/optimizations.md, idea 2): a struct type as an
 ;;;; SBCL structure class of its own, with typed slots, which the
 ;;;; compiler's struct-shape analysis (pass 3) can inline.
-;;;; Not yet: inspectors (every struct is transparent to struct->vector),
+;;;; A struct type made with inspector #f is transparent (equal? and
+;;;; struct->vector see its fields); any other inspector makes it opaque.
+;;;; Not yet: inspectors' powers beyond that,
 ;;;; prefab structs, impersonators and chaperones.
 
 (in-package "PSEUDOSCHEME-RACKET")
@@ -154,11 +156,10 @@ to VALUE, after PROPERTY's guard."
 ;;; The primitives
 
 (defnative "make-struct-type" (name parent-type init-field-count auto-field-count
-				    &optional (auto-v ps:false) (props '()) (inspector ps:false)
+				    &optional (auto-v ps:false) (props '()) (inspector *current-inspector*)
 				    (proc-spec ps:false) (immutables '()) (guard ps:false)
 				    (constructor-name ps:false))
     (:rumble "make-struct-type")
-  (declare (ignore inspector))
   (let* ((parent (and (truthy parent-type) parent-type))
 	 (count (+ init-field-count auto-field-count))
 	 (type (%make-struct-type
@@ -168,28 +169,33 @@ to VALUE, after PROPERTY's guard."
 		:total (+ count (if parent (struct-type-total parent) 0))
 		:properties (if parent (struct-type-properties parent) '())
 		:immutables immutables
+		:inspector inspector
 		:guard (and (truthy guard) guard)
 		:constructor-name (and (truthy constructor-name) constructor-name)
 		:proc-spec (and (truthy proc-spec) proc-spec))))
-    (loop for (property . value) in props
-	  do (setf (struct-type-properties type)
-		   (attach-property (struct-type-properties type) property value
-				    (list name init-field-count auto-field-count))))
-    (let ((proc (cdr (assoc *prop-procedure* props))))
-      (when proc (setf (struct-type-proc-spec type) proc)))
-    (let ((who (rname name)))
+    (let* ((who (rname name))
+	   (accessor (lambda (x i)
+		       (check-instance type x (format nil "~A-ref" who))
+		       (svref (struct-fields x) (field-index type i (format nil "~A-ref" who)))))
+	   (mutator (lambda (x i v)
+		      (check-instance type x (format nil "~A-set!" who))
+		      (when (member i (struct-type-immutables type))
+			(racket-error (format nil "~A-set!" who) "field is immutable: ~D" i))
+		      (setf (svref (struct-fields x) (field-index type i (format nil "~A-set!" who))) v)
+		      *void*))
+	   ;; what a property's guard gets, as struct-type-info returns it
+	   (info (list name init-field-count auto-field-count accessor mutator
+		       immutables (or parent ps:false) ps:false)))
+      (loop for (property . value) in props
+	    do (setf (struct-type-properties type)
+		     (attach-property (struct-type-properties type) property value info)))
+      (let ((proc (cdr (assoc *prop-procedure* props))))
+	(when proc (setf (struct-type-proc-spec type) proc)))
       (values type
 	      (constructor type)
 	      (lambda (x) (bool (and (struct-instance-p x) (subtype-p (struct-of-type x) type))))
-	      (lambda (x i)
-		(check-instance type x (format nil "~A-ref" who))
-		(svref (struct-fields x) (field-index type i (format nil "~A-ref" who))))
-	      (lambda (x i v)
-		(check-instance type x (format nil "~A-set!" who))
-		(when (member i (struct-type-immutables type))
-		  (racket-error (format nil "~A-set!" who) "field is immutable: ~D" i))
-		(setf (svref (struct-fields x) (field-index type i (format nil "~A-set!" who))) v)
-		*void*)))))
+	      accessor
+	      mutator))))
 
 (defnative "make-struct-type-property" (name &optional (guard ps:false) (supers '())
 					     (can-impersonate? ps:false) (realm ps:false))
@@ -227,7 +233,78 @@ to VALUE, after PROPERTY's guard."
 		   (vector (rsym (format nil "struct:~A" (rname (struct-type-name (struct-of-type x))))))
 		   (struct-fields x))
       (vector (rsym "struct:?"))))
-(defnative "current-inspector" (&optional i) (:leaf t) (declare (ignore i)) ps:false)
-(defnative "make-inspector" (&optional i) (:leaf t) (declare (ignore i)) ps:false)
+(defstruct (inspector (:constructor make-inspector* (superior))) superior)
+(defvar *root-inspector* (make-inspector* nil))
+(defvar *current-inspector* (make-inspector* *root-inspector*))
+
+(defun transparent-p (type)
+  "Whether TYPE's instances show their fields: made with inspector #f, or prefab."
+  (or (eq (struct-type-inspector type) ps:false) (struct-type-prefab-key type)))
+
+(defnative "current-inspector" (&optional (i nil i-p)) (:leaf t)
+  (if i-p (progn (setq *current-inspector* i) *void*) *current-inspector*))
+(defnative "make-inspector" (&optional (superior *current-inspector*)) (:leaf t)
+  (make-inspector* superior))
+(defnative "make-sibling-inspector" (&optional (inspector *current-inspector*)) (:leaf t)
+  (make-inspector* (inspector-superior inspector)))
+(defnative "inspector?" (x) (:leaf t) (bool (inspector-p x)))
+(defnative "inspector-superior?" (a b) (:leaf t)
+  (bool (loop for i = (inspector-superior b) then (inspector-superior i)
+	      while i thereis (eq i a))))
 
 (define-primitive "#%kernel" "prop:procedure" *prop-procedure*)
+
+;;; ------------------------------------------------------------------
+;;; Prefab structs: a struct type per (key, field count), shared by all
+;;; who name it.  Keys as Racket normalizes them: NAME, or (NAME N
+;;; [(AUTO-N AUTO-V)] [#(MUTABLE-INDEX ...)] PARENT-KEY ...); the
+;;; normalized key drops the defaults.  Not yet: auto fields in keys.
+
+(defvar *prefab-types* (make-hash-table :test 'equal :synchronized t))
+
+(defun prefab-key-parts (key)
+  "KEY's own name, its own field count (or NIL), its mutable indexes and
+its parent key (or NIL)."
+  (if (symbolp key)
+      (values key nil '() nil)
+      (let ((name (car key)) (rest (cdr key)) (n nil) (mutable '()))
+	(when (and rest (integerp (car rest))) (setq n (pop rest)))
+	(when (and rest (consp (car rest)) (integerp (caar rest))) (pop rest))
+	(when (and rest (vectorp (car rest))) (setq mutable (coerce (pop rest) 'list)))
+	(values name n mutable (and rest (if (cdr rest) rest (car rest)))))))
+
+(defun prefab-struct-type (key field-count)
+  "The prefab struct type for KEY with FIELD-COUNT fields in all."
+  (or (gethash (cons (rkey key) field-count) *prefab-types*)
+      (multiple-value-bind (name own mutable parent-key) (prefab-key-parts key)
+	(let* ((parent (and parent-key
+			    (prefab-struct-type parent-key (- field-count (or own 0)))))
+	       (own (or own (- field-count (if parent (struct-type-total parent) 0)))))
+	  (multiple-value-bind (type)
+	      (make-struct-type* name (or parent ps:false) own 0 ps:false '() ps:false ps:false
+				 (loop for i below own unless (member i mutable) collect i))
+	    (setf (struct-type-prefab-key type) (normalized-prefab-key name mutable parent)
+		  (gethash (cons (rkey key) field-count) *prefab-types*) type))))))
+
+(defun rkey (key) (format nil "~S" key))
+
+(defun normalized-prefab-key (name mutable parent)
+  (let ((own (append (list name) (and mutable (list (coerce mutable 'simple-vector))))))
+    (if parent
+	(append own (let ((pk (struct-type-prefab-key parent))) (if (symbolp pk) (list pk) pk)))
+	(if (cdr own) own name))))
+
+(defnative "prefab-struct-key" (v) (:leaf t)
+  (let ((type (and (struct-instance-p v) (struct-of-type v))))
+    (or (and type (struct-type-prefab-key type)) ps:false)))
+(defnative "make-prefab-struct" (key &rest fields) (:leaf t)
+  (let ((type (prefab-struct-type key (length fields))))
+    (make-instance-of type (coerce fields 'simple-vector))))
+(defnative "prefab-key->struct-type" (key field-count) (:leaf t)
+  (prefab-struct-type key field-count))
+(defnative "prefab-key?" (x) (:leaf t)
+  (bool (or (symbolp x) (and (consp x) (symbolp (car x))))))
+(defnative "prefab-struct-type-key+field-count" (type) (:leaf t)
+  (if (and (struct-type-p type) (struct-type-prefab-key type))
+      (cons (struct-type-prefab-key type) (struct-type-total type))
+      ps:false))

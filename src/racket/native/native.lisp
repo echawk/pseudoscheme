@@ -43,7 +43,7 @@ one: every primitive the instances have that isn't host-shared."
     "list" "append" "reverse" "length" "list-ref" "list-tail"
     "memq" "memv" "member" "assq" "assv" "assoc" "null?" "pair?" "list?"
     ;; equivalence, booleans
-    "eq?" "eqv?" "equal?" "not" "boolean?"
+    "eq?" "eqv?" "not" "boolean?"
     ;; numbers
     "+" "-" "*" "/" "=" "<" ">" "<=" ">=" "zero?" "positive?" "negative?" "odd?" "even?"
     "abs" "max" "min" "quotient" "remainder" "modulo" "gcd" "lcm" "expt" "exp" "log" "sqrt"

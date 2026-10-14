@@ -96,8 +96,15 @@ new ones for the rest), and each form's function in turn."
       (loop for i from (length variables) below n
 	    do (setf (svref cells i) (make-linklet-variable (rsym "internal"))))
       (let ((result (list *void*)))
-	(dolist (f functions (values-list result))
-	  (setq result (multiple-value-list (funcall f instance cells))))))))
+	(loop for f in functions
+	      for i from 0
+	      do (setq *split-form-index* i
+		       result (multiple-value-list (funcall f instance cells))))
+	(values-list result)))))
+
+(defvar *split-form-index* nil
+  "The index of the top-level form a split linklet's instantiation is
+running (or ran last): for error reports.")
 
 (defun instantiate-linklet (compiled import-instances &optional target)
   "instantiate-linklet: with no TARGET, a new instance with the exports;
@@ -122,6 +129,9 @@ with one, the body's result, the exports defined in TARGET."
 ;;; ------------------------------------------------------------------
 ;;; #%linklet's names: those written so far, and stubs for the rest
 
+(defstruct (linklet-bundle (:constructor make-linklet-bundle (table))) table)
+(defstruct (linklet-directory (:constructor make-linklet-directory (table))) table)
+
 (defparameter *linklet-primitives*
   '("primitive-table" "primitive->compiled-primitive" "primitive-in-category?"
     "primitive-lookup" "linklet?" "compile-linklet" "recompile-linklet" "eval-linklet"
@@ -135,7 +145,11 @@ with one, the body's result, the exports defined in TARGET."
     "variable-reference?" "variable-reference->instance" "variable-reference-constant?"
     "variable-reference-from-unsafe?" "correlated?" "correlated-source" "correlated-line"
     "correlated-column" "correlated-position" "correlated-span" "correlated-e"
-    "correlated->datum" "datum->correlated" "correlated-property" "correlated-property-symbol-keys")
+    "correlated->datum" "datum->correlated" "correlated-property" "correlated-property-symbol-keys"
+    ;; what BC's expander also uses (racket/src/bc/src/startup.inc)
+    "linklet-cross-machine-type" "linklet-add-target-machine-info"
+    "linklet-summarize-target-machine-info" "primitive->compiled-position"
+    "compiled-position->primitive")
   "A first list of #%linklet's names, from Racket's reference (\"Linklets
 and the Core Compiler\") and its correlated objects; milestone 1 replaces
 it with (primitive-table '#%linklet) of the pinned release.")
@@ -208,7 +222,43 @@ it with (primitive-table '#%linklet) of the pinned release.")
 			     :span (correlated-span c)
 			     :props (acons key value (remove key (correlated-props c) :key #'car)))
 	    (let ((p (assoc key (correlated-props c)))) (if p (cdr p) ps:false)))))
-    ("correlated-property-symbol-keys" ,(lambda (c) (mapcar #'car (correlated-props c)))))
+    ("correlated-property-symbol-keys" ,(lambda (c) (mapcar #'car (correlated-props c))))
+    ("primitive-table"
+     ,(lambda (name &optional table)
+	(declare (ignore table))
+	(let ((instance (gethash (rname name) *primitive-instances*)))
+	  (if instance
+	      (let ((h (empty-ihash :eq)))
+		(maphash (lambda (k v) (setq h (ihash-set h (rsym k) v))) instance)
+		h)
+	      ps:false))))
+    ("primitive-lookup" ,(lambda (name) (multiple-value-bind (v found) (primitive (rname name))
+					  (if found v ps:false))))
+    ("instance-describe-variable!"
+     ,(lambda (i name desc)
+	(declare (ignore desc))
+	(instance-variable i name t)	; a description is a hint for the compiler
+	*void*))
+    ("variable-reference-constant?"
+     ,(lambda (r)
+	(let* ((name (variable-reference-name r))
+	       (v (and (truthy name) (instance-variable (variable-reference-instance r) name))))
+	  (bool (and v (linklet-variable-constant v))))))
+    ;; our .zo's VM: compiled code here is ours alone (cache.lisp)
+    ("linklet-virtual-machine-bytes" ,(lambda () (ascii-bytes *vm-name*)))
+    ;; bundles (a linklet per phase, and data) and directories (of bundles)
+    ("hash->linklet-bundle" ,(lambda (h) (make-linklet-bundle h)))
+    ("linklet-bundle->hash" ,(lambda (b) (linklet-bundle-table b)))
+    ("linklet-bundle?" ,(lambda (x) (bool (linklet-bundle-p x))))
+    ("hash->linklet-directory" ,(lambda (h) (make-linklet-directory h)))
+    ("linklet-directory->hash" ,(lambda (d) (linklet-directory-table d)))
+    ("linklet-directory?" ,(lambda (x) (bool (linklet-directory-p x))))
+    ;; one machine: no cross-compilation, and no machine-specific info
+    ("linklet-cross-machine-type" ,(lambda (&optional target) (declare (ignore target)) ps:false))
+    ("linklet-add-target-machine-info" ,(lambda (linklet info) (declare (ignore info)) linklet))
+    ("linklet-summarize-target-machine-info" ,(lambda (linklet) (declare (ignore linklet)) ps:false))
+    ("primitive->compiled-position" ,(lambda (p) (declare (ignore p)) ps:false))
+    ("compiled-position->primitive" ,(lambda (i) (declare (ignore i)) ps:false)))
   "#%linklet's functions written so far, as (name function).")
 
 (defun install-linklet-primitives ()

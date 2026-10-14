@@ -61,7 +61,9 @@ top-level forms' lexicals become global definitions).")
 (defvar *lexical-count* 0)
 
 (defun fresh-lexical (&optional (stem ""))
-  (core (format nil "~~~A~D.~A" stem (incf *lexical-count*) *lexical-tag*)))
+  "A new lexical: STEM (the Racket name, so that backtraces show it), and
+a number and tag that make it unique."
+  (core (format nil "~A~~~D.~A" stem (incf *lexical-count*) *lexical-tag*)))
 
 ;;; ------------------------------------------------------------------
 ;;; Pass 1: correlated objects off
@@ -173,11 +175,11 @@ fresh lexicals; and the core formals."
   (let ((formals '()) (rest nil))
     (loop for tail = names then (cdr tail)
 	  while (consp tail)
-	  do (let ((l (fresh-lexical stem)))
+	  do (let ((l (fresh-lexical (if (equal stem "") (rname (car tail)) stem))))
 	       (push (cons (car tail) l) env)
 	       (push l formals))
 	  finally (when (and tail (symbolp tail))
-		    (setq rest (fresh-lexical stem))
+		    (setq rest (fresh-lexical (if (equal stem "") (rname tail) stem)))
 		    (push (cons tail rest) env)))
     (values env (let ((f (nreverse formals))) (if rest (append f rest) f)))))
 
@@ -242,10 +244,24 @@ assigned as its right-hand side returns)."
 				   (list (core "lambda") formals (nest more inner-env)))))))))
 	(nest bindings env))))
 
+(defun named (id rhs core env)
+  "CORE, RHS lowered: when RHS is a procedure assigned to a top-level
+cell (a split linklet's), bound by a letrec of ID's name first, so that
+its function has the name: the translator names a letrec's procedures
+by their variables."
+  (let ((v (and (not (assoc id env)) (gethash id (linklet-info-variables *info*)))))
+    (if (and v (null (variable-info-core v))
+	     (or (form-p rhs "lambda") (form-p rhs "case-lambda")))
+	(let ((f (fresh-lexical (rname id))))
+	  (list (list (core "lambda") (list f)
+		      (list (core "begin") (list (core "set!") f core) f))
+		(quoted ps:false)))
+	core)))
+
 (defun lower-assignment (ids rhs env)
   "IDS (already bound in ENV) assigned RHS's values."
   (if (and (consp ids) (null (cdr ids)))
-      (lower-set (car ids) (lower-expr rhs env) env)
+      (lower-set (car ids) (named (car ids) rhs (lower-expr rhs env) env) env)
       (let ((temps (loop repeat (length ids) collect (fresh-lexical "v"))))
 	(list (core "call-with-values")
 	      (list (core "lambda") '() (lower-expr rhs env))
@@ -359,9 +375,8 @@ one, LOWER-SPLIT's form."
     ;; core names: a lexical per definition, a variable object per
     ;; import and export
     (maphash (lambda (name v)
-	       (declare (ignore name))
 	       (when (member (variable-info-kind v) '(:defined :defined-exported))
-		 (setf (variable-info-core v) (fresh-lexical)))
+		 (setf (variable-info-core v) (fresh-lexical (rname name))))
 	       (when (member (variable-info-kind v) '(:imported :exported :defined-exported))
 		 (setf (variable-info-cell v) (fresh-lexical "var"))))
 	     (linklet-info-variables info))

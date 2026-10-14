@@ -1,0 +1,91 @@
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+
+;;;; Racket's equal? and equal-hash-code, natively, and the hash tables'
+;;;; equal?-based test (hash.lisp's RACKET-EQUAL).
+;;;;
+;;;; equal? is eqv?, or recursive on pairs, mutable pairs, vectors,
+;;;; strings, byte strings, boxes, hash tables and paths; a struct is
+;;;; compared by its type's prop:equal+hash, else field by field when its
+;;;; type is transparent or prefab, else by identity.  The hash agrees:
+;;;; prop:equal+hash's hash procedure, or the fields of a transparent
+;;;; struct.  Not yet: cycles (an equal? of cyclic data doesn't end, as
+;;;; Racket's does) and chaperones.
+
+(in-package "PSEUDOSCHEME-RACKET")
+
+(defvar *prop-equal+hash* (%make-struct-type-property (rsym "prop:equal+hash") nil '()))
+(define-primitive "#%kernel" "prop:equal+hash" *prop-equal+hash*)
+
+(defun equal+hash-procedures (x)
+  "X's prop:equal+hash: its equal procedure and hash procedure, or NIL."
+  (multiple-value-bind (v found) (property-value x *prop-equal+hash*)
+    (when found
+      (cond ((consp v) (values (first v) (second v)))
+	    ((simple-vector-p v) (values (svref v 0) (svref v 1)))
+	    (t nil)))))
+
+(defun equal* (a b)
+  (cond ((eq a b) t)
+	((consp a) (and (consp b) (equal* (car a) (car b)) (equal* (cdr a) (cdr b))))
+	((numberp a) (racket-eqv a b))
+	((characterp a) (eql a b))
+	((stringp a) (and (stringp b) (string= a b)))
+	((typep a '(simple-array (unsigned-byte 8) (*)))
+	 (and (typep b '(simple-array (unsigned-byte 8) (*))) (equalp a b)))
+	((simple-vector-p a)
+	 (and (simple-vector-p b) (= (length a) (length b)) (every #'equal* a b)))
+	((rbox-p a) (and (rbox-p b) (equal* (rbox-value a) (rbox-value b))))
+	((mpair-p a) (and (mpair-p b) (equal* (mpair-car a) (mpair-car b)) (equal* (mpair-cdr a) (mpair-cdr b))))
+	((rpath-p a) (and (rpath-p b) (string= (rpath-string a) (rpath-string b))))
+	((or (ihash-p a) (rhash-p a)) (hash-equal a b))
+	((struct-instance-p a)
+	 (and (struct-instance-p b)
+	      (eq (struct-of-type a) (struct-of-type b))
+	      (let ((eqp (equal+hash-procedures a)))
+		(cond (eqp (truthy (funcall eqp a b (lambda (x y) (bool (equal* x y))))))
+		      ((transparent-p (struct-of-type a))
+		       (every #'equal* (struct-fields a) (struct-fields b)))
+		      (t nil)))))
+	(t nil)))
+
+(defun hash-equal (a b)
+  (and (or (ihash-p b) (rhash-p b))
+       (eq (hash-kind a) (hash-kind b))
+       (eq (ihash-p a) (ihash-p b))
+       (= (length (entries a)) (length (entries b)))
+       (loop for (k . v) across (entries a)
+	     always (multiple-value-bind (w found) (lookup* b k)
+		      (and found (equal* v w))))))
+
+(defun equal-hash* (x &optional (depth 0))
+  (cond ((> depth 16) 0)
+	((consp x) (mix (equal-hash* (car x) (1+ depth)) (equal-hash* (cdr x) (1+ depth))))
+	((stringp x) (logand (sxhash (coerce x 'simple-string)) most-positive-fixnum))
+	((simple-vector-p x)
+	 (let ((h (length x)))
+	   (loop for e across x for i below 8 do (setq h (mix h (equal-hash* e (1+ depth)))))
+	   h))
+	((typep x '(simple-array (unsigned-byte 8) (*)))
+	 (let ((h (length x)))
+	   (loop for b across x for i below 64 do (setq h (mix h b)))
+	   h))
+	((rbox-p x) (mix 7 (equal-hash* (rbox-value x) (1+ depth))))
+	((mpair-p x) (mix (equal-hash* (mpair-car x) (1+ depth)) (equal-hash* (mpair-cdr x) (1+ depth))))
+	((rpath-p x) (mix 11 (logand (sxhash (rpath-string x)) most-positive-fixnum)))
+	((or (ihash-p x) (rhash-p x)) (mix 13 (length (entries x))))
+	((struct-instance-p x)
+	 (multiple-value-bind (eqp hashp) (equal+hash-procedures x)
+	   (cond (eqp (logand (funcall hashp x (lambda (y) (equal-hash* y (1+ depth)))) most-positive-fixnum))
+		 ((transparent-p (struct-of-type x))
+		  (let ((h (eq-hash (struct-of-type x))))
+		    (loop for f across (struct-fields x) for i below 8
+			  do (setq h (mix h (equal-hash* f (1+ depth)))))
+		    h))
+		 (t (eq-hash x)))))
+	(t (eqv-hash x))))
+
+(defnative "equal?" (a b) () (bool (equal* a b)))
+(defnative "equal-always?" (a b) () (bool (equal* a b)))
+(defnative "equal?/recur" (a b recur) ()
+  (declare (ignore recur))
+  (bool (equal* a b)))

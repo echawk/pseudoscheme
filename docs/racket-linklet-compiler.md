@@ -280,7 +280,19 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   checklist. It also lists the primitives whose arity mask differs from
   the table's.
 
+- **The expander instantiates** (milestone 6's first half), with
+  `sbcl --dynamic-space-size 4GB --script tests/racket/coverage.lisp --instantiate`:
+  - it reads BC's `startup.inc` and lowers it in 0.2 s, and compiles it
+    form by form in about 25 s;
+  - all 2,004 top-level forms run, through the expander's own
+    `namespace-init!`;
+  - the instances lack 118 of the primitives it refers to. Every procedure
+    in Racket CS's tables that we lack is installed as a stub, which
+    raises "not implemented yet" when it is called, not when it is
+    referenced.
+
 Next:
+- `(eval '(+ 1 2))` through the expander, the rest of milestone 6;
 - milestone 2, the regexp linklet;
 - the rest of `#%kernel` that the extracted layers use, in the order the
   coverage report's `--missing` list makes plain.

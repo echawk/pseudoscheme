@@ -342,7 +342,7 @@
 (defsystem :pseudoscheme/racket
   :version "3.0"
   :pathname #p"src/racket/"
-  :depends-on (:pseudoscheme/api #+sbcl :sb-introspect)
+  :depends-on (:pseudoscheme/api #+sbcl :sb-introspect #+sbcl :sb-posix)
   :serial t
   :components ((:file "racket")
 	       (:file "instances")
@@ -351,7 +351,7 @@
 	       (:module "native"
 		:serial t
 		:components ((:file "native") (:file "structs") (:file "procedures")
-			     (:file "control") (:file "hash") (:file "exn") (:file "basics")
+			     (:file "control") (:file "hash") (:file "exn") (:file "basics") (:file "paths") (:file "equal")
 			     (:file "rktio")))
 	       (:file "reader")
 	       ;; A: Racket CS's layers on --chez

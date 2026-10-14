@@ -17,6 +17,7 @@
   (unless psx::*host* (psx::boot))
   (install-natives)
   (install-linklet-primitives)
+  (install-stubs)
   (install-host-globals))
 
 (defun linklet-eval (text)

@@ -73,7 +73,7 @@ were quoted (then it's a symbol whatever it looks like)."
 (defun parse-number (token)
   (and (plusp (length token))
        (or (digit-char-p (char token 0)) (find (char token 0) "+-.#"))
-       (let ((n (ignore-errors (funcall (psx:host-ref "string->number") token))))
+       (let ((n (ignore-errors (ps::parse-scheme-number token))))
 	 (and n (numberp n) n))))
 
 (defun read-datum (in)

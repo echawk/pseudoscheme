@@ -3,13 +3,15 @@
 ;;;; How much of Racket CS's primitive tables a --racket strategy's
 ;;;; instances have (src/racket/instances.lisp, COVERAGE-REPORT).
 ;;;;
-;;;; Usage:  sbcl --script tests/racket/coverage.lisp [STRATEGY] [--missing] [--expander] [--fork]
+;;;; Usage:  sbcl --dynamic-space-size 4GB --script tests/racket/coverage.lisp \
+;;;;              [STRATEGY] [--missing] [--expander] [--instantiate] [--fork]
 ;;;; Needs sh utils/racket/setup.sh first (the tables are in Racket's
 ;;;; source).  STRATEGY is linklet (the default); cs and hybrid have
 ;;;; rumble's instances, which need milestone 1 of docs/racket.md.
 ;;;; --expander: also lower the expander linklet (from BC's startup.inc)
 ;;;; with strategy B's compiler, and count the primitives it uses that
-;;;; the instances lack.  --fork: milestone 0's inventory for strategies
+;;;; the instances lack.  --instantiate: compile it and instantiate it
+;;;; (about 30 seconds), or say which top-level form fails.  --fork: milestone 0's inventory for strategies
 ;;;; A and C, the Chez internals rumble uses that --chez lacks
 ;;;; (src/racket/cs/fork.lisp).
 
@@ -38,5 +40,7 @@
   (uiop:symbol-call "PSR" "COVERAGE-REPORT" :missing (member "--missing" args :test #'string=))
   (when (member "--fork" args :test #'string=)
     (uiop:symbol-call "PSR" "FORK-INVENTORY"))
+  (when (member "--instantiate" args :test #'string=)
+    (uiop:symbol-call "PSR" "INSTANTIATE-EXPANDER"))
   (when (member "--expander" args :test #'string=)
     (uiop:symbol-call "PSR" "EXPANDER-REPORT" :missing (member "--missing" args :test #'string=))))
