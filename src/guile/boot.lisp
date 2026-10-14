@@ -570,7 +570,7 @@ continuation captured in it)."
 
 (defun primitive-load (filename)
   "Load FILENAME: from its compiled fasl if the cache has one (cache.lisp),
-otherwise form by form, keeping the code to cache it."
+otherwise form by form, each compiled into the cache as it runs."
   (when *trace-loads* (format *trace-output* "~&;; loading ~A~%" filename))
   (let* ((cacheable (and *cacheable-load* (guile-cache-p)))
 	 (value *unspecified*)		; the last form's, as Guile's primitive-load returns
@@ -581,15 +581,20 @@ otherwise form by form, keeping the code to cache it."
 	 (*bracket-lists* nil))
     (if (and cacheable (load-cached filename))
       *unspecified*
-      (let ((kept (and cacheable (list '()))))
-	;; in the encoding its coding: comment names, as Guile reads it
-	(with-open-file (in filename :external-format (let ((coding (file-coding filename)))
-							(or (and coding (external-format-of coding)) :utf-8)))
-	  (let ((text (let ((s (make-string (file-length in))))
-			(subseq s 0 (read-sequence s in)))))
-	    (setq value (load-forms filename text 0 0 0 0 kept *unspecified*))))
-	(when kept
-	  (write-cached-file (cache-fasl filename) filename (reverse (car kept))))
+      (let ((kept (and cacheable (make-incremental-cache filename)))
+	    (done nil))
+	(unwind-protect
+	     (progn
+	       ;; in the encoding its coding: comment names, as Guile reads it
+	       (with-open-file (in filename :external-format (let ((coding (file-coding filename)))
+								(or (and coding (external-format-of coding)) :utf-8)))
+		 (let ((text (let ((s (make-string (file-length in))))
+			       (subseq s 0 (read-sequence s in)))))
+		   (setq value (load-forms filename text 0 0 0 0 kept *unspecified*))))
+	       (setq done t))
+	  ;; the chunks: the file's fasl if it loaded, gone either way
+	  (when kept
+	    (finish-incremental-cache kept (and done (cache-fasl filename)))))
 	value))))
 
 ;;; How Guile's compiler runs, for (compile x #:to 'value) and the like

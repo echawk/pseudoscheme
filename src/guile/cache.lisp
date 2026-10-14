@@ -96,18 +96,107 @@
 	(flatten-top-level-lets core)
 	core)))
 
+;;; A file being loaded and cached is compiled form by form: each
+;;; top-level form's Lisp code goes through COMPILE-FILE into a chunk
+;;; fasl, which is then loaded to run it, and when the whole file has
+;;; loaded the chunks, concatenated, are its fasl.  So the code is
+;;; compiled once, and nothing of it is held until the file is done:
+;;; Guix's package modules load each other in a cycle of some 400, all of
+;;; them loading at once, and keeping each one's code for its fasl (as
+;;; this did) or compiling it in memory as well took more than 11 GB.  A
+;;; form that can't be compiled to a file (a literal with no load form)
+;;; runs in memory, and the file isn't cached.
+
+(defstruct (incremental-cache (:constructor make-incremental-cache (source)))
+  source
+  (dir nil)				; the chunks' directory, made at the first
+  (fasls '())				; the chunks, newest first
+  (count 0)
+  (failed nil))				; NIL, or why the file can't be cached
+
+(defun chunk-directory (cache)
+  (or (incremental-cache-dir cache)
+      (setf (incremental-cache-dir cache)
+	    (let ((dir (uiop:ensure-directory-pathname
+			(merge-pathnames (format nil "chunks-~36R" (random (expt 36 8) (make-random-state t)))
+					 (guile-cache-directory)))))
+	      (ensure-directories-exist dir)
+	      dir))))
+
+(defun compile-chunk (forms cache)
+  "FORMS compiled into a chunk fasl of CACHE: its path, or NIL if they
+can't be."
+  (when (> (reduce #'+ forms :key #'psx::tree-size) *cache-size-limit*)
+    (return-from compile-chunk nil))
+  (let* ((n (incf (incremental-cache-count cache)))
+	 (dir (chunk-directory cache))
+	 (lisp (merge-pathnames (format nil "c~D.lisp" n) dir))
+	 (fasl (merge-pathnames (format nil "c~D.fasl" n) dir)))
+    (handler-case
+	(progn
+	  (with-open-file (out lisp :direction :output :if-exists :supersede)
+	    (format out "(cl:in-package \"SCHEME\")~%")
+	    (dotimes (i (length forms))
+	      (format out "(pseudoscheme-guile::~A ~D)~%"
+		      (if (= i (1- (length forms))) "cached-last-form" "cached-form") i)))
+	  (let ((*cache-forms* (coerce forms 'simple-vector)))
+	    (declare (special *cache-forms*))	; defined below
+	    (handler-bind ((warning #'muffle-warning))
+	      (with-standard-io-syntax
+		(let ((*package* (find-package "SCHEME"))
+		      (*error-output* (make-broadcast-stream))
+		      (*standard-output* (make-broadcast-stream)))
+		  (multiple-value-bind (output warnings-p failure-p)
+		      (psx::call-with-full-policy (lambda () (compile-cache-file lisp fasl)))
+		    (declare (ignore warnings-p))
+		    (when (or failure-p (null output)) (error "compiling failed")))))))
+	  (ignore-errors (delete-file lisp))
+	  fasl)
+      (error (e)
+	(when *trace-cache* (format *trace-output* "~&;; not cached ~A: ~A~%" (incremental-cache-source cache) e))
+	(ignore-errors (delete-file lisp))
+	nil))))
+
+(defvar *chunk-values* nil "The values of the last form a chunk ran.")
+
+(defmacro cached-last-form (n)
+  "As CACHED-FORM, keeping the form's values for EVAL-KEEPING."
+  `(setq *chunk-values* (multiple-value-list (run-cached (lambda () ,(svref *cache-forms* n))))))
+
 (defun eval-keeping (x kept)
-  "Evaluate X, a form read from a file being compiled, adding its Lisp
-code to KEPT (a list in a cons, newest first)."
+  "Evaluate X, a form read from a file being compiled and cached, KEPT
+being its INCREMENTAL-CACHE: from a chunk fasl, unless it can't be."
   (let* ((tree (cond ((node-type x) x)
 		     ((eq (current-transformer) #'pre-expand) (pre-expand x))
 		     ;; as Guile's compile-file expands: a define-syntax is
 		     ;; then code (it is also made a macro as it is expanded)
 		     (t (funcall (current-transformer) x (ssym "c")
 				 (list (ssym "compile") (ssym "load"))))))
-	 (forms (translate-top-level (tree-il->core tree))))
-    (setf (car kept) (revappend forms (car kept)))
-    (eval-translated forms)))
+	 (forms (translate-top-level (tree-il->core tree)))
+	 (fasl (and (not (incremental-cache-failed kept)) (compile-chunk forms kept))))
+    (if (null fasl)
+	(progn (setf (incremental-cache-failed kept) t)
+	       (eval-translated forms))
+	(progn (push fasl (incremental-cache-fasls kept))
+	       (let ((*chunk-values* (list *unspecified*)))
+		 (handler-bind ((warning #'muffle-warning))
+		   (load fasl))
+		 (values-list *chunk-values*))))))
+
+(defun finish-incremental-cache (cache fasl)
+  "The chunks of CACHE as the file's FASL, if all its forms made one;
+and the chunks gone."
+  (unwind-protect
+       (when (and fasl (not (incremental-cache-failed cache)) (incremental-cache-fasls cache))
+	 (let ((temp (make-pathname :name (format nil "~A-~36R" (pathname-name fasl) (random (expt 36 8) (make-random-state t)))
+				    :defaults fasl)))
+	   (with-open-file (out temp :direction :output :element-type '(unsigned-byte 8) :if-exists :supersede)
+	     (dolist (chunk (reverse (incremental-cache-fasls cache)))
+	       (write-sequence (psx::read-file-bytes chunk) out)))
+	   (uiop:rename-file-overwriting-target temp fasl)
+	   (when *trace-cache* (format *trace-output* "~&;; cached ~A~%" (incremental-cache-source cache)))))
+    (when (incremental-cache-dir cache)
+      (ignore-errors (uiop:delete-directory-tree (incremental-cache-dir cache) :validate t)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Writing and loading fasls
