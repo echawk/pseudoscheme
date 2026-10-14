@@ -303,3 +303,25 @@
   (declare (ignore prompt-tag))
   (funcall (psx:host-ref "call-with-current-continuation") proc))
 (defnative "continuation?" (x) (:leaf t) (declare (ignore x)) ps:false)
+
+;;; ------------------------------------------------------------------
+;;; Load forms for the rest of the values compiled code may hold as
+;;; literals (cache.lisp): prefab structs (the expander's serialized
+;;; syntax uses them) and compiled regexps.  Other structs can't be.
+
+(defun prefab-instance (key count fields)
+  (make-instance-of (prefab-struct-type key count) fields))
+
+(defun srcloc-instance (fields) (make-instance-of *srcloc-type* fields))
+
+(defmethod make-load-form ((x rstruct) &optional environment)
+  (declare (ignore environment))
+  (let ((type (rstruct-type x)))
+    (cond ((struct-type-prefab-key type)
+	   `(prefab-instance ',(struct-type-prefab-key type) ,(length (rstruct-fields x)) ',(rstruct-fields x)))
+	  ((eq type *srcloc-type*) `(srcloc-instance ',(rstruct-fields x)))
+	  (t (error "~S can't be in a compiled file: not a prefab struct" x)))))
+
+(defmethod make-load-form ((x rregexp) &optional environment)
+  (declare (ignore environment))
+  `(make-rregexp ',(rregexp-source x) ',(rregexp-px x)))

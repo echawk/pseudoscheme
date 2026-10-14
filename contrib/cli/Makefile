@@ -17,9 +17,12 @@
 
 LISP ?= sbcl
 ROOT := $(abspath ../..)
+# SBCL's heap limit, kept by the saved executable: more for big loads
+# (Guix's package modules: tests/guix/run.sh builds with HEAP=11GB)
+HEAP ?= 8GB
 
 ifeq ($(LISP),sbcl)
-  RUN = sbcl --dynamic-space-size 8GB --control-stack-size 256MB --non-interactive --no-userinit --load
+  RUN = sbcl --dynamic-space-size $(HEAP) --control-stack-size 256MB --non-interactive --no-userinit --load
 else ifeq ($(LISP),ccl)
   RUN = ccl --no-init --batch --load
 else ifeq ($(LISP),ecl)

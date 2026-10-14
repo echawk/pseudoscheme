@@ -218,8 +218,11 @@ assigned, which schemify's and the expander's checks compare with.")
 (define-property "prop:procedure-accessor")
 (define-property "prop:serializable")
 
+(defvar *srcloc-type* nil "#%kernel's struct:srcloc.")
+
 (multiple-value-bind (type constructor predicate accessor)
     (make-struct-type* (rsym "srcloc") ps:false 5 0 ps:false '() ps:false ps:false '(0 1 2 3 4))
+  (setq *srcloc-type* type)
   (define-primitive "#%kernel" "struct:srcloc" type)
   (define-primitive "#%kernel" "srcloc" constructor)
   (define-primitive "#%kernel" "make-srcloc" constructor)

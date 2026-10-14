@@ -31,9 +31,17 @@
   (source-form nil)			; the linklet as given, for .zo files
   (function nil))			; once loaded: the instantiation function
 
+(defvar *racket-signature* nil)
+
 (defun racket-signature ()
   "What compiled linklets depend on besides their source: the build
-signature, the continuations mode, and src/racket/'s files' dates."
+signature, the continuations mode, and src/racket/'s files' dates.
+Computed once per process: it reads a directory."
+  (or *racket-signature* (setq *racket-signature* (compute-racket-signature))))
+
+(pushnew (lambda () (setq *racket-signature* nil)) sb-ext:*init-hooks*)
+
+(defun compute-racket-signature ()
   (let ((root (asdf:system-source-directory :pseudoscheme)))
     (format nil "~A ~A~{ ~A~}" (psx::build-signature) psx::*full-continuations*
 	    (loop for file in (sort (mapcar #'namestring

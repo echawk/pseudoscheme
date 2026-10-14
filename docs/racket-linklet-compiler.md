@@ -328,7 +328,7 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   `write-linklet-bundle-hash` and `read-linklet-bundle-hash` write and
   read a bundle as Racket data; the expander's machine-independent
   bundles it writes itself. With both caches warm, a `#lang
-  racket/base` program runs in about 9 s.
+  racket/base` program runs in 1.3 s.
   `PSEUDOSCHEME_RACKET_ZO=0` turns `.zo` writing off.
 
 Next:
