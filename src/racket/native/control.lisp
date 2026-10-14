@@ -48,7 +48,9 @@
 (defnative "continuation-mark-set-first" (marks key &optional (none ps:false) prompt-tag)
     (:rumble "continuation-mark-set-first" :leaf t)
   (declare (ignore prompt-tag))
-  (first-mark key (marks-of marks) none))
+  ;; a thread's continuation starts with the root parameterization marked
+  (first-mark key (marks-of marks)
+	      (if (eq key *parameterization-key*) *root-parameterization* none)))
 
 (defnative "continuation-mark-set->list" (marks key &optional prompt-tag) (:leaf t)
   (declare (ignore prompt-tag))
@@ -198,7 +200,7 @@
   (funcall (psx:host-ref "call-with-current-continuation") proc))
 (defnative "check-for-break" () (:leaf t) *void*)
 (defnative "unsafe-root-continuation-prompt-tag" () (:instance "#%unsafe" :leaf t) *default-prompt-tag*)
-(defnative "reparameterize" (paramz) (:leaf t) paramz)
+(defnative "reparameterize" (paramz) (:instance "#%paramz" :leaf t) paramz)
 
 ;;; ------------------------------------------------------------------
 ;;; What the thread layer would give, enough for the expander: locks,
@@ -256,3 +258,42 @@
 (defnative "log-level?" (l level &optional topic) (:leaf t) (declare (ignore l level topic)) ps:false)
 (defnative "log-max-level" (l &optional topic) (:leaf t) (declare (ignore l topic)) ps:false)
 (defnative "log-message" (l level &rest more) (:leaf t) (declare (ignore l level more)) *void*)
+
+;;; Events, for one thread: sync takes the first ready one; with none
+;;; ready it would block forever, which is an error here.
+(defstruct (revt (:constructor make-revt (kind &optional target))) kind target)
+(defvar *always-evt* (make-revt :always))
+(defvar *never-evt* (make-revt :never))
+(define-primitive "#%kernel" "always-evt" *always-evt*)
+(define-primitive "#%kernel" "never-evt" *never-evt*)
+
+(defnative "semaphore-peek-evt" (s) (:leaf t) (make-revt :peek s))
+(defnative "evt?" (x) (:leaf t) (bool (or (revt-p x) (rsemaphore-p x))))
+
+(defun evt-ready (e)
+  "E's sync result, and whether it's ready."
+  (cond ((rsemaphore-p e) (if (plusp (rsemaphore-count e))
+			      (progn (decf (rsemaphore-count e)) (values e t))
+			      (values nil nil)))
+	((not (revt-p e)) (values e t))
+	(t (ecase (revt-kind e)
+	     (:always (values e t))
+	     (:never (values nil nil))
+	     (:peek (if (plusp (rsemaphore-count (revt-target e)))
+			(values e t)
+			(values nil nil)))))))
+
+(defun sync-ready (evts)
+  (dolist (e evts (values nil nil))
+    (multiple-value-bind (v ready) (evt-ready e)
+      (when ready (return (values v t))))))
+
+(defnative "sync" (&rest evts) ()
+  (multiple-value-bind (v ready) (sync-ready evts)
+    (if ready v (racket-error "sync" "would block forever (one thread)"))))
+(defnative "sync/timeout" (timeout &rest evts) ()
+  (multiple-value-bind (v ready) (sync-ready evts)
+    (cond (ready v)
+	  ((and (realp timeout) (zerop timeout)) ps:false)
+	  ((functionp timeout) (funcall timeout))
+	  (t (racket-error "sync/timeout" "would block (one thread)")))))

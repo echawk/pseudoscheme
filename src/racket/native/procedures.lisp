@@ -8,10 +8,6 @@
 
 (in-package "PSEUDOSCHEME-RACKET")
 
-(defnative "procedure-arity-mask" (proc) (:rumble "procedure-arity-mask")
-  (declare (ignore proc))
-  (not-yet "procedure-arity-mask"))
-
 (defnative "procedure-reduce-arity" (proc arity &optional name realm) (:rumble "procedure-reduce-arity")
   (declare (ignore proc arity name realm))
   (not-yet "procedure-reduce-arity"))
@@ -23,3 +19,10 @@
 (defnative "chaperone-procedure" (proc wrapper &rest props) (:rumble "chaperone-procedure")
   (declare (ignore proc wrapper props))
   (not-yet "chaperone-procedure"))
+
+;;; There are no impersonators or chaperones yet: nothing is one
+(defnative "impersonator?" (x) (:leaf t) (declare (ignore x)) ps:false)
+(defnative "chaperone?" (x) (:leaf t) (declare (ignore x)) ps:false)
+(defnative "impersonator-of?" (a b) () (bool (equal* a b)))
+(defnative "chaperone-of?" (a b) () (bool (equal* a b)))
+

@@ -156,9 +156,13 @@ it with (primitive-table '#%linklet) of the pinned release.")
 
 (defparameter *linklet-functions*
   `(("linklet?" ,(lambda (x) (bool (compiled-linklet-p x))))
-    ("compile-linklet" ,(lambda (form &optional (name ps:false) &rest more)
-			  (declare (ignore more))
-			  (compile-linklet form name)))
+    ("compile-linklet" ,(lambda (form &optional (name ps:false) (import-keys ps:false) get-import options)
+			  (declare (ignore get-import options))
+			  ;; with import keys, they come back too (we use no
+			  ;; cross-linklet knowledge yet, so unchanged)
+			  (if (truthy import-keys)
+			      (values (compile-linklet form name) import-keys)
+			      (compile-linklet form name))))
     ("eval-linklet" ,#'identity)
     ("instantiate-linklet" ,(lambda (linklet imports &optional (target ps:false) use-prompt)
 			      (declare (ignore use-prompt))
@@ -268,3 +272,23 @@ it with (primitive-table '#%linklet) of the pinned release.")
 	  (f (second (assoc name *linklet-functions* :test #'string=))))
       (define-primitive "#%linklet" name
 	(or f (lambda (&rest args) (declare (ignore args)) (not-yet name)))))))
+
+;;; #%kernel's syntax objects are correlated objects, as in Racket CS's
+;;; rumble: the expander takes these from the kernel table for the
+;;; syntax objects of the runtime layers (its own are its own structs)
+(defnative "syntax?" (x) (:leaf t) (bool (correlated-p x)))
+(defnative "syntax-e" (c) (:leaf t) (correlated-e c))
+(defnative "syntax->datum" (c) (:leaf t) (correlated->datum c))
+(defnative "datum->syntax" (ctx d &optional srcloc prop) (:leaf t)
+  (declare (ignore ctx srcloc prop))
+  (if (correlated-p d) d (make-correlated d)))
+(defnative "syntax-source" (c) (:leaf t) (or (correlated-source c) ps:false))
+(defnative "syntax-line" (c) (:leaf t) (or (correlated-line c) ps:false))
+(defnative "syntax-column" (c) (:leaf t) (or (correlated-column c) ps:false))
+(defnative "syntax-position" (c) (:leaf t) (or (correlated-position c) ps:false))
+(defnative "syntax-span" (c) (:leaf t) (or (correlated-span c) ps:false))
+(defnative "syntax-property" (c key &optional (value nil value-p)) (:leaf t)
+  (if value-p
+      (funcall (second (assoc "correlated-property" *linklet-functions* :test #'string=)) c key value)
+      (let ((p (assoc key (correlated-props c)))) (if p (cdr p) ps:false))))
+(defnative "syntax-property-symbol-keys" (c) (:leaf t) (mapcar #'car (correlated-props c)))

@@ -308,3 +308,14 @@ its parent key (or NIL)."
   (if (and (struct-type-p type) (struct-type-prefab-key type))
       (cons (struct-type-prefab-key type) (struct-type-total type))
       ps:false))
+
+;;; Unsafe field access: the index counts every field, the ancestors' first
+(defnative "unsafe-struct-ref" (s i) (:instance "#%unsafe" :leaf t) (svref (struct-fields s) i))
+(defnative "unsafe-struct*-ref" (s i) (:instance "#%unsafe" :leaf t) (svref (struct-fields s) i))
+(defnative "unsafe-struct-set!" (s i v) (:instance "#%unsafe" :leaf t)
+  (setf (svref (struct-fields s) i) v) *void*)
+(defnative "unsafe-struct*-set!" (s i v) (:instance "#%unsafe" :leaf t)
+  (setf (svref (struct-fields s) i) v) *void*)
+(defnative "unsafe-struct*-cas!" (s i old new) (:instance "#%unsafe" :leaf t)
+  (let ((fields (struct-fields s)))
+    (bool (eq (sb-ext:compare-and-swap (svref fields i) old new) old))))

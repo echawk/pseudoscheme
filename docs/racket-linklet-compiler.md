@@ -291,8 +291,18 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
     raises "not implemented yet" when it is called, not when it is
     referenced.
 
+- **The expander evaluates.** `bin/pseudoscheme --racket=linklet -e
+  '...'` reads each form with Racket's datum syntax and evaluates it
+  through Racket's expander, in a namespace with `#%kernel`. That is the
+  `boot`, `namespace-require` and `eval` that Racket CS's main.sps
+  does. tests/racket/expander.rktd holds the expressions and values
+  tests/racket/run.sh checks: 10 of 10 pass. Each process compiles the
+  expander again (about 25 s) until its compiled form is cached.
+
 Next:
-- `(eval '(+ 1 2))` through the expander, the rest of milestone 6;
+- caching the compiled expander (cache.lisp), so a process starts in
+  seconds;
+- printing as Racket prints (procedures, structs, `print`'s quoting);
 - milestone 2, the regexp linklet;
 - the rest of `#%kernel` that the extracted layers use, in the order the
   coverage report's `--missing` list makes plain.

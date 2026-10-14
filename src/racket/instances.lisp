@@ -134,7 +134,10 @@ source; without it, nothing."
 	(dolist (e entries)
 	  (let ((name (table-entry-name e)))
 	    (when (and (uiop:string-prefix-p "known-procedure" (table-entry-kind e))
-		       (not (nth-value 1 (gethash name (primitive-instance instance)))))
+		       ;; in no instance: one defined in another instance than
+		       ;; the table's is still the primitive (the host global
+		       ;; racket:NAME is shared)
+		       (not (nth-value 1 (primitive name))))
 	      (setf (gethash name *stubs*) t)
 	      (define-primitive instance name
 		(if (and (eql (table-entry-mask e) 3)

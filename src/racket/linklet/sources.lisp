@@ -117,3 +117,19 @@ top-level form failed and why."
 	    (format stream "~&expander: instantiating failed in top-level form ~A: ~A~%"
 		    *split-form-index* e)
 	    nil))))))
+
+(defun expander-export (name)
+  (instance-value *expander-instance* (rsym name)))
+
+(defvar *expander-booted* nil)
+
+(defun expander-eval (datum)
+  "DATUM evaluated by the expander, in a namespace with #%kernel, as
+Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
+  (unless *expander-instance* (instantiate-expander))
+  (unless *expander-booted*
+    (funcall (expander-export "boot"))
+    (funcall (expander-export "namespace-require")
+	     (list (rsym "quote") (rsym "#%kernel")))
+    (setq *expander-booted* t))
+  (funcall (expander-export "eval") datum))

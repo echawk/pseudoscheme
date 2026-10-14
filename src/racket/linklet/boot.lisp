@@ -21,8 +21,23 @@
   (install-host-globals))
 
 (defun linklet-eval (text)
-  (declare (ignore text))
-  (not-yet "strategy linklet: eval (milestone 6)"))
+  "TEXT's forms, each evaluated by Racket's expander in a namespace with
+#%kernel (as racket -I '#%kernel -e would), under the default prompt;
+the last one's values.  The first use compiles and instantiates the
+expander (src/racket/linklet/sources.lisp), about half a minute."
+  (let ((forms (with-input-from-string (in text)
+		 (loop for form = (read-racket in) until (eq form *eof*) collect form)))
+	(values (list *void*)))
+    (setq *uncaught* nil)
+    (unless *expander-instance*
+      (unless (instantiate-expander :stream nil)
+	(racket-error "racket" "the expander didn't instantiate")))
+    (dolist (form forms)
+      (call-with-continuation-prompt
+       (lambda () (with-racket-errors (setq values (multiple-value-list (expander-eval form)))))
+       *default-prompt-tag* nil))
+    (when *uncaught* (finish-output) (uiop:quit 1))
+    (values-list values)))
 
 (defun run-linklet-forms (forms &key (output *standard-output*))
   "FORMS: (linklet ...) or (define-linklet NAME (linklet ...)).  Each

@@ -385,3 +385,29 @@ assigned, which schemify's and the expander's checks compare with.")
 		       (funcall (psx:host-ref "write") v)
 		       (funcall (psx:host-ref "newline")))
 		     *void*)))
+
+;;; arity-at-least, and procedure-arity from the arity mask
+(defvar *arity-at-least* nil)
+(defun arity-at-least (n) (funcall (second *arity-at-least*) n))
+
+(multiple-value-bind (type constructor predicate accessor)
+    (make-struct-type* (rsym "arity-at-least") ps:false 1 0 ps:false '() ps:false ps:false '(0))
+  (setq *arity-at-least* (list type constructor predicate accessor))
+  (define-primitive "#%kernel" "struct:arity-at-least" type)
+  (define-primitive "#%kernel" "arity-at-least" constructor)
+  (define-primitive "#%kernel" "make-arity-at-least" constructor)
+  (define-primitive "#%kernel" "arity-at-least?" predicate)
+  (define-primitive "#%kernel" "arity-at-least-value" (lambda (a) (funcall accessor a 0))))
+
+(defun mask->arity (mask)
+  "procedure-arity's form of arity mask MASK."
+  (let ((arities (if (minusp mask)
+		     (let ((rest (integer-length (lognot mask))))
+		       (append (loop for i below rest when (logbitp i mask) collect i)
+			       (list (arity-at-least rest))))
+		     (loop for i below (integer-length mask) when (logbitp i mask) collect i))))
+    (if (and arities (null (cdr arities))) (car arities) arities)))
+
+(defnative "procedure-arity" (f) (:leaf t) (mask->arity (or (ignore-errors (arity-mask f)) -1)))
+(defnative "procedure-arity?" (x) (:leaf t)
+  (bool (or (and (integerp x) (>= x 0)) (truthy (funcall (third *arity-at-least*) x)) (listp x))))
