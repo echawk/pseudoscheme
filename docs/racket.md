@@ -345,8 +345,18 @@ objects. SBCL code doesn't belong in Racket's byte stream, so:
 
 `sbcl --script tests/racket/coverage.lisp --fork` is milestone 0's
 inventory. It lists the Chez internals that rumble and the schemified
-layers use and `--chez` lacks: 70 of 203 at v9.3. Each still has to be
-checked against upstream to see which side it goes on.
+layers use and `--chez` lacks, 70 of 203 at v9.3. With upstream Chez's
+source (`sh utils/chez/setup.sh`, cisco/ChezScheme at e3b13636, the
+mats' commit), it also says which side each one goes on:
+- **63 are in upstream Chez 10.** Racket's fork upstreamed most of its
+  additions: stencil vectors, continuation attachments,
+  `$app/no-inline`, the record internals. So most of strategy A's
+  groundwork is `--chez` covering more of upstream Chez's internals,
+  which belongs in src/chez/.
+- **About 7 are Racket's alone:** `$intmap-has-key?`, `$intmap-ref-key`,
+  `fxop`, and some names fork.lisp lists by hand. A few of the 63, such
+  as `foreign-procedure`, are syntax, which the inventory's
+  `top-level-bound?` test can't see, so they aren't really missing.
 
 This decides feasibility; milestone 0's inventory gives the exact list.
 What is known, from the regexp and schemify experiments (about 61 of

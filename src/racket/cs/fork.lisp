@@ -70,6 +70,24 @@ primitive reference #%name, #2%name, #3%name."
 	   (list (ps:intern-scheme-symbol "top-level-bound?")
 		 (list (ps:intern-scheme-symbol "quote") (ps:intern-scheme-symbol name))))))
 
+(defun upstream-chez-names ()
+  "The names upstream Chez Scheme has (build/external/chezscheme/, as
+utils/chez/setup.sh fetches it): those s/primdata.ss declares, and those
+its s/*.ss files define; or NIL without the source."
+  (let ((dir (asdf:system-relative-pathname :pseudoscheme "build/external/chezscheme/s/")))
+    (when (probe-file dir)
+      (let ((names (make-hash-table :test 'equal)))
+	(dolist (file (directory (merge-pathnames "*.ss" dir)) names)
+	  (let ((tokens (reverse (source-tokens file)))
+		(primdata (string= (pathname-name file) "primdata")))
+	    (loop for (a b) on tokens
+		  do (when (and b (member a '("define" "define-who" "set-who!" "define-inline"
+					      "$define" "define-library-entry")
+					  :test #'string=))
+		       (setf (gethash b names) t))
+		     (when (and primdata (plusp (length a)) (not (find #\[ a)))
+		       (setf (gethash a names) t)))))))))
+
 (defun fork-inventory (&key (stream *standard-output*))
   "Milestone 0: the Chez internals ($name, #%name, #3%name) that rumble
 and the schemified layers refer to and --chez doesn't define, with how
@@ -94,5 +112,15 @@ way.  Names rumble defines itself are left out."
 			 #'> :key #'cdr)))
       (format stream "~&--chez lacks ~D of the ~D Chez internals rumble and the schemified layers use~%"
 	      (length missing) (hash-table-count counts))
-      (format stream "~{  ~A (~D)~%~}" (loop for (name . n) in missing append (list name n)))
+      (let ((upstream (upstream-chez-names)))
+	(if (null upstream)
+	    (format stream "~{  ~A (~D)~%~}" (loop for (name . n) in missing append (list name n)))
+	    ;; where each goes (docs/racket.md, "The Chez fork's additions")
+	    (flet ((show (title list)
+		     (format stream "~&~A: ~D~%~{  ~A (~D)~%~}" title (length list)
+			     (loop for (name . n) in list append (list name n)))))
+	      (show "in upstream Chez too (src/chez/)"
+		    (remove-if-not (lambda (e) (gethash (car e) upstream)) missing))
+	      (show "only in Racket's fork (src/racket/cs/)"
+		    (remove-if (lambda (e) (gethash (car e) upstream)) missing)))))
       missing)))
