@@ -694,7 +694,7 @@ import or a begin of forms that may be."
 			     (mapcar #'ssym '("pseudoscheme" "r7rs")))
       (let ((form (translate-repl-imports form)))
 	(if (head-is form "define-library")
-	    (psx:eval-library (library-form form))
+	    (progn (psx:eval-library (library-form form)) ps:unspecific)
 	    (psx:eval-top-level form))))))
 
 (defvar *booted-host* nil

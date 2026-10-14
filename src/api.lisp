@@ -148,6 +148,12 @@ already on *LIBRARY-PATH*."
 (defun r7rs-eval-forms (forms)
   (ensure-psyntax)
   (cond ((null forms) ps:unspecific)
+	;; only imports and libraries: the REPL's imports, not a program's
+	((every (lambda (form)
+		  (or (psl:keyword-head-p form "import") (psl:keyword-head-p form "define-library")))
+		forms)
+	 (dolist (form forms ps:unspecific)
+	   (ps-r7rs::eval-at-repl form)))
 	((or (psl:keyword-head-p (car forms) "import")
 	     (psl:keyword-head-p (car forms) "define-library")
 	     (psl:keyword-head-p (car forms) "library"))

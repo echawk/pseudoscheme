@@ -217,6 +217,7 @@ if every library each was expanded against is still the one it was;
 true if they all were installed."
   (when (every (lambda (c) (dependencies-current-p (cdr c))) compiled)
     (dolist (c compiled t)
+      (mark-library-locations (nth 7 (cdr c)))		; its env
       (apply (entry "psyntax:install-library") (append (cdr c) (list t))))))
 
 (defun load-compiled-library (name)
@@ -240,6 +241,7 @@ return #t, or return #f for psyntax to expand it from source."
 	  (if (and compiled (equal (car compiled) text) (dependencies-current-p (cdr compiled)))
 	      (destructuring-bind (id name version imp* vis* inv* subst env visit invoke)
 		  (cdr compiled)
+		(mark-library-locations env)
 		(funcall (entry "psyntax:install-library")
 			 id name version imp* vis* inv* subst env visit invoke t)
 		(setf *pending-libraries* (remove name *pending-libraries* :key #'car :test #'equal))
@@ -272,6 +274,7 @@ installed (or can be) with the same id."
   "psyntax's LIBRARY-EXPANDED-HOOK: write library NAME to the cache if
 it was being looked for (it came from a file) and everything it was
 expanded against is the same from session to session."
+  (mark-library-locations env)
   (let ((pending (assoc name *pending-libraries* :test #'equal)))
     (when pending
       (setf *pending-libraries* (remove pending *pending-libraries*))
@@ -281,8 +284,9 @@ expanded against is the same from session to session."
 	  (declare (ignore form))
 	  (let* ((data (list id name version imp* vis* inv* subst env))
 		 (visit (thunk-form (definitions (funcall visit-thunk))))
+		 (*noted-safe-locations* '())
 		 (invoke (thunk-form (funcall invoke-thunk)))
-		 (compiled (write-compiled-library key text data visit invoke)))
+		 (compiled (write-compiled-library key text data visit invoke *noted-safe-locations*)))
 	    (if compiled
 		(setf (gethash id *cached-ids*) t)
 		(setq compiled (list* text (append data (list (eval visit) (eval invoke))))))
@@ -309,17 +313,20 @@ undefined variables."
 	`(lambda () (call-with-continuation-base (lambda () ,body)))
 	`(lambda () ,body))))
 
-(defun write-compiled-library (key text data visit invoke)
+(defun write-compiled-library (key text data visit invoke &optional safe-locations)
   "Compile a library into its fasl and load it: what it registers, or
-NIL if that didn't work."
+NIL if that didn't work.  SAFE-LOCATIONS are its exports' locations
+that hold procedures that can't capture (see FIND-SAFE-LOCATIONS)."
   (let* ((fasl (library-fasl key))
 	 (temp (format nil "~A-~36R" key (random (expt 36 8) (make-random-state t))))
 	 (lisp (make-pathname :name temp :type "lisp" :defaults fasl))
 	 (temp-fasl (make-pathname :name temp :type "fasl" :defaults fasl)))
     (prog1
 	(handler-case
-	    (let ((code `(register-compiled-library
-			  ',text ,@(mapcar (lambda (x) `',x) data) ,visit ,invoke)))
+	    (let ((code `(progn
+			   ,@(and safe-locations `((note-safe-locations ',safe-locations)))
+			   (register-compiled-library
+			    ',text ,@(mapcar (lambda (x) `',x) data) ,visit ,invoke))))
 	      (ensure-directories-exist lisp)
 	      (with-open-file (out lisp :direction :output :if-exists :supersede)
 		(with-standard-io-syntax

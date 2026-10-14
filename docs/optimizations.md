@@ -258,8 +258,23 @@ Already per form: calls that can't capture aren't sites (done).
   transformation made a package's code about ten times bigger: `hello`
   went from 808 conses of core to 6,527 transformed.
 
+**Across libraries in the psyntax modes (R6RS, R7RS, Chez; done,
+October 2026).**
+- A library's exports are locations psyntax makes for it: gensyms,
+  assigned once by its invoke code, and immutable (R6RS requires it). The
+  library cache marks them as it installs the library
+  (`mark-library-locations`, src/continuations.lisp).
+- When the invoke code assigns one a procedure that can't capture,
+  `find-safe-locations` marks the location safe, and the cache writes
+  that into the library's fasl, so it holds when the library is loaded
+  from the cache in a later session.
+- An importer's call of a safe location isn't a capture site. A loop in a
+  program calling a one-line procedure from a library, 30 million times,
+  went from 0.29 s to 0.07 s.
+- A REPL's or a script's top-level variables are left out: they can be
+  defined again.
+
 What remains:
-- the same for R6RS and R7RS libraries, from the library cache (idea 3);
 - procedures passed into the runtime's higher-order primitives that
   aren't open-coded (`sort`, `hashtable-walk`), which use the
   frame-aware versions whenever the procedure passed might capture.
@@ -276,7 +291,7 @@ What remains:
 | 6 | inlining small known procedures | partly (SBCL's own) | calls to small helpers |
 | 7 | boolean results | partly | small |
 | 8 | faster compilation | not started | start-up and the REPL |
-| 9 | continuation frames | partly (across forms in Guile mode) | capture sites across R6RS/R7RS libraries |
+| 9 | continuation frames | partly (across forms in Guile mode, across libraries) | the runtime's higher-order primitives |
 
 Ideas 1 and 2 are the cheapest and most certain; 3 and 4 are the
 largest and would be the core of a later major version.

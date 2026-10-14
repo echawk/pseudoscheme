@@ -922,11 +922,70 @@ being their third argument (Guile mode's %guile-define!).")
 (defun safe-operator-p (operator)
   (and *safe-operator-hook* (consp operator) (funcall *safe-operator-hook* operator)))
 
+;;; Across libraries (R6RS, R7RS, Chez mode): a library's exports are
+;;; locations psyntax makes for it (gensyms, so no other variable has
+;;; their names), assigned once by its invoke code and immutable, as R6RS
+;;; requires.  The library cache marks them as it installs a library
+;;; (MARK-LIBRARY-LOCATIONS).  When a library's invoke code assigns one a
+;;; procedure that can't capture, FIND-SAFE-LOCATIONS says so on the
+;;; location, and the cache writes that into the library's fasl
+;;; (NOTE-SAFE-LOCATIONS); an importer's call of it isn't a capture site.
+;;; A REPL's or a script's top-level variables aren't such locations: they
+;;; can be defined again.
+
+(defvar *noted-safe-locations* :none
+  "While a library's invoke code is transformed, a list of the locations
+FIND-SAFE-LOCATIONS found safe.")
+
+(defun mark-library-locations (env)
+  "Mark the variables of ENV, a library's psyntax environment ((label
+global . location) ...), as library locations."
+  (dolist (entry env)
+    (when (and (consp entry) (consp (cdr entry)) (keyword-p (cadr entry) "GLOBAL")
+	       (symbolp (cddr entry)) (cddr entry))
+      (setf (get (cddr entry) 'library-location) t))))
+
+(defun note-safe-locations (locations)
+  "Mark LOCATIONS as library locations holding procedures that can't capture."
+  (dolist (l locations)
+    (setf (get l 'library-location) t (get l 'safe-procedure) t)))
+
+(defun safe-location-p (x)
+  (and (symbolp x) x (get x 'safe-procedure)))
+
+(defun find-safe-locations (form)
+  "Mark each library location FORM assigns once, to a procedure that
+can't capture, as SAFE-LOCATION-P."
+  (let ((assignments (make-hash-table :test 'eq))
+	(values '()))
+    (labels ((walk (e)
+	       (cond ((atom e))
+		     ((quote-form-p e))
+		     ((and (or (keyword-p (car e) "SET!") (keyword-p (car e) "DEFINE"))
+			   (consp (cdr e)) (consp (cddr e))
+			   (symbolp (cadr e)) (cadr e) (get (cadr e) 'library-location))
+		      ;; (define location '#f) only declares it
+		      (unless (and (keyword-p (car e) "DEFINE")
+				   (equal (caddr e) `(,(sym "quote") ,ps:false)))
+			(incf (gethash (cadr e) assignments 0))
+			(push (cons (cadr e) (caddr e)) values))
+		      (walk (caddr e)))
+		     (t (loop for x on e
+			      do (walk (car x))
+				 (unless (listp (cdr x)) (walk (cdr x))))))))
+      (walk form)
+      (loop for (location . value) in values
+	    when (and (= (gethash location assignments) 1) (safe-procedure-p value))
+	      do (setf (get location 'safe-procedure) t)
+		 (when (listp *noted-safe-locations*)
+		   (push location *noted-safe-locations*))))))
+
 (defun calling-call-p (operator)
   "Whether a call with OPERATOR (normalized) may capture.  Operators that
 are Lisp symbols are the transformation's own, or the translator's."
   (cond ((and (symbolp operator) (not (scheme-symbol-p operator))) nil)
 	((and *safe-procedures* (symbolp operator) (gethash operator *safe-procedures*)) nil)
+	((safe-location-p operator) nil)
 	((safe-operator-p operator) nil)
 	(t (let ((name (primitive-name operator)))
 	     (or (null name) (member name *calling-primitives* :test #'string=))))))
@@ -1142,6 +1201,7 @@ procedure's variable, a primitive that calls no procedure, or a lambda
 whose body can't capture."
   (cond ((lambda-form-p e) (not (may-capture-p (caddr e))))
 	((and *safe-procedures* (symbolp e) (gethash e *safe-procedures*)) t)
+	((safe-location-p e) t)
 	((safe-operator-p e) t)
 	((or (scheme-symbol-p e) (and (consp e) (keyword-p (car e) "PRIMITIVE")))
 	 (let ((name (primitive-name e)))
@@ -1803,6 +1863,7 @@ its own, of the chunk's free variables."
 	 (*downward-parameters* nil)
 	 (*safe-procedures* (find-safe-procedures form))
 	 (*downward-parameters* (find-downward-parameters)))
+    (find-safe-locations form)
     (cc-transform-1 (note-safe-definitions form))))
 
 (defun defined-lambda (value)
