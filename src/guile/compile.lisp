@@ -161,7 +161,7 @@ image and of this process mustn't collide.")
 (pushnew 'new-lexical-tag sb-ext:*init-hooks*)
 
 (defun fresh-lexical ()
-  (ssym (format nil "~~~D.~A" (incf *lexical-count*) *lexical-tag*)))
+  (psx::make-lexical (ps::invert-case (format nil "~~~D.~A" (incf *lexical-count*) *lexical-tag*))))
 
 (defvar *unassigned* '()
   "The gensyms of letrec variables not yet assigned where the code being

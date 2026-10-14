@@ -63,7 +63,8 @@ top-level forms' lexicals become global definitions).")
 (defun fresh-lexical (&optional (stem ""))
   "A new lexical: STEM (the Racket name, so that backtraces show it), and
 a number and tag that make it unique."
-  (core (format nil "~A~~~D.~A" stem (incf *lexical-count*) *lexical-tag*)))
+  (psx::make-lexical
+   (ps::invert-case (format nil "~A~~~D.~A" stem (incf *lexical-count*) *lexical-tag*))))
 
 ;;; ------------------------------------------------------------------
 ;;; Pass 1: correlated objects off

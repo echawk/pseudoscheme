@@ -41,6 +41,15 @@
   "The CL symbol holding the host global NAME (a Scheme symbol)."
   (psl:tr "PROGRAM-VARIABLE-LOCATION" (psl:tr "PROGRAM-ENV-ENSURE-DEFINED" *host* name)))
 
+(defun make-lexical (name)
+  "A lexical variable for core code, named NAME: uninterned, so that it
+is garbage once the code is compiled.  Interned, the names compilers make
+for their lexicals (Guile mode's ~N.tag, --racket's) pile up in SCHEME for
+as long as the process runs, as no package lets go of a symbol."
+  (let ((symbol (make-symbol name)))
+    (setf (get symbol 'scheme-lexical) t)
+    symbol))
+
 (defun host-ref (name)
   (symbol-value (location (if (stringp name) (sym name) name))))
 

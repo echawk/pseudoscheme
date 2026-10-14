@@ -848,7 +848,11 @@ no procedure.")
   (and (symbolp x) (string= (symbol-name x) name)))
 
 (defun scheme-symbol-p (x)
-  (and (symbolp x) x (eq (symbol-package x) (find-package "SCHEME"))))
+  "Whether X is a Scheme variable: a symbol of SCHEME, or a lexical
+MAKE-LEXICAL made."
+  (and (symbolp x) x
+       (or (eq (symbol-package x) (find-package "SCHEME"))
+	   (and (null (symbol-package x)) (get x 'scheme-lexical)))))
 
 (defun primitive-names ()
   (or *primitive-names*

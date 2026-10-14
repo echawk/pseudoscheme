@@ -351,7 +351,7 @@
 	       (:module "native"
 		:serial t
 		:components ((:file "native") (:file "structs") (:file "procedures")
-			     (:file "control") (:file "hash") (:file "exn") (:file "basics") (:file "paths") (:file "equal") (:file "ports") (:file "printer") (:file "regexp")
+			     (:file "control") (:file "hash") (:file "exn") (:file "basics") (:file "paths") (:file "equal") (:file "ports") (:file "printer") (:file "regexp") (:file "more")
 			     (:file "rktio")))
 	       (:file "reader")
 	       ;; A: Racket CS's layers on --chez
