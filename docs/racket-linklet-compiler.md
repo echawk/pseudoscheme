@@ -331,6 +331,20 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   racket/base` program runs in 1.3 s.
   `PSEUDOSCHEME_RACKET_ZO=0` turns `.zo` writing off.
 
+- **Safety for continuations, within a linklet.** A whole linklet's
+  definitions are a `letrec*`, which `cc-transform` sees into (its
+  `'unassigned` placeholders count, as `'#f` ones do). A split linklet's
+  are cells, so `settle-safe-cells` (compiler.lisp) finds the defined,
+  never-assigned procedures that can't capture, assuming all can't and
+  striking out those that can until none changes. References to those
+  procedures are `(racket:safe-variable-ref cell)`, and a call of one
+  isn't a capture site. Across linklets, through `get-import`, is still
+  to do.
+- **Arities.** A `case-lambda` of several clauses records its arity mask,
+  since `(lambda args ...)` doesn't show it. `procedure-reduce-arity`
+  checks and restricts. Arity errors, ours and SBCL's, raise
+  `exn:fail:contract:arity` (tests/racket/programs/arity.rkt).
+
 Next:
 - milestone 2, the regexp linklet;
 - the rest of `#%kernel` that the extracted layers use, in the order the

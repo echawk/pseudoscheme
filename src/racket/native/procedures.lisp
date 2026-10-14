@@ -11,8 +11,8 @@
 ;;;; chaperones itself, on top of these.
 ;;;; Not yet, and approximated: a chaperone of a struct, vector, box or
 ;;;; hash table is the value itself (so racket/contract's contracts on
-;;;; them aren't enforced), procedure-reduce-arity doesn't reduce, and a
-;;;; chaperone's arity is the wrapper's lambda list's.
+;;;; them aren't enforced), and a chaperone's arity is the wrapper's
+;;;; lambda list's.
 
 (in-package "PSEUDOSCHEME-RACKET")
 
@@ -105,9 +105,34 @@
 	"chaperone-channel" "impersonate-channel" "chaperone-continuation-mark-key"
 	"impersonate-continuation-mark-key" "chaperone-prompt-tag" "impersonate-prompt-tag"))
 
-(defnative "procedure-reduce-arity" (proc arity &optional name realm) (:rumble "procedure-reduce-arity")
-  (declare (ignore arity name realm))
-  proc)
+(defun arity->mask (arity)
+  "The arity mask of ARITY, procedure-arity's form: k, (arity-at-least
+k), or a list of them."
+  (cond ((integerp arity) (ash 1 arity))
+	((listp arity) (reduce #'logior (mapcar #'arity->mask arity) :initial-value 0))
+	((truthy (funcall (third *arity-at-least*) arity))
+	 (- (ash 1 (funcall (fourth *arity-at-least*) arity 0))))
+	(t (racket-error "procedure-reduce-arity" "contract violation~%  expected: procedure-arity?~%  given: ~A"
+			 (written arity)))))
+
+(defun reduce-arity (who proc mask name)
+  "PROC, taking only the argument counts in MASK.  (Racket checks that
+they are some of PROC's; our arities of struct procedures and wrappers
+are approximate, so that isn't checked.)"
+  (declare (ignore who))
+  (let ((new (lambda (&rest args)
+	       (if (logbitp (length args) mask)
+		   (apply proc args)
+		   (racket-arity-error (if (truthy name) (rname name) "#<procedure>") (length args))))))
+    (setf (gethash new *arity-masks*) mask)
+    new))
+
+(defnative "procedure-reduce-arity" (proc arity &optional (name ps:false) realm) (:rumble "procedure-reduce-arity")
+  (declare (ignore realm))
+  (reduce-arity "procedure-reduce-arity" proc (arity->mask arity) name))
+(defnative "procedure-reduce-arity-mask" (proc mask &optional (name ps:false) realm) ()
+  (declare (ignore realm))
+  (reduce-arity "procedure-reduce-arity-mask" proc mask name))
 
 ;;; procedure-specialize: a hint to compile a closure for its values;
 ;;; the procedure itself here

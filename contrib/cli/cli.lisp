@@ -464,7 +464,9 @@ is reported, and the program runs anyway."
       (die "--quicklisp: no ~A" (namestring setup)))
     (load setup)))
 
-(defun report-and-exit (e)
+(defun report-and-exit (e &aux (*error-output* sb-sys:*stderr*))
+  ;; (to the process's stderr: E may be signalled where *ERROR-OUTPUT*
+  ;; is bound to silence a compiler's notes)
   ;; Guile's (exit n), not caught: the program's exit status
   (let ((status (and (eq *standard* :guile) (psg::quit-status e))))
     (when status

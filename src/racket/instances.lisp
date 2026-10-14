@@ -78,8 +78,16 @@ Racket's own (primitive-table ...) lists."
   (loop for (file . instance) in *primitive-table-files*
 	collect (cons instance (read-primitive-table file))))
 
+(defvar *arity-masks* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Procedures whose arity isn't their lambda list's -> their arity mask:
+a case-lambda of several clauses, procedure-reduce-arity's.")
+
 (defun arity-mask (function)
-  "FUNCTION's arity mask, from its lambda list."
+  "FUNCTION's arity mask: recorded, or from its lambda list."
+  (or (values (gethash function *arity-masks*))
+      (lambda-list-arity-mask function)))
+
+(defun lambda-list-arity-mask (function)
   (multiple-value-bind (required optional rest)
       (let ((required 0) (optional 0) (rest nil) (state :required))
 	(dolist (p (sb-introspect:function-lambda-list function) (values required optional rest))

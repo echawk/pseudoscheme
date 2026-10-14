@@ -1013,7 +1013,8 @@ are Lisp symbols are the transformation's own, or the translator's."
   (let ((assignments (make-hash-table :test 'eq))	; variable -> number of set!s
 	(lambdas (make-hash-table :test 'eq))		; variable -> its lambda, if known
 	(placeholders (make-hash-table :test 'eq)))	; variable -> bound to '#f
-    (labels ((false-p (x) (equal x `(,(sym "quote") ,ps:false)))
+    (labels ((false-p (x)		; a placeholder: '#f, or --racket's 'unassigned
+	       (or (equal x `(,(sym "quote") ,ps:false)) (equal x `(,(sym "quote") ,ps:unassigned))))
 	     (scan (e)
 	       (cond ((atom e))
 		     ((quote-form-p e))

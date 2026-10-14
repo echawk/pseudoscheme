@@ -999,6 +999,18 @@ the command line and exits; DROP-LAST skips it.)"
 				      ("string>=?" string>= simple-string))
 	    collect `(,(concatenate 'string "chez:" name) (a b)
 		      (if (and (typep a ',type) (typep b ',type)) (if (,test a b) t ps:false) :call)))
+    ;; R7RS define-record-type's procedures (src/r7rs/syntax.sls), for a
+    ;; record of exactly the type: a subtype's, or an error, by the call
+    ("r7rs:record-ref" (x rtd i who)
+     (if (and (ps-r6rs::record-p x) (eq (ps-r6rs::record-rtd x) rtd))
+	 (svref (ps-r6rs::record-values x) i)
+	 :call))
+    ("r7rs:record-set!" (x rtd i value who)
+     (if (and (ps-r6rs::record-p x) (eq (ps-r6rs::record-rtd x) rtd))
+	 (progn (setf (svref (ps-r6rs::record-values x) i) value) ps:unspecific)
+	 :call))
+    ("r7rs:record?" (x rtd)
+     (if (and (ps-r6rs::record-p x) (eq (ps-r6rs::record-rtd x) rtd)) t :call))
     ;; a letrec variable's reference that may come before its init (LETREC-CHECKS)
     ("%letrec-check" (flag value name) (if (eq flag ps:false) :call value)))
   "(name lambda-list body): BODY, with the arguments bound to the

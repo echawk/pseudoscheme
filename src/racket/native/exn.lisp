@@ -169,7 +169,14 @@ an abort to the default prompt."
 
 (defun lisp-error-exn (e)
   (typecase e
-    (racket-error (make-exn "exn:fail:contract" (princ-to-string e)))
+    (racket-error (make-exn (or (racket-error-type e) "exn:fail:contract") (princ-to-string e)))
+    ;; SBCL's: a function called with the wrong number of arguments
+    (sb-int:simple-program-error
+     (if (search "invalid number of arguments" (princ-to-string e))
+	 (make-exn "exn:fail:contract:arity"
+		   (format nil "#<procedure>: arity mismatch;~% the expected number of arguments does not match the given number~@[~%  given: ~A~]"
+			   (car (simple-condition-format-arguments e))))
+	 (make-exn "exn:fail" (princ-to-string e))))
     (division-by-zero (make-exn "exn:fail:contract:divide-by-zero" "/: division by zero"))
     (type-error (make-exn "exn:fail:contract"
 			  (format nil "contract violation~%  expected: ~A~%  given: ~A"

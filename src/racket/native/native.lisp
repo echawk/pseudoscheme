@@ -100,21 +100,26 @@ linklets (after every instance is filled: #%linklet's too)."
 (defun install-compiler-helpers ()
   (psx:defhost "racket:variable-ref" (v) (variable-ref v))
   (psx:defhost "racket:variable-set!" (v value) (variable-set v value))
+  ;; a reference to a procedure that can't capture (SAFE-CELLS)
+  (psx:defhost "racket:safe-variable-ref" (v) (variable-ref v))
   (psx:defhost "racket:variable-reference" (instance name)
     (make-variable-reference instance name))
   (psx:defhost "racket:unknown-primitive" (name)
     (racket-error (rname name) "undefined;~% cannot reference an identifier before its definition"))
   (psx:defhost "racket:assign-error" (name)
     (racket-error "set!" "assignment disallowed;~% cannot assign a primitive or imported variable: ~A" (rname name)))
+  (psx:defhost "racket:with-arity" (mask f)
+    (setf (gethash f *arity-masks*) mask)
+    f)
   (psx:defhost "racket:arity-error" (args)
-    (racket-error "#<procedure>" "arity mismatch;~% the expected number of arguments does not match the given number~%  given: ~D" (length args)))
+    (racket-arity-error "#<procedure>" (length args)))
   (psx:defhost "racket:note-split-function" (i f)
     (setf (svref *loading-split-functions* i) f))
   (psx:defhost "racket:call-with-mark" (key value thunk)
     (ps-r6rs::call-with-mark key value thunk))
   (psx::register-primitive-names
-   '("racket:variable-ref" "racket:variable-set!" "racket:variable-reference"
-     "racket:unknown-primitive" "racket:assign-error" "racket:arity-error")))
+   '("racket:variable-ref" "racket:safe-variable-ref" "racket:variable-set!" "racket:variable-reference"
+     "racket:unknown-primitive" "racket:assign-error" "racket:arity-error" "racket:with-arity")))
 
 ;;; ------------------------------------------------------------------
 ;;; Numbers and the like, where Racket's differ from the host's

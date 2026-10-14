@@ -120,10 +120,12 @@ objects: compiled now if need be."
 
 (defun linklet-function-1 (compiled)
   (let ((psx::*full-continuations* t)
-		  (form (compiled-linklet-form compiled)))
-	      (if (and (consp form) (eq (car form) (psx::sym "racket:split")))
-		  (split-function (cadr form) (split-functions compiled))
-		  (whole-function compiled))))
+	(form (compiled-linklet-form compiled)))
+    (call-with-safe-cells
+     (lambda ()
+       (if (and (consp form) (eq (car form) (psx::sym "racket:split")))
+	   (split-function (cadr form) (split-functions compiled))
+	   (whole-function compiled))))))
 
 (defun split-function (n functions)
   "A split linklet's instantiation: the cells (the variables given, then

@@ -285,7 +285,6 @@
 (defnatives "#%kernel"
   ("primitive?" (x) (declare (ignore x)) ps:false)
   ("primitive-closure?" (x) (declare (ignore x)) ps:false)
-  ("procedure-reduce-arity-mask" (f mask &optional name realm) (declare (ignore mask name realm)) f)
   ("procedure-realm" (f) (declare (ignore f)) (rsym "racket"))
   ("procedure->method" (f) f)
   ("procedure-closure-contents-eq?" (a b) (bool (eq a b)))

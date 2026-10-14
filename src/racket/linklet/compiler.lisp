@@ -158,7 +158,10 @@ is what get-import told us about the imported linklets' variables
 		      ((:defined :defined-exported)
 		       ;; a lexical; in a split linklet, a cell
 		       (or (variable-info-core v)
-			   (list (core "racket:variable-ref") (variable-info-cell v))))
+			   (list (core (if (eq (variable-info-known v) :safe-candidate)
+					   "racket:safe-variable-ref"
+					   "racket:variable-ref"))
+				 (variable-info-cell v))))
 		      ((:imported :exported)
 		       (list (core "racket:variable-ref") (variable-info-cell v)))))))
 	  (t (primitive-reference name)))))
@@ -203,7 +206,15 @@ fresh lexicals; and the core formals."
   "One clause is a plain lambda; several dispatch on the argument count."
   (if (and clauses (null (cdr clauses)))
       (lower-lambda (car (first clauses)) (cdr (first clauses)) env)
-      (let ((args (fresh-lexical "args")) (n (fresh-lexical "n")))
+      (let ((args (fresh-lexical "args")) (n (fresh-lexical "n"))
+	    ;; its arity: the clauses', which (lambda args ...) doesn't show
+	    (mask (reduce #'logior
+			  (loop for (formals) in clauses
+				for required = (loop for tail = formals then (cdr tail)
+						     while (consp tail) count t)
+				collect (if (rest-formal formals) (- (ash 1 required)) (ash 1 required)))
+			  :initial-value 0)))
+       (list (core "racket:with-arity") (quoted mask)
 	(list (core "lambda") args
 	      (list (list (core "lambda") (list n)
 			  (reduce (lambda (clause else)
@@ -216,7 +227,7 @@ fresh lexicals; and the core formals."
 					      else))))
 				  clauses :from-end t
 				  :initial-value (list (core "racket:arity-error") args)))
-		    (list (core "length") args))))))
+		    (list (core "length") args)))))))
 
 (defun lower-let-values (bindings body env &optional recursive)
   "let-values: each right-hand side in the outer ENV, then all bound.
@@ -340,6 +351,82 @@ by their variables."
 Racket CS compiles a big linklet's outer level piecewise: compiled whole,
 the expander's 2 MB linklet needs more than 8 GB to compile.")
 
+;;; Procedures that can't capture a continuation, in a split linklet.  A
+;;; whole linklet's definitions are a letrec*, which the continuation
+;;; transformation sees into; a split one's are cells, so a call of one
+;;; is a capture site unless the cell is known to hold such a procedure
+;;; for good: defined once by a lambda, never assigned, and the lambda's
+;;; body making no call that can capture.  Assuming every candidate safe
+;;; and striking out those that aren't, until none changes, finds them
+;;; (as FIND-SAFE-PROCEDURES does for a letrec); their references are
+;;; (racket:safe-variable-ref cell), which SAFE-OPERATOR-P takes as safe.
+
+(defun safe-cell-candidates (parsed info)
+  "Mark as :SAFE-CANDIDATE each defined variable, never assigned, whose
+one definition is a lambda."
+  (dolist (form (parsed-linklet-body parsed))
+    (when (and (form-p form "define-values") (consp (cadr form)) (null (cdr (cadr form)))
+	       (or (form-p (caddr form) "lambda") (form-p (caddr form) "case-lambda")))
+      (let ((v (info-of info (car (cadr form)))))
+	(when (and (member (variable-info-kind v) '(:defined :defined-exported))
+		   (not (variable-info-mutated v)))
+	  (setf (variable-info-known v) :safe-candidate))))))
+
+(defun safe-variable-ref-p (form)
+  (and (consp form) (eq (car form) (core "racket:safe-variable-ref"))))
+
+(defun call-with-safe-cells (thunk)
+  "Call THUNK with (racket:safe-variable-ref cell) taken as safe by the
+continuation transformation."
+  (let ((psx::*safe-operator-hook*
+	  (let ((outer psx::*safe-operator-hook*))
+	    (lambda (form) (or (safe-variable-ref-p form) (and outer (funcall outer form)))))))
+    (funcall thunk)))
+
+(defun settle-safe-cells (forms info)
+  "FORMS, a split linklet's lowered forms, with references to the
+candidates that turn out to capture made plain."
+  (let ((lambdas '()))			; (cell . lambda)
+    (dolist (form forms)
+      ;; (lambda (instance cells) (begin (racket:variable-set! cell value) '#<void>))
+      (let ((set (and (consp (caddr form)) (consp (cdr (caddr form))) (cadr (caddr form)))))
+	(when (and (consp set) (eq (car set) (core "racket:variable-set!")))
+	  (let* ((value (caddr set))
+		 (l (labels ((procedure (x)
+			       (cond ((psx::lambda-form-p x) x)
+				     ;; a case-lambda's (racket:with-arity 'mask lambda)
+				     ((and (consp x) (eq (car x) (core "racket:with-arity")))
+				      (procedure (caddr x)))
+				     ;; NAMED's ((lambda (f) (begin (set! f lambda) f)) '#f)
+				     ((and (consp x) (psx::lambda-form-p (car x)))
+				      (let ((b (caddr (car x))))
+					(and (consp b) (consp (cdr b)) (consp (cadr b))
+					     (procedure (caddr (cadr b)))))))))
+		      (procedure value))))
+	    (when l (push (cons (cadr set) l) lambdas))))))
+    (let ((safe (make-hash-table :test 'equal)))
+      (maphash (lambda (name v)
+		 (declare (ignore name))
+		 (when (eq (variable-info-known v) :safe-candidate)
+		   (if (assoc (variable-info-cell v) lambdas :test #'equal)
+		       (setf (gethash (variable-info-cell v) safe) t)
+		       (setf (variable-info-known v) nil))))
+	       (linklet-info-variables info))
+      (let ((psx::*safe-procedures* nil) (psx::*known-procedures* nil) (psx::*downward-parameters* nil)
+	    (psx::*safe-operator-hook* (lambda (form) (and (safe-variable-ref-p form) (gethash (cadr form) safe)))))
+	(loop while (loop with changed = nil
+			  for (cell . l) in lambdas
+			  when (and (gethash cell safe) (psx::may-capture-p (caddr l)))
+			    do (remhash cell safe) (setq changed t)
+			  finally (return changed))))
+      (labels ((plain (x)
+		 (cond ((atom x) x)
+		       ((and (safe-variable-ref-p x) (not (gethash (cadr x) safe)))
+			(list (core "racket:variable-ref") (cadr x)))
+		       (t (let ((a (plain (car x))) (d (plain (cdr x))))
+			    (if (and (eq a (car x)) (eq d (cdr x))) x (cons a d)))))))
+	(mapcar #'plain forms)))))
+
 (defun lower-split (parsed info)
   "Pass 4 for a big linklet: (racket:split N (lambda (racket:instance
 racket:cells) FORM) ...), each top-level form its own lambda, every
@@ -357,14 +444,17 @@ then exports then the rest (N cells in all)."
 		 (declare (ignore name))
 		 (when (eq (variable-info-kind v) :defined) (cell v)))
 	       (linklet-info-variables info)))
+    (safe-cell-candidates parsed info)
     (list* (core "racket:split") (1+ i)
-	   (loop for form in (parsed-linklet-body parsed)
+	   (settle-safe-cells
+	    (loop for form in (parsed-linklet-body parsed)
 		 collect (list (core "lambda") (list (core "racket:instance") cells)
 			       (if (form-p form "define-values")
 				   (list (core "begin")
 					 (lower-assignment (cadr form) (caddr form) '())
 					 (quoted *void*))
-				   (lower-expr form '())))))))
+				   (lower-expr form '()))))
+	    info))))
 
 (defun lower (parsed info)
   "Pass 4: the linklet as a core lambda of its variable objects (imports,

@@ -83,7 +83,8 @@ cs), made current."
 
 (define-condition racket-error (error)
   ((who :initarg :who :reader racket-error-who)
-   (message :initarg :message :reader racket-error-message))
+   (message :initarg :message :reader racket-error-message)
+   (type :initarg :type :initform nil :reader racket-error-type)) ; an exn type's name, or NIL
   (:report (lambda (c stream)
 	     (format stream "~A: ~A" (racket-error-who c) (racket-error-message c)))))
 
@@ -91,6 +92,12 @@ cs), made current."
   "Raise Racket's exn:fail (exn.lisp makes it a Racket exception once
 exceptions are written; a Lisp condition until then)."
   (error 'racket-error :who who :message (apply #'format nil format args)))
+
+(defun racket-arity-error (who given &optional expected)
+  "Raise exn:fail:contract:arity: WHO called with GIVEN arguments."
+  (error 'racket-error :who who :type "exn:fail:contract:arity"
+		       :message (format nil "arity mismatch;~% the expected number of arguments does not match the given number~@[~%  expected: ~A~]~%  given: ~D"
+					expected given)))
 
 ;;; ------------------------------------------------------------------
 ;;; Racket's sources and collections
