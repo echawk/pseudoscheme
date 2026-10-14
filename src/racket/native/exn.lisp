@@ -173,9 +173,19 @@ an abort to the default prompt."
 				    (funcall (psx:host-ref "write") (type-error-datum e) s)))))
     (t (make-exn "exn:fail" (princ-to-string e)))))
 
+(defun note-lisp-error (e)
+  "With PSEUDOSCHEME_RACKET_BACKTRACE set, Lisp error E and where it was
+signalled, on the error output: for finding what a Racket program ran
+into that isn't written yet."
+  (when (uiop:getenv "PSEUDOSCHEME_RACKET_BACKTRACE")
+    (format *error-output* "~&;; Lisp error: ~A~%" e)
+    (let ((*print-length* 5) (*print-level* 3))
+      (sb-debug:print-backtrace :count 25 :stream *error-output*))))
+
 (defmacro with-racket-errors (&body body)
   "BODY, its Lisp errors raised as Racket exceptions."
   `(handler-bind ((error (lambda (e)
+			   (note-lisp-error e)
 			   (unless (typep e 'not-yet)
 			     (do-raise (lisp-error-exn e))))))
      ,@body))

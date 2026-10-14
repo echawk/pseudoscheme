@@ -136,3 +136,18 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 	     (list (rsym "quote") (rsym "#%kernel")))
     (setq *expander-booted* t))
   (funcall (expander-export "eval") datum))
+
+;;; The port read handler: the io layer's default reads with the reader
+;;; the expander installs (in Racket CS, install-reader!); here, the
+;;; expander instance's read and read-syntax
+(defvar *port-read-handlers* (make-hash-table :test 'eq :weakness :key :synchronized t))
+
+(defun default-port-read-handler (port &optional (source nil source-p))
+  (if source-p
+      (funcall (expander-export "read-syntax") source port)
+      (funcall (expander-export "read") port)))
+
+(defnative "port-read-handler" (port &optional (handler nil handler-p)) (:leaf t)
+  (if handler-p
+      (progn (setf (gethash port *port-read-handlers*) handler) *void*)
+      (or (gethash port *port-read-handlers*) #'default-port-read-handler)))

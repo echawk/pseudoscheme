@@ -58,6 +58,8 @@
 		 finally (when tail (write-string " . " stream) (p tail)))
 	   (write-char #\} stream))
 	  ((rpath-p x) (format stream "#<path:~A>" (rpath-string x)))
+	  ((rinport-p x) (write-string "#<input-port>" stream))
+	  ((routport-p x) (write-string "#<output-port>" stream))
 	  ((or (ihash-p x) (rhash-p x))
 	   (format stream "#hash~A(" (ecase (hash-kind x) (:eq "eq") (:eqv "eqv") (:equal "")))
 	   (loop for (k . v) across (entries x) for first = t then nil
@@ -99,7 +101,7 @@ not given."
   (or port (funcall (psx:host-ref "current-output-port"))))
 
 (defun to-port (port f)
-  (funcall (psx:host-ref "write-string") (with-output-to-string (s) (funcall f s)) (port-stream port))
+  (port-write-string (with-output-to-string (s) (funcall f s)) port)
   *void*)
 
 (defnative "write" (x &optional port) () (to-port port (lambda (s) (print-value x s :write))))

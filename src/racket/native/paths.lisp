@@ -114,8 +114,11 @@
 (defnative "cleanse-path" (p) (:leaf t)
   (make-rpath (let ((s (path-string "cleanse-path" p)))
 		(with-output-to-string (out)
-		  (loop for c across s for prev = nil then c
-			unless (and (char= c #\/) (eql prev #\/)) do (write-char c out))))))
+		  (let ((prev nil))
+		    ;; runs of / as one
+		    (loop for c across s
+			  unless (and (char= c #\/) (eql prev #\/)) do (write-char c out)
+			  do (setq prev c)))))))
 
 (defnative "resolve-path" (p) (:leaf t) (make-rpath (path-string "resolve-path" p)))
 

@@ -53,12 +53,9 @@
      ("infinite?" . "infinite?") ("nan?" . "nan?")
      ("vector-fill!" . "vector-fill!") ("string-fill!" . "string-fill!")
      ("string->bytes/utf-8" . "string->utf8") ("bytes->string/utf-8" . "utf8->string")
-     ("write-string" . "write-string") ("write-char" . "write-char")
-     ("newline" . "newline") ("read-char" . "read-char")
-     ("peek-char" . "peek-char") ("read-byte" . "read-u8") ("peek-byte" . "peek-u8")
      ("current-input-port" . "current-input-port") ("current-output-port" . "current-output-port")
-     ("current-error-port" . "current-error-port") ("flush-output" . "flush-output-port")
-     ("eof" . "eof-object") ("vector-copy" . "vector-copy") ("vector-map" . "vector-map")
+     ("current-error-port" . "current-error-port")
+     ("vector-copy" . "vector-copy") ("vector-map" . "vector-map")
      ("vector-for-each" . "vector-for-each") ("string-for-each" . "string-for-each"))
     ("#%flfxnum" ("fx+" . "fx+") ("fx-" . "fx-") ("fx*" . "fx*") ("fx=" . "fx=?") ("fx<" . "fx<?")
      ("fx>" . "fx>?") ("fx<=" . "fx<=?") ("fx>=" . "fx>=?") ("fxand" . "fxand") ("fxior" . "fxior")
@@ -97,6 +94,7 @@
 assigned, which schemify's and the expander's checks compare with.")
 
 (define-primitive "#%kernel" "null" '())
+(define-primitive "#%kernel" "eof" ps:eof-object)	; a value, not a procedure
 (define-primitive "#%unsafe" "unsafe-undefined" *unsafe-undefined*)
 
 (defnative "check-not-unsafe-undefined" (v name) (:instance "#%unsafe" :leaf t)
@@ -375,7 +373,7 @@ assigned, which schemify's and the expander's checks compare with.")
   (multiple-value-bind (s us) (sb-ext:get-time-of-day) (+ (* s 1000d0) (/ us 1000d0))))
 (defnative "current-gc-milliseconds" () (:leaf t) sb-ext:*gc-run-time*)
 (defnative "current-memory-use" (&optional mode) (:leaf t) (declare (ignore mode)) (sb-kernel:dynamic-usage))
-(defnative "eval-jit-enabled" () (:leaf t) ps:true)
+(define-primitive "#%kernel" "eval-jit-enabled" (make-parameter* ps:true))
 (defnative "unquoted-printing-string" (s) (:leaf t) s)
 (defnative "datum-intern-literal" (v) (:leaf t) v)
 
@@ -406,3 +404,9 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "procedure-arity" (f) (:leaf t) (mask->arity (or (ignore-errors (arity-mask f)) -1)))
 (defnative "procedure-arity?" (x) (:leaf t)
   (bool (or (and (integerp x) (>= x 0)) (truthy (funcall (third *arity-at-least*) x)) (listp x))))
+
+;;; cache-configuration: a configuration value per index, computed once
+(defvar *configuration* (make-hash-table :synchronized t))
+(defnative "cache-configuration" (index thunk) ()
+  (multiple-value-bind (v found) (gethash index *configuration*)
+    (if found v (setf (gethash index *configuration*) (funcall thunk)))))
