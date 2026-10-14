@@ -75,7 +75,13 @@ logged() {
   return $st
 }
 
-PS="bin/pseudoscheme --no-userinit --guile"
+# Escape-only continuations: with full ones (the default elsewhere), the
+# continuation transformation makes a package definition's code about ten
+# times bigger (each call of a record constructor is a capture site), and
+# compiling Guix's package modules takes hours; guix build doesn't re-enter
+# a continuation.  CONTINUATIONS=full for the other.
+CONTINUATIONS=${CONTINUATIONS:-escape}
+PS="bin/pseudoscheme --no-userinit --continuations=$CONTINUATIONS --guile"
 PACKAGE=${PACKAGE:-"(@ (gnu packages base) hello)"}
 
 step_build() {

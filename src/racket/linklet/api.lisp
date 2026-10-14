@@ -111,7 +111,12 @@ what identifies it in the cache."
 objects: compiled now if need be."
   (or (compiled-linklet-function compiled)
       (setf (compiled-linklet-function compiled)
-	    (timing (:compile) (linklet-function-1 compiled)))))
+	    (timing (:compile)
+	      ;; SBCL's notes, and its summary when a form too big for it
+	      ;; aborts a compilation unit (retried with compact frames),
+	      ;; aren't the program's output
+	      (let ((*error-output* (make-broadcast-stream)))
+		(linklet-function-1 compiled))))))
 
 (defun linklet-function-1 (compiled)
   (let ((psx::*full-continuations* t)
