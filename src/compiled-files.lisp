@@ -108,7 +108,9 @@ HOST-EVAL runs it: escape-only, a top-level PROGN is its forms."
 				 (compile-file lisp :output-file fasl :verbose nil :print nil))
 			   (error () (values nil t t))))
 		     (declare (ignore warnings-p))
-		     #+sbcl (sb-ext:gc :full t)
+		     ;; a big chunk leaves much garbage in older generations;
+		     ;; a small one (a --racket linklet) isn't worth a full GC
+		     #+sbcl (when (> (reduce #'+ forms :key #'tree-size) 100000) (sb-ext:gc :full t))
 		     (and output (not failure-p)))))
 	    ;; a form too big for SBCL (a branch past its reach, on arm64)
 	    ;; goes again with compact frames

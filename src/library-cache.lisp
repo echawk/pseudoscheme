@@ -108,8 +108,61 @@ object, such as the (cl <package>) bridge's functions)."
   (format nil "~36R" (fnv-1a text (fnv-1a (format nil "~A ~A" (build-signature)
 						  (if *full-continuations* "full" "escape"))))))
 
+;;; Generations.  Every key holds the build signature, so each rebuild
+;;; of Pseudoscheme from changed sources made a new set of compiled files
+;;; and orphaned the old, and the caches only grew (to gigabytes).  Each
+;;; cache now keeps a signature's files in a directory of their own, and
+;;; the first use in a process removes all but the most recently used
+;;; other one: two builds can share a machine (a checkout and a stash,
+;;; say) without wiping each other's.
+
+(defvar *pruned-generations* '()
+  "The cache directories this process has pruned.")
+
+(defvar *generations* (make-hash-table :test 'equal :synchronized t)
+  "(parent . signature) -> the generation directory, once made.")
+
+(defun cache-generation (parent signature)
+  "PARENT/<SIGNATURE's hash>/, made and marked used; on the first call for
+PARENT in this process, PARENT's other generations, but the most
+recently used one, are deleted."
+  (let ((key (cons (namestring parent) signature)))
+    (or (gethash key *generations*)
+	(setf (gethash key *generations*) (cache-generation-1 parent signature)))))
+
+(pushnew (lambda () (clrhash *generations*) (setq *pruned-generations* '())) sb-ext:*init-hooks*)
+
+(defun cache-generation-1 (parent signature)
+  (let* ((parent (uiop:ensure-directory-pathname parent))
+	 (dir (uiop:merge-pathnames* (format nil "~36R/" (fnv-1a signature)) parent))
+	 (stamp (merge-pathnames ".used" dir)))
+    (ensure-directories-exist stamp)
+    (ignore-errors (with-open-file (out stamp :direction :output :if-exists :supersede)
+		     (write-line signature out)))
+    (unless (member (namestring parent) *pruned-generations* :test #'string=)
+      (push (namestring parent) *pruned-generations*)
+      (ignore-errors (prune-generations parent dir)))
+    dir))
+
+(defun prune-generations (parent current)
+  (let* ((others (remove (namestring current)
+			 (remove-if-not (lambda (d) (probe-file (merge-pathnames ".used" d)))
+					(uiop:subdirectories parent))
+			 :key #'namestring :test #'string=))
+	 (by-use (sort others #'> :key (lambda (d) (or (ignore-errors (file-write-date (merge-pathnames ".used" d))) 0)))))
+    (dolist (old (cdr by-use))
+      (uiop:delete-directory-tree old :validate t :if-does-not-exist :ignore))
+    ;; a load killed partway leaves its chunks (src/guile/cache.lisp)
+    (dolist (dir (append (uiop:subdirectories parent) (uiop:subdirectories current)))
+      (when (and (uiop:string-prefix-p "chunks-" (car (last (pathname-directory dir))))
+		 (< (or (ignore-errors (file-write-date dir)) 0) (- (get-universal-time) 3600)))
+	(uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore)))))
+
+(defun library-generation ()
+  (cache-generation (library-cache-directory) (build-signature)))
+
 (defun library-fasl (key)
-  (merge-pathnames (make-pathname :name key :type "fasl") (library-cache-directory)))
+  (merge-pathnames (make-pathname :name key :type "fasl") (library-generation)))
 
 ;;; ------------------------------------------------------------------
 ;;; Which ids are the same from session to session

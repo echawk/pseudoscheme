@@ -60,16 +60,26 @@ global (native.lisp), whichever native is behind it."
 		 (psx::fnv-1a source)
 		 (psx::fnv-1a (format nil "~A ~A" (racket-signature) (compiled-linklet-strategy compiled)))))))
 
+(defun racket-cache-directory ()
+  "This signature's generation of the Racket cache (psx::CACHE-GENERATION)."
+  (psx::cache-generation (uiop:merge-pathnames* "../racket/" (psx::library-cache-directory))
+			 (racket-signature)))
+
 (defun linklet-fasl (key)
-  (merge-pathnames (make-pathname :name key :type "fasl")
-		   (uiop:merge-pathnames* "../racket/" (psx::library-cache-directory))))
+  (merge-pathnames (make-pathname :name key :type "fasl") (racket-cache-directory)))
 
 (defvar *loading-split-functions* nil
   "While a split linklet's fasl loads: the vector its functions go in.")
 
 (defun write-split-fasl (path forms)
   "FORMS, a split linklet's (lambda (instance cells) ...) forms, compiled
-into the fasl at PATH."
+into the fasl at PATH.  The compiler's notes, and the summary of a
+compilation unit a form too big for SBCL aborted (compiled again with
+compact frames), aren't the program's output."
+  (let ((*error-output* (make-broadcast-stream)))
+    (write-split-fasl-1 path forms)))
+
+(defun write-split-fasl-1 (path forms)
   (psx::write-compiled-file
    path
    (loop for form in forms

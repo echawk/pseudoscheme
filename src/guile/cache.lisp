@@ -26,10 +26,14 @@
        (not (member (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE") '("0" "no" "off") :test #'equalp))))
 
 (defun guile-cache-directory ()
-  (let ((dir (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE_DIRECTORY")))
-    (if (and dir (plusp (length dir)))
-	(uiop:ensure-directory-pathname dir)
-	(uiop:xdg-cache-home "pseudoscheme" "guile/"))))
+  "This build's generation of the cache (psx::CACHE-GENERATION): the old
+ones are pruned."
+  (psx::cache-generation
+   (let ((dir (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE_DIRECTORY")))
+     (if (and dir (plusp (length dir)))
+	 (uiop:ensure-directory-pathname dir)
+	 (uiop:xdg-cache-home "pseudoscheme" "guile/")))
+   (psx::build-signature)))
 
 (defun cache-fasl (file)
   (let ((true (probe-file file)))
@@ -147,7 +151,7 @@ can't be."
 		      (*error-output* (make-broadcast-stream))
 		      (*standard-output* (make-broadcast-stream)))
 		  (multiple-value-bind (output warnings-p failure-p)
-		      (psx::call-with-full-policy (lambda () (compile-cache-file lisp fasl)))
+		      (psx::call-with-full-policy (lambda () (compile-cache-file lisp fasl :collect nil)))
 		    (declare (ignore warnings-p))
 		    (when (or failure-p (null output)) (error "compiling failed")))))))
 	  (ignore-errors (delete-file lisp))
@@ -249,10 +253,12 @@ doesn't.  A bigger file is compiled each time it is loaded.")
       (ignore-errors (delete-file lisp))
       (ignore-errors (when (probe-file temp-fasl) (delete-file temp-fasl))))))
 
-(defun compile-cache-file (lisp fasl)
+(defun compile-cache-file (lisp fasl &key (collect t))
   "COMPILE-FILE's values for LISP.  A form whose code is too big for SBCL
 (a branch past its reach, on arm64) is compiled again with
-PSX::*COMPACT-FRAMES*."
+PSX::*COMPACT-FRAMES*.  COLLECT: a full GC after (not for one form's
+chunk: a full GC per form makes loading Guix's package modules take
+hours)."
   (flet ((try ()
 	   (multiple-value-prog1
 	       (with-compilation-unit (:override t)
@@ -261,7 +267,7 @@ PSX::*COMPACT-FRAMES*."
 	     ;; compiling a big file leaves much garbage in older
 	     ;; generations, which a rebuild of the whole cache in one
 	     ;; process would otherwise run out of heap with
-	     #+sbcl (sb-ext:gc :full t))))
+	     #+sbcl (when collect (sb-ext:gc :full t)))))
     (multiple-value-bind (output warnings-p failure-p) (try)
       (if (and output (not failure-p))
 	  (values output warnings-p failure-p)

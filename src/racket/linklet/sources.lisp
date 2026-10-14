@@ -167,13 +167,11 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 ;;; expander writes and reads itself; loading one compiles its linklets,
 ;;; whose machine code is in the fasl cache (cache.lisp).  The .zo files
 ;;; go under a cache root, current-compiled-file-roots, never into
-;;; Racket's tree; the root's name has the signature in it, so a change
-;;; to our code starts afresh.  PSEUDOSCHEME_RACKET_ZO=0 turns them off.
+;;; Racket's tree: in the Racket cache's generation (cache.lisp), so a
+;;; change to our code starts afresh and the old ones are pruned.  PSEUDOSCHEME_RACKET_ZO=0 turns them off.
 
 (defun zo-root ()
-  (uiop:merge-pathnames*
-   (format nil "../racket/zo-~36R/" (psx::fnv-1a (racket-signature)))
-   (psx::library-cache-directory)))
+  (uiop:merge-pathnames* "zo/" (racket-cache-directory)))
 
 (defun expander-value (name)
   "NAME's value in the expander's #%kernel namespace."
