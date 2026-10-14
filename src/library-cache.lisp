@@ -363,10 +363,11 @@ library a macro makes, as Chez allows).")
 (defun load-library (name)
   "psyntax's LIBRARY-LOADER: the cache, then *LIBRARY-LOADERS*."
   (let ((loaded (load-compiled-library name)))
-    (if (and loaded (not (eq loaded ps:false)))
-	loaded
-	(or (some (lambda (loader) (funcall loader name)) *library-loaders*)
-	    ps:false))))
+    (prog1 (if (and loaded (not (eq loaded ps:false)))
+	       loaded
+	       (or (some (lambda (loader) (funcall loader name)) *library-loaders*)
+		   ps:false))
+      (ps::maybe-sweep-symbols))))
 
 (defun install-library-cache-hooks ()
   "Point psyntax's library loader and expansion hook here (in an image

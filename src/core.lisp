@@ -75,6 +75,56 @@
   "The Scheme symbol named STRING (STRING->SYMBOL)."
   (values (intern (invert-case string) scheme-package)))
 
+;;; Collecting symbols.  A package never lets go of a symbol, but the
+;;; symbols Scheme code makes and drops -- gensyms, macro expanders'
+;;; renamings, names read once -- are garbage in Chez and Guile, whose
+;;; symbol tables are weak.  A symbol with no value, no function and no
+;;; property list means only its name: if nothing refers to it, uninterning
+;;; it can't be seen, as the next STRING->SYMBOL of that name makes an
+;;; equivalent one.  So now and then SWEEP-SYMBOLS uninterns every such
+;;; symbol, collects, and interns again those still referred to.
+
+(defvar *symbol-sweep-threshold* 100000
+  "How many symbols SCHEME may gain before MAYBE-SWEEP-SYMBOLS sweeps;
+PSEUDOSCHEME_SYMBOL_SWEEP in the environment, if set (0 sweeps every
+time: for testing).")
+
+(defvar *symbols-after-sweep* nil "SCHEME's symbol count after the last sweep.")
+
+(defun sweep-symbols (&optional (package scheme-package))
+  "Unintern PACKAGE's symbols that are only names and that nothing refers
+to.  The number uninterned."
+  #+sbcl
+  (let ((pointers '()))
+    (flet ((only-a-name-p (s)
+	     (and (eq (symbol-package s) package) (not (boundp s)) (null (sb-kernel:symbol-%info s)))))
+      (let ((candidates '()))
+	(do-symbols (s package)
+	  (when (only-a-name-p s) (push s candidates)))
+	(loop for s in candidates
+	      do (unintern s package)
+		 (push (sb-ext:make-weak-pointer s) pointers))
+	(setq candidates nil))
+      (sb-ext:gc :full t)
+      (let ((count 0))
+	(dolist (w pointers)
+	  (let ((s (sb-ext:weak-pointer-value w)))
+	    (if s (import s package) (incf count))))
+	count)))
+  #-sbcl (progn package 0))
+
+(defun maybe-sweep-symbols ()
+  "SWEEP-SYMBOLS, if SCHEME has gained *SYMBOL-SWEEP-THRESHOLD* symbols
+since the last sweep.  For when a file or library is done."
+  #+sbcl
+  (let ((n (sb-int:package-internal-symbol-count scheme-package)))
+    (cond ((null *symbols-after-sweep*) (setq *symbols-after-sweep* n))
+	  ((> (- n *symbols-after-sweep*)
+	      (or (ignore-errors (parse-integer (sb-ext:posix-getenv "PSEUDOSCHEME_SYMBOL_SWEEP")))
+		  *symbol-sweep-threshold*))
+	   (sweep-symbols)
+	   (setq *symbols-after-sweep* (sb-int:package-internal-symbol-count scheme-package))))))
+
 (defun list->bytevector (list)
   "For the reader's #u8(...) / #vu8(...)."
   (dolist (b list)

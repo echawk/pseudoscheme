@@ -579,7 +579,8 @@ otherwise form by form, each compiled into the cache as it runs."
 	 (*guile-fold-case* nil)
 	 (*curly-infix* nil)
 	 (*bracket-lists* nil))
-    (if (and cacheable (load-cached filename))
+    (prog1
+     (if (and cacheable (load-cached filename))
       *unspecified*
       (let ((kept (and cacheable (make-incremental-cache filename)))
 	    (done nil))
@@ -595,7 +596,9 @@ otherwise form by form, each compiled into the cache as it runs."
 	  ;; the chunks: the file's fasl if it loaded, gone either way
 	  (when kept
 	    (finish-incremental-cache kept (and done (cache-fasl filename)))))
-	value))))
+	value))
+      ;; its gensyms and the like are garbage now, unless kept
+      (ps::maybe-sweep-symbols))))
 
 ;;; How Guile's compiler runs, for (compile x #:to 'value) and the like
 ;;; (src/guile/modules/language/tree-il/spec.scm):
