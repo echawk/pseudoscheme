@@ -53,8 +53,8 @@
      ("infinite?" . "infinite?") ("nan?" . "nan?")
      ("vector-fill!" . "vector-fill!") ("string-fill!" . "string-fill!")
      ("string->bytes/utf-8" . "string->utf8") ("bytes->string/utf-8" . "utf8->string")
-     ("write-string" . "write-string") ("write-char" . "write-char") ("display" . "display")
-     ("write" . "write") ("newline" . "newline") ("read-char" . "read-char")
+     ("write-string" . "write-string") ("write-char" . "write-char")
+     ("newline" . "newline") ("read-char" . "read-char")
      ("peek-char" . "peek-char") ("read-byte" . "read-u8") ("peek-byte" . "peek-u8")
      ("current-input-port" . "current-input-port") ("current-output-port" . "current-output-port")
      ("current-error-port" . "current-error-port") ("flush-output" . "flush-output-port")
@@ -244,7 +244,9 @@ assigned, which schemify's and the expander's checks compare with.")
 ;;; ------------------------------------------------------------------
 ;;; Errors with fields
 
-(defun written (v) (with-output-to-string (s) (funcall (psx:host-ref "write") v s)))
+(defun written (v)
+  "V as Racket's error messages show it (printer.lisp)."
+  (with-output-to-string (s) (print-value v s :write)))
 
 (defnative "raise-arguments-error" (who message &rest fields-and-values) ()
   (do-raise (make-exn "exn:fail:contract"
@@ -377,14 +379,7 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "unquoted-printing-string" (s) (:leaf t) s)
 (defnative "datum-intern-literal" (v) (:leaf t) v)
 
-;;; current-print: its default prints a value that isn't #<void> and a
-;;; newline, as Racket's (with write; print's quoting comes later)
-(define-primitive "#%kernel" "current-print"
-  (make-parameter* (lambda (v)
-		     (unless (eq v *void*)
-		       (funcall (psx:host-ref "write") v)
-		       (funcall (psx:host-ref "newline")))
-		     *void*)))
+
 
 ;;; arity-at-least, and procedure-arity from the arity mask
 (defvar *arity-at-least* nil)

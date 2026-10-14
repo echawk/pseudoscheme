@@ -41,7 +41,7 @@ one: every primitive the instances have that isn't host-shared."
   '(;; pairs and lists
     "car" "cdr" "cons" "caar" "cadr" "cdar" "cddr" "caddr" "cdddr" "cadddr"
     "list" "append" "reverse" "length" "list-ref" "list-tail"
-    "memq" "memv" "member" "assq" "assv" "assoc" "null?" "pair?" "list?"
+    "memq" "memv" "assq" "assv" "null?" "pair?" "list?"
     ;; equivalence, booleans
     "eq?" "eqv?" "not" "boolean?"
     ;; numbers
@@ -135,9 +135,5 @@ linklets (after every instance is filled: #%linklet's too)."
 (defnative "mcar" (p) (:leaf t) (mpair-car p))
 (defnative "mcdr" (p) (:leaf t) (mpair-cdr p))
 (defnative "mpair?" (x) (:leaf t) (bool (mpair-p x)))
-(defnative "displayln" (x &optional (port nil port-p)) ()
-  (if port-p
-      (progn (funcall (psx:host-ref "display") x port) (funcall (psx:host-ref "newline") port))
-      (progn (funcall (psx:host-ref "display") x) (funcall (psx:host-ref "newline"))))
-  *void*)
+
 

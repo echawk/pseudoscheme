@@ -8,3 +8,7 @@
 (with-continuation-mark 'k 1 (continuation-mark-set-first #f 'k))	1
 (begin0 1 2)	1
 ((case-lambda [(a) a] [(a b) b]) 1 2)	2
+(list (void) (box 1) (string->keyword "k") (vector 1 'a) (cons 1 2))	(#<void> #&1 #:k #(1 a) (1 . 2))
+(let-values ([(s mk ? ref set) (make-struct-type 'pt #f 2 0 #f '() #f)]) (list (mk 1 2) (procedure? ref)))	(#(struct:pt 1 2) #t)
+(let-values ([(s mk ? ref set) (make-struct-type 'pt #f 2 0)]) (mk 1 2))	#<pt>
+(member (list 1) (list (list 2) (list 1)))	((1))
