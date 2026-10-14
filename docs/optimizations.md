@@ -235,11 +235,34 @@ it), or compiled with `(compilation-speed 3)`. The library cache
 
 ### 9. Continuation frames for Lisp code (partly)
 
-Already per form: calls that can't capture aren't sites (done). What
-remains is cross-library (idea 3) and procedures passed into the
-runtime's higher-order primitives that aren't open-coded (`sort`,
-`hashtable-walk`), which use the frame-aware versions whenever the
-procedure passed might capture.
+Already per form: calls that can't capture aren't sites (done).
+
+**Across top-level forms in Guile mode (done, October 2026).**
+- A top-level definition whose lambda can't capture is wrapped in
+  `%note-safe`, which records the procedure in `psx::*safe-functions*`
+  when the definition runs, including when it's loaded from a cached
+  fasl.
+- `psx::*safe-operator-hook*` lets a language mode say when an operator
+  form the transformation can't see into is safe. Guile mode's says so
+  for `(%guile-ref site)` in two cases:
+  - the site's variable holds a recorded procedure, in a declarative
+    module (bound once, as Guile's own compiler assumes);
+  - it holds a primitive that calls no procedure: a host primitive the
+    transformation knows doesn't, or one of Guile mode's whose
+    parameters include none named as procedures (`proc`, `thunk`,
+    `less`, ...).
+- A call of such an operator isn't a capture site, and the operator
+  counts as safe when passed to `map` and the like.
+- The effect: Guix's package definitions call record constructors from
+  other modules. Before, each of those calls was a site, and the
+  transformation made a package's code about ten times bigger: `hello`
+  went from 808 conses of core to 6,527 transformed.
+
+What remains:
+- the same for R6RS and R7RS libraries, from the library cache (idea 3);
+- procedures passed into the runtime's higher-order primitives that
+  aren't open-coded (`sort`, `hashtable-walk`), which use the
+  frame-aware versions whenever the procedure passed might capture.
 
 ## Summary
 
@@ -253,7 +276,7 @@ procedure passed might capture.
 | 6 | inlining small known procedures | partly (SBCL's own) | calls to small helpers |
 | 7 | boolean results | partly | small |
 | 8 | faster compilation | not started | start-up and the REPL |
-| 9 | continuation frames | partly | capture sites across libraries |
+| 9 | continuation frames | partly (across forms in Guile mode) | capture sites across R6RS/R7RS libraries |
 
 Ideas 1 and 2 are the cheapest and most certain; 3 and 4 are the
 largest and would be the core of a later major version.

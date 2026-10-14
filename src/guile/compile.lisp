@@ -616,7 +616,86 @@ evaluated in the scope of those before it."
 
 ;;; Helpers the compiled code calls
 
+;;; Cross-form knowledge for the continuation transformation
+;;; (src/continuations.lisp, *SAFE-OPERATOR-HOOK*): a reference to a
+;;; top-level variable of a declarative module (Guile's default: its
+;;; bindings are defined once, which Guile's own compiler relies on too)
+;;; that holds a procedure proved unable to capture is safe to call
+;;; without a frame.
+
+(defun site-module-object (site)
+  (ecase (site-kind site)
+    (:toplevel (site-module site))
+    (:module (resolve-module* (site-module site)))))
+
+(defparameter *procedure-parameter-names*
+  '("F" "FN" "PROC" "PROCEDURE" "THUNK" "PRED" "PREDICATE" "LESS" "HASH" "ASSOC" "HANDLER"
+    "KONS" "CMP" "COMPARE" "TEST" "BEFORE" "AFTER" "BODY" "CONSUMER" "PRODUCER" "READER"
+    "WRITER" "GETTER" "SETTER" "INIT-PROC" "PRE-UNWIND-HANDLER" "PROMPT-HANDLER" "K")
+  "Parameter names of Guile mode's primitives that are procedures they
+may call: a primitive with none of them is taken to call none.")
+
+(defvar *safe-primitive-functions* nil
+  "Primitive functions that call no procedure, so can't capture: the
+host's that the continuation transformation knows don't, and Guile mode's
+own with no parameter named as a procedure.  Made on first use.")
+
+(defun safe-primitive-functions ()
+  (or *safe-primitive-functions*
+      (let ((table (make-hash-table :test 'eq)))
+	;; the root module's values of the host primitives' names (not
+	;; PSX:HOST-REF, which would define a name it doesn't find: quote!)
+	(maphash (lambda (name kind)
+		   (declare (ignore kind))
+		   (unless (member name psx::*calling-primitives* :test #'string=)
+		     (let* ((v (module-variable* :root (ssym name)))
+			    (f (and v (gvariable-value v))))
+		       (when (functionp f) (setf (gethash f table) t)))))
+		 (psx::primitive-names))
+	(maphash (lambda (name f)
+		   (declare (ignore name))
+		   (when (functionp f)
+		     (let ((parameters (ignore-errors (sb-kernel:%fun-lambda-list f))))
+		       (when (and (listp parameters)
+				  (notany (lambda (p)
+					    (let ((p (if (consp p) (car p) p)))
+					      (and (symbolp p)
+						   (member (symbol-name p) *procedure-parameter-names* :test #'string=))))
+					  parameters))
+			 (setf (gethash f table) t)))))
+		 *guile-primitives*)
+	(setq *safe-primitive-functions* table))))
+
+(defun safe-site-p (site)
+  "Whether SITE's variable holds a procedure that can't capture, and
+will: a primitive (Guile's compiler, too, takes the root module's
+primitives as they are), or a procedure the continuation transformation
+proved safe, defined in a declarative module."
+  ;; only what's resolved already: resolving a module may load it, and
+  ;; compile, and come back here
+  (let ((v (or (site-variable site)
+	       (and (eq (site-kind site) :toplevel)
+		    (or (eq (site-module site) :root) (module-p* (site-module site)))
+		    (module-variable* (site-module site) (site-name site))))))
+    (and v
+	 (let ((value (gvariable-value v)))
+	   (and (functionp value)
+		(or (gethash value (safe-primitive-functions))
+		    (and (gethash value psx::*safe-functions*)
+			 (let ((m (if (eq (site-module site) :root) ps:false (site-module-object site)))
+			       (declarative (root-value "module-declarative?")))
+			   (and (module-p* m) declarative (truthy (funcall declarative m)))))))))))
+
+(defun safe-operator-form-p (form)
+  "(%guile-ref 'site), SITE being a SAFE-SITE-P."
+  (and (consp form) (eq (car form) (core "%guile-ref"))
+       (consp (cdr form)) (psx::quote-form-p (cadr form))
+       (site-p (cadr (cadr form)))
+       (ignore-errors (safe-site-p (cadr (cadr form))))))
+
 (defun install-compiler-primitives ()
+  (setq psx::*definition-operators* '("%guile-define!")
+	psx::*safe-operator-hook* 'safe-operator-form-p)
   (psx:defhost "%guile-ref" (site) (site-ref site))
   (psx:defhost "%guile-true" (x) (if (eq x *elisp-nil*) ps:false x))
   (psx:defhost "%guile-set!" (site value) (site-set site value))

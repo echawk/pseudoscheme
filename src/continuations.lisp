@@ -897,11 +897,37 @@ such a parameter (see FIND-DOWNWARD-PARAMETERS); or NIL.")
 transformed, that are bound to procedures that can't capture a
 continuation (see FIND-SAFE-PROCEDURES); or NIL.")
 
+;;; Across top-level forms (docs/optimizations.md, ideas 3 and 9): a
+;;; procedure a top-level definition makes, whose lambda can't capture,
+;;; is recorded in *SAFE-FUNCTIONS* as the definition runs (NOTE-SAFE-
+;;; DEFINITIONS wraps it in %note-safe).  A language mode whose top-level
+;;; variables are reached by forms the transformation can't see into
+;;; (Guile mode's (%guile-ref site)) says, through *SAFE-OPERATOR-HOOK*,
+;;; when such a form is one of those procedures and will stay so; then a
+;;; call of it isn't a capture site.  Guix's package definitions call
+;;; record constructors so, and with every such call a site their code
+;;; was ten times bigger.
+
+(defvar *safe-functions* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Procedures a top-level definition made of a lambda that can't capture.")
+
+(defvar *safe-operator-hook* nil
+  "NIL, or a function of an operator form (not a symbol): true if the form
+evaluates to one of *SAFE-FUNCTIONS*, and always will.")
+
+(defvar *definition-operators* '()
+  "Names of host primitives that define a top-level variable, the value
+being their third argument (Guile mode's %guile-define!).")
+
+(defun safe-operator-p (operator)
+  (and *safe-operator-hook* (consp operator) (funcall *safe-operator-hook* operator)))
+
 (defun calling-call-p (operator)
   "Whether a call with OPERATOR (normalized) may capture.  Operators that
 are Lisp symbols are the transformation's own, or the translator's."
   (cond ((and (symbolp operator) (not (scheme-symbol-p operator))) nil)
 	((and *safe-procedures* (symbolp operator) (gethash operator *safe-procedures*)) nil)
+	((safe-operator-p operator) nil)
 	(t (let ((name (primitive-name operator)))
 	     (or (null name) (member name *calling-primitives* :test #'string=))))))
 
@@ -1116,6 +1142,7 @@ procedure's variable, a primitive that calls no procedure, or a lambda
 whose body can't capture."
   (cond ((lambda-form-p e) (not (may-capture-p (caddr e))))
 	((and *safe-procedures* (symbolp e) (gethash e *safe-procedures*)) t)
+	((safe-operator-p e) t)
 	((or (scheme-symbol-p e) (and (consp e) (keyword-p (car e) "PRIMITIVE")))
 	 (let ((name (primitive-name e)))
 	   (and name (not (member name *calling-primitives* :test #'string=)))))))
@@ -1776,7 +1803,37 @@ its own, of the chunk's free variables."
 	 (*downward-parameters* nil)
 	 (*safe-procedures* (find-safe-procedures form))
 	 (*downward-parameters* (find-downward-parameters)))
-    (cc-transform-1 form)))
+    (cc-transform-1 (note-safe-definitions form))))
+
+(defun defined-lambda (value)
+  "The lambda VALUE is, possibly under (%guile-with-meta lambda props)."
+  (cond ((lambda-form-p value) value)
+	((and (consp value) (scheme-symbol-p (car value))
+	      (equal (ps:scheme-symbol-name (car value)) "%guile-with-meta")
+	      (consp (cdr value)) (lambda-form-p (cadr value)))
+	 (cadr value))))
+
+(defun note-safe-definitions (form)
+  "FORM with each top-level definition (by *DEFINITION-OPERATORS*) of a
+lambda that can't capture wrapped in %note-safe, which records the
+procedure in *SAFE-FUNCTIONS*."
+  (if (null *definition-operators*)
+      form
+      (labels ((walk (e)
+		 (cond ((atom e) e)
+		       ((quote-form-p e) e)
+		       ((lambda-form-p e) e)	; a definition inside isn't top-level
+		       ((and (scheme-symbol-p (car e))
+			     (member (ps:scheme-symbol-name (car e)) *definition-operators* :test #'string=)
+			     (= (length e) 4))
+			(let ((l (defined-lambda (fourth e))))
+			  (if (and l (not (may-capture-p (caddr l))))
+			      (list (first e) (second e) (third e) (list (sym "%note-safe") (fourth e)))
+			      e)))
+		       ((or (keyword-p (car e) "BEGIN") (keyword-p (car e) "IF"))
+			(cons (car e) (mapcar #'walk (cdr e))))
+		       (t e))))
+	(walk form))))
 
 (defparameter *cc-transform-limit* 175000
   "The largest top-level form, in conses after the transformation, that
@@ -1819,6 +1876,8 @@ left as they are, so continuations captured in them are escape-only.")
   (defhost "%full-call-with-values" (producer consumer) (full-call-with-values producer consumer))
   (defhost "%guard-reraise" (k thunk) (guard-reraise k thunk))
   (defhost "%escape-call/cc" (f) (escape-call/cc f))
+  (defhost "%note-safe" (f) (setf (gethash f *safe-functions*) t) f)
+  (register-primitive-names '("%note-safe"))
   (defhost "call-with-prompt" (tag thunk handler) (call-with-prompt tag thunk handler))
   (defhost "abort-to-prompt" (tag &rest values) (apply #'abort-to-prompt tag values))
   (defhost "%full-map" (f list &rest lists) (apply #'full-map f list lists))
