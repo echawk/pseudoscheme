@@ -556,11 +556,14 @@
 					 (function sb-alien:void sb-alien:unsigned-long))
 		     (export-scm port)))))
 	 (name (port-type-name type)))
-    (setq port (cond ((and (logtest mode +rdng+) (logtest mode +wrtng+))
-		      (scm "make-custom-binary-input/output-port" name read! write! ps:false ps:false close))
-		     ((logtest mode +rdng+)
-		      (scm "make-custom-binary-input-port" name read! ps:false ps:false close))
-		     (t (scm "make-custom-binary-output-port" name write! ps:false ps:false close))))
+    ;; a Guile port of Guile mode's own, bivalent (bytes and characters)
+    ;; as Guile's ports are, with the C type's functions as its backend
+    (setq port (psg::make-port :kind name
+			       :input (logtest mode +rdng+) :output (logtest mode +wrtng+)
+			       :buffering :full :encoding "UTF-8"
+			       :read (and (logtest mode +rdng+) read!)
+			       :write (and (logtest mode +wrtng+) write!)
+			       :close close))
     (setf (gethash port *c-ports*) (list type-address stream mode))
     port))
 

@@ -25,8 +25,14 @@ Status (October 2026):
   - 634 are stubs that raise "not implemented", so that anything linked
     against Guile still loads.
 - **Port types written in C** (`scm_make_port_type`, `scm_c_make_port`,
-  `SCM_STREAM`): written, on R6RS custom binary ports, but **not yet
-  run**. Their test is tests/libguile/ext-ports.c and ports.scm.
+  `SCM_STREAM`): Guile mode's own ports, bivalent as Guile's are, with
+  the C type's read, write and close functions as their backend.
+  tests/libguile/ext-ports.c and ports.scm give the same results as real
+  Guile: reading lines and bytes, writing, closing, and reading from C.
+  The one difference is in the output: three warnings our Guile mode
+  prints when `(rnrs io ports)` is imported. Its `port?`,
+  `input-port?` and `output-port?` are other bindings than the root
+  module's, where in Guile they are the same.
 - **Programs that embed Guile** (a C `main` calling `scm_with_guile`):
   **not yet.** The design is under "Embedding" below.
 - Linux only so far. It is built and tested in the container
