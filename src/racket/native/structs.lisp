@@ -160,6 +160,11 @@ to VALUE, after PROPERTY's guard."
 				    (proc-spec ps:false) (immutables '()) (guard ps:false)
 				    (constructor-name ps:false))
     (:rumble "make-struct-type")
+  ;; a field that is the procedure (proc-spec, or prop:procedure's value,
+  ;; an index) is immutable, as Racket makes it
+  (let ((index (if (integerp proc-spec) proc-spec (cdr (assoc *prop-procedure* props)))))
+    (when (and (integerp index) (not (member index immutables)))
+      (setq immutables (cons index immutables))))
   (let* ((parent (and (truthy parent-type) parent-type))
 	 (count (+ init-field-count auto-field-count))
 	 (type (%make-struct-type
@@ -319,3 +324,12 @@ its parent key (or NIL)."
 (defnative "unsafe-struct*-cas!" (s i old new) (:instance "#%unsafe" :leaf t)
   (let ((fields (struct-fields s)))
     (bool (eq (sb-ext:compare-and-swap (svref fields i) old new) old))))
+
+;;; Keyword procedures' check: V an instance of TYPE (which has
+;;; prop:checked-procedure) whose first field accepts V1 and V2 gives its
+;;; second field; anything else is ALT's to deal with
+(defnative "checked-procedure-check-and-extract" (type v alt v1 v2) ()
+  (if (and (struct-instance-p v) (subtype-p (struct-of-type v) type)
+	   (truthy (funcall (svref (struct-fields v) 0) v1 v2)))
+      (svref (struct-fields v) 1)
+      (funcall alt v v1 v2)))

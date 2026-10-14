@@ -303,8 +303,20 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   The first process compiles it (about 30 s); after that,
   `--racket=linklet -p '(+ 1 2)'` takes 0.4 s.
 
+- **`racket/base` loads and runs**, from the pinned source's
+  `racket/collects`. Each module is expanded from source by Racket's
+  expander and compiled by our compiler, and racket/base takes about a
+  minute. Keyword arguments, `for` loops, structs, `with-handlers`,
+  hash tables and regexps work (tests/racket/base/). The natives that
+  stand in for the io and regexp layers are in src/racket/native/:
+  - `ports.lisp`;
+  - `paths.lisp`;
+  - `printer.lisp`;
+  - `regexp.lisp`, on CL-PPCRE.
+
 Next:
-- printing as Racket prints (procedures, structs, `print`'s quoting);
+- caching compiled modules (compiled/pseudoscheme/ beside Racket's
+  compiled/), so racket/base loads in seconds;
 - milestone 2, the regexp linklet;
 - the rest of `#%kernel` that the extracted layers use, in the order the
   coverage report's `--missing` list makes plain.

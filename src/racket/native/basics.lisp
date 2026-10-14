@@ -85,6 +85,14 @@
 			  (warn "--racket: *host-aliases* names ~A, which the host doesn't have" host))))))
 
 ;;; ------------------------------------------------------------------
+;;; Immutable strings, byte strings, vectors and boxes: the same types as
+;;; mutable ones, recorded here (as Guile mode records read-only strings)
+
+(defvar *immutables* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t))
+(defun immutable! (x) (setf (gethash x *immutables*) t) x)
+(defun immutable-p (x) (values (gethash x *immutables*)))
+
+;;; ------------------------------------------------------------------
 ;;; Constants
 
 (defun ascii-bytes (s) (map '(simple-array (unsigned-byte 8) (*)) #'char-code s))
@@ -145,8 +153,8 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "subbytes" (b start &optional (end (length b))) (:leaf t) (subseq b start end))
 (defnative "bytes=?" (a &rest more) (:leaf t)
   (bool (every (lambda (b) (equalp a b)) more)))
-(defnative "bytes->immutable-bytes" (b) (:leaf t) b)
-(defnative "string->immutable-string" (s) (:leaf t) s)
+(defnative "bytes->immutable-bytes" (b) (:leaf t) (if (immutable-p b) b (immutable! (copy-seq b))))
+(defnative "string->immutable-string" (s) (:leaf t) (if (immutable-p s) s (immutable! (copy-seq s))))
 (defnative "string->bytes/latin-1" (s &optional err start end) (:leaf t)
   (declare (ignore err))
   (map '(simple-array (unsigned-byte 8) (*)) #'char-code (subseq s (or start 0) end)))
@@ -158,13 +166,13 @@ assigned, which schemify's and the expander's checks compare with.")
   (sb-ext:string-to-octets (subseq s (or start 0) end) :external-format :utf-8))
 (defnative "char-general-category" (c) (:leaf t)
   (rsym (string-downcase (symbol-name (sb-unicode:general-category c)))))
-(defnative "vector->immutable-vector" (v) (:leaf t) v)
-(defnative "immutable?" (x) (:leaf t) (bool (ihash-p x)))
+(defnative "vector->immutable-vector" (v) (:leaf t) (if (immutable-p v) v (immutable! (copy-seq v))))
+(defnative "immutable?" (x) (:leaf t) (bool (or (ihash-p x) (immutable-p x))))
 
 ;;; ------------------------------------------------------------------
 ;;; Boxes, weak boxes, place-locals
 
-(defnative "box-immutable" (x) (:leaf t) (make-rbox :value x))
+(defnative "box-immutable" (x) (:leaf t) (immutable! (make-rbox :value x)))
 (defnative "unbox*" (b) (:leaf t) (rbox-value b))
 (defnative "set-box*!" (b x) (:leaf t) (setf (rbox-value b) x) *void*)
 (defnative "unsafe-unbox" (b) (:instance "#%unsafe" :leaf t) (rbox-value b))
@@ -345,7 +353,7 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "cadadr" (x) (:leaf t) (cadadr x))
 (defnative "set-mcar!" (p v) (:leaf t) (setf (mpair-car p) v) *void*)
 (defnative "set-mcdr!" (p v) (:leaf t) (setf (mpair-cdr p) v) *void*)
-(defnative "vector-immutable" (&rest xs) (:leaf t) (coerce xs 'simple-vector))
+(defnative "vector-immutable" (&rest xs) (:leaf t) (immutable! (coerce xs 'simple-vector)))
 (defnative "vector-cas!" (v i old new) (:leaf t)
   (bool (eq (sb-ext:compare-and-swap (svref v i) old new) old)))
 (defnative "byte?" (x) (:leaf t) (bool (typep x '(unsigned-byte 8))))
@@ -353,8 +361,8 @@ assigned, which schemify's and the expander's checks compare with.")
   (bool (let ((m (mismatch a b))) (and m (or (= m (length a)) (and (< m (length b)) (< (aref a m) (aref b m))))))))
 (defnative "string-foldcase" (s) (:leaf t) (string-downcase s))
 (defnative "string-locale-downcase" (s) (:leaf t) (string-downcase s))
-(defnative "string-append-immutable" (&rest ss) (:leaf t) (apply #'concatenate 'string ss))
-(defnative "symbol->immutable-string" (s) (:leaf t) (rname s))
+(defnative "string-append-immutable" (&rest ss) (:leaf t) (immutable! (apply #'concatenate 'string ss)))
+(defnative "symbol->immutable-string" (s) (:leaf t) (immutable! (copy-seq (rname s))))
 (defnative "char-utf-8-length" (c) (:leaf t)
   (let ((n (char-code c))) (cond ((< n #x80) 1) ((< n #x800) 2) ((< n #x10000) 3) (t 4))))
 (defnative "make-rectangular" (a b) (:leaf t) (complex a b))
@@ -375,7 +383,14 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "current-memory-use" (&optional mode) (:leaf t) (declare (ignore mode)) (sb-kernel:dynamic-usage))
 (define-primitive "#%kernel" "eval-jit-enabled" (make-parameter* ps:true))
 (defnative "unquoted-printing-string" (s) (:leaf t) s)
-(defnative "datum-intern-literal" (v) (:leaf t) v)
+(defvar *interned-literals* (make-hash-table :test 'equal :weakness :value :synchronized t))
+(defnative "datum-intern-literal" (v) (:leaf t)
+  ;; a string or bytes: an immutable one, the same for equal ones
+  (if (or (stringp v) (typep v '(simple-array (unsigned-byte 8) (*))))
+      (let ((key (if (stringp v) (coerce v 'simple-string) (cons :bytes (coerce v 'list)))))
+	(or (gethash key *interned-literals*)
+	    (setf (gethash key *interned-literals*) (immutable! (copy-seq v)))))
+      v))
 
 
 
@@ -410,3 +425,19 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "cache-configuration" (index thunk) ()
   (multiple-value-bind (v found) (gethash index *configuration*)
     (if found v (setf (gethash index *configuration*) (funcall thunk)))))
+
+;;; c[ad]{2,4}r, every one: composed from car and cdr, right to left
+(labels ((combos (n) (if (= n 0) '("") (loop for c in '("a" "d") append (mapcar (lambda (s) (concatenate 'string c s)) (combos (1- n)))))))
+  (loop for n from 2 to 4
+	do (dolist (letters (combos n))
+	     (let ((name (format nil "c~Ar" letters))
+		   (ops (reverse (coerce letters 'list))))
+	       (unless (gethash name *natives*)
+		 (setf (gethash name *natives*)
+		       (make-native name
+				    (lambda (x)
+				      (dolist (op ops x)
+					(unless (consp x)
+					  (racket-error name "contract violation~%  given: ~A" (written x)))
+					(setq x (if (char= op #\a) (car x) (cdr x)))))
+				    :leaf t)))))))

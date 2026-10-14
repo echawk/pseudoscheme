@@ -140,7 +140,7 @@ were quoted (then it's a symbol whatever it looks like)."
 		     (#\Newline)		; a line continuation
 		     (t (write-char e out))))))))
 
-(defun read-string-literal (in) (read-string-chars in))
+(defun read-string-literal (in) (immutable! (read-string-chars in)))
 
 (defun string-bytes (s)
   (map '(simple-array (unsigned-byte 8) (*)) #'char-code s))
@@ -167,9 +167,9 @@ were quoted (then it's a symbol whatever it looks like)."
   "After a #."
   (let ((c (peek-char nil in)))
     (cond ((member c '(#\( #\[ #\{))
-	   (read-char in) (coerce (read-list-tail in (ecase c (#\( #\)) (#\[ #\]) (#\{ #\}))) 'simple-vector))
+	   (read-char in) (immutable! (coerce (read-list-tail in (ecase c (#\( #\)) (#\[ #\]) (#\{ #\}))) 'simple-vector)))
 	  ((char= c #\\) (read-char in) (read-character in))
-	  ((char= c #\") (read-char in) (string-bytes (read-string-chars in)))
+	  ((char= c #\") (read-char in) (immutable! (string-bytes (read-string-chars in))))
 	  ((char= c #\:) (read-char in) (rkeyword (read-token in)))
 	  ((char= c #\&) (read-char in) (make-rbox :value (read-datum in)))
 	  ((char= c #\') (read-char in) (list (rsym "syntax") (read-datum in)))

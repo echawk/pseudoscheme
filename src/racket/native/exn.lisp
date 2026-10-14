@@ -129,6 +129,11 @@ an abort to the default prompt."
 	  do (let ((c (char control i)))
 	       (if (and (char= c #\~) (< (1+ i) (length control)))
 		   (let ((d (char-downcase (char control (1+ i)))))
+		     ;; ~.a ~.s ~.v: truncated to error-print-width in Racket;
+		     ;; whole here
+		     (when (and (char= d #\.) (< (+ i 2) (length control)))
+		       (incf i)
+		       (setq d (char-downcase (char control (1+ i)))))
 		     (case d
 		       ((#\a) (funcall (psx:host-ref "display") (pop args) out))
 		       ((#\s #\v #\e) (funcall (psx:host-ref "write") (pop args) out))

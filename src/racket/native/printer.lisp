@@ -88,7 +88,14 @@
 	  (t (host-write x stream)))))
 
 (defun print-quoted (x stream)
-  "print: as write, with ' before what isn't self-quoting."
+  "print: as write, with ' before what isn't self-quoting; a transparent
+struct as its constructor's application, (point 1 2)."
+  (when (and (struct-instance-p x) (transparent-p (struct-of-type x))
+	     (not (struct-type-prefab-key (struct-of-type x))))
+    (format stream "(~A" (rname (struct-type-name (struct-of-type x))))
+    (loop for f across (struct-fields x) do (write-char #\Space stream) (print-quoted f stream))
+    (write-char #\) stream)
+    (return-from print-quoted))
   (when (or (and (symbolp x) x (not (eq x ps:true)) (not (eq x ps:false)))
 	    (consp x) (null x) (simple-vector-p x) (rbox-p x) (rkeyword-p x)
 	    (ihash-p x))

@@ -11,6 +11,11 @@
 #   expander   core forms evaluated through Racket's expander (-e), in a
 #              #%kernel namespace: tests/racket/expander.rktd holds each
 #              expression and its expected printed value
+#   base       racket/base required from the collections (Racket's
+#              source tree, build/external/racket/), then the programs in
+#              tests/racket/base/*.rkt evaluated with it, each compared
+#              with its .expected; about a minute, as racket/base is
+#              expanded from source each time
 #   regexp     Racket's rx.rktl checks on the regexp layer (milestone 2)
 #   suite      pkgs/racket-test-core, one file per process (milestone 7)
 # The linklets step needs no Racket source; the others need
@@ -52,5 +57,23 @@ for strategy in "$@"; do
     echo "$strategy: expander tests failed: $(diff "$out" "$OUT/$strategy-expander.expected" | head -3 | tr '\n' ' ')"
     status=1
   fi
+  # racket/base: each program's forms after (#%require racket/base)
+  pass=0 total=0
+  for f in tests/racket/base/*.rkt; do
+    name=$(basename "$f" .rkt)
+    out=$OUT/$strategy-base-$name.out
+    total=$((total + 1))
+    bin/pseudoscheme --racket="$strategy" \
+      -e "(current-library-collection-links (find-library-collection-links))" \
+      -e "(current-library-collection-paths (find-library-collection-paths))" \
+      -e "(#%require racket/base)" -e "$(cat "$f")" > "$out" 2>&1
+    if cmp -s "$out" "tests/racket/base/$name.expected"; then
+      pass=$((pass + 1))
+    else
+      echo "$strategy base $name: $(tail -1 "$out")"
+      status=1
+    fi
+  done
+  echo "$strategy: $pass of $total racket/base tests passed"
 done
 exit $status

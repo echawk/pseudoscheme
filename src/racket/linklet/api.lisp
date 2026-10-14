@@ -202,9 +202,13 @@ it with (primitive-table '#%linklet) of the pinned release.")
 	  (when v (setf (linklet-variable-value v) +undefined+))
 	  *void*)))
     ("variable-reference?" ,(lambda (x) (bool (variable-reference-p x))))
-    ("variable-reference->instance" ,(lambda (r &optional ref-site)
-				      (declare (ignore ref-site))
-				      (variable-reference-instance r)))
+    ("variable-reference->instance"
+     ,(lambda (r &optional (ref-site ps:false))
+	;; an anonymous reference, (#%variable-reference), has no
+	;; variable's instance; the instance it occurs in is REF-SITE's
+	(if (or (truthy ref-site) (truthy (variable-reference-name r)))
+	    (variable-reference-instance r)
+	    ps:false)))
     ("variable-reference-from-unsafe?" ,(lambda (r) (declare (ignore r)) ps:false))
     ("correlated?" ,(lambda (x) (bool (correlated-p x))))
     ("correlated-e" ,#'correlated-e)

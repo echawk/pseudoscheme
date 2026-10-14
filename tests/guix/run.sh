@@ -7,17 +7,24 @@
 # the host) and appending a line to /logs/summary.txt:
 #   build       build bin/pseudoscheme and our libguile
 #   reference   real Guix (the store's Guile 3.0.9): `guix build -d
-#               --no-grafts hello', and `guix build hello' from substitutes
+#               --no-grafts -e PACKAGE', and `guix build -e PACKAGE' from
+#               substitutes
 #   modules     load each of Guix's modules on --guile, one process each
 #               (MODULES="guix/gexp.scm gnu/packages/base.scm" for some)
-#   derivation  `guix build -d --no-grafts hello' on --guile, compared
-#               with the reference's .drv
-#   hello       `guix build hello' on --guile, then run hello
+#   derivation  `guix build -d --no-grafts -e PACKAGE' on --guile,
+#               compared with the reference's .drv
+#   hello       `guix build -e PACKAGE' on --guile, then run hello
 #   tests       Guix's own test suite (its tests/*.scm), each file on
 #               --guile (TESTS="base32 records" for some), and on real
 #               Guile for comparison
 # guix-daemon is started first, if it isn't running.  LIMIT (seconds,
 # default 600) bounds each process.
+#
+# PACKAGE is "(@ (gnu packages base) hello)": by name (`guix build
+# hello'), Guix looks through every package module, all 585 of them, for
+# want of a package cache in this profile, which cold takes hours here;
+# by module, it loads only hello's dependencies.  Real Guix computes the
+# same derivation either way.
 #
 # Guix's modules are compiled the first time they load, into the cache
 # volume, and a killed run keeps what it finished.  The cache is keyed
@@ -69,6 +76,7 @@ logged() {
 }
 
 PS="bin/pseudoscheme --no-userinit --guile"
+PACKAGE=${PACKAGE:-"(@ (gnu packages base) hello)"}
 
 step_build() {
   make -C contrib/cli > "$LOGS/build.log" 2>&1
@@ -80,16 +88,16 @@ step_build() {
 
 step_reference() {
   start_daemon
-  logged "$LOGS/reference.log" guix build -d --no-grafts hello
+  logged "$LOGS/reference.log" guix build -d --no-grafts -e "$PACKAGE"
   drv=$(grep '\.drv$' "$LOGS/reference.log" | tail -1)
   echo "$drv" > "$LOGS/reference.drv"
-  note "reference: guix build -d --no-grafts hello: ${drv:-failed}"
-  logged "$LOGS/reference-build.log" guix build hello
+  note "reference: guix build -d --no-grafts -e '$PACKAGE': ${drv:-failed}"
+  logged "$LOGS/reference-build.log" guix build -e "$PACKAGE"
   out=$(grep '^/gnu/store/.*-hello-' "$LOGS/reference-build.log" | tail -1)
   if [ -n "$out" ] && "$out/bin/hello" > /dev/null 2>&1; then
-    note "reference: guix build hello: $out ($("$out/bin/hello"))"
+    note "reference: guix build: $out ($("$out/bin/hello"))"
   else
-    note "reference: guix build hello: failed"
+    note "reference: guix build: failed"
   fi
 }
 
@@ -117,7 +125,7 @@ step_modules() {
 
 step_derivation() {
   start_daemon
-  logged "$LOGS/derivation.log" $PS tests/guix/guix.scm build -d --no-grafts hello
+  logged "$LOGS/derivation.log" $PS tests/guix/guix.scm build -d --no-grafts -e "$PACKAGE"
   drv=$(grep '\.drv$' "$LOGS/derivation.log" | tail -1)
   ref=$(cat "$LOGS/reference.drv" 2>/dev/null)
   if [ -z "$drv" ]; then
@@ -131,7 +139,7 @@ step_derivation() {
 
 step_hello() {
   start_daemon
-  logged "$LOGS/hello.log" $PS tests/guix/guix.scm build hello
+  logged "$LOGS/hello.log" $PS tests/guix/guix.scm build -e "$PACKAGE"
   out=$(grep '^/gnu/store/.*-hello-' "$LOGS/hello.log" | tail -1)
   if [ -n "$out" ] && "$out/bin/hello" > /dev/null 2>&1; then
     note "hello: $out ($("$out/bin/hello"))"

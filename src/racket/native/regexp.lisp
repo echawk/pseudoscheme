@@ -36,7 +36,28 @@
 	(loop with i = 0
 	      while (< i (length source))
 	      do (let ((c (char source i)))
-		   (cond ((and (char= c #\\) (< (1+ i) (length source))
+		   (cond ((char= c #\[)
+			  ;; a class: in rx a \ in it is itself, and a ] first
+			  ;; (after any ^) is a member
+			  (write-char c out)
+			  (incf i)
+			  (when (and (< i (length source)) (char= (char source i) #\^))
+			    (write-char #\^ out) (incf i))
+			  (when (and (< i (length source)) (char= (char source i) #\]))
+			    (write-string "\\]" out) (incf i))
+			  (loop while (and (< i (length source)) (char/= (char source i) #\]))
+				do (let ((d (char source i)))
+				     (cond ((char= d #\\) (write-string "\\\\" out))
+					   ((and (char= d #\[) (< (1+ i) (length source))
+						 (char= (char source (1+ i)) #\:))
+					    ;; [:alpha:] and the like, through :]
+					    (let ((close (search ":]" source :start2 i)))
+					      (write-string source out :start i :end (+ close 2))
+					      (setq i (+ close 1))))
+					   (t (write-char d out))))
+				   (incf i))
+			  (when (< i (length source)) (write-char #\] out) (incf i)))
+			 ((and (char= c #\\) (< (1+ i) (length source))
 			       (alphanumericp (char source (1+ i))))
 			  ;; rx: \a is a
 			  (write-char (char source (1+ i)) out)
@@ -46,11 +67,70 @@
 			  (incf i 2))
 			 (t (write-char c out) (incf i))))))))
 
+(defun group-end (s start)
+  "The index of the ) closing the group whose contents start at START in
+S, skipping escapes, classes and nested groups."
+  (let ((depth 0) (i start))
+    (loop while (< i (length s))
+	  do (let ((c (char s i)))
+	       (cond ((char= c #\\) (incf i 2))
+		     ((char= c #\[)
+		      (incf i)
+		      (when (and (< i (length s)) (char= (char s i) #\^)) (incf i))
+		      (when (and (< i (length s)) (char= (char s i) #\])) (incf i))
+		      (loop while (and (< i (length s)) (char/= (char s i) #\])) do (incf i))
+		      (incf i))
+		     ((char= c #\() (incf depth) (incf i))
+		     ((char= c #\))
+		      (when (zerop depth) (return-from group-end i))
+		      (decf depth) (incf i))
+		     (t (incf i)))))
+    (length s)))
+
+(defun top-level-alternatives (s)
+  "S split at its |s outside groups and classes."
+  (let ((parts '()) (start 0) (depth 0) (i 0))
+    (loop while (< i (length s))
+	  do (let ((c (char s i)))
+	       (cond ((char= c #\\) (incf i 2))
+		     ((char= c #\[) (setq i (1+ (or (position #\] s :start (+ i 2)) (1- (length s))))))
+		     ((char= c #\() (incf depth) (incf i))
+		     ((char= c #\)) (decf depth) (incf i))
+		     ((and (char= c #\|) (zerop depth))
+		      (push (subseq s start i) parts) (setq start (1+ i)) (incf i))
+		     (t (incf i)))))
+    (nreverse (cons (subseq s start) parts))))
+
+(defun split-lookbehinds (s)
+  "S with each lookbehind of several alternatives made one lookbehind per
+alternative: CL-PPCRE wants each fixed-length, Racket only bounded."
+  (let ((out (make-string-output-stream)) (i 0))
+    (loop while (< i (length s))
+	  do (let ((c (char s i)))
+	       (cond ((char= c #\\)
+		      (write-char c out) (when (< (1+ i) (length s)) (write-char (char s (1+ i)) out))
+		      (incf i 2))
+		     ((and (char= c #\() (< (+ i 3) (length s))
+			   (string= "(?<" s :start2 i :end2 (+ i 3))
+			   (member (char s (+ i 3)) '(#\= #\!)))
+		      (let* ((negative (char= (char s (+ i 3)) #\!))
+			     (end (group-end s (+ i 4)))
+			     (alternatives (mapcar #'split-lookbehinds
+						   (top-level-alternatives (subseq s (+ i 4) end)))))
+			(if (null (cdr alternatives))
+			    (format out "(?<~A~A)" (if negative "!" "=") (car alternatives))
+			    (if negative
+				(dolist (a alternatives) (format out "(?<!~A)" a))
+				(format out "(?:~{(?<=~A)~^|~})" alternatives)))
+			(setq i (1+ end))))
+		     (t (write-char c out) (incf i)))))
+    (get-output-stream-string out)))
+
 (defun make-rregexp (source px)
   (let* ((bytes (typep source '(simple-array (unsigned-byte 8) (*))))
 	 (text (if bytes (latin-1 source) source)))
     (%make-rregexp source px bytes
-		   (handler-case (cl-ppcre:create-scanner (translate-regexp text px))
+		   (handler-case (cl-ppcre:create-scanner (split-lookbehinds (translate-regexp text px)))
 		     (cl-ppcre:ppcre-syntax-error (e)
 		       (racket-error (if px "pregexp" "regexp") "~A" e))))))
 

@@ -18,7 +18,8 @@
   (install-natives)
   (install-linklet-primitives)
   (install-stubs)
-  (install-host-globals))
+  (install-host-globals)
+  (prune-extra-primitives))
 
 (defun linklet-eval (text)
   "TEXT's forms, each evaluated by Racket's expander in a namespace with

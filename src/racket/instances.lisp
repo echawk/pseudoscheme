@@ -29,7 +29,7 @@
 (defun define-primitive (instance name value)
   (setf (gethash name (primitive-instance instance)) value))
 
-(defun primitive (name &optional (instances *instance-names*))
+(defun primitive (name &optional (instances (append *instance-names* '("#%internal" "#%pseudoscheme"))))
   "NAME's value in the first of INSTANCES that has it, and T; else NIL, NIL."
   (dolist (i instances (values nil nil))
     (multiple-value-bind (v found) (gethash name (primitive-instance i))
@@ -133,6 +133,10 @@ source; without it, nothing."
       (destructuring-bind (instance . entries) table
 	(dolist (e entries)
 	  (let ((name (table-entry-name e)))
+	    ;; defined, but in another instance: this one has it too
+	    (multiple-value-bind (value found) (primitive name)
+	      (when (and found (not (nth-value 1 (gethash name (primitive-instance instance)))))
+		(define-primitive instance name value)))
 	    (when (and (uiop:string-prefix-p "known-procedure" (table-entry-kind e))
 		       ;; in no instance: one defined in another instance than
 		       ;; the table's is still the primitive (the host global
@@ -140,13 +144,49 @@ source; without it, nothing."
 		       (not (nth-value 1 (primitive name))))
 	      (setf (gethash name *stubs*) t)
 	      (define-primitive instance name
-		(if (and (eql (table-entry-mask e) 3)
-			 (or (uiop:string-prefix-p "current-" name) (uiop:string-prefix-p "error-" name)
-			     (uiop:string-prefix-p "print-" name) (uiop:string-prefix-p "read-" name)
-			     (uiop:string-prefix-p "port-" name) (search "-handler" name)
-			     (search "enabled" name)))
+		(if (and (eql (table-entry-mask e) 3) (parameter-name-p name))
 		    ;; parameter-shaped (a getter and setter, by name): a
 		    ;; parameter holding #f, which linklets read as they
 		    ;; instantiate
 		    (make-parameter* ps:false)
-		    (lambda (&rest args) (declare (ignore args)) (not-yet name)))))))))))
+		    (lambda (&rest args) (declare (ignore args)) (not-yet name)))))
+	    ;; a constant we lack: a property for a property's name, else a
+	    ;; value of its own, so that references to it compile and run
+	    (unless (or (uiop:string-prefix-p "known-procedure" (table-entry-kind e))
+			(nth-value 1 (primitive name)))
+	      (setf (gethash name *stubs*) t)
+	      (define-primitive instance name
+		(cond ((search "prop:" name) (%make-struct-type-property (rsym name) nil '()))
+		      ;; Racket CS lists parameters as constants
+		      ((parameter-name-p name) (make-parameter* ps:false))
+		      (t (make-missing-constant name)))))))))))
+
+(defun parameter-name-p (name)
+  "Whether NAME is shaped like a parameter's: Racket's parameters are named
+current-..., print-..., read-... and so on."
+  (and (not (find #\? name)) (not (find #\! name))
+       (or (some (lambda (prefix) (uiop:string-prefix-p prefix name))
+		 '("current-" "error-" "print-" "read-" "port-" "compile-" "use-" "load-"
+		   "eval-" "executable-" "exit-" "global-port-" "uncaught-"))
+	   (search "-handler" name) (search "enabled" name))))
+
+(defstruct (missing-constant (:constructor make-missing-constant (name))) name)
+
+(defun prune-extra-primitives ()
+  "Move each primitive an instance has that Racket CS's table for it
+doesn't list to the instance #%pseudoscheme: an instance exports exactly
+Racket's names, or a module that requires #%kernel and defines one of
+ours (racket/private's andmap, say) would find it already required.
+Compiled code still reaches them, by their host globals."
+  (when (ignore-errors (racket-source-directory))
+    (dolist (table (primitive-tables))
+      (destructuring-bind (instance . entries) table
+	(let ((names (make-hash-table :test 'equal))
+	      (extra '()))
+	  (dolist (e entries) (setf (gethash (table-entry-name e) names) t))
+	  (maphash (lambda (name value)
+		     (unless (gethash name names) (push (cons name value) extra)))
+		   (primitive-instance instance))
+	  (loop for (name . value) in extra
+		do (remhash name (primitive-instance instance))
+		   (define-primitive "#%pseudoscheme" name value)))))))
