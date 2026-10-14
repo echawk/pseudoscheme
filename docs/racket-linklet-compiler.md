@@ -321,10 +321,17 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   about 18 s, which is the expansion of racket/base. The first run after
   src/racket/ changes compiles everything again (about 100 s).
 
+- **.zo files.** A module file is compiled serializable as it loads, and
+  its `.zo` is written under a cache root (`current-compiled-file-roots`,
+  `~/.cache/pseudoscheme/racket/zo-SIGNATURE/`), never into Racket's tree.
+  The expander's own load handler finds it next time. Our
+  `write-linklet-bundle-hash` and `read-linklet-bundle-hash` write and
+  read a bundle as Racket data; the expander's machine-independent
+  bundles it writes itself. With both caches warm, a `#lang
+  racket/base` program runs in about 9 s.
+  `PSEUDOSCHEME_RACKET_ZO=0` turns `.zo` writing off.
+
 Next:
-- .zo files (write-linklet-bundle-hash and read-linklet-bundle-hash, with
-  compiled/pseudoscheme/ beside Racket's compiled/), so racket/base
-  isn't expanded each time;
 - milestone 2, the regexp linklet;
 - the rest of `#%kernel` that the extracted layers use, in the order the
   coverage report's `--missing` list makes plain.

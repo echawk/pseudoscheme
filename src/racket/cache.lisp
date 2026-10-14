@@ -28,6 +28,7 @@
   (exports '())				; the external names of the exports
   (export-internals '())		; ... and their names inside the linklet
   (source-key nil)			; a string identifying its source, for the cache
+  (source-form nil)			; the linklet as given, for .zo files
   (function nil))			; once loaded: the instantiation function
 
 (defun racket-signature ()
@@ -105,15 +106,80 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 	      (load-split-fasl fasl n)))
 	(mapcar #'psx:host-eval (cddr form)))))
 
-(defun write-linklet-bundle (bundle stream)
-  "write-linklet-bundle-hash: BUNDLE (phase or key -> compiled linklet or
-datum) to STREAM, in our .zo format."
-  (declare (ignore bundle stream))
-  (not-yet "write-linklet-bundle"))
+;;; ------------------------------------------------------------------
+;;; .zo files: write-linklet-bundle-hash and read-linklet-bundle-hash
+;;;
+;;; After the expander's header: a 4-byte length (little-endian), then the
+;;; bundle as Racket data in UTF-8, (#%pseudoscheme-bundle (key . value)
+;;; ...).  A linklet is (#%pseudoscheme-linklet name form), its form as
+;;; the expander gave it, decorrelated: reading it compiles it again,
+;;; which lowers it (fast) and finds its machine code in the fasl cache,
+;;; keyed by the same text.  Our values without a Racket syntax are
+;;; tagged lists: (#%pseudoscheme-void), (#%pseudoscheme-path "...").
 
-(defun read-linklet-bundle (stream)
-  (declare (ignore stream))
-  (not-yet "read-linklet-bundle"))
+(defun zo-encode (x)
+  (cond ((compiled-linklet-p x)
+	 (list (rsym "#%pseudoscheme-linklet") (or (compiled-linklet-name x) ps:false)
+	       (zo-encode (correlated->datum (compiled-linklet-source-form x)))))
+	((eq x *void*) (list (rsym "#%pseudoscheme-void")))
+	((eq x ps:eof-object) (list (rsym "#%pseudoscheme-eof")))
+	((rpath-p x) (list (rsym "#%pseudoscheme-path") (rpath-string x)))
+	((correlated-p x) (zo-encode (correlated->datum x)))
+	((rregexp-p x)
+	 ;; as the #rx or #px literal it prints as
+	 (make-regexp-literal (if (rregexp-px x) :px :rx) (rregexp-source x)))
+	((consp x) (let ((a (zo-encode (car x))) (d (zo-encode (cdr x))))
+		     (if (and (eq a (car x)) (eq d (cdr x))) x (cons a d))))
+	((simple-vector-p x) (map 'simple-vector #'zo-encode x))
+	((ihash-p x) (ihash-from-assocs (ihash-kind x)
+					(map 'list (lambda (e) (cons (zo-encode (car e)) (zo-encode (cdr e))))
+					     (ihash-entries x))))
+	((or (symbolp x) (numberp x) (stringp x) (characterp x) (rkeyword-p x) (rbox-p x)
+	     (typep x '(simple-array (unsigned-byte 8) (*))) (regexp-literal-p x))
+	 x)
+	(t (error "can't put ~S in a .zo" x))))
+
+(defun zo-decode (x)
+  (cond ((and (consp x) (symbolp (car x)))
+	 (let ((head (rname (car x))))
+	   (cond ((string= head "#%pseudoscheme-linklet")
+		  (compile-linklet (zo-decode (third x)) (zo-decode (second x))))
+		 ((string= head "#%pseudoscheme-void") *void*)
+		 ((string= head "#%pseudoscheme-eof") ps:eof-object)
+		 ((string= head "#%pseudoscheme-path") (make-rpath (second x)))
+		 (t (cons (zo-decode (car x)) (zo-decode (cdr x)))))))
+	((consp x) (cons (zo-decode (car x)) (zo-decode (cdr x))))
+	((simple-vector-p x) (map 'simple-vector #'zo-decode x))
+	((ihash-p x) (ihash-from-assocs (ihash-kind x)
+					(map 'list (lambda (e) (cons (zo-decode (car e)) (zo-decode (cdr e))))
+					     (ihash-entries x))))
+	(t x)))
+
+(defun write-linklet-bundle (bundle port)
+  "write-linklet-bundle-hash: BUNDLE (a hash: phase or key -> linklet or
+data) to PORT, an output port of ours."
+  (let* ((text (with-output-to-string (s)
+		 (print-value (cons (rsym "#%pseudoscheme-bundle")
+				    (map 'list (lambda (e) (cons (car e) (zo-encode (cdr e))))
+					 (entries bundle)))
+			      s :write)))
+	 (bytes (bytes-of text)))
+    (out-bytes port (let ((n (length bytes)))
+		      (make-array 4 :element-type '(unsigned-byte 8)
+				    :initial-contents (loop for i below 4 collect (ldb (byte 8 (* 8 i)) n)))))
+    (out-bytes port bytes)
+    *void*))
+
+(defun read-linklet-bundle (port)
+  "read-linklet-bundle-hash: the bundle WRITE-LINKLET-BUNDLE wrote, from
+PORT, an input port of ours."
+  (let* ((n (loop for i below 4 sum (ash (inport-read-byte port) (* 8 i))))
+	 (start (rinport-pos port))
+	 (text (sb-ext:octets-to-string (rinport-bytes port) :external-format :utf-8
+					:start start :end (+ start n))))
+    (setf (rinport-pos port) (+ start n))
+    (let ((datum (with-input-from-string (in text) (read-racket in))))
+      (ihash-from-assocs :eq (mapcar (lambda (e) (cons (car e) (zo-decode (cdr e)))) (cdr datum))))))
 
 ;;; (system-type 'vm) answers this, so that Racket code that checks for
 ;;; chez-scheme doesn't take paths meant for Racket CS's machine code.

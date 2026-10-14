@@ -139,6 +139,7 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 	     (read-racket (make-string-input-stream
 			   "(begin (current-library-collection-links (find-library-collection-links))
                                    (current-library-collection-paths (find-library-collection-paths)))")))
+    (install-zo-writer)
     (setq *expander-booted* t))
   (funcall (expander-export "eval") datum))
 
@@ -156,3 +157,67 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
   (if handler-p
       (progn (setf (gethash port *port-read-handlers*) handler) *void*)
       (or (gethash port *port-read-handlers*) #'default-port-read-handler)))
+
+;;; ------------------------------------------------------------------
+;;; .zo files: a module file's compiled form, written as it is compiled,
+;;; and found by the expander's own load handler next time
+;;;
+;;; The expander compiles machine-independently here (current-compile-
+;;; target-machine is #f), so a .zo holds correlated linklets, which the
+;;; expander writes and reads itself; loading one compiles its linklets,
+;;; whose machine code is in the fasl cache (cache.lisp).  The .zo files
+;;; go under a cache root, current-compiled-file-roots, never into
+;;; Racket's tree; the root's name has the signature in it, so a change
+;;; to our code starts afresh.  PSEUDOSCHEME_RACKET_ZO=0 turns them off.
+
+(defun zo-root ()
+  (uiop:merge-pathnames*
+   (format nil "../racket/zo-~36R/" (psx::fnv-1a (racket-signature)))
+   (psx::library-cache-directory)))
+
+(defun expander-value (name)
+  "NAME's value in the expander's #%kernel namespace."
+  (funcall (expander-export "eval") (rsym name)))
+
+(defun install-zo-writer ()
+  (unless (member (uiop:getenv "PSEUDOSCHEME_RACKET_ZO") '("0" "no" "off") :test #'equal)
+    (let* ((root (namestring (zo-root)))
+	   (current-compile (expander-export "current-compile"))
+	   (compile (funcall current-compile))
+	   (declare-name (expander-value "current-module-declare-name"))
+	   (resolved-name (expander-value "resolved-module-path-name")))
+      (ensure-directories-exist root)
+      (funcall (expander-export "current-compiled-file-roots") (list (make-rpath root)))
+      (funcall current-compile
+	       (lambda (stx immediate-eval?)
+		 ;; a module file's declaration is compiled serializable (as
+		 ;; for immediate-eval? #f) to be written; the same code runs
+		 (let* ((name (funcall declare-name))
+			(file (and (truthy name) (rpath-p (funcall resolved-name name))))
+			(compiled (funcall compile stx (if file ps:false immediate-eval?))))
+		   (when (truthy name)
+		     (let ((path (funcall resolved-name name)))
+		       (when (rpath-p path)
+			 (handler-case (write-zo compiled (rpath-string path) root)
+			   (error (e)
+			     (when (uiop:getenv "PSEUDOSCHEME_RACKET_BACKTRACE")
+			       (format *error-output* "~&;; no .zo for ~A: ~A~%" (rpath-string path) e)))))))
+		   compiled))))))
+
+(defun zo-path (source root)
+  "Where the expander looks for SOURCE's .zo under ROOT: ROOT/DIR/compiled/
+NAME_EXT.zo, DIR being SOURCE's directory less its leading /."
+  (let* ((slash (position #\/ source :from-end t))
+	 (dir (subseq source 1 (1+ slash)))
+	 (file (substitute #\_ #\. (subseq source (1+ slash)))))
+    (format nil "~A~Acompiled/~A.zo" root dir file)))
+
+(defun write-zo (compiled source root)
+  (let* ((path (zo-path source root))
+	 (temp (format nil "~A.~36R" path (random (expt 36 8) (make-random-state t))))
+	 (port (make-routport (rsym "zo"))))
+    (funcall (native-function (gethash "write" *natives*)) compiled port)
+    (ensure-directories-exist path)
+    (with-open-file (out temp :direction :output :element-type '(unsigned-byte 8) :if-exists :supersede)
+      (write-sequence (routport-buffer port) out))
+    (rename-file temp path)))

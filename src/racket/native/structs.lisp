@@ -196,6 +196,17 @@ to VALUE, after PROPERTY's guard."
 		     (attach-property (struct-type-properties type) property value info)))
       (let ((proc (cdr (assoc *prop-procedure* props))))
 	(when proc (setf (struct-type-proc-spec type) proc)))
+      ;; inspector 'prefab: a prefab struct type, the same for all who
+      ;; make one of this name and shape
+      (when (and (symbolp inspector) inspector (string= (rname inspector) "prefab"))
+	(let* ((key (normalized-prefab-key name (loop for i below count unless (member i immutables) collect i)
+					   parent))
+	       (existing (gethash (cons (rkey key) (struct-type-total type)) *prefab-types*)))
+	  (if existing
+	      ;; the same prefab type as before: its instances are each other's
+	      (setq type existing)
+	      (setf (struct-type-prefab-key type) key
+		    (gethash (cons (rkey key) (struct-type-total type)) *prefab-types*) type))))
       (values type
 	      (constructor type)
 	      (lambda (x) (bool (and (struct-instance-p x) (subtype-p (struct-of-type x) type))))

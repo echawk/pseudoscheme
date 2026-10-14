@@ -47,6 +47,11 @@
 			  (t (format stream "\\~O" b))))
 	   (write-char #\" stream))
 	  ((rkeyword-p x) (format stream "#:~A" (rkeyword-name x)))
+	  ((or (regexp-literal-p x) (rregexp-p x))
+	   (let ((source (if (rregexp-p x) (rregexp-source x) (regexp-literal-source x)))
+		 (px (if (rregexp-p x) (rregexp-px x) (eq (regexp-literal-kind x) :px))))
+	     (write-string (if px "#px" "#rx") stream)
+	     (p source)))
 	  ((rbox-p x) (write-string "#&" stream) (p (rbox-value x)))
 	  ((mpair-p x)
 	   (write-char #\{ stream)
@@ -66,6 +71,9 @@
 		 do (unless first (write-char #\Space stream))
 		    (write-char #\( stream) (p k) (write-string " . " stream) (p v) (write-char #\) stream))
 	   (write-char #\) stream))
+	  ((custom-write-procedure x)
+	   (write-string (custom-written x (custom-write-procedure x) (if (eq mode :display) ps:false ps:true))
+			 stream))
 	  ((struct-instance-p x)
 	   (let ((type (struct-of-type x)))
 	     (cond ((struct-type-prefab-key type)
@@ -107,15 +115,36 @@ struct as its constructor's application, (point 1 2)."
 not given."
   (or port (funcall (psx:host-ref "current-output-port"))))
 
+(defun custom-write-procedure (x)
+  "X's prop:custom-write procedure, if X is a struct with one."
+  (and (struct-instance-p x)
+       (multiple-value-bind (v found) (property-value x (primitive "prop:custom-write"))
+	 (and found (functionp v) v))))
+
+(defun custom-written (x f mode)
+  "What F, X's prop:custom-write procedure, writes in MODE, as a string."
+  (let ((port (make-routport (rsym "string"))))
+    (funcall f x port mode)
+    (sb-ext:octets-to-string (coerce (routport-buffer port) '(simple-array (unsigned-byte 8) (*)))
+			     :external-format :latin-1)))
+
+(defun write-with-mode (x port mode lisp-mode)
+  "write, display or print of X to PORT: its prop:custom-write procedure
+writes straight to the port (compiled code writes its bytes so)."
+  (let ((f (custom-write-procedure x)))
+    (if f
+	(progn (funcall f x (output-port port) mode) *void*)
+	(to-port port (lambda (s) (if (eq lisp-mode :print) (print-quoted x s) (print-value x s lisp-mode)))))))
+
 (defun to-port (port f)
   (port-write-string (with-output-to-string (s) (funcall f s)) port)
   *void*)
 
-(defnative "write" (x &optional port) () (to-port port (lambda (s) (print-value x s :write))))
-(defnative "display" (x &optional port) () (to-port port (lambda (s) (print-value x s :display))))
+(defnative "write" (x &optional port) () (write-with-mode x port ps:true :write))
+(defnative "display" (x &optional port) () (write-with-mode x port ps:false :display))
 (defnative "print" (x &optional port quote-depth) ()
   (declare (ignore quote-depth))
-  (to-port port (lambda (s) (print-quoted x s))))
+  (write-with-mode x port 0 :print))
 (defnative "writeln" (x &optional port) ()
   (to-port port (lambda (s) (print-value x s :write) (terpri s))))
 (defnative "displayln" (x &optional port) ()
