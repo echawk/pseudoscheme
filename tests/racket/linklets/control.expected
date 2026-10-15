@@ -1,5 +1,5 @@
 (1 ((2 1)) (2) (10 20) (caught oops) (caught "contract violation
   expected: pair?
   given: 5") (caught "/: division by zero") (caught "who: bad 42") (caught inner) (1 5) (2 6) (1 5))
-uncaught exception: uncaught
+uncaught exception: 'uncaught
 (after)

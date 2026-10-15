@@ -2,47 +2,164 @@
 
 ;;;; Ports, natively: strategy B's stand-in for the io layer's ports,
 ;;;; enough for the expander to read modules (docs/racket.md, "How Racket
-;;;; is layered").
+;;;; is layered"), and the rest of Racket's port procedures that a
+;;;; program meets (port-ops.lisp has the less common ones).
 ;;;;
-;;;; An input port (RINPORT) is bytes and a position: a file is read
-;;;; whole when opened.  Characters are decoded from UTF-8 as they are
-;;;; read; with line counting on (port-count-lines!), the port keeps the
-;;;; line, column and position of the next character, as Racket's does.
-;;;; An output port (ROUTPORT) collects bytes, for open-output-bytes and
-;;;; open-output-string.  The operations take these, or the host's ports
-;;;; (current-input-port and the like are the host's), and pass the
-;;;; host's to the host's procedures.
-;;;; Not yet: custom ports, pipes, file output ports, specials, peeking
-;;;; progress events, encodings other than UTF-8.
+;;;; An input port (RINPORT) is a buffer of bytes and a position.  A
+;;;; port of a string, bytes or a file has all its bytes when opened; the
+;;;; others (pipes, custom ports, the host's) fill the buffer as bytes
+;;;; are asked for (RINPORT-FILL), and drop what has been read now and
+;;;; then.  A custom port with a peek procedure has no buffer: its peeks
+;;;; and reads call its procedures.  Characters are decoded from UTF-8
+;;;; as they are read; with line counting on (port-count-lines!), the
+;;;; port keeps the line, column and position of the next character, as
+;;;; Racket's does.
+;;;; An output port (ROUTPORT) is one of: bytes collected, for
+;;;; open-output-bytes and open-output-string; a file; the output end of
+;;;; a pipe; a custom port.  The operations take these, or the host's
+;;;; ports (current-input-port and the like are the host's), and pass
+;;;; the host's to the host's procedures.
+;;;; There is one thread, so a read that would block forever is an
+;;;; error, as sync's is.
+;;;; Not yet: encodings other than UTF-8, progress events of the host's ports.
 
 (in-package "PSEUDOSCHEME-RACKET")
 
-(defstruct (rinport (:constructor make-rinport (bytes name)))
+(deftype octets () '(simple-array (unsigned-byte 8) (*)))
+
+(defun make-octets (n) (make-array n :element-type '(unsigned-byte 8)))
+
+;;; port-count-lines-enabled: new ports count lines when it is true
+(defvar *port-count-lines-enabled* (make-parameter* ps:false))
+(define-primitive "#%kernel" "port-count-lines-enabled" *port-count-lines-enabled*)
+
+(defun auto-count-lines () (truthy (funcall *port-count-lines-enabled*)))
+
+;;; What a custom input port is made of (make-input-port, port-ops.lisp)
+(defstruct custom-in
+  read-in peek-in close progress commit location count-lines init-position buffer-mode
+  (pipe nil)				; a pipe the read procedure redirected to
+  (closed nil))
+
+(defstruct (rinport (:constructor make-rinport (bytes name &key (kind :static) (end nil) (fill nil) (custom nil))))
   (bytes #() :type (simple-array (unsigned-byte 8) (*)))
   (pos 0 :type fixnum)
   name
   (closed nil)
   (count-lines nil)
-  (line 1) (column 0) (position 1))	; of the next character, when counting
+  (line 1) (column 0) (position 1)	; of the next character, when counting
+  end					; a lazy port's bytes end here (NIL: at the end of BYTES)
+  (base 0)				; bytes dropped from the front of BYTES
+  kind					; :static :string :pipe :custom :host
+  fill					; (port need blocking) -> :data, :eof or :block, after appending bytes
+  custom
+  (progress nil)			; the semaphore of the port's progress event, until the port progresses
+  (closed-sema nil)
+  (peer nil)				; a pipe's output port
+  (limit nil)				; a pipe's capacity
+  (writer-closed nil)			; a pipe's output end is closed
+  (host nil)				; the host port a :host port reads
+  (buffer-mode nil))
+
+(defstruct custom-out
+  write-out close write-out-special get-write-evt get-write-special-evt
+  location count-lines init-position buffer-mode)
 
 (defstruct (routport (:constructor make-routport (name)))
   (buffer (make-array 64 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
   name
-  (closed nil))
+  (closed nil)
+  (kind :bytes)				; :bytes :file :pipe :custom
+  (stream nil)				; a file's
+  (peer nil)				; a pipe's input port
+  (custom nil)
+  (written 0)				; bytes written, for file-position
+  (closed-sema nil)
+  (count-lines nil)
+  (line 1) (column 0) (position 1)
+  (buffer-mode nil)
+  (path nil))
 
-(defmethod print-object ((p rinport) stream) (format stream "#<input-port:~A>" (rinport-name p)))
-(defmethod print-object ((p routport) stream) (format stream "#<output-port:~A>" (routport-name p)))
+(defun name-string (name)
+  (cond ((rpath-p name) (rpath-string name))
+	((stringp name) name)
+	(t (with-output-to-string (s) (print-value name s :display)))))
+
+(defun port-desc (p)
+  "P as Racket's error messages show it."
+  (typecase p
+    (rinport (format nil "#<input-port:~A>" (name-string (rinport-name p))))
+    (routport (format nil "#<output-port:~A>" (name-string (routport-name p))))
+    (t (written p))))
+
+(defmethod print-object ((p rinport) stream) (write-string (port-desc p) stream))
+(defmethod print-object ((p routport) stream) (write-string (port-desc p) stream))
 
 (defun bytes-of (s) (sb-ext:string-to-octets s :external-format :utf-8))
 
+(defun decode-utf-8 (bytes &optional (start 0) end)
+  (sb-ext:octets-to-string bytes :start start :end end
+				 :external-format (list :utf-8 :replacement (code-char #xFFFD))))
+
+(defun finish-inport (p)
+  "P, counting lines if the parameter says so."
+  (when (auto-count-lines) (setf (rinport-count-lines p) t))
+  p)
+
+(defun finish-outport (p)
+  (when (auto-count-lines) (setf (routport-count-lines p) t))
+  p)
+
+(defun new-lazy-inport (name kind fill &key custom)
+  (finish-inport (make-rinport (make-octets 0) name :kind kind :end 0 :fill fill :custom custom)))
+
+(defun evt-p (x) (or (revt-p x) (rsemaphore-p x)))
+
 ;;; ------------------------------------------------------------------
-;;; Input
+;;; Where the next character is
+
+(defmacro bump (place &optional (n 1))
+  `(when (integerp ,place) (incf ,place ,n)))
+
+(defmacro define-location-noter (name count line column position)
+  `(defun ,name (p c)
+     (when (,count p)
+       (bump (,position p))
+       (cond ((char= c #\Newline) (bump (,line p)) (setf (,column p) (if (integerp (,column p)) 0 (,column p))))
+	     ((char= c #\Tab) (when (integerp (,column p)) (setf (,column p) (* 8 (1+ (floor (,column p) 8))))))
+	     (t (bump (,column p)))))))
+
+(define-location-noter note-in-char rinport-count-lines rinport-line rinport-column rinport-position)
+(define-location-noter note-out-char routport-count-lines routport-line routport-column routport-position)
+
+(defun note-char (p c)
+  (if (rinport-p p) (note-in-char p c) (note-out-char p c)))
+
+(defun counting-p (p)
+  (if (rinport-p p) (rinport-count-lines p) (routport-count-lines p)))
+
+(defun note-bytes (p vec start end)
+  "Bytes VEC[START,END) went through P: move its location past the characters they start."
+  (when (counting-p p)
+    (loop for i from start below end
+	  for b = (aref vec i)
+	  do (unless (= (logand b #xC0) #x80)
+	       (note-char p (if (< b #x80) (code-char b) #\?))))))
+
+(defun note-special (p)
+  (when (counting-p p) (note-char p #\?)))
+
+;;; ------------------------------------------------------------------
+;;; Input: the buffer
+
+(defun utf-8-lead-length (b)
+  (cond ((< b #x80) 1) ((< b #xC0) 0) ((< b #xE0) 2) ((< b #xF0) 3) ((< b #xF8) 4) (t 0)))
 
 (defun utf-8-char-at (bytes pos)
   "The character whose UTF-8 encoding starts at POS in BYTES, and how
 many bytes it takes; a bad sequence is #\\uFFFD, one byte."
   (let* ((b (aref bytes pos))
-	 (n (cond ((< b #x80) 1) ((< b #xC0) 0) ((< b #xE0) 2) ((< b #xF0) 3) ((< b #xF8) 4) (t 0))))
+	 (n (utf-8-lead-length b)))
     (if (or (= n 0) (> (+ pos n) (length bytes)))
 	(values (code-char #xFFFD) 1)
 	(if (= n 1)
@@ -56,191 +173,740 @@ many bytes it takes; a bad sequence is #\\uFFFD, one byte."
 	      (values (if (or (> code #x10FFFF) (<= #xD800 code #xDFFF)) (code-char #xFFFD) (code-char code))
 		      n))))))
 
-(defun inport-peek-char (p skip)
-  "The character SKIP bytes after P's position, and its byte length, or NIL."
-  (let ((pos (+ (rinport-pos p) skip)))
-    (if (>= pos (length (rinport-bytes p)))
-	nil
-	(utf-8-char-at (rinport-bytes p) pos))))
+(defun ip-end (p) (or (rinport-end p) (length (rinport-bytes p))))
 
-(defun note-char (p c)
-  (when (rinport-count-lines p)
-    (incf (rinport-position p))
-    (cond ((char= c #\Newline) (incf (rinport-line p)) (setf (rinport-column p) 0))
-	  ((char= c #\Tab) (setf (rinport-column p) (* 8 (1+ (floor (rinport-column p) 8)))))
-	  (t (incf (rinport-column p))))))
+(defun ip-append (p vec start end)
+  "Add VEC[START,END) to the end of lazy port P's buffer, first dropping what's been read."
+  (let* ((n (- end start))
+	 (e (ip-end p))
+	 (bytes (rinport-bytes p)))
+    (when (and (> (rinport-pos p) 4096) (> (* 2 (rinport-pos p)) e))
+      (let ((k (rinport-pos p)))
+	(replace bytes bytes :start1 0 :start2 k :end2 e)
+	(decf e k)
+	(incf (rinport-base p) k)
+	(setf (rinport-pos p) 0)))
+    (when (> (+ e n) (length bytes))
+      (let ((new (make-octets (max (* 2 (length bytes)) (+ e n) 256))))
+	(replace new bytes :end2 e)
+	(setf bytes new (rinport-bytes p) new)))
+    (replace bytes vec :start1 e :start2 start :end2 end)
+    (setf (rinport-end p) (+ e n))))
 
-(defun inport-read-char (p)
-  (multiple-value-bind (c n) (inport-peek-char p 0)
+(defun ip-fill (p need blocking)
+  (let ((f (rinport-fill p)))
+    (if f (funcall f p need blocking) :eof)))
+
+(defun ip-avail (p skip want blocking)
+  "How many bytes, up to WANT, are SKIP bytes past P's position (filling
+a lazy port if there are none), and, if none, :eof or :block."
+  (if (<= want 0)
+      (values 0 nil)
+      (loop
+	(let ((have (- (ip-end p) (rinport-pos p) skip)))
+	  (when (plusp have) (return (values (min have want) nil)))
+	  (case (ip-fill p (- (+ skip want) (- (ip-end p) (rinport-pos p))) blocking)
+	    (:data nil)
+	    (:eof (return (values 0 :eof)))
+	    (t (if blocking
+		   (racket-error "read" "would block forever (one thread)")
+		   (return (values 0 :block)))))))))
+
+(defun ip-progress (p)
+  "P read something: its progress event is ready."
+  (let ((s (rinport-progress p)))
+    (when s
+      (incf (rsemaphore-count s))
+      (setf (rinport-progress p) nil))))
+
+(defun ip-advance (p n)
+  (incf (rinport-pos p) n)
+  (ip-progress p))
+
+(defun pipe-content (p) (- (ip-end p) (rinport-pos p)))
+
+(defun peek-proc-port-p (p)
+  (let ((c (rinport-custom p))) (and c (custom-in-peek-in c))))
+
+;;; ------------------------------------------------------------------
+;;; Custom input ports: the user's procedures
+
+(defun custom-call (p buf skip blocking progress-evt)
+  "Call P's read procedure (SKIP NIL) or peek procedure with BUF (a fresh
+byte string), for some of the bytes the caller asked for: the count
+(positive), :eof, :block, :progress, (:special . procedure) or (:pipe . input-port)."
+  (let* ((c (rinport-custom p))
+	 (peek (not (null skip)))
+	 (proc (if peek (custom-in-peek-in c) (custom-in-read-in c)))
+	 (who (if peek "user port peek" "user port read")))
+    (loop repeat 100000
+	  do (let ((r (cond ((rinport-p proc)
+			     (let ((n (if peek
+					  (ip-peek-bytes proc skip buf 0 (length buf) blocking)
+					  (ip-read-bytes proc buf 0 (length buf) blocking))))
+			       (if (functionp n) (return (cons :special n)) n)))
+			    (peek (funcall proc buf skip (or progress-evt ps:false)))
+			    (t (funcall proc buf)))))
+	       (cond ((integerp r)
+		      (when (> r (length buf))
+			(racket-error who "result integer is larger than the supplied byte string~%  result: ~D~%  byte-string length: ~D"
+				      r (length buf)))
+		      (when (plusp r) (return r))
+		      (unless blocking (return :block)))
+		     ((eq r ps:eof-object) (return :eof))
+		     ((member r '(:eof :block :progress)) (return r))
+		     ((rinport-p r)
+		      (unless (eq (rinport-kind r) :pipe)
+			(racket-error who "result is not an accepted value~%  result: ~A" (written r)))
+		      (return (cons :pipe r)))
+		     ((evt-p r)
+		      (if blocking
+			  (unless (nth-value 1 (evt-ready r))
+			    (racket-error "sync" "would block forever (one thread)"))
+			  (return :block)))
+		     ((eq r ps:false)
+		      (if progress-evt
+			  (return :progress)
+			  (racket-error who "returned #f when no progress evt was supplied")))
+		     ((functionp r)
+		      (unless (custom-in-peek-in c)
+			(racket-error who "the port has no specific peek procedure, so a special read result is not allowed~%  special result: ~A"
+				      (written r)))
+		      (return (cons :special r)))
+		     (t (racket-error who "result is not an accepted value~%  result: ~A" (written r)))))
+	  finally (racket-error "read" "would block forever (one thread)"))))
+
+(defun custom-peek (p skip dest dstart dend blocking &optional progress-evt)
+  "Peek P's peek procedure for the bytes of DEST[DSTART,DEND): see IP-PEEK-BYTES."
+  (let ((c (rinport-custom p)))
+    (loop
+      (let ((pipe (custom-in-pipe c)))
+	(if (and pipe (> (pipe-content pipe) skip))
+	    (return (ip-peek-bytes pipe skip dest dstart dend blocking))
+	    (setf (custom-in-pipe c) nil)))
+      (let* ((buf (make-octets (min (- dend dstart) 8192)))
+	     (r (custom-call p buf skip blocking progress-evt)))
+	(cond ((integerp r) (replace dest buf :start1 dstart :end2 r) (return r))
+	      ((and (consp r) (eq (car r) :pipe)) (setf (custom-in-pipe c) (cdr r)))
+	      ((consp r) (return (cdr r)))
+	      (t (return r)))))))
+
+(defun custom-read (p dest dstart dend blocking)
+  "Read P's read procedure for the bytes of DEST[DSTART,DEND): see IP-READ-BYTES."
+  (let ((c (rinport-custom p)))
+    (loop
+      (let ((pipe (custom-in-pipe c)))
+	(if (and pipe (plusp (pipe-content pipe)))
+	    (return (ip-read-bytes pipe dest dstart dend blocking))
+	    (setf (custom-in-pipe c) nil)))
+      (let* ((buf (make-octets (min (- dend dstart) 8192)))
+	     (r (custom-call p buf nil blocking nil)))
+	(cond ((integerp r) (replace dest buf :start1 dstart :end2 r) (return r))
+	      ((and (consp r) (eq (car r) :pipe)) (setf (custom-in-pipe c) (cdr r)))
+	      ((consp r) (return (cdr r)))
+	      (t (return r)))))))
+
+(defun custom-fill (p need blocking)
+  "The fill procedure of a custom port without a peek procedure: ask its read procedure."
+  (let ((c (rinport-custom p)))
+    (loop
+      (let ((pipe (custom-in-pipe c)))
+	(if (and pipe (plusp (pipe-content pipe)))
+	    (let* ((n (min (pipe-content pipe) 8192))
+		   (buf (make-octets n)))
+	      (ip-read-bytes pipe buf 0 n nil)
+	      (ip-append p buf 0 n)
+	      (return :data))
+	    (setf (custom-in-pipe c) nil)))
+      (let* ((buf (make-octets (max 1 (min need 8192))))
+	     (r (custom-call p buf nil blocking nil)))
+	(cond ((integerp r) (ip-append p buf 0 r) (return :data))
+	      ((and (consp r) (eq (car r) :pipe)) (setf (custom-in-pipe c) (cdr r)))
+	      (t (return r)))))))
+
+;;; ------------------------------------------------------------------
+;;; Input: peeking and reading bytes
+
+(defun ip-peek-bytes (p skip dest dstart dend blocking)
+  "Up to DEND-DSTART bytes of P, SKIP bytes after its position, into DEST
+from DSTART, not consumed: the count (at least one unless asked for
+none), :eof, :block (nothing now, and not BLOCKING), :progress, or a
+procedure, a special."
+  (let ((n (- dend dstart)))
+    (cond ((<= n 0) 0)
+	  ((peek-proc-port-p p) (custom-peek p skip dest dstart dend blocking))
+	  (t (multiple-value-bind (m status) (ip-avail p skip n blocking)
+	       (if (plusp m)
+		   (let ((from (+ (rinport-pos p) skip)))
+		     (replace dest (rinport-bytes p) :start1 dstart :start2 from :end2 (+ from m))
+		     m)
+		   status))))))
+
+(defun ip-read-bytes (p dest dstart dend blocking)
+  "Like IP-PEEK-BYTES, and consumes what it returns."
+  (let ((n (- dend dstart)))
+    (cond ((<= n 0) 0)
+	  ((peek-proc-port-p p)
+	   (let ((r (custom-read p dest dstart dend blocking)))
+	     (cond ((integerp r) (ip-progress p) (note-bytes p dest dstart (+ dstart r)))
+		   ((functionp r) (ip-progress p) (note-special p)))
+	     r))
+	  (t (let ((r (ip-peek-bytes p 0 dest dstart dend blocking)))
+	       (when (integerp r)
+		 (ip-advance p r)
+		 (note-bytes p dest dstart (+ dstart r)))
+	       r)))))
+
+(defun ip-skip (p n)
+  "Consume N bytes that were peeked."
+  (if (peek-proc-port-p p)
+      (let ((tmp (make-octets n)) (got 0))
+	(loop while (< got n)
+	      do (let ((r (custom-read p tmp got n t)))
+		   (if (integerp r) (incf got r) (return))))
+	(ip-progress p))
+      (ip-advance p n)))
+
+(defun special-error (who p)
+  (racket-error who "non-character in an unsupported context~%  port: ~A" (port-desc p)))
+
+(defun inport-peek-byte (p skip &optional (who "peek-byte") special-ok)
+  "The byte SKIP bytes after P's position, or eof (or a special)."
+  (if (and (null (rinport-fill p)) (null (rinport-custom p)))
+      (let ((pos (+ (rinport-pos p) skip)))
+	(if (< pos (ip-end p)) (aref (rinport-bytes p) pos) ps:eof-object))
+      (let* ((tmp (make-octets 1))
+	     (r (ip-peek-bytes p skip tmp 0 1 t)))
+	(cond ((eql r 1) (aref tmp 0))
+	      ((functionp r) (if special-ok r (special-error who p)))
+	      (t ps:eof-object)))))
+
+(defun inport-read-byte (p &optional (who "read-byte") special-ok)
+  (if (and (null (rinport-fill p)) (null (rinport-custom p)))
+      (if (>= (rinport-pos p) (ip-end p))
+	  ps:eof-object
+	  (let ((b (aref (rinport-bytes p) (rinport-pos p))))
+	    (ip-advance p 1)
+	    (when (rinport-count-lines p) (note-in-char p (if (< b #x80) (code-char b) #\?)))
+	    b))
+      (let* ((tmp (make-octets 1))
+	     (r (ip-read-bytes p tmp 0 1 t)))
+	(cond ((eql r 1) (aref tmp 0))
+	      ((functionp r) (if special-ok r (special-error who p)))
+	      (t ps:eof-object)))))
+
+;;; ------------------------------------------------------------------
+;;; Input: characters
+
+(defun inport-peek-char (p skip &optional (who "peek-char") special-ok)
+  "The character SKIP bytes after P's position, and its byte length; NIL
+at eof (or a special, and 1)."
+  (if (and (null (rinport-fill p)) (null (rinport-custom p)))
+      (let ((pos (+ (rinport-pos p) skip)))
+	(if (>= pos (ip-end p))
+	    nil
+	    (utf-8-char-at (rinport-bytes p) pos)))
+      (let* ((tmp (make-octets 4))
+	     (r (ip-peek-bytes p skip tmp 0 1 t)))
+	(cond ((eql r 1)
+	       (let ((n (utf-8-lead-length (aref tmp 0))))
+		 (if (<= n 1)
+		     (utf-8-char-at tmp 0)
+		     (let ((got 1))
+		       (loop while (< got n)
+			     do (let ((m (ip-peek-bytes p (+ skip got) tmp got n t)))
+				  (if (integerp m) (incf got m) (return))))
+		       (utf-8-char-at (subseq tmp 0 got) 0)))))
+	      ((functionp r) (if special-ok (values r 1) (special-error who p)))
+	      (t nil)))))
+
+(defun inport-read-char (p &optional (who "read-char") special-ok)
+  (multiple-value-bind (c n) (inport-peek-char p 0 who special-ok)
     (cond ((null c) ps:eof-object)
-	  (t (incf (rinport-pos p) n) (note-char p c) c))))
+	  ((functionp c) (ip-skip p 1) (note-special p) c)
+	  (t (ip-skip p n) (note-in-char p c) c))))
 
-(defun inport-read-byte (p)
-  (if (>= (rinport-pos p) (length (rinport-bytes p)))
-      ps:eof-object
-      (prog1 (aref (rinport-bytes p) (rinport-pos p))
-	(incf (rinport-pos p))
-	(when (rinport-count-lines p) (incf (rinport-position p))))))
+(defun read-chars (p n who)
+  "Up to N characters of P, a string, or eof if there were none."
+  (let ((out (make-string-output-stream)) (count 0))
+    (loop while (< count n)
+	  do (let ((c (inport-read-char p who)))
+	       (when (eq c ps:eof-object) (return))
+	       (write-char c out)
+	       (incf count)))
+    (if (and (zerop count) (plusp n)) ps:eof-object (get-output-stream-string out))))
+
+(defun read-line-bytes (p mode who)
+  "The bytes of P up to the next line separator of MODE (a string), which is consumed; or eof."
+  (let ((out (make-array 80 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+	(seen nil))
+    (flet ((result () (coerce out 'octets)))
+      (loop
+	(let ((b (inport-read-byte p who)))
+	  (cond ((eq b ps:eof-object) (return (if seen (result) ps:eof-object)))
+		(t (setq seen t)
+		   (cond ((and (= b 10) (member mode '("linefeed" "any" "any-one") :test #'string=))
+			  (return (result)))
+			 ((and (= b 13) (string= mode "return")) (return (result)))
+			 ((= b 13)
+			  (cond ((string= mode "return-linefeed")
+				 (if (eql (inport-peek-byte p 0 who) 10)
+				     (progn (inport-read-byte p who) (return (result)))
+				     (vector-push-extend b out)))
+				((string= mode "any")
+				 (when (eql (inport-peek-byte p 0 who) 10) (inport-read-byte p who))
+				 (return (result)))
+				((string= mode "any-one") (return (result)))
+				(t (vector-push-extend b out))))
+			 (t (vector-push-extend b out))))))))))
+
+(defun line-mode-name (who mode)
+  (let ((name (and (symbolp mode) (not (eq mode ps:false)) (not (eq mode ps:true)) (rname mode))))
+    (unless (member name '("linefeed" "return" "return-linefeed" "any" "any-one") :test #'equal)
+      (racket-error who "contract violation~%  expected: (or/c 'linefeed 'return 'return-linefeed 'any 'any-one)~%  given: ~A"
+		    (written mode)))
+    name))
+
+;;; ------------------------------------------------------------------
+;;; Opening input ports
+
+(defun raise-errno (who what path errno &optional (type "exn:fail:filesystem:errno"))
+  (do-raise (make-exn type
+		      (format nil "~A: ~A~%  path: ~A~%  system error: ~A; errno=~D"
+			      who what path (sb-int:strerror errno) errno)
+		      (cons errno (rsym "posix")))))
+
+(defun slurp-stream (stream size)
+  "All the bytes of STREAM, a file of SIZE bytes (maybe not known)."
+  (if (plusp size)
+      (let* ((bytes (make-octets size))
+	     (n (read-sequence bytes stream)))
+	(if (= n size) bytes (subseq bytes 0 n)))
+      (let ((out (make-array 256 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+	    (buf (make-octets 4096)))
+	(loop for n = (read-sequence buf stream)
+	      while (plusp n)
+	      do (loop for i below n do (vector-push-extend (aref buf i) out)))
+	(coerce out 'octets))))
+
+(defun open-file-for-input (who name)
+  "The bytes of the file NAME, or Racket's exception."
+  (let ((fd (handler-case (sb-posix:open name sb-posix:o-rdonly)
+	      (sb-posix:syscall-error (e)
+		(raise-errno who "cannot open input file" name (sb-posix:syscall-errno e))))))
+    (let ((st (sb-posix:fstat fd)))
+      (when (sb-posix:s-isdir (sb-posix:stat-mode st))
+	(sb-posix:close fd)
+	(raise-errno who "cannot open input file" name 21))
+      (let ((stream (sb-sys:make-fd-stream fd :input t :element-type '(unsigned-byte 8)
+						 :buffering :full :file name)))
+	(unwind-protect (slurp-stream stream (sb-posix:stat-size st))
+	  (close stream))))))
+
+(defnative "open-input-file" (path &rest mode) ()
+  (declare (ignore mode))
+  (let* ((name (path-string "open-input-file" path))
+	 (bytes (open-file-for-input "open-input-file" name)))
+    (finish-inport (make-rinport bytes (make-rpath name)))))
+(defnative "open-input-string" (s &optional (name (rsym "string"))) ()
+  (finish-inport (make-rinport (bytes-of s) name :kind :string)))
+(defnative "open-input-bytes" (b &optional (name (rsym "string"))) ()
+  (finish-inport (make-rinport (copy-seq b) name :kind :string)))
+
+(defvar *host-adapters* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "A host input port -> the lazy input port of ours that reads it.")
+
+(defun host-fill (p need blocking)
+  (declare (ignore need))
+  (let ((host (rinport-host p)))
+    (if (and (not blocking) (not (truthy (funcall (psx:host-ref "char-ready?") host))))
+	:block
+	(let ((b (funcall (psx:host-ref "read-u8") host)))
+	  (if (eq b ps:eof-object)
+	      :eof
+	      (let ((v (make-octets 1)))
+		(setf (aref v 0) b)
+		(ip-append p v 0 1)
+		:data))))))
+
+(defun host-adapter (who port)
+  (or (gethash port *host-adapters*)
+      (progn
+	(unless (truthy (funcall (psx:host-ref "input-port?") port))
+	  (racket-error who "contract violation~%  expected: input-port?~%  given: ~A" (written port)))
+	(let ((p (new-lazy-inport (rsym "host") :host #'host-fill)))
+	  (setf (rinport-host p) port)
+	  (setf (gethash port *host-adapters*) p)))))
 
 (defun input-port (who port)
   (let ((port (or port (current-port :input))))
     (when (and (rinport-p port) (rinport-closed port))
-      (racket-error who "input port is closed~%  port: ~A" (written port)))
+      (racket-error who "input port is closed~%  input port: ~A" (port-desc port)))
     port))
 
-(defnative "open-input-file" (path &rest mode) (:leaf t)
-  (declare (ignore mode))
-  (let ((name (path-string "open-input-file" path)))
-    (handler-case
-	(with-open-file (in name :element-type '(unsigned-byte 8))
-	  (let ((bytes (make-array (file-length in) :element-type '(unsigned-byte 8))))
-	    (read-sequence bytes in)
-	    (make-rinport bytes (make-rpath name))))
-      (file-error ()
-	(do-raise (make-exn "exn:fail:filesystem"
-			    (format nil "open-input-file: cannot open input file~%  path: ~A" name)))))))
-(defnative "open-input-string" (s &optional (name (rsym "string"))) (:leaf t)
-  (make-rinport (bytes-of s) name))
-(defnative "open-input-bytes" (b &optional (name (rsym "bytes"))) (:leaf t)
-  (make-rinport (copy-seq b) name))
+(defun in-port (who port)
+  "PORT, or the current input port, as one of ours (the host's through an adapter)."
+  (let ((p (input-port who port)))
+    (if (rinport-p p) p (host-adapter who p))))
 
-(defnative "read-char" (&optional port) (:leaf t)
+;;; ------------------------------------------------------------------
+;;; Reading
+
+(defnative "read-char" (&optional port) ()
   (let ((p (input-port "read-char" port)))
-    (if (rinport-p p) (inport-read-char p) (funcall (psx:host-ref "read-char") p))))
-(defnative "peek-char" (&optional port (skip 0)) (:leaf t)
+    (if (rinport-p p) (inport-read-char p "read-char") (funcall (psx:host-ref "read-char") p))))
+(defnative "peek-char" (&optional port (skip 0)) ()
   (let ((p (input-port "peek-char" port)))
     (if (rinport-p p)
-	(or (inport-peek-char p skip) ps:eof-object)
+	(or (inport-peek-char p skip "peek-char") ps:eof-object)
 	(funcall (psx:host-ref "peek-char") p))))
-(defnative "read-char-or-special" (&optional port special-wrap source-name) (:leaf t)
-  (declare (ignore special-wrap source-name))
+(defun wrap-special (p special source-name delta special-wrap)
+  "A special SPECIAL that P produced, as read-char-or-special and the like return it."
+  (if (eq special-wrap (rsym "special"))
+      (rsym "special")
+      (multiple-value-bind (line col pos) (funcall (native-function (gethash "port-next-location" *natives*)) p)
+	(let ((v (funcall special source-name line (if (integerp col) (+ col delta) col)
+			  (if (integerp pos) (+ pos delta) pos))))
+	  (if (and special-wrap (truthy special-wrap)) (funcall special-wrap v) v)))))
+(defnative "read-char-or-special" (&optional port special-wrap (source-name ps:false)) ()
   (let ((p (input-port "read-char-or-special" port)))
-    (if (rinport-p p) (inport-read-char p) (funcall (psx:host-ref "read-char") p))))
-(defnative "peek-char-or-special" (&optional port (skip 0) special-wrap source-name) (:leaf t)
-  (declare (ignore special-wrap source-name))
+    (if (rinport-p p)
+	(let ((c (inport-read-char p "read-char-or-special" t)))
+	  (if (functionp c) (wrap-special p c source-name -1 special-wrap) c))
+	(funcall (psx:host-ref "read-char") p))))
+(defnative "peek-char-or-special" (&optional port (skip 0) special-wrap (source-name ps:false)) ()
   (let ((p (input-port "peek-char-or-special" port)))
     (if (rinport-p p)
-	(or (inport-peek-char p skip) ps:eof-object)
+	(multiple-value-bind (c n) (inport-peek-char p skip "peek-char-or-special" t)
+	  (declare (ignore n))
+	  (cond ((null c) ps:eof-object)
+		((functionp c) (wrap-special p c source-name skip special-wrap))
+		(t c)))
 	(funcall (psx:host-ref "peek-char") p))))
-(defnative "read-byte" (&optional port) (:leaf t)
+(defnative "read-byte" (&optional port) ()
   (let ((p (input-port "read-byte" port)))
-    (if (rinport-p p) (inport-read-byte p) (funcall (psx:host-ref "read-u8") p))))
-(defnative "peek-byte" (&optional port (skip 0)) (:leaf t)
+    (if (rinport-p p) (inport-read-byte p "read-byte") (funcall (psx:host-ref "read-u8") p))))
+(defnative "peek-byte" (&optional port (skip 0)) ()
   (let ((p (input-port "peek-byte" port)))
     (if (rinport-p p)
-	(let ((pos (+ (rinport-pos p) skip)))
-	  (if (< pos (length (rinport-bytes p))) (aref (rinport-bytes p) pos) ps:eof-object))
+	(inport-peek-byte p skip "peek-byte")
 	(funcall (psx:host-ref "peek-u8") p))))
-(defnative "read-bytes" (n &optional port) (:leaf t)
-  (let* ((p (input-port "read-bytes" port))
-	 (start (rinport-pos p))
-	 (end (min (length (rinport-bytes p)) (+ start n))))
-    (if (and (= start end) (plusp n))
-	ps:eof-object
-	(progn (setf (rinport-pos p) end)
-	       (when (rinport-count-lines p) (incf (rinport-position p) (- end start)))
-	       (subseq (rinport-bytes p) start end)))))
-(defnative "peek-bytes" (n skip &optional port) (:leaf t)
-  (let* ((p (input-port "peek-bytes" port))
-	 (start (+ (rinport-pos p) skip))
-	 (end (min (length (rinport-bytes p)) (+ start n))))
-    (if (and (>= start end) (plusp n)) ps:eof-object (subseq (rinport-bytes p) start end))))
-(defnative "read-string" (n &optional port) (:leaf t)
-  (let ((p (input-port "read-string" port)))
-    (let ((chars (loop repeat n
-		       for c = (inport-read-char p)
-		       until (eq c ps:eof-object) collect c)))
-      (if (and (null chars) (plusp n)) ps:eof-object (coerce chars 'string)))))
-(defnative "read-line" (&optional port mode) (:leaf t)
-  (declare (ignore mode))
+
+(defun check-count (who n)
+  (unless (and (integerp n) (>= n 0))
+    (racket-error who "contract violation~%  expected: exact-nonnegative-integer?~%  given: ~A" (written n))))
+
+(defnative "read-bytes" (n &optional port) ()
+  (check-count "read-bytes" n)
+  (let* ((p (in-port "read-bytes" port))
+	 (buf (make-octets n))
+	 (got 0))
+    (loop while (< got n)
+	  do (let ((r (ip-read-bytes p buf got n t)))
+	       (cond ((integerp r) (incf got r))
+		     ((functionp r) (special-error "read-bytes" p))
+		     (t (return)))))
+    (cond ((and (zerop got) (plusp n)) ps:eof-object)
+	  ((= got n) buf)
+	  (t (subseq buf 0 got)))))
+(defnative "peek-bytes" (n skip &optional port) ()
+  (check-count "peek-bytes" n)
+  (let* ((p (in-port "peek-bytes" port))
+	 (buf (make-octets n))
+	 (got 0))
+    (loop while (< got n)
+	  do (let ((r (ip-peek-bytes p (+ skip got) buf got n t)))
+	       (cond ((integerp r) (incf got r))
+		     ((functionp r) (special-error "peek-bytes" p))
+		     (t (return)))))
+    (cond ((and (zerop got) (plusp n)) ps:eof-object)
+	  ((= got n) buf)
+	  (t (subseq buf 0 got)))))
+(defnative "read-string" (n &optional port) ()
+  (check-count "read-string" n)
+  (read-chars (in-port "read-string" port) n "read-string"))
+(defnative "read-line" (&optional port (mode (rsym "linefeed"))) ()
   (let ((p (input-port "read-line" port)))
     (if (not (rinport-p p))
 	(funcall (psx:host-ref "read-line") p)
-	(let ((first (inport-read-char p)))
-	  (if (eq first ps:eof-object)
-	      ps:eof-object
-	      (with-output-to-string (out)
-		(loop for c = first then (inport-read-char p)
-		      until (or (eq c ps:eof-object) (char= c #\Newline))
-		      do (write-char c out))))))))
+	(let ((line (read-line-bytes p (line-mode-name "read-line" mode) "read-line")))
+	  (if (eq line ps:eof-object) line (decode-utf-8 line))))))
+(defnative "read-bytes-line" (&optional port (mode (rsym "linefeed"))) ()
+  (read-line-bytes (in-port "read-bytes-line" port) (line-mode-name "read-bytes-line" mode) "read-bytes-line"))
 
-(defnative "port-count-lines!" (p) (:leaf t)
-  (when (and (rinport-p p) (not (rinport-count-lines p)))
-    (setf (rinport-count-lines p) t))
+(defun inport-location (p)
+  (if (and (rinport-count-lines p)
+	   (rinport-custom p)
+	   (custom-in-location (rinport-custom p)))
+      (funcall (custom-in-location (rinport-custom p)))
+      (if (rinport-count-lines p)
+	  (values (rinport-line p) (rinport-column p) (rinport-position p))
+	  (values ps:false ps:false (1+ (+ (rinport-base p) (rinport-pos p)))))))
+
+(defun outport-location (p)
+  (if (and (routport-count-lines p)
+	   (routport-custom p)
+	   (custom-out-location (routport-custom p)))
+      (funcall (custom-out-location (routport-custom p)))
+      (if (routport-count-lines p)
+	  (values (routport-line p) (routport-column p) (routport-position p))
+	  (values ps:false ps:false (1+ (out-position p))))))
+
+(defnative "port-count-lines!" (p) ()
+  (cond ((rinport-p p)
+	 (unless (rinport-count-lines p)
+	   (setf (rinport-count-lines p) t)
+	   (let ((c (rinport-custom p)))
+	     (when (and c (custom-in-count-lines c)) (funcall (custom-in-count-lines c))))))
+	((routport-p p)
+	 (unless (routport-count-lines p)
+	   (setf (routport-count-lines p) t)
+	   (let ((c (routport-custom p)))
+	     (when (and c (custom-out-count-lines c)) (funcall (custom-out-count-lines c)))))))
   *void*)
-(defnative "port-counts-lines?" (p) (:leaf t) (bool (and (rinport-p p) (rinport-count-lines p))))
-(defnative "port-next-location" (p) (:leaf t)
-  (if (and (rinport-p p) (rinport-count-lines p))
-      (values (rinport-line p) (rinport-column p) (rinport-position p))
-      (values ps:false ps:false (if (rinport-p p) (1+ (rinport-pos p)) ps:false))))
-(defnative "file-position" (p &optional (pos nil pos-p)) (:leaf t)
-  (cond ((and pos-p (rinport-p p)) (setf (rinport-pos p) (if (eq pos ps:eof-object) (length (rinport-bytes p)) pos)) *void*)
-	((rinport-p p) (rinport-pos p))
-	((routport-p p) (fill-pointer (routport-buffer p)))
+(defnative "port-counts-lines?" (p) (:leaf t)
+  (bool (cond ((rinport-p p) (rinport-count-lines p)) ((routport-p p) (routport-count-lines p)))))
+(defnative "port-next-location" (p) ()
+  (cond ((rinport-p p) (inport-location p))
+	((routport-p p) (outport-location p))
+	(t (values ps:false ps:false ps:false))))
+
+(defun init-position-offset (init)
+  "The bytes already read or written, for a custom port made with init-position INIT."
+  (cond ((integerp init) (1- init))
 	(t 0)))
-(defnative "file-position*" (p) (:leaf t)
-  (if (rinport-p p) (rinport-pos p) ps:false))
-(defnative "close-input-port" (p) (:leaf t)
-  (if (rinport-p p) (setf (rinport-closed p) t) (funcall (psx:host-ref "close-input-port") p))
-  *void*)
-(defnative "char-ready?" (&optional port) (:leaf t)
+
+(defun init-position-value (init base)
+  "file-position of a custom port with init-position INIT after BASE more bytes."
+  (cond ((functionp init)
+	 (let ((v (funcall init))) (if (integerp v) (1- v) base)))
+	((rinport-p init) (funcall (native-function (gethash "file-position" *natives*)) init))
+	((routport-p init) (funcall (native-function (gethash "file-position" *natives*)) init))
+	(t base)))
+
+(defnative "file-position" (p &optional (pos nil pos-p)) ()
+  (cond ((and pos-p (rinport-p p))
+	 (setf (rinport-pos p) (if (eq pos ps:eof-object) (ip-end p) (- pos (rinport-base p))))
+	 *void*)
+	((and pos-p (routport-p p))
+	 (when (eq (routport-kind p) :file)
+	   (finish-output (routport-stream p))
+	   (file-position (routport-stream p) (if (eq pos ps:eof-object) (file-length (routport-stream p)) pos)))
+	 *void*)
+	((rinport-p p)
+	 (let ((c (rinport-custom p)))
+	   (if (and c (custom-in-init-position c) (not (integerp (custom-in-init-position c))))
+	       (init-position-value (custom-in-init-position c) (+ (rinport-base p) (rinport-pos p)))
+	       (+ (rinport-base p) (rinport-pos p)))))
+	((routport-p p) (out-position p))
+	(t 0)))
+(defnative "file-position*" (p) ()
+  (cond ((rinport-p p) (+ (rinport-base p) (rinport-pos p)))
+	((routport-p p) (out-position p))
+	(t ps:false)))
+
+(defun ip-ready (p)
+  (let ((tmp (make-octets 1)))
+    (not (eq (ip-peek-bytes p 0 tmp 0 1 nil) :block))))
+
+(defnative "char-ready?" (&optional port) ()
   (let ((p (input-port "char-ready?" port)))
-    (if (rinport-p p) ps:true (funcall (psx:host-ref "char-ready?") p))))
-(defnative "byte-ready?" (&optional port) (:leaf t) (declare (ignore port)) ps:true)
+    (if (rinport-p p) (bool (ip-ready p)) (funcall (psx:host-ref "char-ready?") p))))
+(defnative "byte-ready?" (&optional port) ()
+  (let ((p (input-port "byte-ready?" port)))
+    (if (rinport-p p) (bool (ip-ready p)) (funcall (psx:host-ref "char-ready?") p))))
+
+;;; ------------------------------------------------------------------
+;;; Closing
+
+(defun post-closed (p)
+  (let ((s (if (rinport-p p) (rinport-closed-sema p) (routport-closed-sema p))))
+    (when s (incf (rsemaphore-count s)))))
+
+(defun close-inport (p)
+  (unless (rinport-closed p)
+    (let ((c (rinport-custom p)))
+      (when (and c (not (custom-in-closed c)))
+	(setf (custom-in-closed c) t)
+	(funcall (custom-in-close c))))
+    (when (eq (rinport-kind p) :pipe)
+      (setf (rinport-closed p) t))
+    (setf (rinport-closed p) t)
+    (post-closed p)))
+
+(defnative "close-input-port" (p) ()
+  (if (rinport-p p) (close-inport p) (funcall (psx:host-ref "close-input-port") p))
+  *void*)
 
 ;;; ------------------------------------------------------------------
 ;;; Output
 
-(defun output-port (port)
-  (or port (current-port :output)))
+(defun output-port (port &optional (who "write"))
+  (let ((p (or port (current-port :output))))
+    (when (and (routport-p p) (routport-closed p))
+      (racket-error who "output port is closed~%  output port: ~A" (port-desc p)))
+    p))
+
+(defun out-position (p)
+  "The bytes written to P, for file-position."
+  (ecase (routport-kind p)
+    (:bytes (fill-pointer (routport-buffer p)))
+    (:file (finish-output (routport-stream p)) (file-position (routport-stream p)))
+    (:pipe (routport-written p))
+    (:custom (let* ((c (routport-custom p)) (init (custom-out-init-position c)))
+	       (if (and init (not (integerp init)))
+		   (init-position-value init (routport-written p))
+		   (+ (init-position-offset init) (routport-written p)))))))
+
+(defun pipe-write (p vec start end)
+  (let* ((in (routport-peer p))
+	 (n (- end start)))
+    (if (rinport-closed in)
+	n
+	(let* ((limit (rinport-limit in))
+	       (room (if limit (- limit (pipe-content in)) n)))
+	  (if (<= room 0)
+	      :block
+	      (let ((m (min n room)))
+		(ip-append in vec start (+ start m))
+		m))))))
+
+(defun custom-write (p vec start end nonblock)
+  (let* ((c (routport-custom p))
+	 (w (custom-out-write-out c))
+	 (n (- end start)))
+    (if (routport-p w)
+	(out-write-some w vec start end nonblock)
+	(loop repeat 100000
+	      do (let ((r (funcall w (subseq vec start end) 0 n (bool nonblock) ps:false)))
+		   (cond ((integerp r)
+			  (when (> r n)
+			    (racket-error "user port write" "result integer is larger than the supplied byte string~%  result: ~D~%  byte string length: ~D" r n))
+			  (if (plusp r)
+			      (return r)
+			      (racket-error "user port write" "bad result for non-flush write~%  result: ~A" r)))
+			 ((eq r ps:false) (when nonblock (return :block)))
+			 ((routport-p r)
+			  (return (out-write-some r vec start end nonblock)))
+			 ((evt-p r)
+			  (if nonblock
+			      (return :block)
+			      (unless (nth-value 1 (evt-ready r))
+				(racket-error "sync" "would block forever (one thread)"))))
+			 (t (racket-error "user port write" "result is not (or/c exact-nonnegative-integer? #f evt?)~%  result: ~A"
+					  (written r)))))
+	      finally (racket-error "write" "would block forever (one thread)")))))
+
+(defun out-write-some (p vec start end nonblock)
+  "Write some of VEC[START,END) to our output port P: how many bytes, or :block."
+  (if (>= start end)
+      0
+      (let* ((n (- end start))
+	     (r (ecase (routport-kind p)
+		  (:bytes (let ((buffer (routport-buffer p)))
+			    (loop for i from start below end do (vector-push-extend (aref vec i) buffer)))
+			  n)
+		  (:file (write-sequence vec (routport-stream p) :start start :end end)
+			 (finish-output (routport-stream p))
+			 n)
+		  (:pipe (pipe-write p vec start end))
+		  (:custom (custom-write p vec start end nonblock)))))
+	(when (integerp r)
+	  (incf (routport-written p) r)
+	  (note-bytes p vec start (+ start r)))
+	r)))
+
+(defun out-emit (p vec &optional (start 0) (end (length vec)))
+  "All of VEC[START,END) to our output port P."
+  (let ((i start))
+    (loop for tries from 0
+	  while (< i end)
+	  do (let ((r (out-write-some p vec i end nil)))
+	       (cond ((integerp r) (incf i r) (setq tries 0))
+		     ((> tries 100000) (racket-error "write" "would block forever (one thread)")))))))
 
 (defun out-bytes (port bytes)
-  (let ((buffer (routport-buffer port)))
-    (loop for b across bytes do (vector-push-extend b buffer))))
+  (out-emit port bytes))
 
-(defun port-write-string (string port)
+(defun host-write-bytes (p bytes start end)
+  (funcall (psx:host-ref "write-string") (decode-utf-8 bytes start end) p))
+
+(defun port-write-string (string port &optional (who "write-string"))
   "STRING to PORT, ours or the host's."
-  (let ((p (output-port port)))
+  (let ((p (output-port port who)))
     (if (routport-p p)
-	(out-bytes p (bytes-of string))
+	(out-emit p (bytes-of string))
 	(funcall (psx:host-ref "write-string") string p))))
 
-(defnative "open-output-bytes" (&optional (name (rsym "bytes"))) (:leaf t) (make-routport name))
-(defnative "open-output-string" (&optional (name (rsym "string"))) (:leaf t) (make-routport name))
-(defnative "get-output-bytes" (p &optional reset? (start 0) end) (:leaf t)
-  (let ((b (subseq (coerce (routport-buffer p) '(simple-array (unsigned-byte 8) (*))) start end)))
+(defnative "open-output-bytes" (&optional (name (rsym "string"))) ()
+  (finish-outport (make-routport name)))
+(defnative "open-output-string" (&optional (name (rsym "string"))) ()
+  (finish-outport (make-routport name)))
+(defnative "get-output-bytes" (p &optional reset? (start 0) end) ()
+  (let ((b (subseq (coerce (routport-buffer p) 'octets) start end)))
     (when (and reset? (truthy reset?)) (setf (fill-pointer (routport-buffer p)) 0))
     b))
-(defnative "get-output-string" (p) (:leaf t)
-  (sb-ext:octets-to-string (coerce (routport-buffer p) '(simple-array (unsigned-byte 8) (*)))
-			   :external-format :utf-8))
-(defnative "write-string" (s &optional port (start 0) end) (:leaf t)
-  (port-write-string (subseq s start end) port)
+(defnative "get-output-string" (p) ()
+  (decode-utf-8 (coerce (routport-buffer p) 'octets)))
+(defnative "write-string" (s &optional port (start 0) end) ()
+  (port-write-string (subseq s start end) port "write-string")
   (- (or end (length s)) start))
-(defnative "write-char" (c &optional port) (:leaf t)
-  (port-write-string (string c) port)
+(defnative "write-char" (c &optional port) ()
+  (port-write-string (string c) port "write-char")
   *void*)
-(defnative "newline" (&optional port) (:leaf t)
-  (port-write-string (string #\Newline) port)
+(defnative "newline" (&optional port) ()
+  (port-write-string (string #\Newline) port "newline")
   *void*)
-(defnative "write-bytes" (b &optional port (start 0) end) (:leaf t)
-  (let ((p (output-port port)) (b (subseq b start end)))
+(defnative "write-bytes" (b &optional port (start 0) end) ()
+  (let* ((p (output-port port "write-bytes")) (end (or end (length b))))
     (if (routport-p p)
-	(out-bytes p b)
-	(funcall (psx:host-ref "write-string") (sb-ext:octets-to-string b :external-format :utf-8) p))
-    (length b)))
-(defnative "write-byte" (byte &optional port) (:leaf t)
-  (let ((p (output-port port)))
+	(out-emit p b start end)
+	(host-write-bytes p b start end))
+    (- end start)))
+(defnative "write-byte" (byte &optional port) ()
+  (let ((p (output-port port "write-byte")))
     (if (routport-p p)
-	(vector-push-extend byte (routport-buffer p))
+	(out-emit p (make-array 1 :element-type '(unsigned-byte 8) :initial-element byte))
 	(funcall (psx:host-ref "write-char") (code-char byte) p))
     *void*))
-(defnative "flush-output" (&optional port) (:leaf t)
-  (let ((p (output-port port)))
-    (unless (routport-p p) (funcall (psx:host-ref "flush-output-port") p))
+
+(defun flush-outport (p)
+  (when (routport-closed p)
+    (racket-error "flush-output" "output port is closed~%  output port: ~A" (port-desc p)))
+  (case (routport-kind p)
+    (:file (finish-output (routport-stream p)))
+    (:custom
+     (let ((w (custom-out-write-out (routport-custom p))))
+       (if (routport-p w)
+	   (flush-outport w)
+	   (loop repeat 100000
+		 do (let ((r (funcall w (make-octets 0) 0 0 ps:false ps:false)))
+		      (cond ((eql r 0) (return))
+			    ((evt-p r) (unless (nth-value 1 (evt-ready r))
+					 (racket-error "sync" "would block forever (one thread)")))
+			    ((eq r ps:false))
+			    (t (racket-error "flush-output" "weird result"))))
+		 finally (racket-error "flush-output" "would block forever (one thread)")))))))
+
+(defnative "flush-output" (&optional port) ()
+  (let ((p (output-port port "flush-output")))
+    (if (routport-p p)
+	(flush-outport p)
+	(funcall (psx:host-ref "flush-output-port") p))
     *void*))
-(defnative "close-output-port" (p) (:leaf t)
-  (if (routport-p p) (setf (routport-closed p) t) (funcall (psx:host-ref "close-output-port") p))
+
+(defun close-outport (p)
+  (unless (routport-closed p)
+    (ecase (routport-kind p)
+      (:bytes nil)
+      (:file (finish-output (routport-stream p)) (close (routport-stream p)))
+      (:pipe (setf (rinport-writer-closed (routport-peer p)) t))
+      (:custom (funcall (custom-out-close (routport-custom p)))))
+    (setf (routport-closed p) t)
+    (post-closed p)))
+
+(defnative "close-output-port" (p) ()
+  (if (routport-p p) (close-outport p) (funcall (psx:host-ref "close-output-port") p))
   *void*)
 
 ;;; ------------------------------------------------------------------
@@ -254,5 +920,7 @@ many bytes it takes; a bad sequence is #\\uFFFD, one byte."
   (bool (or (rinport-p x) (routport-p x) (truthy (funcall (psx:host-ref "port?") x)))))
 (defnative "port-closed?" (p) (:leaf t)
   (bool (cond ((rinport-p p) (rinport-closed p)) ((routport-p p) (routport-closed p)))))
-(defnative "file-stream-port?" (p) (:leaf t) (bool (and (rinport-p p) (rpath-p (rinport-name p)))))
+(defnative "file-stream-port?" (p) (:leaf t)
+  (bool (or (and (rinport-p p) (rpath-p (rinport-name p)))
+	    (and (routport-p p) (eq (routport-kind p) :file)))))
 (defnative "terminal-port?" (p) (:leaf t) (declare (ignore p)) ps:false)

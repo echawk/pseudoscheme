@@ -278,10 +278,6 @@
    (floor (get-internal-run-time) (/ internal-time-units-per-second 1000)))
   ("collect-garbage" (&optional mode) (declare (ignore mode)) (sb-ext:gc :full t) *void*))
 
-(defnative "exit" (&optional (v ps:true)) ()
-  (finish-output)
-  (uiop:quit (cond ((and (integerp v) (<= 0 v 255)) v) (t 0))))
-
 ;;; ------------------------------------------------------------------
 ;;; Procedures
 
@@ -316,7 +312,6 @@
   ;; full, re-entrant: linklets are compiled for them (api.lisp)
   (declare (ignore prompt-tag))
   (psx::full-call/cc proc))
-(defnative "continuation?" (x) (:leaf t) (bool (and (functionp x) (psx::continuation-procedure-p x))))
 
 ;;; ------------------------------------------------------------------
 ;;; Load forms for the rest of the values compiled code may hold as

@@ -82,20 +82,49 @@
 
 ;;; ------------------------------------------------------------------
 ;;; Uncaught exceptions
+;;;
+;;; As in rumble's: the uncaught-exception handler gives the message to
+;;; the error display handler (which writes it to the error port, with
+;;; the exception's source locations), then calls the error escape
+;;; handler (which aborts to the default prompt).  Both are parameters
+;;; (handlers.lisp has the other error parameters).
 
 (defvar *uncaught* nil "Whether an exception went uncaught (the exit status).")
 
+(defun exn-of-type-p (v type)
+  "Whether V is an exn of the exn type named TYPE (or one of its subtypes)."
+  (and (exn-p v) (subtype-p (struct-of-type v) (gethash type *exn-struct-types*))))
+
+(defun default-error-display-handler (message v)
+  "Racket's: MESSAGE on the error port, then where the exception came
+from, if it says (there is no context to show: no traces of the calls)."
+  (let ((out (current-port :error)))
+    (port-write-string message out)
+    (when (and (exn-p v) (not (exn-of-type-p v "exn:fail:user")))
+      (port-write-string (error-display-locations v) out))
+    (port-write-string (string #\Newline) out)
+    *void*))
+
+(defun default-error-escape-handler ()
+  "Racket's: abort to the default prompt."
+  (psx::abort-to-prompt *default-prompt-tag* (lambda () *void*)))
+
+(defvar *error-display-handler* (make-parameter* #'default-error-display-handler))
+(defvar *error-escape-handler* (make-parameter* #'default-error-escape-handler))
+
 (defun default-uncaught-exception-handler (v)
-  "Racket's: the message (or the value, written) on the error port, then
-an abort to the default prompt."
+  "Racket's: the message (or the value, written) to the error display
+handler, then the error escape handler."
   (setq *uncaught* t)
   (finish-output *standard-output*)
-  (if (exn-p v)
-      (format *error-output* "~A~%" (exn-message v))
-      (format *error-output* "uncaught exception: ~A~%"
-	      (with-output-to-string (s) (funcall (psx:host-ref "write") v s))))
+  (let ((message (if (exn-p v)
+		     (exn-message v)
+		     (concatenate 'string "uncaught exception: " (error-value->string v)))))
+    (funcall (funcall *error-display-handler*) message v))
   (finish-output *error-output*)
-  (psx::abort-to-prompt *default-prompt-tag* (lambda () *void*)))
+  (funcall (funcall *error-escape-handler*))
+  ;; in case the escape handler doesn't escape
+  (default-error-escape-handler))
 
 (setq *uncaught-exception-handler* #'default-uncaught-exception-handler)
 
@@ -107,19 +136,24 @@ an abort to the default prompt."
 (setq *uncaught-exception-handler*
       (lambda (v) (funcall (funcall *uncaught-exception-handler-parameter*) v)))
 
+(defun error-message-from (first rest)
+  "The message of (error FIRST REST ...) and raise-user-error: (error
+sym), (error sym format v ...) or (error string v ...)."
+  (cond ((racket-symbol-p first)
+	 (cond ((null rest) (format nil "error: ~A" (rname first)))
+	       ((stringp (car rest))
+		(format nil "~A: ~A" (rname first) (apply #'racket-format (car rest) (cdr rest))))
+	       (t (arg-error "error" "string?" (car rest)))))
+	((stringp first)
+	 (with-output-to-string (s)
+	   (write-string first s)
+	   (dolist (v rest)
+	     (write-char #\Space s)
+	     (write-string (error-value->string v) s))))
+	(t (arg-error "error" "(or/c symbol? string?)" first))))
+
 (defnative "error" (first &rest rest) ()
-  ;; (error sym) / (error msg v ...) / (error src format v ...)
-  (do-raise
-   (make-exn "exn:fail"
-	     (cond ((and (symbolp first) (null rest)) (format nil "error: ~A" (rname first)))
-		   ((symbolp first)
-		    (format nil "~A: ~A" (rname first)
-			    (apply #'racket-format (car rest) (cdr rest))))
-		   (t (with-output-to-string (s)
-			(write-string first s)
-			(dolist (v rest)
-			  (write-char #\Space s)
-			  (funcall (psx:host-ref "write") v s))))))))
+  (do-raise (make-exn "exn:fail" (error-message-from first rest))))
 
 (defun racket-format (control &rest args)
   "Racket's format directives: ~a ~s ~v ~e ~% ~n ~~."
@@ -137,20 +171,14 @@ an abort to the default prompt."
 		     (case d
 		       ;; Racket's printer (printer.lisp): ~v prints as print does
 		       ((#\a) (print-value (pop args) out :display))
-		       ((#\s #\e) (print-value (pop args) out :write))
+		       ((#\s) (print-value (pop args) out :write))
+		       ((#\e) (write-string (error-value->string (pop args)) out))
 		       ((#\v) (print-quoted (pop args) out))
 		       ((#\% #\n) (terpri out))
 		       (#\~ (write-char #\~ out))
 		       (t (write-char c out) (write-char d out)))
 		     (incf i 2))
 		   (progn (write-char c out) (incf i)))))))
-
-(defnative "raise-argument-error" (who expected value &rest more) ()
-  (declare (ignore more))
-  (do-raise (make-exn "exn:fail:contract"
-		      (format nil "~A: contract violation~%  expected: ~A~%  given: ~A"
-			      (rname who) expected
-			      (with-output-to-string (s) (funcall (psx:host-ref "write") value s))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Lisp errors as Racket exceptions

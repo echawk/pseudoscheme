@@ -315,7 +315,11 @@
 	     (:never (values nil nil))
 	     (:peek (if (plusp (rsemaphore-count (revt-target e)))
 			(values e t)
-			(values nil nil)))))))
+			(values nil nil)))
+	     ;; ready at once, with the thunk's value (port-ops.lisp)
+	     (:thunk (values (funcall (revt-target e)) t))
+	     ;; a log receiver's next message (handlers.lisp)
+	     (:log-receiver (log-receiver-poll e))))))
 
 (defun sync-ready (evts)
   (dolist (e evts (values nil nil))

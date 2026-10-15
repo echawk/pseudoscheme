@@ -297,3 +297,114 @@ with & and \\N for the match and its groups."
 	    (find #\^ source))
 	(max 1 (length source))
 	0)))
+
+;;; ------------------------------------------------------------------
+;;; Peeking at a port: the match starts START bytes after its position;
+;;; positions are byte positions from there, as Racket's are; a string
+;;; regexp matches the bytes as UTF-8.
+
+(defun peek-all-bytes (p skip limit blocking)
+  "The bytes of input port P after SKIP, up to LIMIT of them (NIL: to
+the end), as far as they are there (or, if not BLOCKING, there now)."
+  (let ((out (make-array 256 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+	(buf (make-array 4096 :element-type '(unsigned-byte 8))))
+    (loop
+      (let* ((want (if limit (min 4096 (- limit (length out))) 4096))
+	     (r (if (<= want 0) :eof (ip-peek-bytes p (+ skip (length out)) buf 0 want blocking))))
+	(if (integerp r)
+	    (loop for i below r do (vector-push-extend (aref buf i) out))
+	    (return))))
+    (coerce out '(simple-array (unsigned-byte 8) (*)))))
+
+(defun utf-8-offsets (text)
+  "A vector: the byte offset of each character index of TEXT (and its end)."
+  (let ((offsets (make-array (1+ (length text)))) (n 0))
+    (dotimes (i (length text))
+      (setf (aref offsets i) n)
+      (incf n (let ((c (char-code (char text i))))
+		(cond ((< c #x80) 1) ((< c #x800) 2) ((< c #x10000) 3) (t 4)))))
+    (setf (aref offsets (length text)) n)
+    offsets))
+
+(defun peek-match (who pattern in start end immediate)
+  "Match PATTERN against the bytes of input port IN from START to END
+without reading them: the bytes peeked, and the byte start and end of
+the match and of its groups (vectors), or NIL."
+  (let* ((r (as-regexp pattern))
+	 (p (in-port who in))
+	 (raw (peek-all-bytes p start (and end (truthy end) (- end start)) (not immediate))))
+    (multiple-value-bind (s e gs ge)
+	(if (rregexp-bytes r)
+	    (cl-ppcre:scan (rregexp-scanner r) (latin-1 raw))
+	    (let ((text (decode-utf-8 raw)))
+	      (multiple-value-bind (s e gs ge) (cl-ppcre:scan (rregexp-scanner r) text)
+		(if s
+		    (let ((offsets (utf-8-offsets text)))
+		      (values (aref offsets s) (aref offsets e)
+			      (map 'vector (lambda (g) (and g (aref offsets g))) gs)
+			      (map 'vector (lambda (g) (and g (aref offsets g))) ge)))
+		    nil))))
+      ;; -immediate only peeks what's available (PEEK-ALL-BYTES), rather
+      ;; than waiting for more
+      (if s
+	  (values raw s e gs ge)
+	  (values raw nil nil nil nil)))))
+
+(defun peek-match-groups (raw s e gs ge)
+  (cons (subseq raw s e)
+	(loop for g across gs for h across ge collect (if g (subseq raw g h) ps:false))))
+
+(defun peek-match-positions (start s e gs ge)
+  (cons (cons (+ start s) (+ start e))
+	(loop for g across gs for h across ge collect (if g (cons (+ start g) (+ start h)) ps:false))))
+
+(defmacro define-peek-match (name immediate positions)
+  `(progn
+     (defnative ,name (pattern in &optional (start 0) (end nil) out prefix) ()
+       (declare (ignore out prefix))
+       (multiple-value-bind (raw s e gs ge) (peek-match ,name pattern in start end ,immediate)
+	 (if s
+	     ,(if positions
+		  `(peek-match-positions start s e gs ge)
+		  `(peek-match-groups raw s e gs ge))
+	     ps:false)))
+     (defnative ,(concatenate 'string name "/end") (pattern in &optional (start 0) (end nil) out prefix (count 1)) ()
+       (declare (ignore out prefix))
+       (multiple-value-bind (raw s e gs ge) (peek-match ,(concatenate 'string name "/end") pattern in start end ,immediate)
+	 (if s
+	     (values ,(if positions
+			  `(peek-match-positions start s e gs ge)
+			  `(peek-match-groups raw s e gs ge))
+		     (subseq raw (max 0 (- e count)) e))
+	     (values ps:false ps:false))))))
+
+(define-peek-match "regexp-match-peek" nil nil)
+(define-peek-match "regexp-match-peek-positions" nil t)
+(define-peek-match "regexp-match-peek-immediate" t nil)
+(define-peek-match "regexp-match-peek-positions-immediate" t t)
+
+;;; The number of groups a regexp captures: the ( not followed by ?,
+;;; outside classes and escapes
+(defnative "regexp-capture-group-count" (rx) (:leaf t)
+  (let* ((r (or (regexp-of rx)
+		(racket-error "regexp-capture-group-count" "contract violation~%  expected: (or/c regexp? byte-regexp?)~%  given: ~A" (written rx))))
+	 (source (let ((s (rregexp-source r))) (if (stringp s) s (latin-1 s))))
+	 (n 0) (i 0) (len (length source)))
+    (loop while (< i len)
+	  do (let ((c (char source i)))
+	       (cond ((char= c #\\) (incf i 2))
+		     ((char= c #\[)
+		      (incf i)
+		      (when (and (< i len) (char= (char source i) #\^)) (incf i))
+		      (when (and (< i len) (char= (char source i) #\])) (incf i))
+		      (loop while (and (< i len) (char/= (char source i) #\]))
+			    do (if (and (char= (char source i) #\[) (< (1+ i) len) (char= (char source (1+ i)) #\:))
+				   (let ((close (search ":]" source :start2 i)))
+				     (setq i (if close (+ close 2) len)))
+				   (incf i)))
+		      (incf i))
+		     ((char= c #\()
+		      (unless (and (< (1+ i) len) (char= (char source (1+ i)) #\?)) (incf n))
+		      (incf i))
+		     (t (incf i)))))
+    n))

@@ -266,23 +266,52 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   - continuation marks, prompts with tags, parameters and
     parameterizations;
   - mutable hash tables, and immutable ones on a hash array mapped
-    trie.
+    trie;
+  - error raisers with Racket's messages, the error and print
+    parameters the printer consults, loggers with receivers,
+    `equal-always?` (handlers.lisp);
+  - custom ports (`make-input-port`, `make-output-port`), pipes,
+    peeking and reading into buffers, specials, progress events, file
+    ports and file status, regexps on ports (ports.lisp, port-ops.lisp);
+  - strings and characters (comparisons of one argument or more,
+    graphemes, normalization), vectors, SHA-1/224/256, byte converters,
+    stencil vectors, dates (data.lisp).
+  - Literal strings, byte strings and vectors are immutable: the header
+    flag the Chez mode uses, or the one SBCL's fasl loader gives
+    constants, so they stay immutable in cached compiled code.
   - The host's procedures are used wherever Racket's mean the same
     (`*host-shared*` in native.lisp).
 - **Tests:** `sh tests/racket/run.sh linklet` runs the linklets in
   tests/racket/linklets/ and compares each with its `.expected` file.
   A file there may also hold `(define-linklet NAME (linklet ...))`,
   which the harness instantiates for later linklets to import from
-  instance NAME.
+  instance NAME. The programs in tests/racket/programs/ are compared
+  with what Racket 9.3 itself prints (`racket prog.rkt`), which is how
+  their `.expected` files are made.
+- **Racket's own test suite:** `sh tests/racket/run-suite.sh [NAME ...]`
+  runs each file of pkgs/racket-test-core in its own process, in a
+  namespace with `racket` required, and tallies its reports; `REF=1`
+  runs the installed Racket on the same files. Under Racket 9.3, the
+  89 files that report pass about 1.15 million tests with 3 failures
+  (optimize 1, subprocess 2); seven don't report under this harness
+  even there (module, submodule, sandbox, future, promise, place,
+  syntax). Here, loading `racket` itself still fails (milestone 7).
 - **Coverage:** `sbcl --script tests/racket/coverage.lisp [--missing]`
   counts how much of each of Racket CS's primitive tables the instances
   have. It reads the tables from the pinned source, which is the
   checklist. It also lists the primitives whose arity mask differs from
   the table's.
 
+- **The expander** is the linklet Racket's own build extracts for
+  Racket CS: `sh utils/racket/extract.sh` runs the README's
+  `bootstrap-run.rkt` recipe (main.zuo's arguments) with an installed
+  Racket of the pinned version, into
+  build/external/racket-derived/expander.rktl (8.7 MB). Without it, the
+  copy in BC's `startup.inc` (C string literals) is read instead
+  (src/racket/linklet/sources.lisp).
 - **The expander instantiates** (milestone 6's first half), with
   `sbcl --dynamic-space-size 4GB --script tests/racket/coverage.lisp --instantiate`:
-  - it reads BC's `startup.inc` and lowers it in 0.2 s, and compiles it
+  - it reads the linklet and lowers it in 0.2 s, and compiles it
     form by form in about 25 s;
   - all 2,004 top-level forms run, through the expander's own
     `namespace-init!`;
@@ -299,7 +328,7 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   tests/racket/run.sh checks: 10 of 10 pass.
 - **The compiled expander is cached** (src/racket/cache.lisp): a 21 MB
   fasl under `~/.cache/pseudoscheme/racket/`. It is keyed by
-  startup.inc's text, the build signature and src/racket/'s file dates.
+  the linklet's text, the build signature and src/racket/'s file dates.
   The first process compiles it (about 30 s); after that,
   `--racket=linklet -p '(+ 1 2)'` takes 0.4 s.
 

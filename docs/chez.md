@@ -61,7 +61,7 @@ counted in every column, failures included. By file:
 | file | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
 | 3 | 541 | 3 | 0 | 0 | 136 | 0 |
-| 4 | 577 | 87 | 18 | 29 | 250 | 1 |
+| 4 | 583 | 86 | 14 | 28 | 250 | 1 |
 | 5_1 | 400 | 0 | 2 | 0 | 3 | 0 |
 | 5_2 | 191 | 18 | 1 | 4 | 3 | 7 |
 | 5_3 | 98 | 0 | 0 | 6 | 0 | 0 |
@@ -72,7 +72,7 @@ counted in every column, failures included. By file:
 | 5_8 | 22 | 0 | 0 | 0 | 0 | 0 |
 | 6 | 2859 | 160 | 60 | 70 | 89 | 3 |
 | 7 | 736 | 99 | 37 | 39 | 103 | 0 |
-| 8 | 1187 | 161 | 131 | 70 | 668 | 2 |
+| 8 | 1205 | 161 | 126 | 57 | 668 | 2 |
 | bytevector | 1027 | 39 | 22 | 34 | 1599 | 3 |
 | cfl | 177 | 0 | 0 | 5 | 81 | 0 |
 | cp0 | 16 | 0 | 0 | 42 | 238 | 0 |
@@ -540,13 +540,10 @@ and `roots.ss` is a helper the others include):
 
 The main causes:
 
-- **Engines** (`make-engine`, and timer interrupts with `set-timer`).
-  e fuels evaluation with them (kernel, policy). Chez builds engines
-  from a tick counter, a timer interrupt and `call/cc`. The same can
-  be done here, because full continuations already mark every place
-  a call might capture. A tick check at procedure entry, compiled only
-  in `--chez` mode, would call the timer handler, which captures the
-  continuation and returns to the engine's caller. Not done yet.
+- **Engines** (`make-engine`): done since this table's run (src/chez/host.lisp,
+  "Engines": each engine's computation runs in a thread of its own, preempted
+  by an interrupt when its ticks, a span of time here, run out). The e
+  scripts that use them (kernel, policy) haven't been run again.
 - **Annotations**: `get-datum/annotations` with source positions, which
   e's expression navigation reads Scheme files with. The reader keeps
   no positions; it needs a second, annotating reader.
@@ -574,10 +571,10 @@ profiling and cost centers, the inspector, the 56 port-buffer
 accessors, phantom bytevectors. The ones that matter
 to programs, in rough order:
 
-1. engines and timer interrupts (above);
-2. ftypes (`define-ftype`, `ftype-ref`), on CFFI's structs;
-3. annotations and source objects;
-4. `record-case`;
-5. `meta-cond`, `extend-syntax`, `define-structure`;
-6. continuation marks (Chez 10's), which would share prompts' frames
-   (docs/continuations.md).
+1. timer interrupts (`set-timer`, `timer-interrupt-handler`);
+2. ftypes (`define-ftype`, `ftype-ref`), on CFFI's structs.
+
+Done since this list was made: engines, continuation marks
+(src/chez/host.lisp), `record-case`, `meta-cond` and `extend-syntax`
+(src/chez/syntax.scm, with extend-syntax's helpers in
+src/chez/extend-syntax.sls), and `define-structure`.

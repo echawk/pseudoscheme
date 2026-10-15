@@ -201,6 +201,7 @@
 		:components ((:file "host")
 			     (:file "ffi" :depends-on ("host"))
 			     (:static-file "chezscheme.scm") (:static-file "ffi.scm") (:static-file "lists.scm")
+			     (:static-file "syntax.scm") (:static-file "extend-syntax.sls")
 			     (:static-file "numbers.scm") (:static-file "hashtables.scm")
 			     (:static-file "threads.scm") (:static-file "conditions.scm")
 			     (:static-file "top-level.scm")))
@@ -351,7 +352,7 @@
 	       (:module "native"
 		:serial t
 		:components ((:file "native") (:file "structs") (:file "procedures")
-			     (:file "control") (:file "hash") (:file "exn") (:file "basics") (:file "paths") (:file "equal") (:file "ports") (:file "printer") (:file "regexp") (:file "more")
+			     (:file "control") (:file "hash") (:file "exn") (:file "basics") (:file "paths") (:file "equal") (:file "ports") (:file "port-ops") (:file "printer") (:file "regexp") (:file "more") (:file "data") (:file "handlers")
 			     (:file "rktio")))
 	       (:file "reader")
 	       ;; A: Racket CS's layers on --chez

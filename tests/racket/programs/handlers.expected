@@ -1,0 +1,137 @@
+(raise-argument-error (quote f) "string?" 5): contract: f: contract violation
+  expected: string?
+  given: 5
+(raise-argument-error (quote f) "string?" 1 "a" 5 6): contract: f: contract violation
+  expected: string?
+  given: 5
+  argument position: 2nd
+  other arguments...:
+   "a"
+   6
+(raise-argument-error (quote f) (quote x) (quote x)): contract: raise-argument-error: contract violation
+  expected: string?
+  given: 'x
+(raise-arguments-error (quote f) "bad thing" "a" 1 "b" (quote (1 2))): contract: f: bad thing
+  a: 1
+  b: '(1 2)
+(raise-arguments-error (quote f) "bad thing" "a" 1 "b" (unquoted-printing-string "xx\nyy")): contract: f: bad thing
+  a: 1
+  b: 
+   xx
+   yy
+(raise-result-error (quote f) "string?" 5): contract: f: contract violation
+  expected: string?
+  result: 5
+(raise-range-error (quote f) "vector" "" 5 (vector 1 2) 0 1): contract: f: index is out of range
+  index: 5
+  valid range: [0, 1]
+  vector: '#(1 2)
+(raise-range-error (quote f) "vector" "" 5 (vector) 0 -1): contract: f: index is out of range for empty vector
+  index: 5
+(raise-range-error (quote f) "vector" "starting " 5 (vector 1 2 3) 2 3 1): contract: f: starting index is out of range
+  starting index: 5
+  valid range: [1, 3]
+  vector: '#(1 2 3)
+(raise-arity-error (quote f) 2 1 2 3): arity: f: arity mismatch;
+ the expected number of arguments does not match the given number
+  expected: 2
+  given: 3
+  arguments...:
+   1
+   2
+   3
+(raise-arity-error (quote f) (arity-at-least 1)): arity: f: arity mismatch;
+ the expected number of arguments does not match the given number
+  expected: at least 1
+  given: 0
+(raise-arity-mask-error (quote f) 5 1 2): arity: f: arity mismatch;
+ the expected number of arguments does not match the given number
+  given: 2
+  arguments...:
+   1
+   2
+(raise-result-arity-error (quote f) 2 "\n  in: here" 1 2 3): arity: f: result arity mismatch;
+ expected number of values not received
+  expected: 2
+  received: 3
+  in: here
+  arguments...:
+   1
+   2
+   3
+(raise-mismatch-error (quote f) "bad: " 5 " and " 6): contract: f: bad: 5" and "6
+(raise-type-error (quote f) "string" 1 "a" 5): contract: f: expected argument of type <string>; given: 5; other arguments: "a"
+(raise-user-error (quote f) "hi ~a" 5): user: f: hi 5
+(raise-user-error (quote f)): user: error: f
+(error "x" 1 "s" (quote a)): fail: x 1 "s" 'a
+(error (quote f) "a~a" 1): fail: f: a1
+(string-length (exn-message (with-handlers ((values values)) (raise-argument-error (quote f) "string?" (make-string 300 #\a))))) => (307)
+(parameterize ((error-print-width 10)) (raise-argument-error (quote f) "string?" "abcdefghijklmnop")): contract: f: contract violation
+  expected: string?
+  given: "abcdef...
+((error-value->string-handler) "abcdef" 5) => ("\"a...")
+((error-value->string-handler) (quote (1 "a" b)) 100) => ("'(1 \"a\" b)")
+(error-print-width 2): contract: error-print-width: contract violation
+  expected: (and/c exact-integer? (>=/c 3))
+  given: 2
+(parameterize ((current-error-message-adjuster (lambda (m) (and (eq? m (quote name)) (lambda (n r) (values (quote zzz) r)))))) (raise-argument-error (quote f) "string?" 5)): contract: zzz: contract violation
+  expected: string?
+  given: 5
+(error-message->adjusted-string (quote f) (quote racket) "msg" (quote racket)) => ("f: msg")
+(error-message->adjusted-string #f (quote racket) "msg" (quote racket)) => ("msg")
+(srcloc->string (srcloc "f.rkt" 1 2 3 4)) => ("f.rkt:1:2")
+(srcloc->string (srcloc "f.rkt" 1 #f 3 4)) => ("f.rkt::3")
+(srcloc->string (srcloc #f 1 2 3 4)) => (#f)
+(srcloc->string 5): contract: srcloc->string: contract violation
+  expected: srcloc?
+  given: 5
+(list (read-accept-bar-quote) (read-case-sensitive) (print-graph) (print-struct) (print-box) (print-vector-length) (print-hash-table) (print-unreadable) (print-pair-curly-braces) (print-mpair-curly-braces) (print-reader-abbreviations) (print-boolean-long-form) (print-syntax-width) (print-as-expression) (compile-enforce-module-constants) (error-print-context-length) (current-thread-initial-stack-size)) => ((#t #t #f #t #t #f #t #t #f #t #f #f 256 #t #t 16 64))
+(current-locale 5): contract: current-locale: contract violation
+  expected: (or/c #f string?)
+  given: 5
+(compile-target-machine? (quote x)) => (#f)
+(list (true-object? #t) (true-object? 1)) => ((#t #f))
+(custom-write? 5) => (#f)
+(custom-write-accessor 5): contract: custom-write-accessor: contract violation
+  expected: custom-write?
+  given: 5
+(procedure-struct-type? struct:arity-at-least) => (#f)
+(let-values (((p ? a) (make-struct-type-property (quote x)))) (list (struct-type-property-accessor-procedure? a) (struct-type-property-predicate-procedure? ?) (struct-type-property-accessor-procedure? ?))) => ((#t #t #f))
+(procedure-rename car "foo"): contract: procedure-rename: contract violation
+  expected: symbol?
+  given: "foo"
+((procedure-rename (lambda (x) x) (quote foo)) 1 2): arity: foo: arity mismatch;
+ the expected number of arguments does not match the given number
+  expected: 1
+  given: 2
+(object-name (procedure-rename car (quote foo))) => (foo)
+(procedure-arity (procedure-rename (lambda (x) x) (quote foo))) => (1)
+(call-with-continuation-prompt (lambda () (+ 1 (call-with-composable-continuation (lambda (k) (k 10)))))) => (12)
+(call-with-continuation-prompt (lambda () (call-with-composable-continuation (lambda (k) (list (continuation? k) (procedure? k)))))) => ((#t #t))
+(call-with-composable-continuation (lambda (k) 5) (make-continuation-prompt-tag (quote p))): contract: call-with-composable-continuation: no corresponding prompt in the continuation
+  tag: #<continuation-prompt-tag:p>
+(let ((k (call/cc values))) (if (procedure? k) (call-in-continuation k (lambda () 7)) k)) => (7)
+(with-continuation-mark (quote a) 1 (with-continuation-mark (quote b) 2 (let-values (((v next) ((continuation-mark-set->iterator (current-continuation-marks) (list (quote a) (quote b)) (quote none))))) v))) => (#(1 2))
+(let* ((l (make-logger (quote foo))) (r (make-log-receiver l (quote info)))) (log-message l (quote info) (quote foo) "hi" 5) (log-message l (quote debug) "dbg" 6) (log-message l (quote warning) #f "w" 7 #f) (list (sync/timeout 0 r) (sync/timeout 0 r) (sync/timeout 0 r))) => ((#(info "foo: hi" 5 foo) #(warning "w" 7 #f) #f))
+(let ((l (make-logger (quote foo)))) (list (log-level? l (quote info)) (log-max-level l))) => ((#f #f))
+(let* ((l (make-logger (quote foo))) (r (make-log-receiver l (quote info)))) (list (log-level? l (quote info)) (log-level? l (quote debug)) (log-max-level l))) => ((#t #f info))
+(let* ((l (make-logger (quote foo))) (c (make-logger (quote child) l)) (r (make-log-receiver l (quote warning)))) (log-message c (quote error) (quote x) "yy" 1) (list (sync/timeout 0 r) (log-max-level c) (logger-name c))) => ((#(error "x: yy" 1 x) warning child))
+(make-log-receiver (current-logger) (quote foo)): contract: make-log-receiver: contract violation
+  expected: (or/c 'none 'fatal 'error 'warning 'info 'debug)
+  given: 'foo
+(parameterize ((exit-handler (lambda (c) (list (quote exit) c)))) (exit 5)) => (#<void>)
+(list (equal-always? (vector 1) (vector 1)) (equal-always? (box 1) (box 1)) (equal-always? (string #\a) (string #\a)) (equal-always? (string->immutable-string "a") (string->immutable-string "a")) (equal-always? (vector->immutable-vector (vector 1)) (vector->immutable-vector (vector 1))) (equal-always? "a" "a") (equal? (vector 1) (vector->immutable-vector (vector 1)))) => ((#f #f #f #t #t #t #t))
+(= (equal-always-hash-code (quote (1 2))) (equal-always-hash-code (list 1 2))) => (#t)
+(equal?/recur (quote (1 2)) (quote (1 3)) (lambda (a b) #t)) => (#t)
+(printed (lambda () (parameterize ((print-boolean-long-form #t)) (print (list #t #f)) (write #t) (display #f)))) => ("'(#true #false)#true#false")
+(printed (lambda () (parameterize ((print-vector-length #t)) (print (vector 1 2)) (write (vector)) (write (vector 1 1 1)) (write (vector 1 2 2 2))))) => ("'#2(1 2)#0()#3(1)#4(1 2)")
+(printed (lambda () (parameterize ((print-box #f)) (print (box 1)) (write (box 1))))) => ("'#<box>#<box>")
+(printed (lambda () (parameterize ((print-pair-curly-braces #t)) (print (list 1 2)) (write (quote (1 . 2)))))) => ("'{1 2}{1 . 2}")
+(printed (lambda () (print (mcons 1 2)) (write (mcons 1 (mcons 2 (quote ())))))) => ("(mcons 1 2){1 2}")
+(printed (lambda () (parameterize ((print-as-expression #f)) (print (quote (a "b" #\c))) (print (quote a))))) => ("(a \"b\" #\\c)a")
+(printed (lambda () (parameterize ((print-reader-abbreviations #t)) (write (quote (quote a))) (write (quote (quasiquote (a (unquote b) (unquote-splicing c))))) (print (quote (quote a)))))) => ("'a`(a ,b ,@c)''a")
+(printed (lambda () (write (quote (quote a))) (print (quote (quote a))))) => ("(quote a)''a")
+(printed (lambda () (parameterize ((print-unreadable #f)) (display car) (write car)))): fail: write: printing disabled for unreadable value
+  value: #<procedure:car>
+(printed (lambda () (print (list (unquoted-printing-string "a b"))))) => ("'(a b)")
+(printed (lambda () (write "a\r\n\t\v\a\b\e\f\u0000x") (write #"a\r\n\0001\1a\377"))) => ("\"a\\r\\n\\t\\v\\a\\b\\e\\f\\u0000x\"#\"a\\r\\n\\0001\\1a\\377\"")

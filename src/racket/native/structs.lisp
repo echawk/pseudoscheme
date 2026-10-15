@@ -112,10 +112,12 @@ to VALUE, after PROPERTY's guard."
 (defun constructor (type)
   (let ((n-init (loop for ty = type then (struct-type-parent ty)
 		      while ty sum (struct-type-init-field-count ty))))
-    (lambda (&rest args)
-      (unless (= (length args) n-init)
-	(racket-error (rname (or (struct-type-constructor-name type) (struct-type-name type)))
-		      "arity mismatch;~% expected: ~D~% given: ~D" n-init (length args)))
+    (with-arity-mask
+	(ash 1 n-init)
+      (lambda (&rest args)
+	(unless (= (length args) n-init)
+	  (racket-arity-error (rname (or (struct-type-constructor-name type) (struct-type-name type)))
+			      (length args) n-init))
       ;; each type's guard, the ancestors' first ... innermost first, as
       ;; Racket's: the type's own guard gets all the fields, then its
       ;; parent's gets what it returns for the parent's fields
@@ -128,7 +130,13 @@ to VALUE, after PROPERTY's guard."
 		  do (setf (svref fields i) (pop rest)) (incf i))
 	    (loop repeat (struct-type-auto-field-count ty)
 		  do (setf (svref fields i) (struct-type-auto-value ty)) (incf i)))
-	  (make-instance-of type fields))))))
+	  (make-instance-of type fields)))))))
+
+(defun with-arity-mask (mask function)
+  "FUNCTION, which procedure-arity and the like see as taking MASK's
+numbers of arguments."
+  (setf (gethash function *arity-masks*) mask)
+  function)
 
 (defun run-guards (type args)
   (if (null type)

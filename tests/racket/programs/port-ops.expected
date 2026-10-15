@@ -1,0 +1,44 @@
+(let* ((n 0) (i (make-input-port (quote x) (lambda (bs) (if (< n 3) (begin (bytes-set! bs 0 (+ 97 n)) (set! n (add1 n)) 1) eof)) #f void))) (list (peek-bytes 2 0 i) (read-bytes 5 i) (read-byte i))) => ((#"ab" #"abc" #<eof>))
+(let* ((got (quote ())) (o (make-output-port (quote o) always-evt (lambda (bs s e non-block? breakable?) (set! got (cons (subbytes bs s e) got)) (- e s)) void))) (write-bytes #"hi" o) (write-string "yo" o) (flush-output o) (reverse got)) => ((#"hi" #"yo" #""))
+(make-input-port (quote x) 1 #f void): error: make-input-port: contract violation
+  expected: (or/c (procedure-arity-includes/c 1) input-port?)
+  given: 1
+(let-values (((i o) (make-pipe))) (write-bytes #"hello\nworld" o) (close-output-port o) (list (pipe-content-length i) (read-line i) (read-bytes-line i) (read-line i))) => ((11 "hello" #"world" #<eof>))
+(let-values (((i o) (make-pipe 5))) (list (write-bytes-avail* #"abcdefgh" o) (write-bytes-avail* #"zz" o) (pipe-content-length i))) => ((5 0 5))
+(let ((i (open-input-bytes #"abcdef"))) (list (peek-bytes-avail!* (make-bytes 3) 2 #f i) (read-bytes-avail!* (make-bytes 10) i) (read-bytes-avail!* (make-bytes 10) i))) => ((3 6 #<eof>))
+(let ((i (open-input-string "a\r\nb\rc\nd"))) (list (read-line i (quote any)) (read-line i (quote any)) (read-line i (quote any)) (read-line i (quote any)))) => (("a" "b" "c" "d"))
+(let ((b (make-bytes 4 0))) (list (read-bytes! b (open-input-bytes #"xy") 1) b)) => ((2 #"\0xy\0"))
+(read-bytes! (make-bytes 3) (open-input-bytes #"abcdef") 5): error: read-bytes!: starting index is out of range
+  starting index: 5
+  valid range: [0, 3]
+  byte string: #"\0\0\0"
+(let ((s (make-string 3 #\-))) (list (read-string! s (open-input-string "hey!")) s)) => ((3 "hey"))
+(peek-string 2 1 (open-input-string "abcd")) => ("bc")
+(let ((sp (make-input-port (quote sp) (lambda (bs) eof) (lambda (bs skip evt) (if (= skip 0) (lambda (src line col pos) (quote sp)) eof)) void))) (list (peek-byte-or-special sp) (peek-byte-or-special sp 0 #f (quote special)))) => ((sp special))
+(write-special (quote x) (open-output-bytes)): error: write-special: port does not support special values
+  port: #<output-port:string>
+(let ((i (open-input-bytes #"abc"))) (let ((e (port-progress-evt i))) (list (sync/timeout 0 e) (read-byte i) (and (sync/timeout 0 e) #t) (port-commit-peeked 1 e always-evt i)))) => ((#f 97 #t #f))
+(let ((i (open-input-bytes #"abc"))) (port-count-lines! i) (set-port-next-location! i 5 6 7) (read-byte i) (call-with-values (lambda () (port-next-location i)) list)) => ((5 7 8))
+(let ((i (open-input-bytes #"abc"))) (read-byte i) (call-with-values (lambda () (port-next-location i)) list)) => ((#f #f 2))
+(let ((o (open-output-bytes))) (close-output-port o) (write-bytes #"a" o)): error: write-bytes: output port is closed
+  output port: #<output-port:string>
+(let ((i (open-input-bytes #"a"))) (close-input-port i) (read-byte i)): error: read-byte: input port is closed
+  input port: #<input-port:string>
+(string-port? (open-input-string "")) => (#t)
+(file-stream-buffer-mode (open-input-bytes #"") (quote none)): error: file-stream-buffer-mode: buffering not supported for input port
+  mode: 'none
+  input port: #<input-port:string>
+(port-file-identity (open-input-bytes #"")): error: port-file-identity: contract violation
+  expected: file-stream-port?
+  given: #<input-port:string>
+(let ((o (open-output-file p #:exists (quote truncate)))) (write-bytes #"hello" o) (list (file-position o) (file-stream-buffer-mode o) (begin (file-truncate o 2) (close-output-port o) (call-with-input-file p read-line)))) => ((5 block "he"))
+(begin (open-output-file p) (quote opened)): error: open-output-file: file exists
+(begin (call-with-output-file p (lambda (o) (write-string "one\ntwo" o)) #:exists (quote replace)) (with-input-from-file p (lambda () (list (read-line) (read-line) (read-line))))) => (("one" "two" #<eof>))
+(begin (with-output-to-file p (lambda () (display "x")) #:exists (quote append)) (call-with-input-file p (lambda (i) (read-string 100 i)))) => ("one\ntwox")
+(file-or-directory-permissions p (quote bits)) => (420)
+(begin (open-input-file (build-path dir "nonexistent")) (quote opened)): error: open-input-file: cannot open input file
+(regexp-match-peek-positions #rx"b+" (open-input-bytes #"abbc") 1) => (((1 . 3)))
+(regexp-match-peek #rx"b(b)" (open-input-bytes #"abbc")) => ((#"bb" #"b"))
+(regexp-match-peek-positions #rx"é" (open-input-bytes (string->bytes/utf-8 "aéb"))) => (((1 . 3)))
+(regexp-match-peek-immediate #rx"b" (open-input-bytes #"abc")) => ((#"b"))
+(regexp-capture-group-count #rx"(a(b))(?:c)[(]") => (2)

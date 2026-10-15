@@ -55,11 +55,11 @@ one: every primitive the instances have that isn't host-shared."
     "char?" "char=?" "char<?" "char>?" "char->integer" "integer->char" "char-upcase" "char-downcase"
     "char-alphabetic?" "char-numeric?" "char-whitespace?"
     "string?" "string" "make-string" "string-length" "string-ref" "string-set!" "substring"
-    "string-append" "string=?" "string<?" "string-copy" "string->list" "list->string"
+    "string-append" "string-copy" "list->string"
     "string->symbol" "symbol->string" "symbol?" "string-upcase" "string-downcase"
     ;; vectors, bytevectors (Racket's bytes are the host's bytevectors)
     "vector" "make-vector" "vector?" "vector-ref" "vector-set!" "vector-length"
-    "vector->list" "list->vector" "vector-fill!"
+    "list->vector"
     ;; control
     "procedure?" "apply" "values" "call-with-values" "map" "for-each"
     "dynamic-wind")

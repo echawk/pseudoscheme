@@ -2,12 +2,15 @@
 
 ;;;; Strategy B's linklets from Racket's source tree.
 ;;;;
-;;;; The expander: Racket BC's racket/src/bc/src/startup.inc holds the
-;;;; extracted, flattened expander linklet, as C string literals, for
-;;;; BC's own linklet compiler.  It is the linklet strategy B needs,
-;;;; with no Racket to extract it (racket/src/expander/extract).  The
-;;;; thread, io and regexp layers aren't there (BC has them in C):
-;;;; extracting them needs a Racket (docs/racket-linklet-compiler.md,
+;;;; The expander: the expanded, flattened expander linklet that Racket's
+;;;; own build extracts for Racket CS (compiled/expander.rktl, by
+;;;; racket/src/expander/main.zuo), which utils/racket/extract.sh makes
+;;;; with an installed Racket of the pinned version, into
+;;;; build/external/racket-derived/expander.rktl.  Without it, the copy
+;;;; in Racket BC's racket/src/bc/src/startup.inc, as C string literals,
+;;;; is read instead: the same linklet with its local names renamed,
+;;;; there for a machine with no Racket.  The thread, io and regexp
+;;;; layers can be extracted the same way (docs/racket-linklet-compiler.md,
 ;;;; "Status").
 
 (in-package "PSEUDOSCHEME-RACKET")
@@ -39,9 +42,19 @@
 				     (t (write-char e out))))
 				 (write-char d out))))))))
 
+(defun derived-expander-file ()
+  (asdf:system-relative-pathname :pseudoscheme "build/external/racket-derived/expander.rktl"))
+
 (defun expander-linklet-text ()
-  "The expander linklet's source, from BC's startup.inc.  The C string is
-bytes (UTF-8): decoded as such."
+  "The expander linklet's source: extracted (DERIVED-EXPANDER-FILE), or
+else from BC's startup.inc, whose C string is bytes (UTF-8), decoded as
+such."
+  (let ((derived (probe-file (derived-expander-file))))
+    (if derived
+	(uiop:read-file-string derived :external-format :utf-8)
+	(startup-inc-expander-text))))
+
+(defun startup-inc-expander-text ()
   (let ((latin (with-open-file (in (racket-source "racket/src/bc/src/startup.inc")
 				   :external-format :latin-1)
 		 (c-string-literals in))))

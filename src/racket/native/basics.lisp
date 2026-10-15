@@ -40,20 +40,16 @@
      ("vector*-length" . "vector-length")
      ("bytes?" . "bytevector?") ("bytes-length" . "bytevector-length")
      ("bytes-ref" . "bytevector-u8-ref") ("bytes-set!" . "bytevector-u8-set!")
-     ("make-bytes" . "make-bytevector") ("bytes-copy" . "bytevector-copy")
+     ("make-bytes" . "make-bytevector")
      ("bytes-append" . "bytevector-append")
      ("bytes-fill!" . "bytevector-fill!")
-     ("vector-copy!" . "vector-copy!") ("string-copy!" . "string-copy!")
      ("eof-object?" . "eof-object?") ("char<=?" . "char<=?") ("char>=?" . "char>=?")
-     ("char-ci=?" . "char-ci=?") ("string-ci=?" . "string-ci=?")
      ("exact-integer?" . "exact-integer?") ("arithmetic-shift" . "bitwise-arithmetic-shift")
      ("bitwise-and" . "bitwise-and") ("bitwise-ior" . "bitwise-ior") ("bitwise-xor" . "bitwise-xor")
      ("bitwise-not" . "bitwise-not") ("bitwise-bit-set?" . "bitwise-bit-set?")
      ("integer-sqrt" . "exact-integer-sqrt")
      ("infinite?" . "infinite?") ("nan?" . "nan?")
-     ("vector-fill!" . "vector-fill!") ("string-fill!" . "string-fill!")
-
-     ("vector-copy" . "vector-copy") ("vector-map" . "vector-map")
+     ("vector-map" . "vector-map")
      ("vector-for-each" . "vector-for-each") ("string-for-each" . "string-for-each"))
     ("#%flfxnum" ("fx+" . "fx+") ("fx-" . "fx-") ("fx*" . "fx*") ("fx=" . "fx=?") ("fx<" . "fx<?")
      ("fx>" . "fx>?") ("fx<=" . "fx<=?") ("fx>=" . "fx>=?") ("fxand" . "fxand") ("fxior" . "fxior")
@@ -84,11 +80,26 @@
 
 ;;; ------------------------------------------------------------------
 ;;; Immutable strings, byte strings, vectors and boxes: the same types as
-;;; mutable ones, recorded here (as Guile mode records read-only strings)
+;;; mutable ones.  A string, byte string or vector carries the Chez mode's
+;;; flag in its header (src/chez/host.lisp), or the one SBCL's fasl
+;;; loader gives constants, so that literals stay immutable in compiled
+;;; code the cache loads; anything else is recorded here.
 
 (defvar *immutables* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t))
-(defun immutable! (x) (setf (gethash x *immutables*) t) x)
-(defun immutable-p (x) (values (gethash x *immutables*)))
+
+(defconstant +immutable-header-flags+
+  (ash (logior sb-vm:+vector-shareable-nonstd+ sb-vm:+vector-shareable+) 8))
+
+(defun immutable! (x)
+  (if (typep x '(simple-array * (*)))
+      (ps-r6rs::mark-immutable x)
+      (setf (gethash x *immutables*) t))
+  x)
+
+(defun immutable-p (x)
+  (if (typep x '(simple-array * (*)))
+      (logtest +immutable-header-flags+ (sb-kernel:get-header-data x))
+      (values (gethash x *immutables*))))
 
 ;;; ------------------------------------------------------------------
 ;;; Constants
@@ -274,8 +285,9 @@ assigned, which schemify's and the expander's checks compare with.")
 ;;; Errors with fields
 
 (defun written (v)
-  "V as Racket's error messages show it (printer.lisp)."
-  (with-output-to-string (s) (print-value v s :write)))
+  "V as Racket's error messages show it: through the
+error-value->string-handler (handlers.lisp), printed as print does."
+  (error-value->string v))
 
 (defnative "raise-arguments-error" (who message &rest fields-and-values) ()
   (do-raise (make-exn "exn:fail:contract"
@@ -311,6 +323,9 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "procedure-arity-mask" (f) (:leaf t)
   (or (ignore-errors (arity-mask f)) -1))
 
+(defvar *renamed-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "procedure-rename's procedures and their names (handlers.lisp).")
+
 (defnative "object-name" (x) (:leaf t)
   (cond ((rregexp-p x) (rregexp-source x))
 	((regexp-literal-p x) (regexp-literal-source x))
@@ -318,9 +333,13 @@ assigned, which schemify's and the expander's checks compare with.")
 	((routport-p x) (routport-name x))
 	((struct-instance-p x) (struct-type-name (struct-of-type x)))
 	((struct-type-p x) (struct-type-name x))
+	((and (functionp x) (gethash x *renamed-procedures*)))
 	((functionp x)
 	 (let ((name (ignore-errors (sb-kernel:%fun-name x))))
-	   (if (and name (symbolp name) (not (null name))) (rsym (string-downcase (symbol-name name))) ps:false)))
+	   ;; the host's procedures defined by DEFUNE are named .NAME
+	   (if (and name (symbolp name) (not (null name)))
+	       (rsym (string-left-trim "." (string-downcase (symbol-name name))))
+	       ps:false)))
 	(t ps:false)))
 
 (defnative "version" () (:leaf t) "9.3")
