@@ -216,6 +216,15 @@ without a pass of our own.
 `square` is a `labels` function, called twice from `dist2`, so it isn't
 inlined; declared `inline`, it would be.
 
+**Small `labels` functions inline (done, October 2026).** In each
+`labels` the translator writes, the functions of at most 40 conses that
+can't reach themselves through the others are declared `inline`
+(`inline-small-labels`, src/psyntax.lisp). On 16 of the r7rs-benchmarks,
+best of two runs each way, it's 7% faster as a geometric mean: `simplex`
+1.83 → 1.10 s, `earley` 1.26 → 0.98, `mazefun` and `puzzle` 18%. No
+benchmark was consistently slower; `paraffins` and `conform` vary as
+much from run to run as between the two.
+
 ### 7. Boolean results (partly)
 
 `truep` is now an inline `eq` test, so a test whose value is a Scheme
@@ -288,7 +297,7 @@ What remains:
 | 3 | cross-library knowledge | partly (per form) | inlining and fewer capture sites across libraries |
 | 4 | type inference into declarations | not started | fixnum and unboxed-flonum loops |
 | 5 | `dynamic-extent` | not started | rest lists and non-escaping closures |
-| 6 | inlining small known procedures | partly (SBCL's own) | calls to small helpers |
+| 6 | inlining small known procedures | partly (small `labels` functions) | calls to small helpers |
 | 7 | boolean results | partly | small |
 | 8 | faster compilation | not started | start-up and the REPL |
 | 9 | continuation frames | partly (across forms in Guile mode, across libraries) | the runtime's higher-order primitives |

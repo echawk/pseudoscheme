@@ -860,8 +860,64 @@ TOP-LEVEL begin's forms are compiled one by one: its biggest counts."
 		  (tree-size form))))
     (if (> size *inline-arithmetic-limit*)
 	`(locally (declare (notinline ps:scheme+ ps:scheme- ps:scheme*)) ,lisp)
-	lisp)))
+	(inline-small-labels lisp))))
 
+;;; Small known procedures inline (docs/optimizations.md, idea 6).  SBCL
+;;; inlines a LABELS function only if it's called once; declared INLINE,
+;;; a small one is inlined wherever it's called, which saves a call in
+;;; helpers like (define (square x) (* x x)).  Not one that can reach
+;;; itself through the others it calls: that would expand without end.
+
+(defparameter *inline-labels-size* 40
+  "The biggest LABELS function, in conses, declared inline.")
+
+(defun inline-small-labels (form)
+  "FORM, Lisp code, with the small non-recursive functions of each LABELS
+in it declared inline."
+  (labels ((walk (x)
+	     (cond ((atom x) x)
+		   ((eq (car x) 'quote) x)
+		   ((and (eq (car x) 'labels) (consp (cdr x)) (listp (cadr x)))
+		    (let* ((bindings (mapcar (lambda (b)
+					       (if (and (consp b) (consp (cdr b)))
+						   (list* (car b) (cadr b) (mapcar #'walk (cddr b)))
+						   b))
+					     (cadr x)))
+			   (inline (inline-candidates bindings))
+			   (body (mapcar #'walk (cddr x))))
+		      (if inline
+			  `(labels ,bindings (declare (inline ,@inline)) ,@body)
+			  `(labels ,bindings ,@body))))
+		   (t (let ((a (walk (car x))) (d (walk (cdr x))))
+			(if (and (eq a (car x)) (eq d (cdr x))) x (cons a d)))))))
+    (walk form)))
+
+(defun inline-candidates (bindings)
+  "The names of BINDINGS' functions small enough to inline that can't
+reach themselves through the others."
+  (let* ((names (loop for b in bindings when (and (consp b) (symbolp (car b))) collect (car b)))
+	 (small (loop for b in bindings
+		      when (and (consp b) (symbolp (car b)) (consp (cdr b))
+				(<= (tree-size (cddr b)) *inline-labels-size*))
+			collect (car b)))
+	 (calls (make-hash-table :test 'eq)))
+    (labels ((mentions (tree name)
+	       (cond ((eq tree name) t)
+		     ((atom tree) nil)
+		     (t (or (mentions (car tree) name) (mentions (cdr tree) name))))))
+      (dolist (b bindings)
+	(when (and (consp b) (symbolp (car b)))
+	  (setf (gethash (car b) calls)
+		(remove-if-not (lambda (n) (mentions (cddr b) n)) names))))
+      (flet ((reaches-itself-p (f)
+	       (let ((seen '()) (stack (copy-list (gethash f calls))))
+		 (loop while stack
+		       do (let ((g (pop stack)))
+			    (when (eq g f) (return t))
+			    (unless (member g seen)
+			      (push g seen)
+			      (setq stack (append (gethash g calls) stack))))))))
+	(remove-if #'reaches-itself-p small)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Building the host environment
