@@ -85,9 +85,10 @@ PS="bin/pseudoscheme --no-userinit --continuations=$CONTINUATIONS --guile"
 PACKAGE=${PACKAGE:-"(@ (gnu packages base) hello)"}
 
 step_build() {
-  # an 11 GB heap (of the machine's 12): hello's dependencies are some
-  # 400 of Guix's package modules, whose compiled code doesn't fit in 8
-  make -C contrib/cli HEAP=${HEAP:-11GB} > "$LOGS/build.log" 2>&1
+  # an 8 GB heap (of the machine's 12): hello's dependencies, some 525
+  # of Guix's modules, peak at about 3 GB in use; with 11 GB, SBCL let
+  # garbage grow until the kernel killed it for want of memory
+  make -C contrib/cli HEAP=${HEAP:-8GB} > "$LOGS/build.log" 2>&1
   note "build: exit $?"
   # our libguile, for Guix's C extensions (guile-gnutls, ...): docs/libguile.md
   make -C src/libguile > "$LOGS/libguile-build.log" 2>&1
