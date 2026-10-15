@@ -302,10 +302,21 @@
       (setf (gethash derived *parameters*) data)
       derived)))
 
+(defnative "time-apply" (proc args) ()
+  ;; the results as a list, then CPU, real and GC milliseconds
+  (let ((run0 (get-internal-run-time)) (real0 (get-internal-real-time)) (gc0 sb-ext:*gc-run-time*))
+    (let ((results (multiple-value-list (apply proc args))))
+      (flet ((ms (dt) (floor (* dt 1000) internal-time-units-per-second)))
+	(values results
+		(ms (- (get-internal-run-time) run0))
+		(ms (- (get-internal-real-time) real0))
+		(ms (- sb-ext:*gc-run-time* gc0)))))))
+
 (defnative "call-with-current-continuation" (proc &optional prompt-tag) ()
+  ;; full, re-entrant: linklets are compiled for them (api.lisp)
   (declare (ignore prompt-tag))
-  (funcall (psx:host-ref "call-with-current-continuation") proc))
-(defnative "continuation?" (x) (:leaf t) (declare (ignore x)) ps:false)
+  (psx::full-call/cc proc))
+(defnative "continuation?" (x) (:leaf t) (bool (and (functionp x) (psx::continuation-procedure-p x))))
 
 ;;; ------------------------------------------------------------------
 ;;; Load forms for the rest of the values compiled code may hold as

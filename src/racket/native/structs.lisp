@@ -199,11 +199,16 @@ to VALUE, after PROPERTY's guard."
 	   ;; what a property's guard gets, as struct-type-info returns it
 	   (info (list name init-field-count auto-field-count accessor mutator
 		       immutables (or parent ps:false) ps:false)))
-      (loop for (property . value) in props
-	    do (setf (struct-type-properties type)
-		     (attach-property (struct-type-properties type) property value info)))
-      (let ((proc (cdr (assoc *prop-procedure* props))))
-	(when proc (setf (struct-type-proc-spec type) proc)))
+      ;; its own properties, supers included (racket/base's prop:procedure
+      ;; is racket/private/kw.rkt's, whose super is the kernel's), over
+      ;; the parent's
+      (let ((own '()))
+	(loop for (property . value) in props
+	      do (setq own (attach-property own property value info)))
+	(setf (struct-type-properties type)
+	      (append own (remove-if (lambda (e) (assoc (car e) own)) (struct-type-properties type))))
+	(let ((proc (cdr (assoc *prop-procedure* own))))
+	  (when proc (setf (struct-type-proc-spec type) proc))))
       ;; inspector 'prefab: a prefab struct type, the same for all who
       ;; make one of this name and shape
       (when (and (symbolp inspector) inspector (string= (rname inspector) "prefab"))
