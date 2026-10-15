@@ -135,6 +135,9 @@ program after them, through psyntax; return the program's last value."
 (deftest "letrec*: an assignment, early" (r7)
   "(import (scheme base)) (let () (define (f) (set! x 2)) (define y (f)) (define x 1) y)"
   :error)
+(deftest "letrec*: a procedure the init calls refers to the variable it defines" (r7)
+  "(import (scheme base)) (let () (define (b x) c) (define c (b b)) c)"
+  :error)
 (deftest "letrec*: called once everything is defined" (r7)
   "(import (scheme base)) (let () (define (f) (k x)) (define (k z) z) (define x 1) (define y (f)) y)"
   "1")

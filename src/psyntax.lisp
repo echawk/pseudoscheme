@@ -433,10 +433,11 @@ circular, R7RS 2.4)."
 			   do (when (and (set-p s vars) (not (gethash (cadr s) index)))
 				(setf (gethash (cadr s) index) j)
 				(when (lambda-p (caddr s)) (setf (gethash (cadr s) lambdas) (caddr s)))))
-		     (flet ((undefined-at (v j self-ok)
-			      ;; is V not yet defined while statement J runs?
+		     (flet ((undefined-at (v j)
+			      ;; is V not yet defined while statement J (not a
+			      ;; lambda definition) runs?
 			      (let ((i (gethash v index)))
-				(and i (or (> i j) (and (= i j) (not self-ok)))))))
+				(and i (>= i j)))))
 		       ;; A statement that isn't a lambda definition runs its
 		       ;; code, and may call the body's procedures it mentions,
 		       ;; and those they mention, and so on: a reference in any
@@ -446,7 +447,7 @@ circular, R7RS 2.4)."
 				       (code (if definition (caddr s) s))
 				       (refs (mentioned code table)))
 				  (unless (or (and definition (lambda-p code)) (null refs))
-				    (let ((here (remove-if-not (lambda (v) (undefined-at v j nil))
+				    (let ((here (remove-if-not (lambda (v) (undefined-at v j))
 							       (if (and (set-p s vars) (not definition))
 								   (cons (cadr s) refs)
 								   refs))))
@@ -459,7 +460,7 @@ circular, R7RS 2.4)."
 						   (push p seen)
 						   (let ((body-refs (mentioned (caddr (gethash p lambdas)) table)))
 						     (dolist (v body-refs)
-						       (when (undefined-at v j t)
+						       (when (undefined-at v j)
 							 (pushnew v (gethash p danger))))
 						     (setq stack (append body-refs stack)))))))))))
 		     (let ((checked '()))
