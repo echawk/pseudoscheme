@@ -135,8 +135,10 @@ an abort to the default prompt."
 		       (incf i)
 		       (setq d (char-downcase (char control (1+ i)))))
 		     (case d
-		       ((#\a) (funcall (psx:host-ref "display") (pop args) out))
-		       ((#\s #\v #\e) (funcall (psx:host-ref "write") (pop args) out))
+		       ;; Racket's printer (printer.lisp): ~v prints as print does
+		       ((#\a) (print-value (pop args) out :display))
+		       ((#\s #\e) (print-value (pop args) out :write))
+		       ((#\v) (print-quoted (pop args) out))
 		       ((#\% #\n) (terpri out))
 		       (#\~ (write-char #\~ out))
 		       (t (write-char c out) (write-char d out)))
@@ -178,6 +180,13 @@ an abort to the default prompt."
 			   (car (simple-condition-format-arguments e))))
 	 (make-exn "exn:fail" (princ-to-string e))))
     (division-by-zero (make-exn "exn:fail:contract:divide-by-zero" "/: division by zero"))
+    (sb-int:invalid-array-index-error
+     (let ((array (sb-kernel::invalid-array-index-error-array e)))
+       (make-exn "exn:fail:contract"
+		 (format nil "index is out of range~%  index: ~A~%  valid range: [0, ~D]~%  ~A: ~A"
+			 (type-error-datum e) (1- (length array))
+			 (typecase array (string "string") ((array (unsigned-byte 8) (*)) "bytes") (t "vector"))
+			 (with-output-to-string (s) (print-quoted array s))))))
     (type-error (make-exn "exn:fail:contract"
 			  (format nil "contract violation~%  expected: ~A~%  given: ~A"
 				  (racket-type-name (type-error-expected-type e))

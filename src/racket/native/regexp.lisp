@@ -211,6 +211,34 @@ groups (vectors), or NIL."
 	(cons (cons s e) (loop for g across gs for h across ge collect (if g (cons g h) ps:false)))
 	ps:false)))
 
+(defun last-bytes (text bytes e count)
+  "The COUNT (at most) bytes of TEXT before position E, as a byte string:
+the /end variants' second value."
+  (let ((piece (subseq text (max 0 (- e count)) e)))
+    (if (or bytes (not (stringp piece)))
+	(coerce (if (stringp piece) (map 'vector #'char-code piece) piece) '(simple-array (unsigned-byte 8) (*)))
+	(let ((b (sb-ext:string-to-octets piece :external-format :utf-8)))
+	  (subseq b (max 0 (- (length b) count)))))))
+
+(defnative "regexp-match-positions/end" (pattern input &optional (start 0) (end nil) out prefix (count 1)) ()
+  (declare (ignore out prefix))
+  (multiple-value-bind (r text bytes s e gs ge) (match-positions pattern input start end)
+    (declare (ignore r))
+    (if s
+	(values (cons (cons s e) (loop for g across gs for h across ge collect (if g (cons g h) ps:false)))
+		(last-bytes text bytes e count))
+	(values ps:false ps:false))))
+
+(defnative "regexp-match/end" (pattern input &optional (start 0) (end nil) out prefix (count 1)) ()
+  (declare (ignore out prefix))
+  (multiple-value-bind (r text bytes s e gs ge) (match-positions pattern input start end)
+    (declare (ignore r))
+    (if s
+	(values (cons (result-substring text bytes s e)
+		      (loop for g across gs for h across ge collect (result-substring text bytes g h)))
+		(last-bytes text bytes e count))
+	(values ps:false ps:false))))
+
 (defun replacement (insert text bytes s e gs ge)
   "INSERT for one match: a procedure of the matched strings, or a string
 with & and \\N for the match and its groups."
@@ -259,3 +287,13 @@ with & and \\N for the match and its groups."
 (defnative "regexp-replace*" (pattern input insert &optional start end prefix) ()
   (declare (ignore start end prefix))
   (regexp-replace* pattern input insert t))
+
+;;; How far back a match may look: (?<=...) and (?<!...) are bounded
+;;; (as Racket's are), so the pattern's length bounds it
+(defnative "regexp-max-lookbehind" (rx) (:leaf t)
+  (let ((source (let ((s (if (rregexp-p rx) (rregexp-source rx) (funcall (native-function (gethash "object-name" *natives*)) rx))))
+		  (if (stringp s) s (map 'string #'code-char s)))))
+    (if (or (search "(?<=" source) (search "(?<!" source) (search "\\b" source) (search "\\B" source)
+	    (find #\^ source))
+	(max 1 (length source))
+	0)))

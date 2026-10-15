@@ -62,6 +62,8 @@
    (funcall (native-function (gethash "make-struct-type-property" *natives*)) name guard supers)))
 
 (defnatives "#%kernel"
+  ("quotient/remainder" (n m)
+   (values (funcall (psx:host-ref "quotient") n m) (funcall (psx:host-ref "remainder") n m)))
   ("list-pair?" (x) (bool (and (consp x) (handler-case (list-length x) (error () nil)))))
   ("bytes->list" (b) (coerce b 'list))
   ("list->bytes" (l) (make-array (length l) :element-type '(unsigned-byte 8) :initial-contents l))
