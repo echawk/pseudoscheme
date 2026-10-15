@@ -57,7 +57,8 @@
   ("unsafe-remove-collect-callbacks" (&rest args) (declare (ignore args)) *void*)
   ("unsafe-add-global-finalizer" (&rest args) (declare (ignore args)) *void*)
   ("unsafe-assert-unreachable" () (racket-error "unsafe-assert-unreachable" "reached"))
-  ("unsafe-make-struct-type-property/guard-calls-no-arguments" (name &optional (guard ps:false) (supers '()))
+  ("unsafe-make-struct-type-property/guard-calls-no-arguments" (name &optional (guard ps:false) (supers '()) &rest more)
+   (declare (ignore more))
    (funcall (native-function (gethash "make-struct-type-property" *natives*)) name guard supers)))
 
 (defnatives "#%kernel"
@@ -290,7 +291,8 @@
   ("procedure-closure-contents-eq?" (a b) (bool (eq a b)))
   ("parameter-procedure=?" (a b) (bool (eq a b))))
 
-(defnative "make-derived-parameter" (p guard wrap) (:leaf t)
+(defnative "make-derived-parameter" (p guard wrap &optional name realm) (:leaf t)
+  (declare (ignore name realm))
   ;; a procedure over P's value: set through GUARD, read through WRAP
   (let ((data (gethash p *parameters*)))
     (let ((derived (lambda (&optional (v nil v-p))

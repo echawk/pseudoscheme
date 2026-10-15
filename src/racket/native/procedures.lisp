@@ -74,7 +74,8 @@
 (defnative "chaperone-of?" (a b) () (bool (impersonates-p a b)))
 
 ;;; Impersonator properties: values a wrapper carries
-(defnative "make-impersonator-property" (name) (:leaf t)
+(defnative "make-impersonator-property" (name &optional accessor-name contract realm) (:leaf t)
+  (declare (ignore accessor-name contract realm))
   (let ((p (make-impersonator-property* name)))
     (flet ((lookup (x)
 	     (loop for i = (impersonation x) then (impersonation (impersonation-of i))

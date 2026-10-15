@@ -1,0 +1,17 @@
+#lang racket/base
+;; The port parameters, parameterized and set; bytes-copy!
+(define (show . xs) (for-each (lambda (x) (write x) (display " ")) xs) (newline))
+(define o (open-output-string))
+(parameterize ([current-output-port o]) (display "hi") (printf "~a!" 1) (write 'x))
+(show (get-output-string o) (parameter? current-output-port))
+(let ([old (current-output-port)])
+  (current-output-port o)
+  (display "set")
+  (current-output-port old))
+(parameterize ([current-error-port o]) (eprintf "e"))
+(show (get-output-string o))
+(define b (make-bytes 5 0))
+(bytes-copy! b 1 #"abc")
+(show (bytes->list b))
+(bytes-copy! b 0 #"xyz" 1)
+(show (bytes->list b))

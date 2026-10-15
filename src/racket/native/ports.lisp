@@ -83,7 +83,7 @@ many bytes it takes; a bad sequence is #\\uFFFD, one byte."
 	(when (rinport-count-lines p) (incf (rinport-position p))))))
 
 (defun input-port (who port)
-  (let ((port (or port (funcall (psx:host-ref "current-input-port")))))
+  (let ((port (or port (current-port :input))))
     (when (and (rinport-p port) (rinport-closed port))
       (racket-error who "input port is closed~%  port: ~A" (written port)))
     port))
@@ -192,7 +192,7 @@ many bytes it takes; a bad sequence is #\\uFFFD, one byte."
 ;;; Output
 
 (defun output-port (port)
-  (or port (funcall (psx:host-ref "current-output-port"))))
+  (or port (current-port :output)))
 
 (defun out-bytes (port bytes)
   (let ((buffer (routport-buffer port)))

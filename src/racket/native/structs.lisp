@@ -235,9 +235,9 @@ to VALUE, after PROPERTY's guard."
 (defun struct-procedure-kind (f) (car (gethash f *struct-procedures*)))
 
 (defnative "make-struct-type-property" (name &optional (guard ps:false) (supers '())
-					     (can-impersonate? ps:false) (realm ps:false))
+					     (can-impersonate? ps:false) accessor-name contract realm)
     (:rumble "make-struct-type-property")
-  (declare (ignore can-impersonate? realm))
+  (declare (ignore can-impersonate? accessor-name contract realm))
   (let ((p (%make-struct-type-property name (and (truthy guard) guard) supers)))
     (values p
 	    (lambda (x) (bool (and (or (struct-type-p x) (struct-instance-p x))

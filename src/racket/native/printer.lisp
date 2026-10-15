@@ -114,7 +114,7 @@ struct as its constructor's application, (point 1 2)."
 (defun port-stream (port)
   "PORT as something the host's writers take: the current output port if
 not given."
-  (or port (funcall (psx:host-ref "current-output-port"))))
+  (or port (current-port :output)))
 
 (defun custom-write-procedure (x)
   "X's prop:custom-write procedure, if X is a struct with one."

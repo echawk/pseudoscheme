@@ -187,6 +187,32 @@
 (defnative "call-with-parameterization" (paramz thunk) ()
   (ps-r6rs::call-with-mark *parameterization-key* paramz thunk))
 
+;;; The port parameters.  Until a program sets or parameterizes one,
+;;; its value is the host's (*standard-output* and so on).  Our natives
+;;; that take an optional port ask them (CURRENT-PORT); the host's own
+;;; procedures don't.
+
+(defun make-port-parameter (variable name)
+  (let* ((data (make-parameter-data (list nil) nil (rsym name)))
+	 (p (lambda (&optional (new nil new-p))
+	      (if new-p
+		  (progn (setf (car (parameter-cell data)) new) *void*)
+		  (or (car (parameter-cell data)) (symbol-value variable))))))
+    (setf (gethash p *parameters*) data)
+    (define-primitive "#%kernel" name p)
+    p))
+
+(defvar *current-output-port* (make-port-parameter '*standard-output* "current-output-port"))
+(defvar *current-input-port* (make-port-parameter '*standard-input* "current-input-port"))
+(defvar *current-error-port* (make-port-parameter '*error-output* "current-error-port"))
+
+(defun current-port (which)
+  "The current :OUTPUT, :INPUT or :ERROR port."
+  (funcall (ecase which
+	     (:output *current-output-port*)
+	     (:input *current-input-port*)
+	     (:error *current-error-port*))))
+
 ;;; ------------------------------------------------------------------
 ;;; Thread cells.  One place, and threads (thread.lisp, later) will give
 ;;; each its own values of the preserved cells; until then a cell is a
