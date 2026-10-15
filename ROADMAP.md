@@ -358,7 +358,14 @@ expands to Tree-IL.
 - **Guix**, the long-term test: `(guix records)`, G-expressions, the
   store protocol to a real `guix-daemon`, and the FFI libraries
   (guile-gcrypt, guile-git, guile-sqlite3, guile-zlib). Milestone: the
-  same derivation as `guix build -d hello`.
+  same derivation as `guix build -d hello`. **Reached** (October 2026,
+  in the Linux container, tests/guix/run.sh): `guix build -d
+  --no-grafts -e '(@ (gnu packages base) hello)'` on `--guile`, with full
+  continuations, gives
+  `/gnu/store/qzh7rvz609rm845xxf3jsasxzgbp208x-hello-2.12.2.drv`, the same
+  as real Guix. Cold, it loads and compiles 525 of Guix's modules in 41
+  minutes, in a heap of about 3 GB. Next: building hello itself (the
+  `hello` step).
 - **Depends on:** the compiled-library cache (section 2; Guix is
   hundreds of modules), thread safety (section 4), and the CFFI
   experience of the bridge and of Chez's FFI.
