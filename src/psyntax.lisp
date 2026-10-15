@@ -60,6 +60,7 @@ as long as the process runs, as no package lets go of a symbol."
 		;; variable before being changed, so R5RS's isn't.
 		(when (member name *shared-primitives*)
 		  (setq *shared-primitives* (remove name *shared-primitives*))
+		  (define-builtin-alias *host* name (psl:tr "PROGRAM-ENV-LOOKUP" *host* name))
 		  (psl:install-variable! *host* name value))
 		(location name))))
     (setf (symbol-value loc) value)
@@ -188,12 +189,33 @@ value is an extension of the built-in that agrees with it when called
 with MIN to MAX (NIL: any number of) arguments, as Chez's variadic fx+
 does.  OPEN-PRIMITIVES still opens such calls, so they stay open-coded.")
 
+(defun builtin-alias-name (name)
+  (sym (concatenate 'string "%builtin:" (if (stringp name) name (ps:scheme-symbol-name name)))))
+
+(defun define-builtin-alias (env name den)
+  "Define %builtin:NAME in ENV as DEN, R5RS's built-in NAME, which the
+translator open-codes: the host's NAME is another procedure now (an
+extension of it), whose calls with the arguments the built-in takes
+(*EXTENDED-PRIMITIVES*) go to the built-in still."
+  (psl:tr "PROGRAM-ENV-DEFINE!" env (builtin-alias-name name) den))
+
+(defun builtin-alias (name)
+  "%builtin:NAME if the host has it, else NAME."
+  (let ((alias (builtin-alias-name name)))
+    (if (psl:binding-defined-p *host* alias) alias name)))
+
+(defun extended-primitive-name (f)
+  "The host global F, (primitive x) or psyntax's plain x, names."
+  (cond ((and (consp f) (symbolp (car f)) (string= (symbol-name (car f)) "PRIMITIVE")
+	      (consp (cdr f)) (symbolp (cadr f)) (null (cddr f)))
+	 (cadr f))
+	((and f (symbolp f)) f)))
+
 (defun open-call-of-extended-primitive-p (form)
-  (let ((f (car form)))
-    (and (consp f) (symbolp (car f)) (string= (symbol-name (car f)) "PRIMITIVE")
-	 (consp (cdr f)) (symbolp (cadr f)) (null (cddr f))
-	 (let ((entry (assoc (ps:scheme-symbol-name (cadr f)) *extended-primitives* :test #'string=))
-	       (n (and (listp (cdr form)) (length (cdr form)))))
+  (let ((f (extended-primitive-name (car form))))
+    (and f
+	 (let ((entry (assoc (ps:scheme-symbol-name f) *extended-primitives* :test #'string=))
+	       (n (proper-length (cdr form))))
 	   (and entry n (<= (second entry) n) (or (null (third entry)) (<= n (third entry))))))))
 
 (defvar *canonical-empty* nil
@@ -233,7 +255,7 @@ host global."
 	 (cons (sym (chez-renamed-primitive (ps:scheme-symbol-name (cadar form)) (proper-length (cdr form))))
 	       (mapcar #'open-primitives-1 (cdr form))))
 	((open-call-of-extended-primitive-p form)
-	 (cons (cadr (car form)) (mapcar #'open-primitives-1 (cdr form))))
+	 (cons (builtin-alias (extended-primitive-name (car form))) (mapcar #'open-primitives-1 (cdr form))))
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
 	      (chez-renamed-primitive (ps:scheme-symbol-name (cadr form)) nil))
@@ -956,9 +978,11 @@ be a fresh variable, called out of line."
 		   (boundp (psl:tr "PROGRAM-VARIABLE-LOCATION" base-den))
 		   (eq (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" den))
 		       (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" base-den)))
-		   (not (member name overridden))
-		   (not (closed-primitive-p (ps:scheme-symbol-name name))))
-	      (progn (psl:tr "PROGRAM-ENV-DEFINE!" env name base-den) (push name shared))
+		   (not (member name overridden)))
+	      (if (closed-primitive-p (ps:scheme-symbol-name name))
+		  (progn (define-builtin-alias env name base-den)
+			 (psl:copy-bindings! env ps-r7rs:*implementation-env* (list name)))
+		  (progn (psl:tr "PROGRAM-ENV-DEFINE!" env name base-den) (push name shared)))
 	      (psl:copy-bindings! env ps-r7rs:*implementation-env* (list name))))))
     (setq *shared-primitives* shared)
     env))
