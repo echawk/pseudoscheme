@@ -347,11 +347,15 @@ circular, R7RS 2.4)."
 ;;;    (set! v init) ... body ...)) '#f ...): the body's own procedures
 ;;;    can run before V is defined only from a statement before V's
 ;;;    definition (or V's init) that refers to one of the body's
-;;;    variables and isn't a lambda definition.  If there is such a
-;;;    statement, each reference to V up to its definition (in a
-;;;    procedure defined earlier, say), and each assignment, checks a
-;;;    flag set just after the definition.  A body of procedure
-;;;    definitions and then expressions, the usual kind, gets no checks.
+;;;    variables and isn't a lambda definition.  Such a statement may
+;;;    call the procedures it mentions, the ones they mention, and so on;
+;;;    a reference or assignment in it or in one of those to a variable
+;;;    not yet defined when it runs checks a flag set just after that
+;;;    variable's definition.  Only there: a check makes a call through
+;;;    the variable, not a direct one, unless the check is beside the
+;;;    call ((begin check (v arg ...))), which is how a call is checked.
+;;;    A body of procedure definitions and then expressions, the usual
+;;;    kind, gets no checks.
 ;;;
 ;;;  - A letrec whose inits aren't all lambdas: a reference to one of its
 ;;;    variables in an init, in a procedure there included, checks a flag
@@ -380,10 +384,15 @@ circular, R7RS 2.4)."
 	       found))
 	   (guard-references (e flags)
 	     ;; E with each reference to and assignment of a variable of
-	     ;; FLAGS, ((v . flag) ...), checking its flag
+	     ;; FLAGS, ((v . flag) ...), checking its flag; a call of one
+	     ;; checks before the call, so that it stays a call of the
+	     ;; variable (a direct call, if it's a known procedure)
 	     (cond ((symbolp e) (let ((f (cdr (assoc e flags)))) (if f (check f e) e)))
 		   ((atom e) e)
 		   ((quote-p e) e)
+		   ((and (symbolp (car e)) (assoc (car e) flags))
+		    `(,(sym "begin") ,(check (cdr (assoc (car e) flags)) (car e))
+		      (,(car e) ,@(guard-list (cdr e) flags))))
 		   ((and (keyword-p (car e) "SET!") (consp (cdr e)) (assoc (cadr e) flags))
 		    `(,(sym "begin") ,(check (cdr (assoc (cadr e) flags)) (cadr e))
 		      (,(car e) ,(cadr e) ,@(guard-list (cddr e) flags))))
@@ -416,47 +425,63 @@ circular, R7RS 2.4)."
 			    (= (length vars) (length args))
 			    (every #'false-p args))
 		   (let ((table (make-hash-table :test 'eq))
-			 (index (make-hash-table :test 'eq))
-			 (first-running nil)
-			 (early (make-hash-table :test 'eq)) ; v -> T if mentioned up to its definition
-			 (seen '()))
+			 (index (make-hash-table :test 'eq))	; v -> where it's defined
+			 (lambdas (make-hash-table :test 'eq))	; v -> its lambda, if it's defined by one
+			 (danger (make-hash-table :test 'eql)))	; procedure v or statement j -> vars to check there
 		     (dolist (v vars) (setf (gethash v table) t))
 		     (loop for s in statements for j from 0
-			   do (let* ((definition (and (set-p s vars) (not (gethash (cadr s) index)) (cadr s)))
-				     (code (if definition (caddr s) s))
-				     (lambda-definition (and definition (lambda-p code)))
-				     (refs (mentioned code table)))
-				(when definition (setf (gethash definition index) j))
-				(when (and (null first-running) refs (not lambda-definition))
-				  (setq first-running j))
-				;; mentions of variables not yet defined, or of
-				;; the one this defines by a non-lambda init
-				(dolist (v (if (and (set-p s vars) (not definition)) (cons (cadr s) refs) refs))
-				  (unless (and (gethash v index) (or (< (gethash v index) j)
-								     (and (= (gethash v index) j) lambda-definition)))
-				    (setf (gethash v early) t)))
-				(push s seen)))
-		     (let ((checked (and first-running
-					 (loop for v in vars
-					       when (and (gethash v early) (gethash v index)
-							 (>= (gethash v index) first-running))
-						 collect (cons v (flag-for v))))))
+			   do (when (and (set-p s vars) (not (gethash (cadr s) index)))
+				(setf (gethash (cadr s) index) j)
+				(when (lambda-p (caddr s)) (setf (gethash (cadr s) lambdas) (caddr s)))))
+		     (flet ((undefined-at (v j self-ok)
+			      ;; is V not yet defined while statement J runs?
+			      (let ((i (gethash v index)))
+				(and i (or (> i j) (and (= i j) (not self-ok)))))))
+		       ;; A statement that isn't a lambda definition runs its
+		       ;; code, and may call the body's procedures it mentions,
+		       ;; and those they mention, and so on: a reference in any
+		       ;; of them to a variable not yet defined then is checked.
+		       (loop for s in statements for j from 0
+			     do (let* ((definition (and (set-p s vars) (eql (gethash (cadr s) index) j) (cadr s)))
+				       (code (if definition (caddr s) s))
+				       (refs (mentioned code table)))
+				  (unless (or (and definition (lambda-p code)) (null refs))
+				    (let ((here (remove-if-not (lambda (v) (undefined-at v j nil))
+							       (if (and (set-p s vars) (not definition))
+								   (cons (cadr s) refs)
+								   refs))))
+				      (when here (setf (gethash j danger) here)))
+				    ;; the procedures it can reach
+				    (let ((seen '()) (stack (copy-list refs)))
+				      (loop while stack
+					    do (let ((p (pop stack)))
+						 (unless (or (member p seen) (not (gethash p lambdas)))
+						   (push p seen)
+						   (let ((body-refs (mentioned (caddr (gethash p lambdas)) table)))
+						     (dolist (v body-refs)
+						       (when (undefined-at v j t)
+							 (pushnew v (gethash p danger))))
+						     (setq stack (append body-refs stack)))))))))))
+		     (let ((checked '()))
+		       (maphash (lambda (k vs)
+				  (declare (ignore k))
+				  (dolist (v vs) (unless (assoc v checked) (push (cons v (flag-for v)) checked))))
+				danger)
 		       (when checked
 			 (let ((new '()))
-			   (loop for s in statements for j from 0
-				 do (let* ((pending (remove-if (lambda (c) (< (gethash (car c) index) j)) checked))
-					   (defines (and (set-p s vars) (= (gethash (cadr s) index -1) j) (cadr s)))
-					   (s (cond ((null pending) s)
-						    (defines
-						     `(,(car s) ,defines
-						       ,(guard-references (caddr s)
-									  (if (lambda-p (caddr s))
-									      (remove defines pending :key #'car)
-									      pending))))
-						    (t (guard-references s pending)))))
-				      (push s new)
-				      (let ((c (and defines (assoc defines checked))))
-					(when c (push `(,(sym "set!") ,(cdr c) (,(sym "quote") ,ps:true)) new)))))
+			   (flet ((flags-of (key) (remove-if-not (lambda (c) (member (car c) (gethash key danger))) checked)))
+			     (loop for s in statements for j from 0
+				   do (let* ((defines (and (set-p s vars) (eql (gethash (cadr s) index) j) (cadr s)))
+					     (s (cond ((and defines (gethash defines lambdas) (gethash defines danger))
+						       `(,(car s) ,defines ,(guard-references (caddr s) (flags-of defines))))
+						      ((gethash j danger)
+						       (if defines
+							   `(,(car s) ,defines ,(guard-references (caddr s) (flags-of j)))
+							   (guard-references s (flags-of j))))
+						      (t s))))
+					(push s new)
+					(let ((c (and defines (assoc defines checked))))
+					  (when c (push `(,(sym "set!") ,(cdr c) (,(sym "quote") ,ps:true)) new))))))
 			   `((,(caar e) ,(append vars (mapcar #'cdr checked))
 			      (,(sym "begin") ,@(nreverse new)))
 			     ,@args
@@ -836,6 +861,7 @@ TOP-LEVEL begin's forms are compiled one by one: its biggest counts."
     (if (> size *inline-arithmetic-limit*)
 	`(locally (declare (notinline ps:scheme+ ps:scheme- ps:scheme*)) ,lisp)
 	lisp)))
+
 
 ;;; ------------------------------------------------------------------
 ;;; Building the host environment

@@ -120,6 +120,25 @@ program after them, through psyntax; return the program's last value."
   "(import (no such library))"
   :error)
 
+;;; R6RS's letrec restriction (LETREC-CHECKS, src/psyntax.lisp): a
+;;; procedure called before a variable it refers to is defined, directly
+;;; or through another procedure; and the same in the order that's fine
+(deftest "letrec*: a procedure referring to a later variable, called early" (r7)
+  "(import (scheme base)) (let () (define (f) x) (define y (f)) (define x 1) y)"
+  :error)
+(deftest "letrec*: through another procedure" (r7)
+  "(import (scheme base)) (let () (define (g) (h)) (define (h) x) (define y (g)) (define x 1) y)"
+  :error)
+(deftest "letrec*: a call of a later procedure, early" (r7)
+  "(import (scheme base)) (let () (define (f) (k 1)) (define y (f)) (define (k z) z) y)"
+  :error)
+(deftest "letrec*: an assignment, early" (r7)
+  "(import (scheme base)) (let () (define (f) (set! x 2)) (define y (f)) (define x 1) y)"
+  :error)
+(deftest "letrec*: called once everything is defined" (r7)
+  "(import (scheme base)) (let () (define (f) (k x)) (define (k z) z) (define x 1) (define y (f)) y)"
+  "1")
+
 (deftest "cond-expand in library declarations" (r7)
   "(define-library (test ce)
      (export which)
