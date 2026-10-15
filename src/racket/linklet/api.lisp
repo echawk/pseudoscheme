@@ -163,7 +163,8 @@ with one, the body's result, the exports defined in TARGET."
 	 (exports (loop for n in (compiled-linklet-exports compiled)
 			collect (instance-variable instance n t)))
 	 (result (multiple-value-list
-		  ;; the frames a continuation captured in the body can reach
+		  ;; the frames a continuation captured in the body can reach:
+		  ;; the body's (inside an enclosing base, all of that one's)
 		  (psx::call-with-continuation-base
 		   (lambda () (apply (linklet-function compiled) instance (append imports exports)))))))
     (if target (values-list result) instance)))

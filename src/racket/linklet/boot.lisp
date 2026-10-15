@@ -58,7 +58,11 @@ written to OUTPUT."
 			      collect (or (and (consp set) (symbolp (car set)) (gethash (car set) named))
 					  (racket-error "linklet" "no instance named by ~S" set))))
 	       (compiled (compile-linklet (list* (car form) (mapcar #'cdr sets) (cddr form)) name)))
-	  ;; each under the default prompt, as a module body's forms are
+	  ;; each under the default prompt, as a module body's forms are,
+	  ;; inside the base of continuations (which, made by the
+	  ;; instantiation inside, would hide the prompt from it)
+	  (psx::call-with-continuation-base
+	   (lambda ()
 	  (call-with-continuation-prompt
 	   (lambda ()
 	     (with-racket-errors
@@ -69,7 +73,7 @@ written to OUTPUT."
 		       (unless (eq v *void*)
 			 (funcall (psx:host-ref "write") v output)
 			 (terpri output)))))))
-	   *default-prompt-tag* nil))))))
+	   *default-prompt-tag* nil))))))))
 
 (defun linklet-load (path)
   "PATH: a file of linklets (.rktl, the test harness above), or a module,
