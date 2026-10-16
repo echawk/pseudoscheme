@@ -202,8 +202,9 @@ fresh lexicals; and the core formals."
 	while (consp tail)
 	finally (return (and tail (symbolp tail) tail))))
 
-(defun lower-case-lambda (clauses env)
-  "One clause is a plain lambda; several dispatch on the argument count."
+(defun lower-case-lambda (clauses env &optional name)
+  "One clause is a plain lambda; several dispatch on the argument count.
+NAME, if the lambda is bound to a variable: its object-name."
   (if (and clauses (null (cdr clauses)))
       (lower-lambda (car (first clauses)) (cdr (first clauses)) env)
       (let ((args (fresh-lexical "args")) (n (fresh-lexical "n"))
@@ -214,7 +215,7 @@ fresh lexicals; and the core formals."
 						     while (consp tail) count t)
 				collect (if (rest-formal formals) (- (ash 1 required)) (ash 1 required)))
 			  :initial-value 0)))
-       (list (core "racket:with-arity") (quoted mask)
+       (append (list (core "racket:with-arity") (quoted mask)
 	(list (core "lambda") args
 	      (list (list (core "lambda") (list n)
 			  (reduce (lambda (clause else)
@@ -227,7 +228,9 @@ fresh lexicals; and the core formals."
 					      else))))
 				  clauses :from-end t
 				  :initial-value (list (core "racket:arity-error") args)))
-		    (list (core "length") args)))))))
+		    (list (core "length") args))))
+	       ;; its name, for object-name
+	       (and name (symbolp name) (not (eq name ps:false)) (list (quoted name)))))))
 
 (defun lower-let-values (bindings body env &optional recursive)
   "let-values: each right-hand side in the outer ENV, then all bound.
@@ -321,7 +324,9 @@ by their variables."
 					       (append (mapcar (lambda (f) (lower-expr f env)) (cdr args))
 						       (list (list (core "apply") (core "values") vals)))))))))
 	     (:lambda (lower-lambda (car args) (cdr args) env))
-	     (:case-lambda (lower-case-lambda args env))
+	     (:case-lambda (lower-case-lambda args env (gethash x (linklet-info-names *info*))))
+	     ;; Racket CS's (#%foreign-inline e mode): e
+	     (:foreign-inline (lower-expr (first args) env))
 	     (:let-values (lower-let-values (car args) (cdr args) env))
 	     (:letrec-values (lower-let-values (car args) (cdr args) env t))
 	     (:set! (lower-set (first args) (lower-expr (second args) env) env))
@@ -341,7 +346,7 @@ by their variables."
     ("lambda" . :lambda) ("case-lambda" . :case-lambda) ("let-values" . :let-values)
     ("letrec-values" . :letrec-values) ("set!" . :set!) ("define-values" . :define-values)
     ("with-continuation-mark" . :with-continuation-mark)
-    ("#%variable-reference" . :variable-reference)))
+    ("#%variable-reference" . :variable-reference) ("#%foreign-inline" . :foreign-inline)))
 
 (defun special-form (symbol)
   (cdr (assoc (rname symbol) *special-forms* :test #'string=)))

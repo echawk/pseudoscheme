@@ -101,6 +101,60 @@ S, skipping escapes, classes and nested groups."
 		     (t (incf i)))))
     (nreverse (cons (subseq s start) parts))))
 
+(defun atom-end (s i)
+  "Where the regexp atom of S that starts at I ends."
+  (let ((c (char s i)))
+    (cond ((char= c #\\) (min (length s) (+ i 2)))
+	  ((char= c #\[)
+	   (let ((j (1+ i)))
+	     (when (and (< j (length s)) (char= (char s j) #\^)) (incf j))
+	     (when (and (< j (length s)) (char= (char s j) #\])) (incf j))
+	     (loop while (and (< j (length s)) (char/= (char s j) #\])) do (incf j))
+	     (min (length s) (1+ j))))
+	  ((char= c #\()
+	   (min (length s) (1+ (group-end s (1+ i)))))
+	  (t (1+ i)))))
+
+(defun expand-bounded-repeats (s)
+  "The alternatives S, a lookbehind's body, comes to without its x?
+and x{n,m} (small ones): CL-PPCRE wants a fixed length, Racket only a
+bounded one.  S itself (a list of it) if there are none, or too many,
+or a group in S captures (copies would renumber it)."
+  (let ((results (list ""))
+	(i 0)
+	(changed nil))
+    (when (loop for j from 0 below (length s)
+		thereis (and (char= (char s j) #\()
+			     (or (= j 0) (char/= (char s (1- j)) #\\))
+			     (or (= (1+ j) (length s)) (char/= (char s (1+ j)) #\?))))
+      (return-from expand-bounded-repeats (list s)))
+    (loop while (< i (length s))
+	  do (let* ((end (atom-end s i))
+		    (atom (subseq s i end))
+		    (counts nil))
+	       (cond ((and (< end (length s)) (char= (char s end) #\?)
+			   (or (= (1+ end) (length s)) (not (find (char s (1+ end)) "?+"))))
+		      (setq counts '(1 0) end (1+ end)))
+		     ((and (< end (length s)) (char= (char s end) #\{))
+		      (let* ((close (position #\} s :start end))
+			     (body (and close (subseq s (1+ end) close)))
+			     (comma (and body (position #\, body)))
+			     (lo (and body (parse-integer body :end comma :junk-allowed t)))
+			     (hi (and comma (parse-integer body :start (1+ comma) :junk-allowed t))))
+			(when (and lo hi (<= lo hi 8) (not (and (< (1+ close) (length s)) (find (char s (1+ close)) "?+"))))
+			  (setq counts (loop for k from hi downto lo collect k) end (1+ close))))))
+	       (if counts
+		   (let ((next (loop for prefix in results
+				     append (loop for k in counts
+						  collect (concatenate 'string prefix
+								       (apply #'concatenate 'string
+									      (loop repeat k collect atom)))))))
+		     (when (> (length next) 64) (return-from expand-bounded-repeats (list s)))
+		     (setq results next changed t))
+		   (setq results (mapcar (lambda (prefix) (concatenate 'string prefix (subseq s i end))) results)))
+	       (setq i end)))
+    (if changed (remove-duplicates results :test #'string= :from-end t) (list s))))
+
 (defun split-lookbehinds (s)
   "S with each lookbehind of several alternatives made one lookbehind per
 alternative: CL-PPCRE wants each fixed-length, Racket only bounded."
@@ -115,8 +169,8 @@ alternative: CL-PPCRE wants each fixed-length, Racket only bounded."
 			   (member (char s (+ i 3)) '(#\= #\!)))
 		      (let* ((negative (char= (char s (+ i 3)) #\!))
 			     (end (group-end s (+ i 4)))
-			     (alternatives (mapcar #'split-lookbehinds
-						   (top-level-alternatives (subseq s (+ i 4) end)))))
+			     (alternatives (loop for a in (top-level-alternatives (subseq s (+ i 4) end))
+						 append (expand-bounded-repeats (split-lookbehinds a)))))
 			(if (null (cdr alternatives))
 			    (format out "(?<~A~A)" (if negative "!" "=") (car alternatives))
 			    (if negative
@@ -126,11 +180,20 @@ alternative: CL-PPCRE wants each fixed-length, Racket only bounded."
 		     (t (write-char c out) (incf i)))))
     (get-output-stream-string out)))
 
+(defun multi-mode-groups (text)
+  "TEXT with Racket's (?m: (and (?im:, (?mi:) as cl-ppcre's, which also
+turns its single-line mode off."
+  (cl-ppcre:regex-replace-all "\\(\\?(i?)m(i?):" text "(?\\1m\\2-s:"))
+
 (defun make-rregexp (source px)
   (let* ((bytes (typep source '(simple-array (unsigned-byte 8) (*))))
 	 (text (if bytes (latin-1 source) source)))
     (%make-rregexp source px bytes
-		   (handler-case (cl-ppcre:create-scanner (split-lookbehinds (translate-regexp text px)))
+		   ;; Racket's . matches a newline except in (?m: mode, where ^ and
+		   ;; $ match at line breaks too: cl-ppcre's single-line mode, and
+		   ;; its (?m-s: for (?m:
+		   (handler-case (cl-ppcre:create-scanner (multi-mode-groups (split-lookbehinds (translate-regexp text px)))
+							  :single-line-mode t)
 		     (cl-ppcre:ppcre-syntax-error (e)
 		       (racket-error (if px "pregexp" "regexp") "~A" e))))))
 

@@ -12,7 +12,9 @@
 ;;;; print-boolean-long-form, print-box, print-hash-table, print-struct,
 ;;;; print-vector-length, print-pair-curly-braces, print-mpair-curly-braces,
 ;;;; print-reader-abbreviations and print-unreadable.
-;;;; Not yet: cycles and sharing (print-graph), print-syntax-width.
+;;;; Cycles are always found and written in graph notation, #0=(1 . #0#);
+;;;; with print-graph, shared structure too (graph.rkt's marks, below).
+;;;; Not yet: print-syntax-width.
 
 (in-package "PSEUDOSCHEME-RACKET")
 
@@ -44,7 +46,7 @@
     v))
 
 (defstruct (print-options (:conc-name po-))
-  expr long box hash pair-curly mpair-curly abbrev struct vlen unreadable)
+  expr long box hash pair-curly mpair-curly abbrev struct vlen unreadable graph)
 
 (defvar *print-options* nil
   "While something is printed: the print parameters' values, read once.")
@@ -57,7 +59,8 @@
 			:box (on *print-box*) :hash (on *print-hash-table*)
 			:pair-curly (on *print-pair-curly-braces*) :mpair-curly (on *print-mpair-curly-braces*)
 			:abbrev (on *print-reader-abbreviations*) :struct (on *print-struct*)
-			:vlen (on *print-vector-length*) :unreadable (on *print-unreadable*))))
+			:vlen (on *print-vector-length*) :unreadable (on *print-unreadable*)
+			:graph (on *print-graph*))))
 
 ;;; unquoted-printing-string: a string that prints as itself
 (defstruct (unquoted-ps (:constructor make-unquoted-ps (value))) value)
@@ -101,9 +104,90 @@
 (defun print-value (x stream mode)
   "X on STREAM, MODE :write or :display."
   (if *print-options*
-      (print-value* x stream mode)
+      (call-with-print-graph x (lambda () (print-value* x stream mode)))
       (let ((*print-options* (read-print-options)))
-	(print-value* x stream mode))))
+	(call-with-print-graph x (lambda () (print-value* x stream mode))))))
+
+;;; ------------------------------------------------------------------
+;;; Cycles and sharing (Racket's io/print/graph.rkt).  Before a value
+;;; is written, the objects that need a label are found: those a cycle
+;;; goes back to, or, with print-graph, those reached twice.  The
+;;; writer numbers a marked object as it first writes it (#0=) and
+;;; writes #0# for each later reach.
+
+(defvar *print-marks* nil "The marked objects (EQ hash table), or NIL if none.")
+(defvar *print-numbers* nil "A marked object's number, once written (EQ hash table).")
+(defvar *print-next-number* 0)
+(defvar *print-active* nil "Whether the marks of the value being written are found.")
+(defvar *print-top-labeled* nil "An object whose label was just written: its contents next.")
+
+(defun print-children (x o)
+  "The objects X's written form contains, and whether X can be marked at all."
+  (cond ((consp x) (values (list (car x) (cdr x)) t))
+	((mpair-p x) (values (list (mpair-car x) (mpair-cdr x)) t))
+	((simple-vector-p x) (values (coerce x 'list) t))
+	((and (rbox-p x) (po-box o)) (values (list (box-ref* x)) t))
+	((and (or (ihash-p x) (rhash-p x)) (po-hash o))
+	 (values (loop for (k . v) across (entries x) collect k collect v) t))
+	((and (struct-instance-p x) (not (custom-write-procedure x)))
+	 (let ((type (struct-of-type x)))
+	   (if (and (po-struct o) (or (struct-type-prefab-key type) (transparent-p type)))
+	       (values (coerce (struct-fields x) 'list) t)
+	       (values nil nil))))
+	(t (values nil nil))))
+
+(defun find-print-marks (x o)
+  "The hash table of the objects of X that need a label, or NIL.  Walks
+with its own stack, so a long or deep value can't exhaust the host's."
+  (let ((state (make-hash-table :test 'eq))
+	(marks nil)
+	(graph (po-graph o))
+	(stack '()))
+    (flet ((visit (obj)
+	     (multiple-value-bind (children container) (print-children obj o)
+	       (when container
+		 (let ((seen (gethash obj state)))
+		   (cond (seen
+			  (when (or graph (eq seen :active))
+			    (unless marks (setq marks (make-hash-table :test 'eq)))
+			    (setf (gethash obj marks) t)))
+			 (t (setf (gethash obj state) :active)
+			    (push (cons obj children) stack))))))))
+      (visit x)
+      (loop while stack
+	    do (let ((frame (car stack)))
+		 (if (cdr frame)
+		     (let ((child (pop (cdr frame))))
+		       (visit child))
+		     (progn (setf (gethash (car frame) state) :done)
+			    (pop stack))))))
+    marks))
+
+(defun call-with-print-graph (x thunk)
+  "THUNK, with the marks of X found if they aren't already (an inner
+write, from a custom writer, shares its outer write's)."
+  (if (or *print-active* (not (nth-value 1 (print-children x *print-options*))))
+      (funcall thunk)
+      (let* ((marks (find-print-marks x *print-options*))
+	     (*print-active* t)
+	     (*print-marks* marks)
+	     (*print-numbers* (and marks (make-hash-table :test 'eq)))
+	     (*print-next-number* 0)
+	     (*print-top-labeled* nil))
+	(funcall thunk))))
+
+(defun marked-p (x)
+  (and *print-marks* (gethash x *print-marks*)))
+
+(defun print-label (x stream)
+  "If X is marked: write its label (#0=) and return T, the first time;
+its reference (#0#) and return :REFERENCE after."
+  (let ((n (gethash x *print-numbers*)))
+    (cond (n (format stream "#~D#" n) :reference)
+	  (t (setf n (setf (gethash x *print-numbers*) *print-next-number*))
+	     (incf *print-next-number*)
+	     (format stream "#~D=" n)
+	     t))))
 
 (defun unreadable-text (x stream mode text)
   "TEXT, the printed form of X, which can't be read back: an error when
@@ -122,6 +206,11 @@ the trailing ones equal to the one before."
     n))
 
 (defun print-value* (x stream mode)
+  (cond ((not (marked-p x)) (print-value** x stream mode))
+	((eq x *print-top-labeled*) (setq *print-top-labeled* nil) (print-value** x stream mode))
+	((eq (print-label x stream) t) (print-value** x stream mode))))
+
+(defun print-value** (x stream mode)
   (let ((o *print-options*))
     (labels ((p (x) (print-value* x stream mode))
 	     (unreadable (text) (unreadable-text x stream mode text)))
@@ -141,7 +230,9 @@ the trailing ones equal to the one before."
 			   for first = t then nil
 			   while (and (consp tail)
 				      (or first
-					  (not (and (or (po-abbrev o) *print-abbreviate*) (abbreviation-prefix tail)))))
+					  (and (not (marked-p tail))
+					       (not (and (or (po-abbrev o) *print-abbreviate*)
+							 (abbreviation-prefix tail))))))
 			   do (unless first (write-char #\Space stream))
 			      (p (car tail))
 			   finally (when tail (write-string " . " stream) (p tail)))
@@ -177,13 +268,13 @@ the trailing ones equal to the one before."
 	       (p source)))
 	    ((rbox-p x)
 	     (if (po-box o)
-		 (progn (write-string "#&" stream) (p (rbox-value x)))
+		 (progn (write-string "#&" stream) (p (box-ref* x)))
 		 (write-string "#<box>" stream)))
 	    ((mpair-p x)
 	     (write-char (if (po-mpair-curly o) #\{ #\() stream)
 	     (loop for tail = x then (mpair-cdr tail)
 		   for first = t then nil
-		   while (mpair-p tail)
+		   while (and (mpair-p tail) (or first (not (marked-p tail))))
 		   do (unless first (write-char #\Space stream))
 		      (p (mpair-car tail))
 		   finally (when tail (write-string " . " stream) (p tail)))
@@ -222,6 +313,7 @@ the trailing ones equal to the one before."
 	    ((functionp x)
 	     (let ((name (procedure-name-string x)))
 	       (unreadable (format nil "#<procedure~@[:~A~]>" name))))
+	    ((extflonum-p x) (write-string (extflonum-str x) stream))
 	    ((numberp x) (write-string (racket-number-string x) stream))
 	    ((eq mode :display) (host-display x stream))
 	    (t (host-write x stream))))))
@@ -233,7 +325,12 @@ struct as its constructor's application, (point 1 2); a mutable pair as
   (let ((*print-options* (or *print-options* (read-print-options)))
 	(*print-who* "print")
 	(*print-abbreviate* t))
+    (call-with-print-graph x (lambda () (print-quoted* x stream)))))
+
+(defun print-quoted* (x stream)
+  (progn
     (cond ((not (po-expr *print-options*)) (print-value x stream :write))
+	  ((and (marked-p x) (eq (print-label x stream) :reference)))
 	  ((and (struct-instance-p x) (transparent-p (struct-of-type x))
 		(not (struct-type-prefab-key (struct-of-type x)))
 		(po-struct *print-options*))
@@ -251,6 +348,7 @@ struct as its constructor's application, (point 1 2); a mutable pair as
 		     (consp x) (null x) (simple-vector-p x) (rbox-p x) (rkeyword-p x)
 		     (ihash-p x))
 	     (write-char #\' stream))
+	   (when (marked-p x) (setq *print-top-labeled* x))
 	   (print-value x stream :write)))))
 
 (defun port-stream (port)

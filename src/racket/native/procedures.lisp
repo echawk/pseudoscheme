@@ -9,10 +9,9 @@
 ;;;; *IMPERSONATORS* with what it wraps and its impersonator properties.
 ;;;; Racket's keyword procedures are structs racket/private/kw.rkt
 ;;;; chaperones itself, on top of these.
-;;;; Not yet, and approximated: a chaperone of a struct, vector, box or
-;;;; hash table is the value itself (so racket/contract's contracts on
-;;;; them aren't enforced), and a chaperone's arity is the wrapper's
-;;;; lambda list's.
+;;;; Chaperones of structs, boxes and hash tables are in chaperone.lisp.
+;;;; Not yet, and approximated: a chaperone of a vector (and of the other
+;;;; data below) is the value itself.
 
 (in-package "PSEUDOSCHEME-RACKET")
 
@@ -40,7 +39,8 @@
 			 (multiple-value-call (car results) (apply proc (cdr results)))
 			 (apply proc results))))
 		 (lambda (&rest args) (apply proc args)))))
-    (setf (gethash new *impersonators*) (make-impersonation kind proc (plist->alist props)))
+    (setf (gethash new *impersonators*) (make-impersonation kind proc (plist->alist props))
+	  (gethash new *arity-masks*) (or (ignore-errors (arity-mask proc)) -1))
     new))
 
 (defnative "chaperone-procedure" (proc wrapper &rest props) (:rumble "chaperone-procedure")
@@ -92,17 +92,15 @@
 			((functionp fail) (funcall fail))
 			(t fail))))))))
 (defnative "impersonator-property?" (x) (:leaf t) (bool (impersonator-property-p x)))
-(defnative "impersonator-property-accessor-procedure?" (x) (:leaf t) (declare (ignore x)) ps:false)
 
-;;; Chaperones of data: the value itself, for now (see above)
+;;; Chaperones of other data: the value itself, for now (structs, boxes,
+;;; hash tables: chaperone.lisp; vectors: see there too)
 (macrolet ((same (&rest names)
 	     `(progn ,@(loop for name in names
 			     collect `(defnative ,name (v &rest args) (:leaf t)
 					(declare (ignore args))
 					v)))))
-  (same "chaperone-struct" "impersonate-struct" "chaperone-vector" "impersonate-vector"
-	"chaperone-vector*" "impersonate-vector*" "chaperone-box" "impersonate-box"
-	"chaperone-hash" "impersonate-hash" "chaperone-struct-type" "chaperone-evt"
+  (same "chaperone-struct-type" "chaperone-evt"
 	"chaperone-channel" "impersonate-channel" "chaperone-continuation-mark-key"
 	"impersonate-continuation-mark-key" "chaperone-prompt-tag" "impersonate-prompt-tag"))
 
@@ -140,5 +138,13 @@ are approximate, so that isn't checked.)"
 (defnative "procedure-specialize" (f) (:leaf t) f)
 (defnative "procedure-impersonator*?" (f) (:leaf t) (declare (ignore f)) ps:false)
 (defnative "procedure-extract-target" (f) (:leaf t) (declare (ignore f)) ps:false)
-(defnative "procedure-result-arity" (f) (:leaf t) (declare (ignore f)) ps:false)
+(defnative "procedure-result-arity" (f) (:leaf t)
+  (unless (functionp f) (arg-error "procedure-result-arity" "procedure?" f))
+  ;; known: a struct's constructor, predicate, accessor or mutator, or
+  ;; what wraps one
+  (let ((g (loop for x = f then (impersonation-of i)
+		 for i = (impersonation x)
+		 while i
+		 finally (return x))))
+    (if (gethash g *struct-procedures*) 1 ps:false)))
 (defnative "primitive-result-arity" (f) (:leaf t) (declare (ignore f)) ps:false)

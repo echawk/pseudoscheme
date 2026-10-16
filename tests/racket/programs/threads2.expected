@@ -1,0 +1,15 @@
+sync/timeout: contract violation
+  expected: evt?
+  given: #f
+  context...:
+   /Users/ethan/schemes/pseudoscheme/tests/racket/programs/threads2.rkt:16:0
+   body of "/Users/ethan/schemes/pseudoscheme/tests/racket/programs/threads2.rkt"
+(wrapped #t)
+#f
+#f
+thunk
+handled
+2
+#t
+#t
+#<always-evt>

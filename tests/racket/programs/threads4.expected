@@ -1,0 +1,10 @@
+(inner init main)
+(changed child)
+(root main)
+from thread
+root
+boom in thread
+main continues
+none
+(#t #t #t)
+(ENOENT EEXIST)

@@ -113,7 +113,8 @@
 (defun new-lazy-inport (name kind fill &key custom)
   (finish-inport (make-rinport (make-octets 0) name :kind kind :end 0 :fill fill :custom custom)))
 
-(defun evt-p (x) (or (revt-p x) (rsemaphore-p x)))
+;; ports are evts too, as in Racket
+(defun evt-p (x) (or (revt-p x) (rsemaphore-p x) (rinport-p x) (routport-p x)))
 
 ;;; ------------------------------------------------------------------
 ;;; Where the next character is

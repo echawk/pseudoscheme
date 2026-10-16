@@ -214,71 +214,52 @@
 	     (:error *current-error-port*))))
 
 ;;; ------------------------------------------------------------------
-;;; Thread cells.  One place, and threads (thread.lisp, later) will give
-;;; each its own values of the preserved cells; until then a cell is a
-;;; box.
+;;; Thread cells.  The cell holds its initial value (and whether it's
+;;; preserved: copied to new threads); each thread's own values, once it
+;;; sets them, are the thread layer's (threads.lisp).
 
 (defstruct (thread-cell (:constructor make-thread-cell* (value preserved))) value preserved)
-
-(defnative "make-thread-cell" (v &optional (preserved? ps:false)) (:leaf t)
-  (make-thread-cell* v (truthy preserved?)))
-(defnative "thread-cell?" (x) (:leaf t) (bool (thread-cell-p x)))
-(defnative "thread-cell-ref" (c) (:leaf t) (thread-cell-value c))
-(defnative "thread-cell-set!" (c v) (:leaf t) (setf (thread-cell-value c) v) *void*)
-(defnative "current-preserved-thread-cell-values" (&optional v) (:leaf t)
-  (declare (ignore v))
-  *void*)
 
 (defnative "call-with-continuation-barrier" (thunk) () (funcall thunk))
 (defnative "call-with-escape-continuation" (proc) ()
   (funcall (psx:host-ref "call-with-current-continuation") proc))
-(defnative "check-for-break" () (:leaf t) *void*)
 (defnative "unsafe-root-continuation-prompt-tag" () (:instance "#%unsafe" :leaf t) *default-prompt-tag*)
 (defnative "reparameterize" (paramz) (:instance "#%paramz" :leaf t) paramz)
 
 ;;; ------------------------------------------------------------------
-;;; What the thread layer would give, enough for the expander: locks,
-;;; semaphores, the current thread, plumbers and loggers.  One Racket
-;;; thread for now; locks and semaphores are SBCL's.
+;;; The thread layer's structures (threads.lisp has the rest): semaphores
+;;; (a count, and a queue of the waits that wait for it), and threads
 
-(defnative "unsafe-make-uninterruptible-lock" () (:instance "#%unsafe" :leaf t)
-  (sb-thread:make-mutex :name "racket lock"))
-(defnative "unsafe-uninterruptible-lock-acquire" (l) (:instance "#%unsafe" :leaf t)
-  (unless (sb-thread:holding-mutex-p l) (sb-thread:grab-mutex l))
-  *void*)
-(defnative "unsafe-uninterruptible-lock-release" (l) (:instance "#%unsafe" :leaf t)
-  (when (sb-thread:holding-mutex-p l) (sb-thread:release-mutex l))
-  *void*)
+(defstruct (rsemaphore (:constructor make-rsemaphore (count))) (count 0) (waiters '()))
 
-(defstruct (rsemaphore (:constructor make-rsemaphore (count))) (count 0))
-(defnative "make-semaphore" (&optional (n 0)) (:leaf t) (make-rsemaphore n))
-(defnative "semaphore?" (x) (:leaf t) (bool (rsemaphore-p x)))
-(defnative "semaphore-post" (s) (:leaf t) (incf (rsemaphore-count s)) *void*)
-(defnative "semaphore-try-wait?" (s) (:leaf t)
-  (if (plusp (rsemaphore-count s)) (progn (decf (rsemaphore-count s)) ps:true) ps:false))
-(defnative "semaphore-wait" (s) (:leaf t)
-  ;; one thread: a wait that would block never returns
-  (if (plusp (rsemaphore-count s))
-      (progn (decf (rsemaphore-count s)) *void*)
-      (racket-error "semaphore-wait" "would block forever (one thread)")))
+(defstruct (rthread (:constructor make-rthread (name)))
+  name
+  (id 0)
+  (lisp nil)				; its SBCL thread
+  (state :runnable)			; :running :runnable :blocked :done
+  (cv (sb-thread:make-waitqueue))	; where it waits for the baton
+  (wait nil)				; what it waits for, while blocked
+  (cells nil)				; its values of thread cells
+  (mailbox '())
+  (dead nil)
+  (zombie nil)				; killed, and still to unwind
+  (suspended nil)
+  (suspend-to-kill nil)
+  (custodians '())			; the records that custodians manage it by
+  (group nil)
+  (pending-break nil)			; NIL, :break, :hang-up or :terminate
+  (atomic 0)				; depth of atomic sections: no preemption
+  (preempt-queued nil))
 
-(defstruct (rthread (:constructor make-rthread (name))) name)
 (defvar *main-thread* (make-rthread (rsym "main")))
-(defnative "current-thread" () (:leaf t) *main-thread*)
-(defnative "thread?" (x) (:leaf t) (bool (rthread-p x)))
+(defvar *self* *main-thread*
+  "The Racket thread the current SBCL thread runs (bound in each new one).")
 
 (defstruct (plumber (:constructor make-plumber* ())) (flushes '()))
 (defvar *current-plumber* (make-parameter* (make-plumber*)))
 (define-primitive "#%kernel" "current-plumber" *current-plumber*)
 (defnative "make-plumber" () (:leaf t) (make-plumber*))
-(defnative "plumber-add-flush!" (p proc &optional weak?) (:leaf t)
-  (declare (ignore weak?))
-  (let ((handle (cons p proc)))
-    (push handle (plumber-flushes p))
-    handle))
-(defnative "plumber-flush-all" (p) ()
-  (dolist (h (plumber-flushes p)) (funcall (cdr h) h))
-  *void*)
+;; plumber?, flush handles and plumber-flush-all: threads.lisp
 
 (defstruct (logger (:constructor make-logger* (name parent))) name parent)
 (defvar *current-logger* (make-parameter* (make-logger* ps:false nil)))
@@ -293,82 +274,16 @@
 (defnative "log-max-level" (l &optional topic) (:leaf t) (declare (ignore l topic)) ps:false)
 (defnative "log-message" (l level &rest more) (:leaf t) (declare (ignore l level more)) *void*)
 
-;;; Events, for one thread: sync takes the first ready one; with none
-;;; ready it would block forever, which is an error here.
+;;; Events (threads.lisp has sync and the combinators): a REVT is a
+;;; primitive event of a KIND, with a TARGET; the kinds are polled
+;;; (:always :never :peek :thunk :log-receiver :poll) or made by the
+;;; thread layer (:put :alarm :dead :suspend :resume :receive :idle :choice
+;;; :wrap :replace :guard :nack-guard :poll-guard).
 (defstruct (revt (:constructor make-revt (kind &optional target))) kind target)
 (defvar *always-evt* (make-revt :always))
 (defvar *never-evt* (make-revt :never))
 (define-primitive "#%kernel" "always-evt" *always-evt*)
 (define-primitive "#%kernel" "never-evt" *never-evt*)
-
-(defnative "semaphore-peek-evt" (s) (:leaf t) (make-revt :peek s))
-(defnative "evt?" (x) (:leaf t) (bool (or (revt-p x) (rsemaphore-p x))))
-
-(defun evt-ready (e)
-  "E's sync result, and whether it's ready."
-  (cond ((rsemaphore-p e) (if (plusp (rsemaphore-count e))
-			      (progn (decf (rsemaphore-count e)) (values e t))
-			      (values nil nil)))
-	((not (revt-p e)) (values e t))
-	(t (ecase (revt-kind e)
-	     (:always (values e t))
-	     (:never (values nil nil))
-	     (:peek (if (plusp (rsemaphore-count (revt-target e)))
-			(values e t)
-			(values nil nil)))
-	     ;; ready at once, with the thunk's value (port-ops.lisp)
-	     (:thunk (values (funcall (revt-target e)) t))
-	     ;; a log receiver's next message (handlers.lisp)
-	     (:log-receiver (log-receiver-poll e))
-	     ;; a socket's: a thunk that polls (network.lisp)
-	     (:poll (funcall (revt-target e)))))))
-
-(defun sync-ready (evts)
-  (dolist (e evts (values nil nil))
-    (multiple-value-bind (v ready) (evt-ready e)
-      (when ready (return (values v t))))))
-
-(defun external-evt-p (e)
-  "Whether E can become ready by itself, while this one thread waits: a
-socket's (network.lisp)."
-  (and (revt-p e) (eq (revt-kind e) :poll)))
-
-(defun sync-polling (evts deadline)
-  "Poll EVTS until one is ready or DEADLINE (internal real time, or NIL
-for none) passes: its result and T, or NIL."
-  (loop
-    (multiple-value-bind (v ready) (sync-ready evts)
-      (when ready (return (values v t))))
-    (when (and deadline (>= (get-internal-real-time) deadline))
-      (return (values nil nil)))
-    (sleep 0.001)))
-
-(defnative "sync" (&rest evts) ()
-  (multiple-value-bind (v ready) (sync-ready evts)
-    (cond (ready v)
-	  ((some #'external-evt-p evts) (values (sync-polling evts nil)))
-	  (t (racket-error "sync" "would block forever (one thread)")))))
-(defnative "sync/timeout" (timeout &rest evts) ()
-  (multiple-value-bind (v ready) (sync-ready evts)
-    (cond (ready v)
-	  ((and (realp timeout) (zerop timeout)) ps:false)
-	  ((functionp timeout) (funcall timeout))
-	  ((realp timeout)
-	   ;; whatever can become ready meanwhile, until the time is up
-	   (multiple-value-bind (v ready)
-	       (sync-polling evts (+ (get-internal-real-time)
-				     (round (* timeout internal-time-units-per-second))))
-	     (if ready v ps:false)))
-	  ((some #'external-evt-p evts) (values (sync-polling evts nil)))
-	  (t (racket-error "sync/timeout" "would block (one thread)")))))
-
-;;; One thread: holding the semaphore is calling the procedure
-(defnative "call-with-semaphore" (s proc &optional try-fail &rest args) ()
-  (declare (ignore s try-fail))
-  (apply proc args))
-(defnative "call-with-semaphore/enable-break" (s proc &optional try-fail &rest args) ()
-  (declare (ignore s try-fail))
-  (apply proc args))
 
 ;;; Continuation mark keys: any value is a key; these are unique ones
 (defstruct (mark-key (:constructor make-mark-key (name))) name)

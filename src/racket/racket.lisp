@@ -115,17 +115,14 @@ fetches it, or PSEUDOSCHEME_RACKET_SOURCE."
   (merge-pathnames relative (racket-source-directory)))
 
 (defun collects-directories ()
-  "Where racket/base and the rest are: PLTCOLLECTS, else what the
-installed racket executable says (decision 3); never a search."
+  "Where racket/base and the rest are: PLTCOLLECTS, else the source
+tree's racket/collects/ (never an installed racket's).  The source
+tree's other packages (pkgs/) are linked by a links file
+(linklet/sources.lisp, WRITE-COLLECTION-LINKS)."
   (let ((env (uiop:getenv "PLTCOLLECTS")))
     (if (and env (plusp (length env)))
 	(remove "" (uiop:split-string env :separator ":") :test #'string=)
-	(let ((dir (ignore-errors
-		    (uiop:run-program '("racket" "-e" "(display (find-system-path (quote collects-dir)))")
-				      :output :string))))
-	  (if (and dir (plusp (length dir)))
-	      (list dir)
-	      (error "--racket: no collections: set PLTCOLLECTS or install racket"))))))
+	(list (namestring (racket-source "racket/collects/"))))))
 
 ;;; Compiled code goes in compiled/pseudoscheme/ beside Racket's own
 ;;; compiled/ directories (cache.lisp), never in them.

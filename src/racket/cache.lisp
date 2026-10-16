@@ -137,7 +137,9 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 ;;; which lowers it (fast) and finds its machine code in the fasl cache,
 ;;; keyed by the same text.  Our values without a Racket syntax are
 ;;; tagged lists: (#%pseudoscheme-void), (#%pseudoscheme-path "..."),
-;;; (#%pseudoscheme-srcloc source line column position span).
+;;; (#%pseudoscheme-srcloc source line column position span), and
+;;; (#%pseudoscheme-prefab key field ...) for a prefab struct (the
+;;; expander's serialized syntax holds shifted-to-label-phase ones).
 
 (defun zo-encode (x)
   (cond ((compiled-linklet-p x)
@@ -149,6 +151,11 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 	;; a srcloc (the expander's serialized syntax holds them)
 	((and (struct-instance-p x) (eq (struct-of-type x) *srcloc-type*))
 	 (cons (rsym "#%pseudoscheme-srcloc") (map 'list #'zo-encode (struct-fields x))))
+	;; any other prefab struct
+	((and (struct-instance-p x) (struct-type-prefab-key (struct-of-type x)))
+	 (list* (rsym "#%pseudoscheme-prefab")
+		(zo-encode (struct-type-prefab-key (struct-of-type x)))
+		(map 'list #'zo-encode (struct-fields x))))
 	((correlated-p x) (zo-encode (correlated->datum x)))
 	((rregexp-p x)
 	 ;; as the #rx or #px literal it prints as
@@ -174,6 +181,8 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 		 ((string= head "#%pseudoscheme-path") (make-rpath (second x)))
 		 ((string= head "#%pseudoscheme-srcloc")
 		  (apply (primitive "srcloc") (mapcar #'zo-decode (cdr x))))
+		 ((string= head "#%pseudoscheme-prefab")
+		  (apply (primitive "make-prefab-struct") (mapcar #'zo-decode (cdr x))))
 		 (t (cons (zo-decode (car x)) (zo-decode (cdr x)))))))
 	((consp x) (cons (zo-decode (car x)) (zo-decode (cdr x))))
 	((simple-vector-p x) (map 'simple-vector #'zo-decode x))

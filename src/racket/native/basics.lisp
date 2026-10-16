@@ -116,7 +116,7 @@ assigned, which schemify's and the expander's checks compare with.")
 
 (defnative "check-not-unsafe-undefined" (v name) (:instance "#%unsafe" :leaf t)
   (if (eq v *unsafe-undefined*)
-      (racket-error (rname name) "undefined;~% cannot use before initialization")
+      (raise-variable-error name "cannot use before initialization")
       v))
 (defnative "check-not-unsafe-undefined/assign" (v name) (:instance "#%unsafe" :leaf t)
   (if (eq v *unsafe-undefined*)
@@ -337,8 +337,14 @@ error-value->string-handler (handlers.lisp), printed as print does."
 	((functionp x)
 	 (let ((name (ignore-errors (sb-kernel:%fun-name x))))
 	   ;; the host's procedures defined by DEFUNE are named .NAME
+	   ;; the host's procedures defined by DEFUNE are named .NAME, and
+	   ;; Pseudoscheme's own arithmetic SCHEME+ and the like
 	   (if (and name (symbolp name) (not (null name)))
-	       (rsym (string-left-trim "." (string-downcase (symbol-name name))))
+	       (let ((n (string-left-trim "." (string-downcase (symbol-name name)))))
+		 (rsym (if (and (eq (symbol-package name) (find-package "PSEUDOSCHEME"))
+				(> (length n) 6) (string= n "scheme" :end1 6))
+			   (string-left-trim "-" (subseq n 6))
+			   n)))
 	       ps:false)))
 	(t ps:false)))
 

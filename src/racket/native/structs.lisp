@@ -50,6 +50,64 @@
 (defun struct-fields (x)
   (if (rstruct-p x) (rstruct-fields x) (applicable-rstruct-fields x)))
 
+;;; A chaperone or impersonator of a struct instance (chaperone.lisp
+;;; makes them): an instance of the same type that shares the fields
+;;; vector, with the layer it wraps, and its operations' redirection
+;;; procedures: an alist, KEY -> procedure of the instance and the
+;;; value.  A key is (TYPE . POS) for a field's accessor, (TYPE . -1-POS)
+;;; for its mutator, a property for its accessor, :INFO for struct-info.
+(defstruct (cstruct (:include rstruct) (:constructor make-cstruct (type fields of kind procs)))
+  of kind procs)
+
+(defclass applicable-cstruct (applicable-rstruct)
+  ((of :initarg :of :reader applicable-cstruct-of)
+   (kind :initarg :kind :reader applicable-cstruct-kind)
+   (procs :initarg :procs :reader applicable-cstruct-procs))
+  (:metaclass sb-mop:funcallable-standard-class))
+
+(declaim (inline chaperone-layer-p))
+(defun chaperone-layer-p (x)
+  (or (cstruct-p x) (and (not (rstruct-p x)) (typep x 'applicable-cstruct))))
+(defun layer-of (x) (if (cstruct-p x) (cstruct-of x) (applicable-cstruct-of x)))
+(defun layer-kind (x) (if (cstruct-p x) (cstruct-kind x) (applicable-cstruct-kind x)))
+(defun layer-procs (x) (if (cstruct-p x) (cstruct-procs x) (applicable-cstruct-procs x)))
+
+(defun key= (a b)
+  (or (eq a b) (and (consp a) (consp b) (eq (car a) (car b)) (eql (cdr a) (cdr b)))))
+
+(defun raise-chaperone-error (who what orig new)
+  (racket-error who "non-chaperone result; received a~A ~A that is not a chaperone of the original ~A~%  original: ~A~%  received: ~A"
+		(if (string= what "argument") "n" "") what what (written orig) (written new)))
+
+(defun checked-chaperone (who kind what orig new)
+  "NEW, which a chaperone's redirection procedure returned for ORIG: it
+must be ORIG or a chaperone of it."
+  (when (and (eq kind :chaperone) (not (impersonates-p new orig)))
+    (raise-chaperone-error who what orig new))
+  new)
+
+(defun layered-value (x key base orig)
+  "BASE, the value of a struct operation KEY on the instance under X's
+layers, as the layers' redirection procedures (called with ORIG, the
+outermost) change it, innermost first."
+  (if (chaperone-layer-p x)
+      (let* ((r (layered-value (layer-of x) key base orig))
+	     (w (cdr (assoc key (layer-procs x) :test #'key=))))
+	(if w
+	    (checked-chaperone "struct-ref" (layer-kind x) "value" r (funcall w orig r))
+	    r))
+      base))
+
+(defun layered-set (x key abs-index v orig)
+  "Store V in field ABS-INDEX, as the layers' mutator redirections (outermost first) change it."
+  (if (chaperone-layer-p x)
+      (let* ((w (cdr (assoc key (layer-procs x) :test #'key=)))
+	     (new (if w
+		      (checked-chaperone "struct-set!" (layer-kind x) "value" v (funcall w orig v))
+		      v)))
+	(layered-set (layer-of x) key abs-index new orig))
+      (setf (svref (struct-fields x) abs-index) v)))
+
 (defun subtype-p (type ancestor)
   (loop for ty = type then (struct-type-parent ty)
 	while ty
@@ -107,6 +165,14 @@ to VALUE, after PROPERTY's guard."
 		 (let ((index (+ spec (- (struct-type-total owner) (struct-type-field-count owner)))))
 		   (lambda (&rest args) (apply (svref fields index) args)))
 		 (lambda (&rest args) (apply spec s args))))
+	  ;; its arity, as Racket's: the field procedure's, or the
+	  ;; procedure's less the instance
+	  (setf (gethash s *arity-masks*)
+		(or (ignore-errors
+		     (if (integerp spec)
+			 (arity-mask (svref fields (+ spec (- (struct-type-total owner) (struct-type-field-count owner)))))
+			 (ash (arity-mask spec) -1)))
+		    -1))
 	  s))))
 
 (defun constructor (type)
@@ -165,7 +231,7 @@ numbers of arguments."
 ;;; The primitives
 
 (defnative "make-struct-type" (name parent-type init-field-count auto-field-count
-				    &optional (auto-v ps:false) (props '()) (inspector *current-inspector*)
+				    &optional (auto-v ps:false) (props '()) (inspector (current-inspector*))
 				    (proc-spec ps:false) (immutables '()) (guard ps:false)
 				    (constructor-name ps:false))
     (:rumble "make-struct-type")
@@ -197,12 +263,19 @@ numbers of arguments."
     (let* ((who (rname name))
 	   (accessor (lambda (x i)
 		       (check-instance type x (format nil "~A-ref" who))
-		       (svref (struct-fields x) (field-index type i (format nil "~A-ref" who)))))
+		       (let* ((index (field-index type i (format nil "~A-ref" who)))
+			      (v (svref (struct-fields x) index)))
+			 (if (chaperone-layer-p x)
+			     (layered-value x (cons type i) v x)
+			     v))))
 	   (mutator (lambda (x i v)
 		      (check-instance type x (format nil "~A-set!" who))
 		      (when (member i (struct-type-immutables type))
 			(racket-error (format nil "~A-set!" who) "field is immutable: ~D" i))
-		      (setf (svref (struct-fields x) (field-index type i (format nil "~A-set!" who))) v)
+		      (let ((index (field-index type i (format nil "~A-set!" who))))
+			(if (chaperone-layer-p x)
+			    (layered-set x (cons type (- -1 i)) index v x)
+			    (setf (svref (struct-fields x) index) v)))
 		      *void*))
 	   ;; what a property's guard gets, as struct-type-info returns it
 	   (info (list name init-field-count auto-field-count accessor mutator
@@ -238,6 +311,11 @@ numbers of arguments."
 	(note-struct-procedure mutator :mutator type)
 	(values type constructor predicate accessor mutator)))))
 
+;;; A property accessor made by make-struct-type-property -> its property;
+;;; a field accessor or mutator -> (type pos), for chaperone-struct
+(defvar *property-accessors* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defvar *field-operations* (make-hash-table :test 'eq :weakness :key :synchronized t))
+
 (defvar *struct-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "A struct type's constructor, predicate, accessor or mutator -> (kind . type).")
 
@@ -253,29 +331,39 @@ numbers of arguments."
   (declare (ignore can-impersonate? accessor-name contract realm))
   ;; the guard may be the symbol can-impersonate: no guard, the property
   ;; allowing impersonators (which aren't distinguished here)
-  (let ((p (%make-struct-type-property name (and (functionp guard) guard) supers)))
+  (let ((p (%make-struct-type-property name (and (functionp guard) guard) supers))
+	(accessor nil))
+    (setq accessor
+	  (lambda (x &optional (fail nil fail-p))
+	    (multiple-value-bind (v found) (property-value x p)
+	      (cond (found (if (and (struct-instance-p x) (chaperone-layer-p x))
+			       (layered-value x p v x)
+			       v))
+		    ((not fail-p) (racket-error (format nil "~A-accessor" (rname name))
+						"contract violation~%  given: ~S" x))
+		    ((functionp fail) (funcall fail))
+		    (t fail)))))
+    (setf (gethash accessor *property-accessors*) p)
     (values p
 	    (lambda (x) (bool (and (or (struct-type-p x) (struct-instance-p x))
 				   (nth-value 1 (property-value x p)))))
-	    (lambda (x &optional (fail nil fail-p))
-	      (multiple-value-bind (v found) (property-value x p)
-		(cond (found v)
-		      ((not fail-p) (racket-error (format nil "~A-accessor" (rname name))
-						  "contract violation~%  given: ~S" x))
-		      ((functionp fail) (funcall fail))
-		      (t fail)))))))
+	    accessor)))
 
 (defnative "make-struct-field-accessor" (accessor-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-accessor")
   (declare (ignore field-name contract realm))
-  (note-struct-procedure (lambda (s) (funcall accessor-proc s field-pos))
-			 :field-accessor (cdr (gethash accessor-proc *struct-procedures*))))
+  (let ((f (note-struct-procedure (lambda (s) (funcall accessor-proc s field-pos))
+				  :field-accessor (cdr (gethash accessor-proc *struct-procedures*)))))
+    (setf (gethash f *field-operations*) (list :accessor (cdr (gethash accessor-proc *struct-procedures*)) field-pos))
+    f))
 
 (defnative "make-struct-field-mutator" (mutator-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-mutator")
   (declare (ignore field-name contract realm))
-  (note-struct-procedure (lambda (s v) (funcall mutator-proc s field-pos v))
-			 :field-mutator (cdr (gethash mutator-proc *struct-procedures*))))
+  (let ((f (note-struct-procedure (lambda (s v) (funcall mutator-proc s field-pos v))
+				  :field-mutator (cdr (gethash mutator-proc *struct-procedures*)))))
+    (setf (gethash f *field-operations*) (list :mutator (cdr (gethash mutator-proc *struct-procedures*)) field-pos))
+    f))
 
 (defnative "struct-predicate-procedure?" (f) (:leaf t) (bool (eq (struct-procedure-kind f) :predicate)))
 (defnative "struct-constructor-procedure?" (f) (:leaf t) (bool (eq (struct-procedure-kind f) :constructor)))
@@ -289,10 +377,23 @@ numbers of arguments."
   (values (struct-type-name type) (struct-type-init-field-count type) (struct-type-auto-field-count type)
 	  (struct-type-accessor type) (struct-type-mutator type) (struct-type-immutables type)
 	  (or (struct-type-parent type) ps:false) ps:false))
-(defnative "struct-info" (v) (:leaf t)
-  (if (and (struct-instance-p v) (transparent-p (struct-of-type v)))
-      (values (struct-of-type v) ps:false)
-      (values ps:false ps:true)))
+(defnative "struct-info" (v) ()
+  (labels ((base (x)
+	     (if (and (struct-instance-p x) (transparent-p (struct-of-type x)))
+		 (values (struct-of-type x) ps:false)
+		 (values ps:false ps:true)))
+	   (walk (x)
+	     (if (and (struct-instance-p x) (chaperone-layer-p x))
+		 (multiple-value-bind (type skipped) (walk (layer-of x))
+		   (let ((w (cdr (assoc :info (layer-procs x)))))
+		     (if (and w (truthy type))
+			 (multiple-value-bind (new-type new-skipped) (funcall w type skipped)
+			   (checked-chaperone "struct-info" (layer-kind x) "value" type new-type)
+			   (checked-chaperone "struct-info" (layer-kind x) "value" skipped new-skipped)
+			   (values new-type new-skipped))
+			 (values type skipped))))
+		 (base x))))
+    (walk v)))
 (defnative "struct-type-make-constructor" (type &optional name) (:leaf t)
   (declare (ignore name))
   (note-struct-procedure (constructor type) :constructor type))
@@ -315,6 +416,14 @@ numbers of arguments."
 (defstruct (inspector (:constructor make-inspector* (superior))) superior)
 (defvar *root-inspector* (make-inspector* nil))
 (defvar *current-inspector* (make-inspector* *root-inspector*))
+(defvar *current-inspector-parameter* nil
+  "The current-inspector parameter, once it can be made (hash.lisp).")
+
+(defun current-inspector* ()
+  "The current inspector: the parameter's value, once there is the parameter."
+  (if *current-inspector-parameter*
+      (funcall *current-inspector-parameter*)
+      *current-inspector*))
 
 (defun transparent-p (type)
   "Whether TYPE's instances show their fields: made with inspector #f, or prefab."
@@ -324,7 +433,7 @@ numbers of arguments."
   (if i-p (progn (setq *current-inspector* i) *void*) *current-inspector*))
 (defnative "make-inspector" (&optional (superior *current-inspector*)) (:leaf t)
   (make-inspector* superior))
-(defnative "make-sibling-inspector" (&optional (inspector *current-inspector*)) (:leaf t)
+(defnative "make-sibling-inspector" (&optional (inspector (current-inspector*))) (:leaf t)
   (make-inspector* (inspector-superior inspector)))
 (defnative "inspector?" (x) (:leaf t) (bool (inspector-p x)))
 (defnative "inspector-superior?" (a b) (:leaf t)
@@ -409,3 +518,96 @@ its parent key (or NIL)."
 	   (truthy (funcall (svref (struct-fields v) 0) v1 v2)))
       (svref (struct-fields v) 1)
       (funcall alt v v1 v2)))
+
+;;; ------------------------------------------------------------------
+;;; chaperone-struct and impersonate-struct (chaperone.lisp's natives)
+
+(defun struct-chaperone-error (who what &rest details)
+  "WHO: WHAT, with DETAILS (field name, value ...) lines."
+  (racket-error who "~A~{~%  ~A: ~A~}" what details))
+
+(defun make-struct-chaperone (who chaperone? v args)
+  "V chaperoned (or impersonated) by ARGS: an optional struct type, then
+accessors, mutators, property accessors (and struct-info, for a
+chaperone) each with its redirection procedure, and impersonator
+properties each with its value."
+  (when (null args) (return-from make-struct-chaperone v))
+  (let* ((kind (if chaperone? :chaperone :impersonator))
+	 (st (and (struct-type-p (car args)) (car args)))
+	 (args (if st (cdr args) args))
+	 (procs '()) (props '()) (witnessed (and st t)))
+    (unless (struct-instance-p v)
+      (arg-error who "struct?" v))
+    (when (and st (not (subtype-p (struct-of-type v) st)))
+      (struct-chaperone-error who "given value is not an instance of the given structure type"
+			      "struct type" (written st) "value" (written v)))
+    (flet ((operation (what key proc-arg applies redirect arity)
+	     (unless applies
+	       (struct-chaperone-error who "operation does not apply to given value"
+				       "operation kind" what "operation procedure" (written proc-arg)
+				       "value" (written v)))
+	     (when (assoc key procs :test #'key=)
+	       (struct-chaperone-error who "given operation accesses the same value as a previous operation argument"
+				       "operation kind" what "operation procedure" (written proc-arg)))
+	     (when (and (truthy redirect) (not (logbitp arity (arity-mask redirect))))
+	       (struct-chaperone-error who "operation's redirection procedure does not match the expected arity"
+				       "given" (written redirect)
+				       "expected" (format nil "(or/c #f (procedure-arity-includes/c ~D))" arity)
+				       "operation kind" what "operation procedure" (written proc-arg)))
+	     (when (truthy redirect) (push (cons key redirect) procs))))
+      (loop while args
+	    do (let ((a (car args)))
+		 (cond
+		   ((impersonator-property-p a)
+		    (unless (cdr args)
+		      (struct-chaperone-error who "missing value argument after an imperonsonator-property argument"
+					      "impersonator property" (written a)))
+		    (push (cons a (cadr args)) props)
+		    (setq args (cddr args)))
+		   (t
+		    (when (null (cdr args))
+		      (struct-chaperone-error who "missing redirection procedure after operation"
+					      "operation kind" "operation" "operation procedure" (written a)))
+		    (let ((redirect (cadr args))
+			  (op (and (functionp a) (gethash a *field-operations*)))
+			  (prop (and (functionp a) (gethash a *property-accessors*))))
+		      (cond
+			((and op (eq (first op) :accessor))
+			 (destructuring-bind (type pos) (rest op)
+			   (when (and (not chaperone?) (member pos (struct-type-immutables type)))
+			     (struct-chaperone-error who "cannot replace operation for an immutable field"
+						     "operation kind" "property accessor"
+						     "operation procedure" (written a)))
+			   (operation "accessor" (cons type pos) a (subtype-p (struct-of-type v) type) redirect 2)))
+			((and op (eq (first op) :mutator))
+			 (destructuring-bind (type pos) (rest op)
+			   (operation "mutator" (cons type (- -1 pos)) a (subtype-p (struct-of-type v) type) redirect 2)))
+			(prop
+			 (operation "property accessor" prop a
+				    (nth-value 1 (property-value v prop)) redirect 2))
+			((and chaperone? (eq a (native-function (gethash "struct-info" *natives*))))
+			 (operation "struct-info procedure" :info a t redirect 2))
+			(t (arg-error who (format nil "(or/c struct-accessor-procedure?~%      struct-mutator-procedure?~%      struct-type-property-accessor-procedure?~A)"
+						  (if chaperone? (format nil "~%      struct-info") ""))
+				      a)))
+		      (setq witnessed t)
+		      (setq args (cddr args)))))))
+      (unless witnessed
+	(struct-chaperone-error who (format nil "cannot ~A value as a structure without a witness"
+					    (if chaperone? "chaperone" "impersonate"))
+				"explanation" "a structure type, accessor, or mutator acts as a witness that the given value's representation can be chaperoned or impersonated"
+				"given value" (written v)))
+      (when (and (null procs) (null props))
+	(return-from make-struct-chaperone v))
+      (let* ((procs (nreverse procs))
+	     (new (if (rstruct-p v)
+		      (make-cstruct (rstruct-type v) (rstruct-fields v) v kind procs)
+		      (let ((n (make-instance 'applicable-cstruct :type (applicable-rstruct-type v)
+							   :fields (applicable-rstruct-fields v)
+							   :of v :kind kind :procs procs)))
+			(sb-mop:set-funcallable-instance-function n (lambda (&rest args) (apply v args)))
+			(let ((mask (gethash v *arity-masks*)))
+			  (when mask (setf (gethash n *arity-masks*) mask)))
+			n))))
+	(setf (gethash new *impersonators*) (make-impersonation kind v (nreverse props)))
+	new))))

@@ -32,11 +32,52 @@
 	  (default-p default)
 	  (t (racket-error "instance-variable-value" "instance variable not found: ~A" (rname name))))))
 
+(defun raise-variable-error (name message)
+  "Raise exn:fail:contract:variable: NAME (a symbol) is undefined, with
+MESSAGE's reason."
+  (do-raise (make-exn "exn:fail:contract:variable"
+		      (format nil "~A: undefined;~% ~A" (rname name) message)
+		      name)))
+
 (defun variable-ref (v)
   (let ((x (linklet-variable-value v)))
     (if (eq x +undefined+)
-	(racket-error (rname (linklet-variable-name v)) "undefined;~% cannot reference an identifier before its definition")
+	(raise-variable-error (linklet-variable-name v) "cannot reference an identifier before its definition")
 	x)))
+
+;;; A letrec's variable used before its definition: the host's
+;;; %letrec-check (psyntax.lisp) raises an R6RS condition; for the
+;;; lexicals this compiler makes (FRESH-LEXICAL: NAME~N.TAG) Racket's
+;;; exn:fail:contract:variable instead, named as Racket names it.
+(defun racket-lexical-name (symbol)
+  "The Racket name of SYMBOL, if it is one of FRESH-LEXICAL's, else NIL."
+  (let* ((name (rname symbol))
+	 (tilde (position #\~ name :from-end t))
+	 (dot (and tilde (position #\. name :start tilde))))
+    (when (and dot (> tilde 0) (> dot (1+ tilde))
+	       (every #'digit-char-p (subseq name (1+ tilde) dot))
+	       (< (1+ dot) (length name)) (char-equal (char name (1+ dot)) #\r))
+      (let* ((stem (subseq name 0 tilde))
+	     (us (position #\_ stem :from-end t)))
+	;; the expander's NAME_N
+	(if (and us (> us 0) (< (1+ us) (length stem)) (every #'digit-char-p (subseq stem (1+ us))))
+	    (subseq stem 0 us)
+	    stem)))))
+
+(defvar *racket-letrec-check* nil
+  "The host's %letrec-check as INSTALL-LETREC-CHECK last replaced it.")
+
+(defun install-letrec-check ()
+  "Replace the host's %letrec-check, unless this process already has."
+  (unless (and *racket-letrec-check* (eq (psx:host-ref "%letrec-check") *racket-letrec-check*))
+    (let* ((old (psx:host-ref "%letrec-check"))
+	   (new (lambda (flag value name)
+		  (let ((racket-name (and (eq flag ps:false) (racket-lexical-name name))))
+		    (if racket-name
+			(raise-variable-error (rsym racket-name) "cannot use before initialization")
+			(funcall old flag value name))))))
+      (psx:host-set! "%letrec-check" new)
+      (setq *racket-letrec-check* new))))
 
 (defun variable-set (v value)
   (when (linklet-variable-constant v)
@@ -64,9 +105,27 @@
   (cdr (assoc key (correlated-props c))))
 
 (defun correlated->datum (x)
+  "X without its correlated objects: in pairs, vectors, boxes, immutable
+hash tables and prefab structs too; what holds none is returned as is."
   (cond ((correlated-p x) (correlated->datum (correlated-e x)))
 	((consp x) (let ((a (correlated->datum (car x))) (d (correlated->datum (cdr x))))
 		     (if (and (eq a (car x)) (eq d (cdr x))) x (cons a d))))
+	((simple-vector-p x)
+	 (let ((new (map 'simple-vector #'correlated->datum x)))
+	   (if (every #'eq new x) x new)))
+	((rbox-p x)
+	 (let ((v (correlated->datum (rbox-value x))))
+	   (if (eq v (rbox-value x)) x (make-rbox :value v))))
+	((ihash-p x)
+	 (let ((changed nil) (new (empty-ihash (ihash-kind x))))
+	   (loop for (k . v) across (ihash-entries x)
+		 do (let ((k2 (correlated->datum k)) (v2 (correlated->datum v)))
+		      (unless (and (eq k k2) (eq v v2)) (setq changed t))
+		      (setq new (ihash-set new k2 v2))))
+	   (if changed new x)))
+	((and (rstruct-p x) (struct-type-prefab-key (rstruct-type x)))
+	 (let ((new (map 'simple-vector #'correlated->datum (rstruct-fields x))))
+	   (if (every #'eq new (rstruct-fields x)) x (make-rstruct (rstruct-type x) new))))
 	(t x)))
 
 ;;; ------------------------------------------------------------------
@@ -91,6 +150,7 @@ time units), and how many: PSEUDOSCHEME_RACKET_STATS prints them.")
 (defun compile-linklet (form &optional name)
   "compile-linklet: FORM (an S-expression or correlated) to a linklet."
   (incf (getf *stats* :linklets))
+  (install-letrec-check)
   (timing (:lower)
     (let ((compiled (compile-linklet-form form :name name)))
       ;; its compiled code is cached, keyed by the linklet as given
@@ -149,6 +209,12 @@ running (or ran last): for error reports.")
 (defun instantiate-linklet (compiled import-instances &optional target)
   "instantiate-linklet: with no TARGET, a new instance with the exports;
 with one, the body's result, the exports defined in TARGET."
+  (unless (and (listp import-instances) (every #'linklet-instance-p import-instances))
+    (racket-error "instantiate-linklet" "contract violation~%  expected: (listof instance?)~%  given: ~A"
+		  (written import-instances)))
+  (unless (or (null target) (linklet-instance-p target))
+    (racket-error "instantiate-linklet" "contract violation~%  expected: (or/c instance? #f)~%  given: ~A"
+		  (written target)))
   (unless (= (length import-instances) (length (compiled-linklet-imports compiled)))
     (racket-error "instantiate-linklet" "expected ~D import instances, given ~D"
 		  (length (compiled-linklet-imports compiled)) (length import-instances)))
@@ -273,7 +339,9 @@ it with (primitive-table '#%linklet) of the pinned release.")
 			     :span (correlated-span c)
 			     :props (acons key value (remove key (correlated-props c) :key #'car)))
 	    (let ((p (assoc key (correlated-props c)))) (if p (cdr p) ps:false)))))
-    ("correlated-property-symbol-keys" ,(lambda (c) (mapcar #'car (correlated-props c))))
+    ;; the interned symbols
+    ("correlated-property-symbol-keys"
+     ,(lambda (c) (loop for (k) in (correlated-props c) when (and (symbolp k) (symbol-package k)) collect k)))
     ("primitive-table"
      ,(lambda (name &optional table)
 	(declare (ignore table))

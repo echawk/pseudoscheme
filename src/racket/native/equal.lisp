@@ -9,7 +9,8 @@
 ;;;; type is transparent or prefab, else by identity.  The hash agrees:
 ;;;; prop:equal+hash's hash procedure, or the fields of a transparent
 ;;;; struct.  Not yet: cycles (an equal? of cyclic data doesn't end, as
-;;;; Racket's does) and chaperones.
+;;;; Racket's does); a chaperoned box or hash table is compared through
+;;;; its chaperone, a chaperoned struct by its fields underneath.
 
 (in-package "PSEUDOSCHEME-RACKET")
 
@@ -34,10 +35,10 @@
 	 (and (typep b '(simple-array (unsigned-byte 8) (*))) (equalp a b)))
 	((simple-vector-p a)
 	 (and (simple-vector-p b) (= (length a) (length b)) (every #'equal* a b)))
-	((rbox-p a) (and (rbox-p b) (equal* (rbox-value a) (rbox-value b))))
+	((rbox-p a) (and (rbox-p b) (equal* (box-ref* a) (box-ref* b))))
 	((mpair-p a) (and (mpair-p b) (equal* (mpair-car a) (mpair-car b)) (equal* (mpair-cdr a) (mpair-cdr b))))
 	((rpath-p a) (and (rpath-p b) (string= (rpath-string a) (rpath-string b))))
-	((or (ihash-p a) (rhash-p a)) (hash-equal a b))
+	((hash-table-p* a) (hash-equal a b))
 	;; a stencil vector (data.lisp)
 	((typep a 'stencil)
 	 (and (typep b 'stencil) (= (stencil-mask a) (stencil-mask b))
@@ -53,9 +54,9 @@
 	(t nil)))
 
 (defun hash-equal (a b)
-  (and (or (ihash-p b) (rhash-p b))
+  (and (hash-table-p* b)
        (eq (hash-kind a) (hash-kind b))
-       (eq (ihash-p a) (ihash-p b))
+       (eq (hash-immutable-p a) (hash-immutable-p b))
        (= (length (entries a)) (length (entries b)))
        (loop for (k . v) across (entries a)
 	     always (multiple-value-bind (w found) (lookup* b k)
@@ -73,10 +74,10 @@
 	 (let ((h (length x)))
 	   (loop for b across x for i below 64 do (setq h (mix h b)))
 	   h))
-	((rbox-p x) (mix 7 (equal-hash* (rbox-value x) (1+ depth))))
+	((rbox-p x) (mix 7 (equal-hash* (box-ref* x) (1+ depth))))
 	((mpair-p x) (mix (equal-hash* (mpair-car x) (1+ depth)) (equal-hash* (mpair-cdr x) (1+ depth))))
 	((rpath-p x) (mix 11 (logand (sxhash (rpath-string x)) most-positive-fixnum)))
-	((or (ihash-p x) (rhash-p x)) (mix 13 (length (entries x))))
+	((hash-table-p* x) (mix 13 (length (entries x))))
 	((struct-instance-p x)
 	 (multiple-value-bind (eqp hashp) (equal+hash-procedures x)
 	   (cond (eqp (logand (funcall hashp x (lambda (y) (equal-hash* y (1+ depth)))) most-positive-fixnum))

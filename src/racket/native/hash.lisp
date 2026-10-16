@@ -15,8 +15,8 @@
 ;;;; Iteration positions (hash-iterate-first and the rest) are indexes
 ;;;; into a snapshot of the entries, made when iteration starts and
 ;;;; dropped when a mutable table changes.
-;;;; Not yet: ephemeron tables, equal-always?, impersonators, chaperones,
-;;;; and equal? on structs that are transparent or have prop:equal+hash.
+;;;; Chaperones and impersonators are CHASH structs (chaperone.lisp makes
+;;;; them).  Not yet: ephemeron tables and equal-always?.
 
 (in-package "PSEUDOSCHEME-RACKET")
 
@@ -242,26 +242,132 @@ differ, at SHIFT."
 ;;; ------------------------------------------------------------------
 ;;; Generic operations
 
-(defun hash-table-p* (x) (or (rhash-p x) (ihash-p x)))
+;;; A chaperone or impersonator of a hash table (chaperone-hash,
+;;; impersonate-hash): the table it wraps, and the procedures of the
+;;; arguments' contract: each takes the outermost table first.
+(defstruct (chash (:constructor make-chash (of kind ref-proc set-proc remove-proc key-proc clear-proc)))
+  of kind				; :chaperone or :impersonator
+  ref-proc				; (hash key) -> key, (hash key value) -> value
+  set-proc				; (hash key value) -> key, value
+  remove-proc				; (hash key) -> key
+  key-proc				; (hash key) -> key
+  clear-proc)				; (hash), or #f
+
+(defun hash-table-p* (x) (or (rhash-p x) (ihash-p x) (chash-p x)))
+
+(defun hash-immutable-p (h)
+  (if (chash-p h) (hash-immutable-p (chash-of h)) (ihash-p h)))
+(defun hash-mutable-p (h)
+  (if (chash-p h) (hash-mutable-p (chash-of h)) (rhash-p h)))
+(defun hash-weak-p (h)
+  (if (chash-p h) (hash-weak-p (chash-of h)) (and (rhash-p h) (rhash-weak h) t)))
 
 (defun check-hash (who x)
   (unless (hash-table-p* x)
     (racket-error who "contract violation~%  expected: hash?~%  given: ~A"
 		  (with-output-to-string (s) (funcall (psx:host-ref "write") x s)))))
 
-(defun hash-kind (h) (if (rhash-p h) (rhash-kind h) (ihash-kind h)))
+(defun hash-kind (h)
+  (cond ((rhash-p h) (rhash-kind h)) ((ihash-p h) (ihash-kind h)) (t (hash-kind (chash-of h)))))
 
 (defun entries (h)
-  (if (ihash-p h)
-      (ihash-entries h)
-      (or (rhash-snapshot h)
-	  (setf (rhash-snapshot h)
-		(let ((l '()))
-		  (maphash (lambda (k v) (push (cons k v) l)) (rhash-table h))
-		  (coerce (nreverse l) 'simple-vector))))))
+  (cond ((ihash-p h) (ihash-entries h))
+	((chash-p h) (chash-entries h h))
+	(t (or (rhash-snapshot h)
+	       (setf (rhash-snapshot h)
+		     (let ((l '()))
+		       (maphash (lambda (k v) (push (cons k v) l)) (rhash-table h))
+		       (coerce (nreverse l) 'simple-vector)))))))
 
 (defun lookup* (h key)
-  (if (rhash-p h) (gethash key (rhash-table h)) (ihash-ref h key)))
+  (cond ((rhash-p h) (gethash key (rhash-table h)))
+	((ihash-p h) (ihash-ref h key))
+	(t (chash-lookup h key h))))
+
+;;; The operations through chaperones and impersonators.  ORIG is the
+;;; outermost table, which the procedures are given.
+
+(defun chash-lookup (h key orig)
+  "Its value for KEY (and whether it has one), through H's layers."
+  (if (chash-p h)
+      (multiple-value-bind (k2 result-proc) (funcall (chash-ref-proc h) orig key)
+	(checked-chaperone "hash-ref" (chash-kind h) "key" key k2)
+	(multiple-value-bind (v found) (chash-lookup (chash-of h) k2 orig)
+	  (if found
+	      (values (checked-chaperone "hash-ref" (chash-kind h) "value" v
+					 (funcall result-proc orig k2 v))
+		      t)
+	      (values nil nil))))
+      (lookup* h key)))
+
+(defun chash-entries (h orig)
+  (let ((under (if (chash-p (chash-of h)) (chash-entries (chash-of h) orig) (entries (chash-of h)))))
+    (map 'simple-vector
+	 (lambda (e)
+	   (let ((k (checked-chaperone "hash-iterate-key" (chash-kind h) "key" (car e)
+				       (funcall (chash-key-proc h) orig (car e)))))
+	     (multiple-value-bind (k2 result-proc) (funcall (chash-ref-proc h) orig k)
+	       (cons k (checked-chaperone "hash-iterate-value" (chash-kind h) "value" (cdr e)
+					  (funcall result-proc orig k2 (cdr e)))))))
+	 under)))
+
+(defun hash-set!* (h key value orig)
+  (cond ((rhash-p h) (setf (gethash key (rhash-table h)) value (rhash-snapshot h) nil))
+	(t (multiple-value-bind (k2 v2) (funcall (chash-set-proc h) orig key value)
+	     (checked-chaperone "hash-set!" (chash-kind h) "key" key k2)
+	     (checked-chaperone "hash-set!" (chash-kind h) "value" value v2)
+	     (hash-set!* (chash-of h) k2 v2 orig))))
+  *void*)
+
+(defun hash-remove!* (h key orig)
+  (cond ((rhash-p h) (remhash key (rhash-table h)) (setf (rhash-snapshot h) nil))
+	(t (let ((k2 (funcall (chash-remove-proc h) orig key)))
+	     (checked-chaperone "hash-remove!" (chash-kind h) "key" key k2)
+	     (hash-remove!* (chash-of h) k2 orig))))
+  *void*)
+
+(defun hash-clear!* (h orig)
+  (cond ((rhash-p h) (clrhash (rhash-table h)) (setf (rhash-snapshot h) nil))
+	((truthy (chash-clear-proc h))
+	 (funcall (chash-clear-proc h) orig)
+	 (hash-clear!* (chash-of h) orig))
+	(t (loop for (k) across (copy-seq (entries (chash-of h)))
+		 do (hash-remove!* (chash-of h) k orig))))
+  *void*)
+
+(defun rewrap-chash (h new-of)
+  (make-chash new-of (chash-kind h) (chash-ref-proc h) (chash-set-proc h) (chash-remove-proc h)
+	      (chash-key-proc h) (chash-clear-proc h)))
+
+(defun hash-set* (h key value orig)
+  (if (ihash-p h)
+      (ihash-set h key value)
+      (multiple-value-bind (k2 v2) (funcall (chash-set-proc h) orig key value)
+	(checked-chaperone "hash-set" (chash-kind h) "key" key k2)
+	(checked-chaperone "hash-set" (chash-kind h) "value" value v2)
+	(rewrap-chash h (hash-set* (chash-of h) k2 v2 orig)))))
+
+(defun hash-remove* (h key orig)
+  (if (ihash-p h)
+      (ihash-remove h key)
+      (let ((k2 (funcall (chash-remove-proc h) orig key)))
+	(checked-chaperone "hash-remove" (chash-kind h) "key" key k2)
+	(rewrap-chash h (hash-remove* (chash-of h) k2 orig)))))
+
+(defun hash-clear* (h orig)
+  (cond ((ihash-p h) (empty-ihash (ihash-kind h)))
+	((truthy (chash-clear-proc h))
+	 (funcall (chash-clear-proc h) orig)
+	 (rewrap-chash h (hash-clear* (chash-of h) orig)))
+	(t (let ((result h))
+	     (loop for (k) across (copy-seq (entries (chash-of h)))
+		   do (setq result (hash-remove* result k orig)))
+	     result))))
+
+(defun hash-count* (h)
+  (cond ((rhash-p h) (hash-table-count (rhash-table h)))
+	((ihash-p h) (ihash-count h))
+	(t (hash-count* (chash-of h)))))
 
 (defun fail-value (who key fail fail-p)
   (cond ((not fail-p) (racket-error who "no value found for key~%  key: ~A"
@@ -304,11 +410,11 @@ differ, at SHIFT."
 (defnative "hash-eq?" (h) (:leaf t) (check-hash "hash-eq?" h) (bool (eq (hash-kind h) :eq)))
 (defnative "hash-eqv?" (h) (:leaf t) (check-hash "hash-eqv?" h) (bool (eq (hash-kind h) :eqv)))
 (defnative "hash-equal?" (h) (:leaf t) (check-hash "hash-equal?" h) (bool (eq (hash-kind h) :equal)))
-(defnative "hash-weak?" (h) (:leaf t) (check-hash "hash-weak?" h) (bool (and (rhash-p h) (rhash-weak h))))
-(defnative "hash-strong?" (h) (:leaf t) (check-hash "hash-strong?" h) (bool (not (and (rhash-p h) (rhash-weak h)))))
+(defnative "hash-weak?" (h) (:leaf t) (check-hash "hash-weak?" h) (bool (hash-weak-p h)))
+(defnative "hash-strong?" (h) (:leaf t) (check-hash "hash-strong?" h) (bool (not (hash-weak-p h))))
 (defnative "hash-count" (h) (:leaf t)
   (check-hash "hash-count" h)
-  (if (rhash-p h) (hash-table-count (rhash-table h)) (ihash-count h)))
+  (hash-count* h))
 
 (defnative "hash-ref" (h key &optional (fail nil fail-p)) (:rumble "hash-ref")
   (check-hash "hash-ref" h)
@@ -320,37 +426,34 @@ differ, at SHIFT."
   (let ((e (find key (entries h) :key #'car :test (kind-test (hash-kind h)))))
     (if e (car e) (fail-value "hash-ref-key" key fail fail-p))))
 
-(defnative "hash-set!" (h key value) (:leaf t)
-  (unless (rhash-p h)
+(defnative "hash-set!" (h key value) ()
+  (unless (and (hash-table-p* h) (hash-mutable-p h))
     (racket-error "hash-set!" "contract violation~%  expected: (and/c hash? (not/c immutable?))"))
-  (setf (gethash key (rhash-table h)) value (rhash-snapshot h) nil)
-  *void*)
+  (hash-set!* h key value h))
 
-(defnative "hash-remove!" (h key) (:leaf t)
-  (unless (rhash-p h)
+(defnative "hash-remove!" (h key) ()
+  (unless (and (hash-table-p* h) (hash-mutable-p h))
     (racket-error "hash-remove!" "contract violation~%  expected: (and/c hash? (not/c immutable?))"))
-  (remhash key (rhash-table h))
-  (setf (rhash-snapshot h) nil)
-  *void*)
+  (hash-remove!* h key h))
 
-(defnative "hash-clear!" (h) (:leaf t)
+(defnative "hash-clear!" (h) ()
   (check-hash "hash-clear!" h)
-  (when (rhash-p h) (clrhash (rhash-table h)) (setf (rhash-snapshot h) nil))
+  (when (hash-mutable-p h) (hash-clear!* h h))
   *void*)
 
-(defnative "hash-set" (h key value) (:rumble "hash-set" :leaf t)
-  (unless (ihash-p h)
+(defnative "hash-set" (h key value) (:rumble "hash-set")
+  (unless (and (hash-table-p* h) (hash-immutable-p h))
     (racket-error "hash-set" "contract violation~%  expected: (and/c hash? immutable?)"))
-  (ihash-set h key value))
+  (hash-set* h key value h))
 
-(defnative "hash-remove" (h key) (:leaf t)
-  (unless (ihash-p h)
+(defnative "hash-remove" (h key) ()
+  (unless (and (hash-table-p* h) (hash-immutable-p h))
     (racket-error "hash-remove" "contract violation~%  expected: (and/c hash? immutable?)"))
-  (ihash-remove h key))
+  (hash-remove* h key h))
 
 (defnative "hash-copy" (h) (:leaf t)
   (check-hash "hash-copy" h)
-  (rhash-from-assocs (hash-kind h) (coerce (entries h) 'list) (and (rhash-p h) (rhash-weak h))))
+  (rhash-from-assocs (hash-kind h) (coerce (entries h) 'list) (hash-weak-p h)))
 
 (defnative "hash-for-each" (h proc &optional try-order?) ()
   (declare (ignore try-order?))
@@ -404,7 +507,7 @@ differ, at SHIFT."
 (defnative "make-ephemeron-hasheq" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :eq assocs t))
 (defnative "make-ephemeron-hasheqv" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :eqv assocs t))
 (defnative "make-ephemeron-hashalw" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :equal assocs t))
-(defnative "hash-ephemeron?" (h) (:leaf t) (bool (and (rhash-p h) (rhash-weak h))))
+(defnative "hash-ephemeron?" (h) (:leaf t) (bool (hash-weak-p h)))
 (defnative "hash-keys-subset?" (a b) (:leaf t)
   (bool (loop for (k) across (entries a) always (nth-value 1 (lookup* b k)))))
 
@@ -425,3 +528,17 @@ differ, at SHIFT."
 (defnative "unsafe-immutable-hash-iterate-pair" (h i &optional bad-index-v) (:instance "#%unsafe" :leaf t)
   (declare (ignore bad-index-v))
   (let ((e (svref (entries h) i))) (cons (car e) (cdr e))))
+
+;;; ------------------------------------------------------------------
+;;; current-inspector, a parameter (structs.lisp has what uses it; it
+;;; is made here because make-parameter* comes with control.lisp)
+
+(setq *current-inspector-parameter*
+      (make-parameter* *current-inspector*
+		       (lambda (v)
+			 (if (inspector-p v)
+			     v
+			     (racket-error "current-inspector" "contract violation~%  expected: inspector?~%  given: ~A"
+					   (written v))))
+		       (rsym "current-inspector")))
+(define-primitive "#%kernel" "current-inspector" *current-inspector-parameter*)

@@ -134,6 +134,35 @@ top-level form failed and why."
 		    *split-form-index* e)
 	    nil))))))
 
+;;; The packages of Racket's source tree (pkgs/NAME, each a multi-
+;;; collection package: its directories are collections) are linked as
+;;; an installation's pkgs are, by a links file: compiler/zo-structs.rkt
+;;; is zo-lib's, and the "tests" collection of pkgs/racket-test-core/
+;;; (tests/racket/...) is how Racket's own test suite finds its files.
+;;; The file is regenerated at each boot, into the cache.
+
+(defun collection-links-text ()
+  (let ((pkgs (merge-pathnames "pkgs/" (racket-source-directory))))
+    (with-output-to-string (out)
+      (format out "(")
+      (dolist (dir (sort (copy-list (uiop:subdirectories pkgs)) #'string< :key #'namestring))
+	(let ((info (merge-pathnames "info.rkt" dir)))
+	  (when (and (probe-file info)
+		     (search "(define collection 'multi)" (uiop:read-file-string info)))
+	    (format out "~%  (root ~S)" (namestring dir)))))
+      (format out ")~%"))))
+
+(defun write-collection-links ()
+  "The links file of the source tree's packages, in the Racket cache:
+its pathname."
+  (let ((file (merge-pathnames "links.rktd" (racket-cache-directory)))
+	(text (collection-links-text)))
+    (unless (and (probe-file file) (string= (uiop:read-file-string file) text))
+      (ensure-directories-exist file)
+      (with-open-file (out file :direction :output :if-exists :supersede)
+	(write-string text out)))
+    file))
+
 (defun expander-export (name)
   (instance-value *expander-instance* (rsym name)))
 
@@ -147,11 +176,20 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
     (funcall (expander-export "boot"))
     (funcall (expander-export "namespace-require")
 	     (list (rsym "quote") (rsym "#%kernel")))
-    ;; the collections, as main.sps sets them up
+    ;; the collections, as main.sps sets them up, less the user's own
+    ;; (the addon directory's collects and links: not the source tree's),
+    ;; plus a links file for the packages of the source tree (pkgs/)
     (funcall (expander-export "eval")
 	     (read-racket (make-string-input-stream
-			   "(begin (current-library-collection-links (find-library-collection-links))
-                                   (current-library-collection-paths (find-library-collection-paths)))")))
+			   (format nil "(let-values ([(user) (use-user-specific-search-paths)])
+                                          (begin
+                                            (use-user-specific-search-paths #f)
+                                            (current-library-collection-links
+                                              (append (find-library-collection-links)
+                                                      (list (string->path ~S))))
+                                            (current-library-collection-paths (find-library-collection-paths))
+                                            (use-user-specific-search-paths user)))"
+				   (namestring (write-collection-links))))))
     (install-zo-writer)
     ;; Racket's string->number is the reader's, which #%kernel re-exports
     ;; from #%read (data.lisp)

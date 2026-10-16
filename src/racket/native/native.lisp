@@ -40,7 +40,7 @@ one: every primitive the instances have that isn't host-shared."
 (defparameter *host-shared*
   '(;; pairs and lists
     "car" "cdr" "cons" "caar" "cadr" "cdar" "cddr" "caddr" "cdddr" "cadddr"
-    "list" "append" "reverse" "list-ref" "list-tail"
+    "list" "append" "reverse"
     "memq" "memv" "assq" "assv" "null?" "pair?" "list?"
     ;; equivalence, booleans
     "eq?" "eqv?" "not" "boolean?"
@@ -58,7 +58,7 @@ one: every primitive the instances have that isn't host-shared."
     "string-append" "string-copy" "list->string"
     "string->symbol" "symbol->string" "symbol?" "string-upcase" "string-downcase"
     ;; vectors, bytevectors (Racket's bytes are the host's bytevectors)
-    "vector" "make-vector" "vector?" "vector-ref" "vector-set!" "vector-length"
+    "vector" "vector?" "vector-ref" "vector-set!" "vector-length"
     "list->vector"
     ;; control
     "procedure?" "apply" "values" "call-with-values" "map" "for-each"
@@ -108,8 +108,9 @@ linklets (after every instance is filled: #%linklet's too)."
     (racket-error (rname name) "undefined;~% cannot reference an identifier before its definition"))
   (psx:defhost "racket:assign-error" (name)
     (racket-error "set!" "assignment disallowed;~% cannot assign a primitive or imported variable: ~A" (rname name)))
-  (psx:defhost "racket:with-arity" (mask f)
+  (psx:defhost "racket:with-arity" (mask f &optional name)
     (setf (gethash f *arity-masks*) mask)
+    (when name (setf (gethash f *renamed-procedures*) name))
     f)
   (psx:defhost "racket:arity-error" (args)
     (racket-arity-error "#<procedure>" (length args)))

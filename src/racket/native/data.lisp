@@ -763,6 +763,7 @@ of the square roots of the first (or the ninth to sixteenth) primes."
   (source-order :be)			; UTF-16/32 source: from its byte order mark
   (source-started nil)
   (bom-pending nil)			; UTF-16/32 target: write the mark first
+  (ish nil)				; (from . to) of the "platform-" and WTF converters
   (closed nil))
 
 (defmethod print-object ((c bconv) stream) (format stream "#<bytes-converter>"))
@@ -781,15 +782,229 @@ of the square roots of the first (or the ninth to sixteenth) primes."
 	  ((member name '("ASCII" "US-ASCII") :test #'string=) :ascii)
 	  (t nil))))
 
+;;; The converters Racket writes itself (racket/src/io/converter/utf-8.rkt),
+;;; on a Unix platform: platform-UTF-8 is UTF-8, platform-UTF-16 is
+;;; native-order UTF-16 whose surrogates are assumed paired; the WTF
+;;; ones allow unpaired surrogates.  Ported from that file.
+
+(defparameter *ish-converters*
+  '((("platform-UTF-8" . "platform-UTF-16") :utf-8 . :utf-16-assume)
+    (("platform-UTF-8-permissive" . "platform-UTF-16") :utf-8-permissive . :utf-16-assume)
+    (("platform-UTF-16" . "platform-UTF-8") :utf-16-assume . :utf-8)
+    (("WTF-8" . "WTF-16") :wtf-8 . :wtf-16)
+    (("WTF-8-permissive" . "WTF-16") :wtf-8-permissive . :wtf-16)
+    (("WTF-16" . "WTF-8") :wtf-16 . :wtf-8)))
+
+(defun put16 (out j v)
+  "V as two bytes at J in native (little-endian) order."
+  (setf (aref out j) (ldb (byte 8 0) v)
+	(aref out (1+ j)) (ldb (byte 8 8) v)))
+
+(defun utf8-ish-reencode (in is ie out os oe permissive from-wtf to16)
+  "UTF-8 (or WTF-8) bytes IN[IS,IE) to UTF-8 or UTF-16 bytes in OUT[OS,OE): (values consumed produced status)."
+  (let ((i is) (j os) (base-i is) (accum 0) (remaining 0) (pending nil))
+    (labels ((finish (status &optional (at base-i))
+	       (return-from utf8-ish-reencode (values (- at is) (- j os) status)))
+	     (proceed (next-j)
+	       (let ((next-i (1+ i)))
+		 (setq j next-j)
+		 (if (= next-j oe)
+		     (finish (if (= next-i ie) :complete :continues) next-i)
+		     (setq i next-i base-i next-i accum 0 remaining 0 pending nil)))))
+      (macrolet ((with-pending (&body body)
+		   `(cond ((and pending (> (+ j 2) oe)) (finish :continues))
+			  (t (when pending
+			       (put16 out j pending)
+			       (incf j 2)
+			       (incf base-i 3))
+			     ,@body))))
+	(flet ((encoding-failure ()
+		 (if permissive
+		     (flet ((continue-after-permissive (next-j)
+			      (let ((next-i (1+ base-i)))
+				(setq j next-j)
+				(if (= next-j oe)
+				    (finish :continues next-i)
+				    (setq i next-i base-i next-i accum 0 remaining 0 pending nil)))))
+		       (with-pending
+			 (cond ((and (not to16) (<= (+ j 3) oe))
+				(setf (aref out j) #o357 (aref out (+ j 1)) #o277 (aref out (+ j 2)) #o275)
+				(continue-after-permissive (+ j 3)))
+			       ((and to16 (<= (+ j 2) oe))
+				(put16 out j #xFFFD)
+				(continue-after-permissive (+ j 2)))
+			       (t (finish :continues)))))
+		     (finish :error))))
+	  (loop
+	    (if (= i ie)
+		(cond ((zerop remaining)
+		       (if pending
+			   (finish (if (= j oe) :continues :aborts))
+			   (finish :complete)))
+		      (t (finish :aborts)))
+		(let ((b (aref in i)))
+		  (cond
+		    ((< b 128)
+		     (if (zerop remaining)
+			 (with-pending
+			   (cond ((and (not to16) (< j oe))
+				  (setf (aref out j) b)
+				  (proceed (1+ j)))
+				 ((< (1+ j) oe)
+				  (put16 out j b)
+				  (proceed (+ j 2)))
+				 (t (finish :continues))))
+			 (encoding-failure)))
+		    ((= #x80 (logand b #xC0))
+		     (if (zerop remaining)
+			 (encoding-failure)
+			 (let* ((next-accum (+ (ash accum 6) (logand b #x3F))))
+			   (cond
+			     ((= 1 remaining)
+			      (let ((v next-accum))
+				(cond
+				  ((or (> v #x10FFFF) (< v 128)) (encoding-failure))
+				  ((<= #xD800 v #xDFFF)
+				   (cond
+				     ((not from-wtf) (encoding-failure))
+				     ((and pending (= (logand v #xDC00) #xDC00))
+				      (if permissive
+					  (if (<= (+ j 12) oe)
+					      (progn (dotimes (k 6) (put16 out (+ j (* k 2)) #xFFFD))
+						     (proceed (+ j 12)))
+					      (finish :continues))
+					  (encoding-failure)))
+				     ((= (logand v #xDC00) #xD800)
+				      (let ((next-i (1+ i)))
+					(with-pending
+					  (setq i next-i accum 0 remaining 0 pending v))))
+				     ((<= (+ j 2) oe)
+				      (put16 out j v)
+				      (proceed (+ j 2)))
+				     (t (finish :continues))))
+				  (to16
+				   (with-pending
+				     (cond ((and (< v #x10000) (<= (+ j 2) oe))
+					    (put16 out j v)
+					    (proceed (+ j 2)))
+					   ((<= (+ j 4) oe)
+					    (let* ((av (- v #x10000))
+						   (hi (logior #xD800 (logand (ash av -10) #x3FF)))
+						   (lo (logior #xDC00 (logand av #x3FF))))
+					      (put16 out j hi)
+					      (put16 out (+ j 2) lo)
+					      (proceed (+ j 4))))
+					   (t (finish :continues)))))
+				  (t
+				   (let ((next-i (1+ i)) (to-j j))
+				     (loop for from-i from base-i below next-i
+					   do (when (= to-j oe) (finish :continues))
+					      (setf (aref out to-j) (aref in from-i))
+					      (incf to-j))
+				     (proceed to-j))))))
+			     ((and (= 2 remaining) (<= next-accum #b11111)) (encoding-failure))
+			     ((and (= 3 remaining) (<= next-accum #b1111)) (encoding-failure))
+			     (t (setq i (1+ i) accum next-accum remaining (1- remaining)))))))
+		    ((/= remaining 0) (encoding-failure))
+		    ((= #xC0 (logand b #xE0))
+		     (let ((a (logand b #x1F)))
+		       (if (zerop a)
+			   (encoding-failure)
+			   (setq i (1+ i) accum a remaining 1))))
+		    ((= #xE0 (logand b #xF0))
+		     (setq i (1+ i) accum (logand b #xF) remaining 2))
+		    ((= #xF0 (logand b #xF8))
+		     (let ((a (logand b 7)))
+		       (if (> a 4)
+			   (encoding-failure)
+			   (setq i (1+ i) accum a remaining 3))))
+		    (t (encoding-failure)))))))))))
+
+(defun utf16-ish-reencode (in is ie out os oe from-wtf assume)
+  "Native-order UTF-16 bytes IN[IS,IE) to UTF-8: (values consumed produced status)."
+  (let ((i is) (j os))
+    (labels ((done (status)
+	       (return-from utf16-ish-reencode (values (- i is) (- j os) status)))
+	     (unit (at) (logior (ash (aref in (1+ at)) 8) (aref in at)))
+	     (emit (v next-i)
+	       (let ((n (cond ((<= v #x7F) 1) ((<= v #x7FF) 2) ((<= v #xFFFF) 3) (t 4))))
+		 (when (> (+ j n) oe) (done :continues))
+		 (ecase n
+		   (1 (setf (aref out j) v))
+		   (2 (setf (aref out j) (logior #xC0 (ash v -6))
+			    (aref out (+ j 1)) (logior #x80 (logand v #x3F))))
+		   (3 (setf (aref out j) (logior #xE0 (ash v -12))
+			    (aref out (+ j 1)) (logior #x80 (logand (ash v -6) #x3F))
+			    (aref out (+ j 2)) (logior #x80 (logand v #x3F))))
+		   (4 (setf (aref out j) (logior #xF0 (ash v -18))
+			    (aref out (+ j 1)) (logior #x80 (logand (ash v -12) #x3F))
+			    (aref out (+ j 2)) (logior #x80 (logand (ash v -6) #x3F))
+			    (aref out (+ j 3)) (logior #x80 (logand v #x3F)))))
+		 (incf j n)
+		 (setq i next-i))))
+      (loop
+	(cond
+	  ((= i ie) (done :complete))
+	  ((> (+ i 2) ie) (done :aborts))
+	  (t
+	   (let ((v (unit i)))
+	     (cond
+	       ((<= #xD800 v #xDFFF)
+		(cond
+		  ((or assume (<= v #xDBFF))
+		   (if (> (+ i 4) ie)
+		       (done :aborts)
+		       (let ((v2 (unit (+ i 2))))
+			 (cond ((or assume (<= #xDC00 v2 #xDFFF))
+				(emit (+ #x10000 (logior (ash (logand v #x3FF) 10) (logand v2 #x3FF)))
+				      (+ i 4)))
+			       (from-wtf (emit v (+ i 2)))
+			       (t (done :error))))))
+		  (from-wtf (emit v (+ i 2)))
+		  (t (done :error))))
+	       (t (emit v (+ i 2)))))))))))
+
+(defun ish-convert (c src s e dest ds de)
+  "Racket's do-convert for a converter written in Racket: (values result consumed status)."
+  (destructuring-bind (from . to) (bconv-ish c)
+    (let* ((buf (or dest (make-octets (max 1 (- e s)))))
+	   (bs (if dest ds 0))
+	   (be (if dest de (length buf)))
+	   (consumed-all 0) (produced-all 0))
+      (loop
+	(multiple-value-bind (consumed produced status)
+	    (if (member from '(:utf-16-assume :wtf-16))
+		(utf16-ish-reencode src s e buf bs be (eq from :wtf-16) (eq from :utf-16-assume))
+		(utf8-ish-reencode src s e buf bs be
+				   (and (member from '(:utf-8-permissive :wtf-8-permissive)) t)
+				   (and (member from '(:wtf-8 :wtf-8-permissive)) t)
+				   (and (member to '(:wtf-16 :utf-16-assume)) t)))
+	  (if (and (eq status :continues) (not dest))
+	      (let* ((all (+ produced produced-all))
+		     (new (make-octets (* 2 (length buf)))))
+		(replace new buf :end2 all)
+		(setq buf new s (+ s consumed) bs all be (length new)
+		      consumed-all (+ consumed-all consumed) produced-all all))
+	      (return (values (if dest
+				  (+ produced produced-all)
+				  (subseq buf 0 (+ produced produced-all)))
+			      (+ consumed-all consumed)
+			      (rsym (string-downcase (symbol-name status)))))))))))
+
 (defnative "bytes-open-converter" (from to) (:leaf t)
   (check-string "bytes-open-converter" from)
   (check-string "bytes-open-converter" to)
-  (let ((f (converter-kind from t)) (k (converter-kind to nil)))
-    (if (and f k)
-	(let ((c (make-bconv f k)))
-	  (setf (bconv-bom-pending c) (and (member k '(:utf16 :utf32)) t))
+  (let ((ish (cdr (assoc (cons from to) *ish-converters* :test #'equal))))
+    (if ish
+	(let ((c (make-bconv (car ish) (cdr ish))))
+	  (setf (bconv-ish c) ish)
 	  c)
-	ps:false)))
+	(let ((f (converter-kind from t)) (k (converter-kind to nil)))
+	  (if (and f k)
+	      (let ((c (make-bconv f k)))
+		(setf (bconv-bom-pending c) (and (member k '(:utf16 :utf32)) t))
+		c)
+	      ps:false)))))
 
 (defnative "bytes-converter?" (x) (:leaf t) (bool (bconv-p x)))
 
@@ -886,6 +1101,8 @@ of the square roots of the first (or the ninth to sixteenth) primes."
 
 (defun convert-bytes (c b s e dest ds de)
   "Racket's bytes-convert: (values converted-or-count consumed status)."
+  (when (bconv-ish c)
+    (return-from convert-bytes (ish-convert c b s e dest ds de)))
   (let ((out (and (null dest) (make-array 16 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0)))
 	(pos ds) (i s) (status :complete)
 	(marked 0))
@@ -1278,7 +1495,53 @@ day, month, year, week day, year day, dst?, offset and zone name; or NIL."
 (defvar *expander-string->number* nil)
 
 (defnative "string->number" (s &rest more) ()
-  (if *expander-string->number*
-      (apply *expander-string->number* s more)
-      (let ((radix (if more (car more) 10)))
-	(funcall (psx:host-ref "string->number") s radix))))
+  ;; the expander's reader calls this for 1.0t0 and the like (extfl.lisp)
+  (cond ((extflonum-from-string s more))
+	(*expander-string->number* (apply *expander-string->number* s more))
+	(t (let ((radix (if more (car more) 10)))
+	     (funcall (psx:host-ref "string->number") s radix)))))
+
+;;; ------------------------------------------------------------------
+;;; list-ref, list-tail, make-vector and eq-hash-code, with Racket's checks
+;;; and messages (error-rewrite.ss's for the first two).  They replace
+;;; the host's, so "list-ref", "list-tail" and "make-vector" are out of
+;;; *HOST-SHARED*.
+
+(defun list-index-error (who lst n tail)
+  "WHO's error for index N reaching TAIL, a non-pair, in LST."
+  (racket-error who "index ~A~%  index: ~D~%  in: ~A"
+		(if (null tail) "too large for list" "reaches a non-pair")
+		n (error-value->string lst)))
+
+(defnative "list-ref" (lst n) (:leaf t)
+  (unless (typep n '(integer 0)) (arg-error "list-ref" "exact-nonnegative-integer?" n))
+  (let ((rest lst) (k n))
+    (loop while (and (> k 0) (consp rest))
+	  do (setq rest (cdr rest))
+	     (decf k))
+    (cond ((and (zerop k) (consp rest)) (car rest))
+	  ((not (consp lst)) (arg-error "list-ref" "pair?" lst))
+	  (t (list-index-error "list-ref" lst n rest)))))
+
+(defnative "list-tail" (lst n) (:leaf t)
+  (unless (typep n '(integer 0)) (arg-error "list-tail" "exact-nonnegative-integer?" n))
+  (let ((rest lst) (k n))
+    (loop while (and (> k 0) (consp rest))
+	  do (setq rest (cdr rest))
+	     (decf k))
+    (if (zerop k)
+	rest
+	(list-index-error "list-tail" lst n rest))))
+
+(defnative "make-vector" (size &optional (fill 0)) (:leaf t)
+  (unless (typep size '(integer 0)) (arg-error "make-vector" "exact-nonnegative-integer?" size))
+  (when (>= size (expt 2 36))
+    (raise-exn "exn:fail:out-of-memory"
+	       (format nil "out of memory making vector~%  length: ~D" size)))
+  (make-array size :initial-element fill))
+
+;;; Racket CS: a fixnum's eq-hash-code is the fixnum (60 bits), a character's its code
+(defnative "eq-hash-code" (x) (:leaf t)
+  (cond ((typep x 'fixnum) (ldb (byte 60 0) x))
+	((characterp x) (char-code x))
+	(t (eq-hash x))))

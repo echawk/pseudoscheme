@@ -1,0 +1,11 @@
+(#t #f)
+user break
+(1 2 #f)
+dead
+(#f #f)
+(#t #f)
+(#t #f #f 1)
+(#t #t)
+v
+3
+(b a self)

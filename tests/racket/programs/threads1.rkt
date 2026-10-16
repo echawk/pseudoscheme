@@ -1,0 +1,18 @@
+#lang racket/base
+;; threads, join, results via channel, semaphores
+(define ch (make-channel))
+(define ts (for/list ([i 3]) (thread (lambda () (channel-put ch (* i i))))))
+(displayln (sort (for/list ([i 3]) (channel-get ch)) <))
+(for-each thread-wait ts)
+(displayln (map thread-dead? ts))
+(define s (make-semaphore))
+(define out '())
+(define t (thread (lambda () (semaphore-wait s) (set! out (cons 'woke out)))))
+(sleep 0.01)
+(displayln (thread-running? t))
+(semaphore-post s)
+(thread-wait t)
+(displayln out)
+(displayln (semaphore-try-wait? s))
+(displayln (call-with-semaphore s (lambda () 'in) (lambda () 'failed)))
+(displayln (call-with-semaphore (make-semaphore 0) (lambda () 'in) (lambda () 'failed)))

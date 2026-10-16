@@ -209,12 +209,15 @@ sym), (error sym format v ...) or (error string v ...)."
 	 (make-exn "exn:fail" (princ-to-string e))))
     (division-by-zero (make-exn "exn:fail:contract:divide-by-zero" "/: division by zero"))
     (sb-int:invalid-array-index-error
-     (let ((array (sb-kernel::invalid-array-index-error-array e)))
+     (let* ((array (sb-kernel::invalid-array-index-error-array e))
+	    (kind (typecase array (string "string") ((array (unsigned-byte 8) (*)) "bytes") (t "vector")))
+	    (shown (with-output-to-string (s) (print-quoted array s))))
        (make-exn "exn:fail:contract"
-		 (format nil "index is out of range~%  index: ~A~%  valid range: [0, ~D]~%  ~A: ~A"
-			 (type-error-datum e) (1- (length array))
-			 (typecase array (string "string") ((array (unsigned-byte 8) (*)) "bytes") (t "vector"))
-			 (with-output-to-string (s) (print-quoted array s))))))
+		 (if (zerop (length array))
+		     (format nil "index is out of range for empty ~A~%  index: ~A~%  ~A: ~A"
+			     kind (type-error-datum e) kind shown)
+		     (format nil "index is out of range~%  index: ~A~%  valid range: [0, ~D]~%  ~A: ~A"
+			     (type-error-datum e) (1- (length array)) kind shown)))))
     (type-error (make-exn "exn:fail:contract"
 			  (format nil "contract violation~%  expected: ~A~%  given: ~A"
 				  (racket-type-name (type-error-expected-type e))
