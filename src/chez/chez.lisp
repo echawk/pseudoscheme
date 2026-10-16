@@ -17,12 +17,20 @@
 
 (defparameter *chezscheme-sources*
   '("chezscheme.scm" "lists.scm" "records.scm" "syntax.scm" "numbers.scm" "hashtables.scm" "threads.scm"
-    "conditions.scm" "top-level.scm" "format.scm" "ffi.scm")
+    "conditions.scm" "top-level.scm" "format.scm" "ffi.scm" "ftype.scm")
   "The files of (chezscheme)'s body, in order.")
 
 (defparameter *chezscheme-extras*
   '(;; syntax.scm
     "record-case" "meta-cond" "extend-syntax" "windows?"
+    ;; ftype.scm
+    "define-ftype" "ftype-sizeof" "make-ftype-pointer" "ftype-pointer?" "ftype-ref" "ftype-set!"
+    "ftype-&ref" "ftype-any-ref" "ftype-any-set!" "ftype-locked-incr!" "ftype-locked-decr!"
+    "ftype-init-lock!" "ftype-lock!" "ftype-spin-lock!" "ftype-unlock!" "ftype-guardian"
+    "make-ftype-scheme-object-pointer" "ftype-pointer-address" "ftype-pointer-null?"
+    "ftype-pointer=?" "ftype-pointer-ftype" "ftype-pointer->sexpr"
+    "ftype-scheme-object-pointer?" "ftype-scheme-object-pointer-object"
+    "ftype-scheme-object-pointer-offset"
     ;; chezscheme.scm
     "void" "add1" "sub1" "atom?" "syntax-object->datum" "datum->syntax-object" "clear-input-port" "clear-output-port" "trace-lambda" "trace-case-lambda" "trace-define" "trace-let" "trace-define-syntax" "indirect-export" "trace-output-port" "define-structure" "syntax-error" "unread-char" "make-compile-time-value" "compile-time-value?" "compile-time-value-value" "internal-defines-as-letrec*" "file-buffer-size" "print-select-flonum-exponential-format" "compress-level" "compress-format" "console-input-port" "console-output-port" "console-error-port" "current-transcoder" "oblist" "r6rs:dynamic-wind" "file-port?" "port-length" "port-has-port-length?" "port-has-set-port-length!?" "ephemeron-cons" "ephemeron-pair?" "library-list" "library-version" "library-object-filename" "transcoder?" "with-continuation-mark" "current-continuation-marks" "continuation-marks?" "continuation-next-marks" "continuation-marks-first" "continuation-marks->list" "continuation-marks->iterator" "call-with-immediate-continuation-mark" "port-file-compressed!" "r6rs:current-input-port" "r6rs:current-output-port" "r6rs:current-error-port" "call/1cc" "gensym" "getenv" "system" "open-process-ports" "process" "make-parameter"
     "with-input-from-string" "with-output-to-string" "current-directory"
@@ -414,6 +422,9 @@ Called while the standard libraries are installed."
     ;; what extend-syntax's transformers call (syntax.scm)
     (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme "src/chez/extend-syntax.sls")))
       (psx:eval-library form))
+    ;; and define-ftype's (ftype.scm)
+    (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme "src/chez/ftype-helpers.sls")))
+      (psx:eval-library form))
     (psx:eval-library
      (list* (ssym "library") (list (ssym "chezscheme"))
 	    (cons (ssym "export")
@@ -424,7 +435,8 @@ Called while the standard libraries are installed."
                                   (only (pseudoscheme) ~{~A~^ ~})
                                   (prefix (pseudoscheme host) %)
                                   (prefix (pseudoscheme chez host) %)
-                                  (pseudoscheme chez extend-syntax))"
+                                  (pseudoscheme chez extend-syntax)
+                                  (pseudoscheme chez ftype-helpers))"
 				 *chezscheme-from-psyntax*))
 	    (loop for file in *chezscheme-sources*
 		  append (read-forms (asdf:system-relative-pathname

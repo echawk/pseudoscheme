@@ -32,19 +32,22 @@
 
 ;;; meta-cond: the first clause whose test is true when the form is
 ;;; expanded (the test is evaluated then, as a transformer's code is) is
-;;; what the form expands into: its body, spliced.  No true test and no
-;;; else: (void).  Each test is the transformer of a local macro, so that
-;;; it may use syntax objects (#'id, free-identifier=?).
+;;; what the form expands into: its body, spliced (definitions too, at
+;;; the top level).  No true test and no else: (void).  A test is
+;;; evaluated as a datum at the top level, so syntax objects in it
+;;; (#'id) don't keep their context, as they would in Chez.
 
 (define-syntax meta-cond
-  (syntax-rules (else)
-    ((_) (void))
-    ((_ (else e ...)) (begin e ...))
-    ((_ (test e ...) clause ...)
-     (let-syntax ((m (lambda (x)
-                       (syntax-case x ()
-                         ((_ a b) (if test #'a #'b))))))
-       (m (begin e ...) (meta-cond clause ...))))))
+  (lambda (x)
+    (syntax-case x (else)
+      ((_) #'(void))
+      ((_ (else e ...)) #'(begin e ...))
+      ((_ (test e ...) clause ...)
+       ;; the chosen clause's body is what the form expands into, so
+       ;; that definitions splice, at the top level too
+       (if (meta-cond-test #'test)
+           #'(begin e ...)
+           #'(meta-cond clause ...))))))
 
 ;;; extend-syntax, Chez's old macro facility (CSUG's, TSPL's appendix):
 ;;;

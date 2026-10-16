@@ -34,6 +34,8 @@ values cross: :int, :pointer for u8* (a bytevector's data), :string, :address
 	  ((member name '("float" "single-float") :test #'string=) (values :float :float))
 	  ((member name '("boolean") :test #'string=) (values :int :boolean))
 	  ((member name '("char") :test #'string=) (values :uint8 :char))
+	  ;; wchar_t: 32 bits on Linux and macOS
+	  ((member name '("wchar" "wchar_t") :test #'string=) (values :uint32 :char))
 	  ((member name '("string" "utf-8") :test #'string=) (values :pointer :string))
 	  ((member name '("u8*") :test #'string=) (values :pointer :bytes))
 	  ((member name '("void") :test #'string=) (values :void :void))

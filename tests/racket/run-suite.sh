@@ -10,7 +10,8 @@
 # the errors; a file that prints no report crashed or ran past LIMIT
 # seconds (default 600).  J files run at a time (default 2).
 #
-# REF=1 runs the installed racket on the same files instead, for the
+# PSEUDOSCHEME names the binary to run (default: bin/pseudoscheme), so a
+# long run can go on while bin/ is rebuilt.  REF=1 runs the installed racket on the same files instead, for the
 # reference counts (some tests depend on the machine).  Results go to
 # $OUT/suite-{ours,racket}/: NAME.out per file and summary.txt.
 # Needs sh utils/racket/setup.sh first.
@@ -47,7 +48,7 @@ run_one() {
   (namespace-require 'racket)
   (load "$T/$name.rktl"))
 EOF
-  if [ -n "$REF" ]; then set -- racket "$w"; else set -- "$ROOT/bin/pseudoscheme" --racket=linklet "$w"; fi
+  if [ -n "$REF" ]; then set -- racket "$w"; else set -- "${PSEUDOSCHEME:-$ROOT/bin/pseudoscheme}" --racket=linklet "$w"; fi
   (cd "$T" && exec "$@") > "$DIR/$name.out" 2>&1 &
   pid=$!
   ( sleep "$LIMIT"; kill -9 $pid 2>/dev/null ) &

@@ -8,7 +8,7 @@
 # compile-file, the inspector, ...) count as "unsup", not as failures;
 # "unbound" is a clause that referred to a name not bound here (a missing
 # export).  Whole files that are about the compiler or C (cp0, cptypes,
-# foreign, ftype, profile, windows) are listed as unsupported too.
+# foreign, profile, windows) are listed as unsupported too.
 #
 # Usage: sh tests/run-chez-mats.sh [name ...]
 #   PS=bin/pseudoscheme  JOBS=6  LIMIT=120  OUT=/tmp/pseudoscheme-chez-mats
@@ -18,7 +18,7 @@ PS=${PS:-$ROOT/bin/pseudoscheme}
 JOBS=${JOBS:-6}
 LIMIT=${LIMIT:-120}
 OUT=${OUT:-/tmp/pseudoscheme-chez-mats}
-UNSUPPORTED_FILES="cp0 cptypes foreign ftype profile windows"
+UNSUPPORTED_FILES="cp0 cptypes foreign profile windows"
 mkdir -p "$OUT" || exit 1
 OUT=$(cd "$OUT" && pwd)
 # separate-eval's Scheme: Pseudoscheme run as `chez`, its Chez mode

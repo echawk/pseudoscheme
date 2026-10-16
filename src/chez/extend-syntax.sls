@@ -6,8 +6,14 @@
 
 (library (pseudoscheme chez extend-syntax)
   (export es-pattern-depths es-check-pattern es-match es-bind
-          es-template-symbols es-map es-subst es-wrap)
-  (import (rnrs))
+          es-template-symbols es-map es-subst es-wrap
+          meta-cond-test)
+  (import (rnrs) (rnrs eval))
+
+  ;; meta-cond's test, evaluated when the form is expanded, as a datum at
+  ;; the top level (one-argument eval: src/chez/chez.lisp's eval hook)
+  (define (meta-cond-test test)
+    (eval (syntax->datum test)))
 
   (define (es-pattern-depths p keys)
     (cond ((symbol? p)

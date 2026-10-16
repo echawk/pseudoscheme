@@ -44,8 +44,8 @@ clause:
 | unsup | needs what isn't planned here: Chez's compiler internals, the inspector, `$` system procedures |
 | crash | hung or killed its process, and was skipped on a retry |
 
-The files about the compiler or C (cp0, cptypes, foreign, ftype,
-profile, windows) aren't counted in the totals. The latest run:
+The files about the compiler or C (cp0, cptypes, foreign, profile,
+windows) aren't counted in the totals. The latest run:
 
 | | pass | fail | error | unbound | unsup | crash |
 |---|---|---|---|---|---|---|
@@ -571,10 +571,12 @@ profiling and cost centers, the inspector, the 56 port-buffer
 accessors, phantom bytevectors. The ones that matter
 to programs, in rough order:
 
-1. timer interrupts (`set-timer`, `timer-interrupt-handler`);
-2. ftypes (`define-ftype`, `ftype-ref`), on CFFI's structs.
+1. timer interrupts (`set-timer`, `timer-interrupt-handler`).
 
-Done since this list was made: engines, continuation marks
+Done since this list was made: ftypes (src/chez/ftype.scm, with
+ftype-helpers.sls and ftype.lisp; ftype.ms, counted now: 1,059 pass,
+0 fail, 12 error; what fails needs Chez's compiler or Scheme objects in
+foreign memory), engines, continuation marks
 (src/chez/host.lisp), `record-case`, `meta-cond` and `extend-syntax`
 (src/chez/syntax.scm, with extend-syntax's helpers in
 src/chez/extend-syntax.sls), and `define-structure`.
