@@ -65,7 +65,7 @@ def main():
                 cells.append("")
             elif isinstance(v, str):
                 cells.append(v.lower())
-            elif isinstance(base, float) and base > 0:
+            elif isinstance(base, float) and base > 0 and v > 0:
                 cells.append("%.2f (%.1fx)" % (v, v / base))
                 logs[i].append(math.log(v / base))
             else:

@@ -43,6 +43,7 @@ summary. Locally:
 make -C contrib/cli                               # build bin/pseudoscheme
 bench/run.sh                                      # Pseudoscheme, every benchmark
 bench/run.sh pseudoscheme chez-akku guile -- fib tak nqueens
+bench/run.sh modes                                # each of Pseudoscheme's modes
 python3 bench/summarize.py                        # table of results.* so far
 ```
 
@@ -52,6 +53,18 @@ is that of the benchmark's own loop, measured with `current-jiffy`, so
 the time Pseudoscheme spends expanding, translating and compiling the
 program with SBCL is not included. That time *is* charged against
 `CPU_LIMIT` (300 s by default), however.
+
+`modes` runs the programs in each of `bin/pseudoscheme`'s modes:
+`pseudoscheme` (R7RS), and `pseudoscheme-r6rs`, `-r5rs`, `-chez`,
+`-guile` and `-racket` (`--racket=linklet`), each its own column. R6RS,
+Chez and Guile mode take the programs as they are. Racket mode's
+programs are `racket/base` modules with a prelude of the R7RS names it
+lacks (`src/PseudoschemeRacket-prelude.scm`); `racket-base` runs
+Racket itself on the same modules. R5RS mode's prelude defines R7RS
+names in R5RS, so the programs that need more than R5RS can provide
+(bytevectors, `let-values`, string ports) crash; and as R5RS has no
+clock, its times are of the whole run measured from outside, startup
+and compilation included.
 
 ## Results
 

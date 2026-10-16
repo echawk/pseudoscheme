@@ -368,6 +368,49 @@ pseudoscheme_exec ()
     time "${PSEUDOSCHEME}" "$1" < "$2"
 }
 
+# PSEUDOSCHEME: Pseudoscheme's other modes run the same programs: R6RS
+# (expanded by psyntax), Chez Scheme and Guile take them as they are;
+# Racket and R5RS get a prelude of the R7RS names they lack.
+pseudoscheme_r6rs_exec ()
+{
+    time "${PSEUDOSCHEME}" --r6rs "$1" < "$2"
+}
+
+pseudoscheme_chez_exec ()
+{
+    time "${PSEUDOSCHEME}" --chez "$1" < "$2"
+}
+
+pseudoscheme_guile_exec ()
+{
+    time "${PSEUDOSCHEME}" --guile "$1" < "$2"
+}
+
+pseudoscheme_racket_exec ()
+{
+    time "${PSEUDOSCHEME}" --racket=linklet "$1" < "$2"
+}
+
+# R5RS has no clock, so this times the whole run from outside, the
+# program's startup and compilation included, and puts that in the
+# CSV line in place of the program's 0.
+pseudoscheme_r5rs_exec ()
+{
+    t0=$(perl -MTime::HiRes=time -e 'printf "%.6f", time')
+    out=$("${PSEUDOSCHEME}" --r5rs "$1" < "$2")
+    status=$?
+    secs=$(perl -MTime::HiRes=time -e "printf '%.3f', time - $t0")
+    printf '%s\n' "$out" | sed "s/^\(+!CSVLINE!+[^,]*,[^,]*\),0\(\.0\)*$/\1,$secs/"
+    return $status
+}
+
+# Racket's racket/base with the same prelude as pseudoscheme-racket
+# (Racket's #lang r7rs is a separate package)
+racket_base_exec ()
+{
+    time ${RACKET} "$1" < "$2"
+}
+
 chibi_exec ()
 {
     time "${CHIBI}" -m scheme.load -e "(load \"$1\")" < "$2"
@@ -1004,11 +1047,54 @@ for system in $systems ; do
                EXTENSIONCOMP="scm"
                ;;
 
+        # PSEUDOSCHEME: bench/run.sh's "modes" runs these and the next six.
         pseudoscheme) NAME='Pseudoscheme'
                COMP=pseudoscheme_comp
                EXEC=pseudoscheme_exec
                EXTENSION="scm"
                EXTENSIONCOMP="scm"
+               ;;
+
+        pseudoscheme-r6rs) NAME='PseudoschemeR6RS'
+               COMP=pseudoscheme_comp
+               EXEC=pseudoscheme_r6rs_exec
+               EXTENSION="scm"
+               EXTENSIONCOMP="scm"
+               ;;
+
+        pseudoscheme-r5rs) NAME='PseudoschemeR5RS'
+               COMP=pseudoscheme_comp
+               EXEC=pseudoscheme_r5rs_exec
+               EXTENSION="scm"
+               EXTENSIONCOMP="scm"
+               ;;
+
+        pseudoscheme-chez) NAME='PseudoschemeChez'
+               COMP=pseudoscheme_comp
+               EXEC=pseudoscheme_chez_exec
+               EXTENSION="scm"
+               EXTENSIONCOMP="scm"
+               ;;
+
+        pseudoscheme-guile) NAME='PseudoschemeGuile'
+               COMP=pseudoscheme_comp
+               EXEC=pseudoscheme_guile_exec
+               EXTENSION="scm"
+               EXTENSIONCOMP="scm"
+               ;;
+
+        pseudoscheme-racket) NAME='PseudoschemeRacket'
+               COMP=pseudoscheme_comp
+               EXEC=pseudoscheme_racket_exec
+               EXTENSION="rkt"
+               EXTENSIONCOMP="rkt"
+               ;;
+
+        racket-base) NAME='RacketBase'
+               COMP=pseudoscheme_comp
+               EXEC=racket_base_exec
+               EXTENSION="rkt"
+               EXTENSIONCOMP="rkt"
                ;;
 
         chibi) NAME='Chibi'

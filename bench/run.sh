@@ -6,12 +6,20 @@
 #
 #   bench/run.sh                              pseudoscheme, all benchmarks
 #   bench/run.sh pseudoscheme chez-akku guile -- fib tak nqueens
+#   bench/run.sh modes -- fib tak     each of Pseudoscheme's modes
 #
 # Systems are the harness's names (see r7rs-benchmarks/bench), plus:
 #   pseudoscheme   bin/pseudoscheme (build it first: make -C contrib/cli)
 #   chez-akku      Chez Scheme with Akku's akku-r7rs libraries; set
 #                  CHEZ_LIBDIRS to a .akku/lib containing them
 #   gauche-local   Gauche without SLIB
+#   pseudoscheme-r6rs, -r5rs, -chez, -guile, -racket
+#                  bin/pseudoscheme's other modes on the same programs;
+#                  -racket and -r5rs with a prelude of the R7RS names
+#                  they lack, and -r5rs timed from outside (R5RS has no
+#                  clock), so its times include startup and compilation
+#   modes          pseudoscheme and all five of those
+#   racket-base    Racket, racket/base with -racket's prelude
 # Environment: CPU_LIMIT (seconds per benchmark, default 300), BENCH_TEMP
 # (scratch directory for the assembled programs, default /tmp/...).
 #
@@ -24,6 +32,12 @@ while [ $# -gt 0 ] && [ "$1" != "--" ]; do systems="$systems $1"; shift; done
 [ "$1" = "--" ] && shift
 benchmarks="${*:-all}"
 systems="${systems:-pseudoscheme}"
+modes="pseudoscheme pseudoscheme-r6rs pseudoscheme-r5rs pseudoscheme-chez pseudoscheme-guile pseudoscheme-racket"
+expanded=""
+for s in $systems; do
+    if [ "$s" = modes ]; then expanded="$expanded $modes"; else expanded="$expanded $s"; fi
+done
+systems=$expanded
 
 cd "$here/r7rs-benchmarks" || exit 1
 for s in $systems; do
