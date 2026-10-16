@@ -150,8 +150,9 @@
   "N wrapped to Racket CS's fixnum range (61 bits)."
   (let ((m (ldb (byte 61 0) n))) (if (logbitp 60 m) (- m (ash 1 61)) m)))
 
-(define-primitive "#%flfxnum" "most-positive-fixnum" (1- (ash 1 60)))
-(define-primitive "#%flfxnum" "most-negative-fixnum" (- (ash 1 60)))
+;;; procedures of no arguments, as Racket's are
+(defnative "most-positive-fixnum" () (:instance "#%flfxnum" :leaf t) (1- (ash 1 60)))
+(defnative "most-negative-fixnum" () (:instance "#%flfxnum" :leaf t) (- (ash 1 60)))
 
 (defnatives "#%unsafe"
   ("unsafe-fx->fl" (n) (fl n)) ("unsafe-fl->fx" (x) (values (truncate x)))

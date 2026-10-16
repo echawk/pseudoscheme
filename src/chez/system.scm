@@ -215,9 +215,15 @@
 (define (date-dst? d) (check-date 'date-dst? d) #f)
 (define (date-zone-name d) (check-date 'date-zone-name d) #f)
 
-;;; Printer parameters that don't change what is written here
+;;; Printer parameters that don't change what is written here (but
+;;; print-positive-exponent-sign, which the writer reads)
 (define print-subnormal-precision (make-parameter #t ->boolean))
 (define print-positive-exponent-sign (make-parameter #f ->boolean))
+;; the writer (host.lisp) reads these
+(define printer-parameters-registered
+  (%chez:set-printer-parameters! print-graph print-length print-level print-radix print-gensym
+                                 print-char-name print-vector-length print-unicode
+                                 print-extended-identifiers print-positive-exponent-sign))
 
 ;;; Pseudo-random generators (host.lisp: Chez's own generator)
 (define make-pseudo-random-generator %chez:make-pseudo-random-generator)

@@ -1,0 +1,48 @@
+(memq (quote a) cyc): contract: memq: not a proper list
+  in: #0='(1 . #0#)
+(memv 2 cyc): contract: memv: not a proper list
+  in: #0='(1 . #0#)
+(assq (quote a) cyc): contract: assq: non-pair found in list
+  non-pair: 1
+  list: #0='(1 . #0#)
+(memq (quote a) (quote (1 2 . 3))): contract: memq: not a proper list
+  in: '(1 2 . 3)
+(memq 2 (quote (1 2 . 3))) => ((2 . 3))
+(assq (quote a) (quote (1))): contract: assq: non-pair found in list
+  non-pair: 1
+  list: '(1)
+(assv 1 (quote ((1 . 2)))) => ((1 . 2))
+(member (quote a) cyc): contract: member: not a proper list
+  in: #0='(1 . #0#)
+(chaperone? (chaperone-box (box-immutable 10) (lambda (b v) v) (lambda (b v) v))) => (#t)
+(unbox (chaperone-box (box-immutable 10) (lambda (b v) (+ v 1)) (lambda (b v) v))): contract: unbox: chaperone produced a result that is not a chaperone of the original result
+  chaperone result: 11
+  original result: 10
+(impersonate-box (box-immutable 10) (lambda (b v) v) (lambda (b v) v)): contract: impersonate-box: contract violation
+  expected: (and/c box? (not/c immutable?))
+  given: '#&10
+(immutable? (chaperone-box (box-immutable 10) (lambda (b v) v) (lambda (b v) v))) => (#t)
+(list (equal? (flvector +nan.0) (flvector +nan.0)) (equal-always? (fxvector 1 2) (fxvector 1 2)) (equal? (fxvector 1 2) (fxvector 1 2)) (equal? (make-flvector 2 0.0) (make-flvector 2 -0.0)) (equal? (stencil-vector 1 (quote a)) (stencil-vector 1 (quote a))) (equal-always? (stencil-vector 1 (quote a)) (stencil-vector 1 (quote a)))) => ((#t #f #t #f #t #f))
+(= (equal-hash-code (fxvector 1 2)) (equal-hash-code (fxvector 1 2))) => (#t)
+(let-values (((i o) (make-pipe))) (close-input-port i) (list (evt? (sync/timeout 0 (port-progress-evt i))) (peek-bytes-avail! (make-bytes 10) 0 (port-progress-evt i) i))) => ((#t 0))
+(parameterize ((current-custodian (let ((c (make-custodian))) (custodian-shutdown-all c) c))) (kill-thread (current-thread))): contract: kill-thread: the current custodian does not solely manage the specified thread
+  thread: #<thread>
+(list (procedure? most-positive-fixnum) (fixnum? (most-positive-fixnum))) => ((#t #t))
+(map procedure-result-arity (list car list values)) => ((1 1 #f))
+(bytes<?): arity: bytes<?: arity mismatch;
+ the expected number of arguments does not match the given number
+  expected: at least 1
+  given: 0
+(char-ci<?): arity: char-ci<?: arity mismatch;
+ the expected number of arguments does not match the given number
+  expected: at least 1
+  given: 0
+(string=?): arity: string=?: arity mismatch;
+ the expected number of arguments does not match the given number
+  expected: at least 1
+  given: 0
+(bytes=? #"a" "a"): contract: bytes=?: contract violation
+  expected: bytes?
+  given: "a"
+(format "~s" (stencil-vector 1 (read (open-input-string "#0=(#0#)")))) => ("#<stencil 1: #0=(#0#)>")
+(let ((p (make-inspector))) (parameterize ((current-inspector p)) (eq? (current-inspector) p))) => (#t)

@@ -121,11 +121,14 @@
 (defvar *print-active* nil "Whether the marks of the value being written are found.")
 (defvar *print-top-labeled* nil "An object whose label was just written: its contents next.")
 
+(declaim (ftype function stencil-p stencil-mask stencil-items)) ; data.lisp
+
 (defun print-children (x o)
   "The objects X's written form contains, and whether X can be marked at all."
   (cond ((consp x) (values (list (car x) (cdr x)) t))
 	((mpair-p x) (values (list (mpair-car x) (mpair-cdr x)) t))
 	((simple-vector-p x) (values (coerce x 'list) t))
+	((stencil-p x) (values (coerce (stencil-items x) 'list) t))
 	((and (rbox-p x) (po-box o)) (values (list (box-ref* x)) t))
 	((and (or (ihash-p x) (rhash-p x)) (po-hash o))
 	 (values (loop for (k . v) across (entries x) collect k collect v) t))
@@ -243,6 +246,11 @@ the trailing ones equal to the one before."
 	       (loop for i below n
 		     do (unless (zerop i) (write-char #\Space stream)) (p (svref x i)))
 	       (write-char #\) stream)))
+	    ((stencil-p x)
+	     (format stream "#<stencil ~D" (stencil-mask x))
+	     (when (plusp (length (stencil-items x))) (write-char #\: stream))
+	     (loop for item across (stencil-items x) do (write-char #\Space stream) (p item))
+	     (write-char #\> stream))
 	    ((and (typep x '(simple-array (unsigned-byte 8) (*))) (eq mode :display))
 	     ;; displayed: the bytes themselves, as UTF-8
 	     (write-string (sb-ext:octets-to-string x :external-format '(:utf-8 :replacement #\?)) stream))
@@ -366,8 +374,9 @@ not given."
   "What F, X's prop:custom-write procedure, writes in MODE, as a string."
   (let ((port (make-routport (rsym "string"))))
     (funcall f x port mode)
+    ;; a port holds bytes, the characters' UTF-8
     (sb-ext:octets-to-string (coerce (routport-buffer port) '(simple-array (unsigned-byte 8) (*)))
-			     :external-format :latin-1)))
+			     :external-format '(:utf-8 :replacement #\?))))
 
 (defun write-with-mode (x port mode lisp-mode)
   "write, display or print of X to PORT: its prop:custom-write procedure
@@ -393,17 +402,62 @@ writes straight to the port (compiled code writes its bytes so)."
 (defnative "println" (x &optional port) ()
   (to-port port (lambda (s) (print-quoted x s) (terpri s))))
 
+;;; memq, memv, assq and assv: the host's loop on a cyclic list, where
+;;; Racket's say "not a proper list".  Brent's cycle test: the tortoise
+;;; moves to the hare at each power of two.
+(defmacro do-checked-list ((tail list) test improper)
+  "Walk LIST by TAIL, returning TEST's value at the first tail where it
+is true, false at the end; for a list that ends in a non-pair or cycles,
+evaluate IMPROPER."
+  (let ((tortoise (gensym)) (steps (gensym)) (limit (gensym)))
+    `(let ((,tail ,list) (,tortoise ,list) (,steps 0) (,limit 2))
+       (declare (fixnum ,steps ,limit))
+       (loop
+	 (cond ((consp ,tail)
+		(let ((hit ,test)) (when hit (return hit)))
+		(setq ,tail (cdr ,tail))
+		(incf ,steps)
+		(when (eq ,tail ,tortoise) (return ,improper))
+		(when (= ,steps ,limit) (setq ,tortoise ,tail ,limit (* 2 ,limit))))
+	       ((null ,tail) (return ps:false))
+	       (t (return ,improper)))))))
+
+(defun improper-list-error (who list)
+  (racket-error who "not a proper list~%  in: ~A" (written list)))
+
+(defnative "memq" (x list) (:leaf t)
+  (do-checked-list (tail list) (and (eq x (car tail)) tail)
+    (improper-list-error "memq" list)))
+
+(defnative "memv" (x list) (:leaf t)
+  (do-checked-list (tail list) (and (racket-eqv x (car tail)) tail)
+    (improper-list-error "memv" list)))
+
+(defun assq-like (who test x alist)
+  (do-checked-list (tail alist)
+      (let ((e (car tail)))
+	(cond ((not (consp e))
+	       (racket-error who "non-pair found in list~%  non-pair: ~A~%  list: ~A"
+			     (written e) (written alist)))
+	      ((funcall test x (car e)) e)))
+    (racket-error who "not a proper list: ~A" (written alist))))
+
+(defnative "assq" (x alist) (:leaf t) (assq-like "assq" #'eq x alist))
+(defnative "assv" (x alist) (:leaf t) (assq-like "assv" #'racket-eqv x alist))
+
 ;;; member and assoc with Racket's equal?
 (defnative "member" (x list &optional (test nil test-p)) ()
-  (loop for tail on list
-	when (if test-p (truthy (funcall test x (car tail))) (equal* x (car tail)))
-	  return tail
-	finally (return ps:false)))
+  (do-checked-list (tail list)
+      (and (if test-p (truthy (funcall test x (car tail))) (equal* x (car tail))) tail)
+    (improper-list-error "member" list)))
 (defnative "assoc" (x alist &optional (test nil test-p)) ()
-  (loop for e in alist
-	when (and (consp e) (if test-p (truthy (funcall test x (car e))) (equal* x (car e))))
-	  return e
-	finally (return ps:false)))
+  (do-checked-list (tail alist)
+      (let ((e (car tail)))
+	(cond ((not (consp e))
+	       (racket-error "assoc" "non-pair found in list~%  non-pair: ~A~%  list: ~A"
+			     (written e) (written alist)))
+	      ((if test-p (truthy (funcall test x (car e))) (equal* x (car e))) e)))
+    (racket-error "assoc" "not a proper list: ~A" (written alist))))
 
 ;;; current-print: print, then a newline, for what isn't #<void>
 (define-primitive "#%kernel" "current-print"

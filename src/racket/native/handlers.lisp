@@ -1074,6 +1074,12 @@ through their filters, wants of messages about TOPIC (any, if #f)."
 	   (and (not always) (mpair-p b)
 		(funcall recur (mpair-car a) (mpair-car b)) (funcall recur (mpair-cdr a) (mpair-cdr b))))
 	  ((rpath-p a) (and (rpath-p b) (string= (rpath-string a) (rpath-string b))))
+	  ;; stencil vectors, fxvectors and flvectors: mutable, so by identity for equal-always?
+	  ((typep a 'stencil)
+	   (and (not always) (typep b 'stencil) (= (stencil-mask a) (stencil-mask b))
+		(every (lambda (x y) (funcall recur x y)) (stencil-items a) (stencil-items b))))
+	  ((or (typep a 'fxvector) (typep a '(simple-array double-float (*))))
+	   (and (not always) (equal* a b)))
 	  ((or (ihash-p a) (rhash-p a))
 	   (and (or (not always) (ihash-p a))
 		(or (ihash-p b) (rhash-p b))
@@ -1118,6 +1124,14 @@ hashes of its parts by RECUR."
 		 (loop for e across x do (setq h (mix h (funcall recur e))))
 		 h)))
 	  ((rbox-p x) (if (mutable-p) (eq-hash x) (mix 7 (funcall recur (rbox-value x)))))
+	  ((typep x 'stencil)
+	   (if always
+	       (eq-hash x)
+	       (let ((h (mix 17 (stencil-mask x))))
+		 (loop for e across (stencil-items x) do (setq h (mix h (funcall recur e))))
+		 h)))
+	  ((or (typep x 'fxvector) (typep x '(simple-array double-float (*))))
+	   (if always (eq-hash x) (equal-hash* x)))
 	  ((mpair-p x)
 	   (if always
 	       (eq-hash x)

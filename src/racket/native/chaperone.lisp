@@ -30,13 +30,13 @@
 (defun cbox-ref (b orig)
   (if (cbox-p b)
       (let ((v (cbox-ref (cbox-of b) orig)))
-	(checked-chaperone "unbox" (cbox-kind b) "value" v (funcall (cbox-unbox-proc b) orig v)))
+	(checked-chaperone "unbox" (cbox-kind b) "result" v (funcall (cbox-unbox-proc b) orig v)))
       (rbox-value b)))
 
 (defun cbox-set (b v orig)
   (if (cbox-p b)
       (cbox-set (cbox-of b)
-		(checked-chaperone "set-box!" (cbox-kind b) "value" v (funcall (cbox-set-proc b) orig v))
+		(checked-chaperone "set-box!" (cbox-kind b) "result" v (funcall (cbox-set-proc b) orig v))
 		orig)
       (setf (rbox-value b) v)))
 
@@ -53,7 +53,9 @@
 	((rbox-p b) (rbox-value b))
 	(t (arg-error "unbox" "box?" b))))
 (defnative "set-box!" (b x) (:leaf t)
-  (cond ((cbox-p b) (cbox-set b x b))
+  (cond ((and (rbox-p b) (immutable-p (box-base b)))
+	 (arg-error "set-box!" "(and/c box? (not/c immutable?))" b))
+	((cbox-p b) (cbox-set b x b))
 	((rbox-p b) (setf (rbox-value b) x))
 	(t (arg-error "set-box!" "(and/c box? (not/c immutable?))" b)))
   *void*)
@@ -85,8 +87,9 @@
 	collect (cons (car tail) (cadr tail))))
 
 (defun make-box-chaperone (who kind b unbox-proc set-proc props)
-  (unless (and (rbox-p b) (not (immutable-p b)))
-    (arg-error who "(and/c box? (not/c immutable?))" b))
+  ;; a chaperone may wrap an immutable box; an impersonator, not
+  (unless (and (rbox-p b) (or (eq kind :chaperone) (not (immutable-p (box-base b)))))
+    (arg-error who (if (eq kind :chaperone) "box?" "(and/c box? (not/c immutable?))") b))
   (check-redirect who unbox-proc 2 "unbox-proc")
   (check-redirect who set-proc 2 "set-proc")
   (let ((new (make-cbox b kind unbox-proc set-proc)))
@@ -103,7 +106,8 @@
 
 (defun make-hash-chaperone (who kind h args)
   "chaperone-hash's and impersonate-hash's: H, then ref-proc, set-proc,
-remove-proc and key-proc, an optional clear-proc, and properties."
+remove-proc and key-proc, an optional clear-proc and equal-key-proc, and
+properties."
   (unless (hash-table-p* h) (arg-error who "hash?" h))
   (unless (>= (length args) 4)
     (racket-error who "arity mismatch;~% the expected number of arguments does not match the given number"))
@@ -115,7 +119,12 @@ remove-proc and key-proc, an optional clear-proc, and properties."
     (let ((clear-proc ps:false))
       (when (and more (not (impersonator-property-p (car more))))
 	(setq clear-proc (pop more))
-	(when (truthy clear-proc) (check-redirect who clear-proc 1 "clear-proc")))
+	(when (truthy clear-proc) (check-redirect who clear-proc 1 "clear-proc"))
+	;; the equal-key-proc that may follow: keys already go through
+	;; key-proc, so it only has its arity checked
+	(when (and more (not (impersonator-property-p (car more))))
+	  (let ((equal-key-proc (pop more)))
+	    (when (truthy equal-key-proc) (check-redirect who equal-key-proc 2 "equal-key-proc")))))
       (let ((new (make-chash h kind ref-proc set-proc remove-proc key-proc clear-proc)))
 	(setf (gethash new *impersonators*) (make-impersonation kind h (split-properties who more)))
 	new))))
@@ -133,7 +142,8 @@ remove-proc and key-proc, an optional clear-proc, and properties."
   (hash-clear* h h))
 (defnative "immutable?" (x) (:leaf t)
   (bool (or (ihash-p x) (and (chash-p x) (hash-immutable-p x))
-	    (and (not (cbox-p x)) (immutable-p x)))))
+	    (and (rbox-p x) (immutable-p (box-base x)))
+	    (and (not (rbox-p x)) (immutable-p x)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Structs

@@ -366,7 +366,7 @@
 	       ;; B: our linklet compiler
 	       (:module "linklet"
 		:serial t
-		:components ((:file "api") (:file "compiler") (:file "sources") (:file "boot")))
+		:components ((:file "api") (:file "compiler") (:file "sources") (:file "regexp-layer") (:file "boot")))
 	       ;; C: A plus native overrides
 	       (:module "hybrid" :components ((:file "overrides")))
 	       (:file "strategies")))

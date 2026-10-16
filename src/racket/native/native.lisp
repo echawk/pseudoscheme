@@ -41,7 +41,7 @@ one: every primitive the instances have that isn't host-shared."
   '(;; pairs and lists
     "car" "cdr" "cons" "caar" "cadr" "cdar" "cddr" "caddr" "cdddr" "cadddr"
     "list" "append" "reverse"
-    "memq" "memv" "assq" "assv" "null?" "pair?" "list?"
+    "null?" "pair?" "list?"
     ;; equivalence, booleans
     "eq?" "eqv?" "not" "boolean?"
     ;; numbers

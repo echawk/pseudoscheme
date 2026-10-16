@@ -229,7 +229,8 @@ assigned, which schemify's and the expander's checks compare with.")
 (define-property "prop:sealed")
 (define-property "prop:custom-write")
 (define-property "prop:custom-print-quotable")
-(define-property "prop:object-name")
+(defvar *prop-object-name* (%make-struct-type-property (rsym "prop:object-name") nil '()))
+(define-primitive "#%kernel" "prop:object-name" *prop-object-name*)
 (define-property "prop:evt")
 (define-property "prop:input-port")
 (define-property "prop:output-port")
@@ -326,12 +327,27 @@ error-value->string-handler (handlers.lisp), printed as print does."
 (defvar *renamed-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "procedure-rename's procedures and their names (handlers.lisp).")
 
+(defun object-name-property (x)
+  "X's name from its type's prop:object-name: a procedure of X, or the
+index of a field of the type that has the property; or NIL."
+  (multiple-value-bind (value found) (property-value x *prop-object-name*)
+    (when found
+      (if (integerp value)
+	  ;; the index counts the fields of the type the property is on
+	  (let ((owner (loop for ty = (struct-of-type x) then (struct-type-parent ty)
+			     while (and (struct-type-parent ty)
+					(eql (property-value (struct-type-parent ty) *prop-object-name*) value))
+			     finally (return ty)))
+		(fields (if (rstruct-p x) (rstruct-fields x) (applicable-rstruct-fields x))))
+	    (svref fields (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
+	  (funcall value x)))))
+
 (defnative "object-name" (x) (:leaf t)
   (cond ((rregexp-p x) (rregexp-source x))
 	((regexp-literal-p x) (regexp-literal-source x))
 	((rinport-p x) (rinport-name x))
 	((routport-p x) (routport-name x))
-	((struct-instance-p x) (struct-type-name (struct-of-type x)))
+	((struct-instance-p x) (or (object-name-property x) (struct-type-name (struct-of-type x))))
 	((struct-type-p x) (struct-type-name x))
 	((and (functionp x) (gethash x *renamed-procedures*)))
 	((functionp x)

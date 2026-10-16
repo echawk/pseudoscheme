@@ -114,6 +114,9 @@ k), or a list of them."
 	(t (racket-error "procedure-reduce-arity" "contract violation~%  expected: procedure-arity?~%  given: ~A"
 			 (written arity)))))
 
+(defvar *reduced-arity-of* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "A procedure made by reduce-arity -> the procedure it wraps.")
+
 (defun reduce-arity (who proc mask name)
   "PROC, taking only the argument counts in MASK.  (Racket checks that
 they are some of PROC's; our arities of struct procedures and wrappers
@@ -124,6 +127,7 @@ are approximate, so that isn't checked.)"
 		   (apply proc args)
 		   (racket-arity-error (if (truthy name) (rname name) "#<procedure>") (length args))))))
     (setf (gethash new *arity-masks*) mask)
+    (setf (gethash new *reduced-arity-of*) proc)
     new))
 
 (defnative "procedure-reduce-arity" (proc arity &optional (name ps:false) realm) (:rumble "procedure-reduce-arity")
@@ -138,13 +142,31 @@ are approximate, so that isn't checked.)"
 (defnative "procedure-specialize" (f) (:leaf t) f)
 (defnative "procedure-impersonator*?" (f) (:leaf t) (declare (ignore f)) ps:false)
 (defnative "procedure-extract-target" (f) (:leaf t) (declare (ignore f)) ps:false)
+(defvar *single-valued-primitives* nil
+  "The procedures of *host-shared* that return one value, once found (EQ table).")
+
+;;; Racket CS says 1 for what Chez infers returns one value; of the
+;;; primitives, those of the host that do (not every one Racket does).
+(defparameter *multiple-valued-primitives*
+  '("apply" "values" "call-with-values" "dynamic-wind" "map" "for-each"))
+
+(defun single-valued-primitive-p (f)
+  (unless *single-valued-primitives*
+    (let ((table (make-hash-table :test 'eq)))
+      (dolist (name *host-shared*)
+	(unless (member name *multiple-valued-primitives* :test #'string=)
+	  (let ((v (primitive name)))
+	    (when (functionp v) (setf (gethash v table) t)))))
+      (setq *single-valued-primitives* table)))
+  (gethash f *single-valued-primitives*))
+
 (defnative "procedure-result-arity" (f) (:leaf t)
   (unless (functionp f) (arg-error "procedure-result-arity" "procedure?" f))
-  ;; known: a struct's constructor, predicate, accessor or mutator, or
-  ;; what wraps one
-  (let ((g (loop for x = f then (impersonation-of i)
+  ;; known: a struct's constructor, predicate, accessor or mutator, a
+  ;; primitive that returns one value, or what wraps one
+  (let ((g (loop for x = f then (or (gethash x *reduced-arity-of*) (impersonation-of i))
 		 for i = (impersonation x)
-		 while i
+		 while (or i (gethash x *reduced-arity-of*))
 		 finally (return x))))
-    (if (gethash g *struct-procedures*) 1 ps:false)))
+    (if (or (gethash g *struct-procedures*) (single-valued-primitive-p g)) 1 ps:false)))
 (defnative "primitive-result-arity" (f) (:leaf t) (declare (ignore f)) ps:false)

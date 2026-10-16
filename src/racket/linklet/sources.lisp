@@ -105,7 +105,11 @@ it into *EXPANDER-INSTANCE*, saying how long each step took, or which
 top-level form failed and why."
   (flet ((seconds (start) (/ (- (get-internal-real-time) start) internal-time-units-per-second)))
     (let* ((start (get-internal-real-time))
-	   (text (expander-linklet-text))
+	   (text (progn
+		   ;; Racket's regexps, which the expander's linklet uses
+		   ;; (regexp-layer.lisp)
+		   (install-regexp-layer :stream stream)
+		   (expander-linklet-text)))
 	   (form (with-input-from-string (in text) (read-racket in)))
 	   (compiled (compile-linklet-form form :name (rsym "expander"))))
       ;; its compiled form is cached, keyed by its text (cache.lisp)

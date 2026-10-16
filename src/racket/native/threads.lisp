@@ -80,7 +80,7 @@
 ;;; ------------------------------------------------------------------
 ;;; Structures
 
-(declaim (special *current-custodian* *current-thread-group*))
+(declaim (special *current-custodian* *current-thread-group* *root-custodian*))
 
 (defvar *sched-lock* (sb-thread:make-mutex :name "racket scheduler"))
 (defvar *holder* *main-thread* "The thread that holds the baton.")
@@ -694,8 +694,20 @@ the custodian's shutdown.  Raises if C is shut down."
 	   (when (and w (not (wait-done w))) (complete-wait w :killed nil)))
 	 (when (eq (rthread-state th) :blocked) (setf (rthread-state th) :runnable)))))
 
+(defun thread-managed-by-p (th custodian)
+  "Whether CUSTODIAN is, or is above, one that manages TH (the main
+thread is the root's)."
+  (flet ((covers (c) (or (eq c custodian) (custodian-ancestor-p custodian c))))
+    (let ((live (remove-if-not #'managed-live (rthread-custodians th))))
+      (if live
+	  (some (lambda (m) (covers (managed-custodian m))) live)
+	  (covers *root-custodian*)))))
+
 (defnative "kill-thread" (th) ()
   (check-thread "kill-thread" th)
+  (unless (or (rthread-dead th) (thread-managed-by-p th (funcall *current-custodian*)))
+    (raise-exn "exn:fail:contract"
+	       (format nil "kill-thread: the current custodian does not solely manage the specified thread~%  thread: #<thread>")))
   (kill-thread* th)
   *void*)
 

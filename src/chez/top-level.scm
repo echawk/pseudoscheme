@@ -618,8 +618,8 @@
 (define collect-trip-bytes (make-parameter (* 8 1024 1024)))
 (define (collect-rendezvous) (collect))
 
-;; The printer's parameters; print-length and print-level are honoured
-;; only as far as the writer does (not yet)
+;; The printer's parameters, which the writer (host.lisp) consults, except
+;; print-precision and print-subnormal-precision
 (define print-graph (make-parameter #f ->boolean))
 (define print-length
   (make-parameter #f

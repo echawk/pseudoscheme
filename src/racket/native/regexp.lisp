@@ -1,9 +1,9 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
 
 ;;;; Regular expressions, natively, on CL-PPCRE: strategy B's stand-in for
-;;;; Racket's regexp layer, until that layer's linklet can be extracted
-;;;; and compiled (docs/racket-linklet-compiler.md, milestone 2), which
-;;;; will replace this.
+;;;; Racket's regexp layer.  The layer's own linklet replaces these
+;;;; natives when it is extracted and loaded (linklet/regexp-layer.lisp);
+;;;; this is the fallback when it isn't.
 ;;;;
 ;;;; A regexp is an RREGEXP: its source (a string or bytes), whether it is
 ;;;; a pregexp, whether it is a byte regexp, and the CL-PPCRE scanner.
@@ -471,3 +471,14 @@ the match and of its groups (vectors), or NIL."
 		      (incf i))
 		     (t (incf i)))))
     n))
+
+;;; The layer's procedures call Racket code (a handler, a custom port),
+;;; so they aren't leaves, except the predicates and the counts.
+(dolist (name '("regexp" "pregexp" "byte-regexp" "byte-pregexp"
+		"regexp-match" "regexp-match/end" "regexp-match-positions"
+		"regexp-match-positions/end" "regexp-match?"
+		"regexp-match-peek" "regexp-match-peek-positions" "regexp-match-peek-positions/end"
+		"regexp-match-peek-immediate" "regexp-match-peek-positions-immediate"
+		"regexp-match-peek-positions-immediate/end" "regexp-replace" "regexp-replace*"))
+  (let ((native (gethash name *natives*)))
+    (when native (setf (native-leaf native) nil))))

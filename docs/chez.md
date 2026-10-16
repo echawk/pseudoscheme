@@ -17,7 +17,7 @@ All of it lives in `src/chez/`:
 | file | what |
 |---|---|
 | chez.lisp | the `(chezscheme)` library, Chez's top level, library files that define their library at top level, the extensions Chez makes to R6RS procedures |
-| host.lisp | primitives in Lisp: boxes, fxvectors, weak tables, threads, mutexes and conditions, `format`'s column-tracking port, Chez-style parameters, fd ports, nonblocking reads, file options, typed record fields |
+| host.lisp | primitives in Lisp: boxes, fxvectors, weak tables, threads, mutexes and conditions, Chez's writer, generic ports (`make-input-port`, ...), `format`'s column-tracking port, Chez-style parameters, fd ports, nonblocking reads, file options, typed record fields |
 | ffi.lisp | `load-shared-object`, `foreign-procedure`, foreign memory, on CFFI |
 | chezscheme.scm, lists.scm, records.scm, numbers.scm, hashtables.scm, threads.scm, conditions.scm, top-level.scm, ffi.scm | the library's body, in Scheme |
 | format.scm | Chez's own `format`, `printf` and `fprintf` (s/format.ss), made by boot/chez-format.py |
@@ -178,8 +178,8 @@ The largest groups left:
   `concatenate-object-files` of a compiled program and a text object
   file, `verify-loadability`'s compilation instances, syntax errors
   `compile-file` would report; `eval-when` and `meta`.
-- format: the printer parameters (`print-radix`, `print-level`, ...),
-  which the writer doesn't consult yet.
+- format: `print-precision` and `print-subnormal-precision`, the one
+  printer parameters the writer doesn't consult (it does the others, below).
 - hash: the argument checks Chez makes and the hash values its
   `equal-hash` gives.
 - record: R6RS record-syntax details and `$record` system procedures.
@@ -553,15 +553,46 @@ The main causes:
   compares canonical paths (`markdown-view`, `file`, `wire`), which
   needs `realpath` semantics in path canonicalization.
 
+## The writer and generic ports
+
+In `--chez` mode `write`, `display`, `put-datum` and `format`'s `~s` and
+`~a` print as Chez does (host.lisp, "Chez's writer"; the host's writer,
+src/write.scm, is left what it doesn't know: records, procedures, hash
+tables). It consults `print-radix` (`write` gives `#xFF`, also for flonums and
+complex numbers; `display` the digits only), `print-length`, `print-level`, `print-graph`
+(sharing as well as cycles; a cycle is labelled with it off, as Chez
+does), `print-gensym` (`#t`, `#f`, `pretty`, `pretty/suffix`),
+`print-vector-length`, `print-unicode`, `print-extended-identifiers` and
+`print-positive-exponent-sign`; `print-brackets` and `print-char-name`
+change nothing `write` prints. Chez's own forms are used: `(quote a)`
+rather than `'a`, `#vu8(...)`, `#!eof`, `#<void>`, characters as
+`#\nul` and `#\x1`, symbols with `\x20;` escapes, flonums as `1e21`,
+`10000000.0` and `1e-4`, and `\x7F;` in strings. A gensym's unique
+name is made up when it is first written.
+
+`make-input-port`, `make-output-port` and `make-input/output-port` make
+Chez's generic ports: the handler gets the messages `read-char`,
+`peek-char`, `unread-char`, `char-ready?`, `write-char`, `block-write`,
+`flush-output-port`, `clear-input-port`, `clear-output-port`,
+`close-port`, `file-position`, `file-length` and `port-name`, once the
+port's buffer, in the fields `port-input-buffer`, `-size`, `-index` and
+the output ones (and their `set-...!`, `textual-` variants,
+`port-input-count`, `port-input-empty?`), is empty or full.
+`port-handler`, `block-read`, `block-write`, `mark-port-closed!`,
+`port-name`, `file-position` and `file-length` come with them. Only
+generic ports have the buffer fields: the others raise an error, where
+Chez's string and file ports have them too (binary-port ones aren't
+here).
+
 ## Behaviour that still differs
 
 | | Chez 10.4.1 | Pseudoscheme |
 |---|---|---|
 | `(greatest-fixnum)` | 2⁶⁰ − 1 | 2⁶² − 1 (SBCL's fixnums, allowed by R6RS) |
-| `(write 1e21)` | `1e21` | `1.0e21` |
+| `(number->string 1e21)` | `"1e21"` | `"1.0e21"` (`write` and `display` print `1e21`) |
 | `(open-output-file f)`, `f` existing | an error (Chez's default option) | truncates, as R6RS code here expects; with an option, Chez's behaviour |
 | library invocation | lazy, when a variable is first referenced | when an expression that refers to it runs |
-| printer parameters (`print-radix`, `print-length`, ...) | honoured | accepted, not yet consulted by the writer |
+| `print-precision`, `print-subnormal-precision` (`5e-324|1`) | honoured | accepted, not consulted |
 
 ## Not planned
 

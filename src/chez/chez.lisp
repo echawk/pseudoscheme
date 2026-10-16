@@ -203,7 +203,46 @@
     "make-hash-table" "hash-table?" "put-hash-table!" "get-hash-table" "remove-hash-table!"
     "hash-table-map" "hash-table-for-each" "hashtable-ref-cell" "eq-hashtable-ref-cell"
     "symbol-hashtable-ref-cell" "eq-hashtable-try-atomic-cell" "bytevector->s8-list"
-    "s8-list->bytevector")
+    "s8-list->bytevector"
+    ;; more.scm: generic ports (host.lisp)
+    "make-input-port"
+    "make-output-port"
+    "make-input/output-port"
+    "port-handler"
+    "port-input-buffer"
+    "port-input-size"
+    "port-input-index"
+    "port-input-count"
+    "port-input-empty?"
+    "port-output-buffer"
+    "port-output-size"
+    "port-output-index"
+    "set-port-input-index!"
+    "set-port-input-size!"
+    "set-port-input-buffer!"
+    "set-port-output-index!"
+    "set-port-output-size!"
+    "set-port-output-buffer!"
+    "mark-port-closed!"
+    "block-read"
+    "block-write"
+    "port-name"
+    "set-port-name!"
+    "textual-port-input-buffer"
+    "textual-port-input-size"
+    "textual-port-input-index"
+    "textual-port-input-count"
+    "textual-port-output-buffer"
+    "textual-port-output-size"
+    "textual-port-output-index"
+    "set-textual-port-input-index!"
+    "set-textual-port-input-size!"
+    "set-textual-port-input-buffer!"
+    "set-textual-port-output-index!"
+    "set-textual-port-output-size!"
+    "set-textual-port-output-buffer!"
+    "file-position"
+    "file-length")
   "What src/chez/*.scm defines that (chezscheme) exports, besides R6RS.")
 
 (defparameter *chezscheme-from-psyntax*
@@ -425,6 +464,7 @@ calls with those are still open-coded."
   "Install (pseudoscheme chez host), (chezscheme) and Chez's top level.
 Called while the standard libraries are installed."
   (install-chez-extensions)
+  (ps-r6rs::install-chez-writer)	; host.lisp: Chez's printer, in the Chez mode
   (install-chez-mutators)
   (install-chez-top-level-primitives)
   (install-host-library '("pseudoscheme" "chez" "host")

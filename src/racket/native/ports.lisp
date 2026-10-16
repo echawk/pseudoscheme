@@ -733,6 +733,7 @@ at eof (or a special, and 1)."
     (when (eq (rinport-kind p) :pipe)
       (setf (rinport-closed p) t))
     (setf (rinport-closed p) t)
+    (ip-progress p)			; closing is progress
     (post-closed p)))
 
 (defnative "close-input-port" (p) ()

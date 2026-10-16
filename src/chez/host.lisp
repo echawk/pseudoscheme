@@ -1901,12 +1901,18 @@ reaches it goes to the invoker.")
 ;;; Procedures: a procedure is its own code object here
 
 (defun procedure-name-string (f)
-  (let ((name (ignore-errors
-	       (sb-kernel:%fun-name (if (sb-kernel:closurep f) (sb-kernel:%closure-fun f) f)))))
-    (cond ((and name (symbolp name)) (symbol-name name))
-	  ((and (consp name) (member (car name) '(flet labels)) (symbolp (cadr name)) (cadr name))
-	   (symbol-name (cadr name)))
-	  (t nil))))
+  (let* ((name (ignore-errors
+		(sb-kernel:%fun-name (if (sb-kernel:closurep f) (sb-kernel:%closure-fun f) f))))
+	 (name (cond ((and name (symbolp name)) name)
+		     ((and (consp name) (member (car name) '(flet labels)) (symbolp (cadr name)))
+		      (cadr name)))))
+    (when name
+      ;; the host's procedures are Lisp symbols, .NAME for one DEFUNE
+      ;; defines, upper case; a name with a $ is the compiler's own
+      (let ((s (string-left-trim "." (symbol-name name))))
+	(cond ((or (zerop (length s)) (find #\$ s)) nil)
+	      ((string= s (string-upcase s)) (string-downcase s))
+	      (t s))))))
 
 (defprim "chez:sys-code-name" (f)
   (or (and (functionp f) (procedure-name-string f)) ps:false))
@@ -2151,3 +2157,517 @@ same MARKS, so that eq? says whether two continuations' agree."
 	(if (eq g ps:false)
 	    (make-prgen state)
 	    (progn (replace (prgen-state g) state) ps:unspecific))))))
+
+;;; ------------------------------------------------------------------
+;;; Chez's writer.  In the Chez mode write and display (and what calls
+;;; PS:*SCHEME-WRITE*, put-datum and format's ~s) print as Chez's printer
+;;; does, consulting its parameters (print-radix, print-length,
+;;; print-level, print-graph, print-gensym, print-vector-length,
+;;; print-unicode, print-extended-identifiers, print-positive-exponent-sign,
+;;; print-char-name).  What it doesn't know it leaves to the host's
+;;; writer (src/write.scm): strings of other types, records, procedures.
+;;; print-brackets only matters to the pretty printer; print-precision and
+;;; print-subnormal-precision aren't consulted.
+
+(defvar *chez-printer-parameters* nil
+  "The print-... parameters, as chez:set-printer-parameters! gave them.")
+
+(defprim "chez:set-printer-parameters!" (&rest parameters)
+  (setq *chez-printer-parameters* (coerce parameters 'simple-vector))
+  ps:unspecific)
+
+(defstruct (chez-print (:conc-name cp-))
+  (radix 10) length level graph gensym char-name vector-length unicode extended exponent-sign display)
+
+(defun current-chez-print ()
+  "The printer parameters now."
+  (let ((v *chez-printer-parameters*))
+    (flet ((param (i) (funcall (svref v i)))
+	   (opt (x) (if (eq x ps:false) nil x)))
+      (make-chez-print :graph (not (eq (param 0) ps:false)) :length (opt (param 1)) :level (opt (param 2))
+		       :radix (param 3) :gensym (param 4) :char-name (not (eq (param 5) ps:false))
+		       :vector-length (not (eq (param 6) ps:false)) :unicode (not (eq (param 7) ps:false))
+		       :extended (not (eq (param 8) ps:false)) :exponent-sign (not (eq (param 9) ps:false))))))
+
+;;; Numbers
+
+(defun chez-digits (n radix)
+  (let ((*print-base* radix) (*print-radix* nil)) (princ-to-string n)))
+
+(defun chez-radix-prefix (radix)
+  (case radix (10 "") (2 "#b") (8 "#o") (16 "#x") (t (format nil "#~Dr" radix))))
+
+(defun chez-flonum-string (x radix exponent-sign)
+  (cond ((sb-ext:float-nan-p x) "+nan.0")
+	((sb-ext:float-infinity-p x) (if (plusp x) "+inf.0" "-inf.0"))
+	((zerop x) (if (minusp (float-sign x)) "-0.0" "0.0"))
+	((/= radix 10)
+	 ;; the exact expansion: digits of the integer part, then the
+	 ;; fraction until it ends (a power of 2's radix) or 60 digits
+	 (let* ((r (rational (abs x))) (int (floor r)) (frac (- r int)))
+	   (with-output-to-string (s)
+	     (when (minusp x) (write-char #\- s))
+	     (write-string (chez-digits int radix) s)
+	     (write-char #\. s)
+	     (if (zerop frac)
+		 (write-char #\0 s)
+		 (loop repeat 60 until (zerop frac)
+		       do (setq frac (* frac radix))
+			  (let ((d (floor frac)))
+			    (write-string (chez-digits d radix) s)
+			    (decf frac d)))))))
+	(t
+	 ;; shortest digits d1...dn and the point's place k: x = 0.d1...dn * 10^k.
+	 ;; Chez writes 10000000.0 and 0.001 but 1e10 and 1e-4.
+	 (multiple-value-bind (k digits) (sb-impl::flonum-to-digits (abs x))
+	   (let ((n (length digits)) (e (1- k)))
+	     (with-output-to-string (s)
+	       (when (minusp x) (write-char #\- s))
+	       (cond ((<= -3 e 9)
+		      (cond ((<= k 0)
+			     (write-string "0." s)
+			     (dotimes (i (- k)) (write-char #\0 s))
+			     (write-string digits s))
+			    ((< k n)
+			     (write-string digits s :end k) (write-char #\. s)
+			     (write-string digits s :start k))
+			    (t (write-string digits s)
+			       (dotimes (i (- k n)) (write-char #\0 s))
+			       (write-string ".0" s))))
+		     (t (write-char (char digits 0) s)
+			(when (> n 1) (write-char #\. s) (write-string digits s :start 1))
+			(write-char #\e s)
+			(when (and exponent-sign (plusp e)) (write-char #\+ s))
+			(format s "~D" e)))))))))
+
+(defun chez-real-string (x radix exponent-sign)
+  (cond ((integerp x) (chez-digits x radix))
+	((rationalp x) (format nil "~A/~A" (chez-digits (numerator x) radix) (chez-digits (denominator x) radix)))
+	(t (chez-flonum-string (coerce x 'double-float) radix exponent-sign))))
+
+(defun chez-number-string (x cp)
+  (let ((radix (cp-radix cp)) (es (cp-exponent-sign cp)))
+    (concatenate 'string
+		 (if (and (/= radix 10) (not (cp-display cp)) (not (and (floatp x) (or (sb-ext:float-nan-p x) (sb-ext:float-infinity-p x)))))
+		     (chez-radix-prefix radix)
+		     "")
+		 (if (complexp x)
+		     (let ((im (imagpart x)))
+		       (format nil "~A~A~Ai" (chez-real-string (realpart x) radix es)
+			       (if (or (and (floatp im) (or (sb-ext:float-nan-p im) (sb-ext:float-infinity-p im)))
+				       (minusp (if (floatp im) (float-sign im) im)))
+				   "" "+")
+			       (chez-real-string im radix es)))
+		     (chez-real-string x radix es)))))
+
+;;; Characters, strings and symbols
+
+(defparameter *chez-char-names*
+  '((0 . "nul") (7 . "alarm") (8 . "backspace") (9 . "tab") (10 . "newline") (11 . "vtab")
+    (12 . "page") (13 . "return") (27 . "esc") (32 . "space") (127 . "delete")))
+
+(defun chez-hex (n) (format nil "~X" n))
+
+(defun chez-char-literal (c unicode)
+  (let* ((n (char-code c)) (name (cdr (assoc n *chez-char-names*))))
+    (cond (name (concatenate 'string "#\\" name))
+	  ((or (< n 32) (member n '(#x2028 #x2029)) (and (not unicode) (> n 127)))
+	   (concatenate 'string "#\\x" (chez-hex n)))
+	  (t (format nil "#\\~C" c)))))
+
+(defun chez-write-string-literal (s stream unicode)
+  (write-char #\" stream)
+  (loop for c across s
+	for n = (char-code c)
+	do (cond ((char= c #\") (write-string "\\\"" stream))
+		 ((char= c #\\) (write-string "\\\\" stream))
+		 ((<= 7 n 13) (write-char #\\ stream) (write-char (char "abtnvfr" (- n 7)) stream))
+		 ((or (< n 32) (= n 127) (and (not unicode) (> n 127)))
+		  (format stream "\\x~X;" n))
+		 (t (write-char c stream))))
+  (write-char #\" stream))
+
+(defun chez-symbol-text (name extended unicode)
+  "NAME as Chez writes a symbol: the characters that wouldn't read back
+as part of it are \\x<hex>;."
+  (if (zerop (length name))
+      "||"
+      (with-output-to-string (s)
+	(flet ((escape (c) (format s "\\x~X;" (char-code c))))
+	  (loop for c across name
+		for i from 0
+		do (cond ((or (member c '(#\( #\) #\[ #\] #\{ #\} #\" #\' #\` #\, #\; #\| #\\))
+			      (<= (char-code c) 32) (= (char-code c) 127)
+			      (and (> (char-code c) 127)
+				   (or (not unicode)
+				       (not (graphic-char-p c))
+				       (member (char-code c) '(#x2028 #x2029 #xA0)))))
+			  (escape c))
+			 ((and (= i 0) (or (digit-char-p c) (char= c #\#) (char= c #\@)))
+			  (if (and extended (digit-char-p c)) (write-char c s) (escape c)))
+			 ((and (= i 0) (char= c #\.))
+			  (if (string= name "...") (write-char c s) (escape c)))
+			 ((and (= i 0) (find c "+-"))
+			  (if (or (= (length name) 1)
+				  (and (char= c #\-) (> (length name) 1) (char= (char name 1) #\>))
+				  (and extended (> (length name) 1) (digit-char-p (char name 1))))
+			      (write-char c s)
+			      (escape c)))
+			 (t (write-char c s))))))))
+
+(defvar *chez-gensym-unique-names* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defvar *chez-gensym-prefix* nil)
+(defvar *chez-gensym-count* 0)
+
+(defun chez-gensym-unique-name (sym)
+  "A gensym's unique name, as Chez shows one: 24 digits of base 36, -, a count."
+  (or (gethash sym *chez-gensym-unique-names*)
+      (setf (gethash sym *chez-gensym-unique-names*)
+	    (progn
+	      (unless *chez-gensym-prefix*
+		(let ((*random-state* (make-random-state t)))
+		  (setq *chez-gensym-prefix*
+			(string-downcase
+			 (coerce (loop repeat 25 collect (char "0123456789abcdefghijklmnopqrstuvwxyz" (random 36)))
+				 'string)))))
+	      (format nil "~A-~D" *chez-gensym-prefix* (1- (incf *chez-gensym-count*)))))))
+
+(defun chez-gensym-p (x)
+  (and (symbolp x) x (not (eq x ps:true)) (not (eq x ps:false)) (null (symbol-package x))))
+
+(defun chez-write-symbol (x stream cp display)
+  (let* ((name (ps:scheme-symbol-name x))
+	 (text (chez-symbol-text name (cp-extended cp) (cp-unicode cp))))
+    (cond (display (write-string name stream))
+	  ((not (chez-gensym-p x)) (write-string text stream))
+	  (t (let ((mode (cp-gensym cp)) (unique (chez-gensym-unique-name x)))
+	       (cond ((eq mode ps:false) (write-string text stream))
+		     ((eq mode (ps:intern-scheme-symbol "pretty"))
+		      (write-string "#:" stream) (write-string text stream))
+		     ((eq mode (ps:intern-scheme-symbol "pretty/suffix"))
+		      (write-string text stream)
+		      (format stream ".~A" (subseq unique (1+ (position #\- unique :from-end t)))))
+		     (t (format stream "#{~A ~A}" text unique))))))))
+
+;;; The writer
+
+(defun chez-write-datum (obj stream display old)
+  "OBJ on STREAM as Chez's write (DISPLAY: display) does; OLD, the host's
+writer of that kind, for what this doesn't know."
+  (let* ((cp (let ((cp (current-chez-print))) (setf (cp-display cp) display) cp))
+	 (labels (and (or (consp obj) (simple-vector-p obj))
+		      (ps::datum-labels obj (cp-graph cp))))
+	 (next-label 0)
+	 (limit (cp-length cp)) (level (cp-level cp)))
+    (labels ((out (s) (write-string s stream))
+	     (labelled-p (x) (and labels (nth-value 1 (gethash x labels))))
+	     (elements (x)
+	       ;; a vector's elements to write: with print-vector-length, not the
+	       ;; trailing ones that repeat the one before
+	       (let ((n (length x)))
+		 (when (cp-vector-length cp)
+		   (loop while (and (> n 1) (eql (elt x (1- n)) (elt x (- n 2)))) do (decf n)))
+		 n))
+	     (sequence-body (x n depth)
+	       ;; the elements 0..N-1 of X, to print-length, then )
+	       (let ((count 0))
+		 (loop for i below n
+		       do (when (and limit (>= count limit))
+			    (out (if (zerop count) "..." " ..."))
+			    (return))
+			  (unless (zerop count) (out " "))
+			  (pr (elt x i) (1+ depth))
+			  (incf count)))
+	       (out ")"))
+	     (print-vector (x prefix tag depth)
+	       (let ((n (elements x)))
+		 (cond ((zerop (length x))
+			(out prefix) (when (cp-vector-length cp) (out "0")) (out tag) (out "()"))
+		       ((and level (> depth level)) (out prefix) (out tag) (out "(...)"))
+		       (t (out prefix)
+			  (when (cp-vector-length cp) (format stream "~D" (length x)))
+			  (out tag) (out "(")
+			  (sequence-body x n depth)))))
+	     (pr-list (x depth)
+	       (cond ((and level (> depth level)) (out "(...)"))
+		     (t (out "(")
+			(let ((count 0) (tail x))
+			  (loop
+			    (when (and limit (>= count limit))
+			      (out (if (zerop count) "..." " ..."))
+			      (return))
+			    (unless (zerop count) (out " "))
+			    (pr (car tail) (1+ depth))
+			    (incf count)
+			    (setq tail (cdr tail))
+			    (cond ((null tail) (return))
+				  ((and (consp tail) (not (labelled-p tail))))
+				  (t (out " . ") (pr tail (1+ depth)) (return)))))
+			(out ")"))))
+	     (pr (x depth)
+	       (let ((label (and labels (or (consp x) (simple-vector-p x)) (nth-value 1 (gethash x labels)))))
+		 (when label
+		   (let ((n (gethash x labels)))
+		     (if n
+			 (progn (format stream "#~D#" n) (return-from pr))
+			 (progn (setf (gethash x labels) next-label)
+				(format stream "#~D=" next-label)
+				(incf next-label))))))
+	       (cond ((null x) (out "()"))
+		     ((eq x ps:true) (out "#t"))
+		     ((eq x ps:false) (out "#f"))
+		     ((consp x) (pr-list x depth))
+		     ((simple-vector-p x) (print-vector x "#" "" depth))
+		     ((numberp x) (out (chez-number-string x cp)))
+		     ((characterp x) (if display (write-char x stream) (out (chez-char-literal x (cp-unicode cp)))))
+		     ((stringp x) (if display (out x) (chez-write-string-literal x stream (cp-unicode cp))))
+		     ((and (symbolp x) (not (keywordp x))) (chez-write-symbol x stream cp display))
+		     ((eq x ps:eof-object) (out "#!eof"))
+		     ((eq x ps:unspecific) (out "#<void>"))
+		     ((typep x '(simple-array (unsigned-byte 8) (*))) (print-vector x "#" "vu8" depth))
+		     ((typep x '(simple-array double-float (*))) (print-vector x "#" "vfl" depth))
+		     ((typep x '(simple-array fixnum (*))) (print-vector x "#" "vfx" depth))
+		     ((ps::box-p x)
+		      (if (and level (> depth level))
+			  (out "#&...")
+			  (progn (out "#&") (pr (ps::box-contents x) (1+ depth)))))
+		     ((functionp x)
+		      (let ((name (procedure-name-string x)))
+			(if name (format stream "#<procedure ~A>" name) (out "#<procedure>"))))
+		     (t (funcall old x stream)))))
+      (pr obj 1)))
+  ps:unspecific)
+
+(defvar *chez-writers-installed* nil)
+
+(defun install-chez-writer ()
+  "In the Chez mode (PS:*CHEZ-READER*), write and display print as Chez's do."
+  (unless *chez-writers-installed*
+    (setq *chez-writers-installed* t)
+    (let ((old-write ps:*scheme-write*) (old-display ps:*scheme-display*))
+      (setq ps:*scheme-write*
+	    (lambda (obj port)
+	      (if (and ps:*chez-reader* *chez-printer-parameters*)
+		  (chez-write-datum obj port nil old-write)
+		  (funcall old-write obj port)))
+	    ps:*scheme-display*
+	    (lambda (obj port)
+	      (if (and ps:*chez-reader* *chez-printer-parameters*)
+		  (chez-write-datum obj port t old-display)
+		  (funcall old-display obj port)))))))
+
+;;; ------------------------------------------------------------------
+;;; Chez's generic ports (make-input-port and the like): a textual port
+;;; with a handler, a procedure that gets the low-level operations as
+;;; messages (read-char, write-char, block-read, ...), and buffers it
+;;; keeps in fields the program may read and set, csug's "Generic
+;;; Ports".  Only those ports have the buffer fields here.
+
+(defclass chez-generic-port (scheme-port)
+  ((handler :initarg :handler :reader generic-handler)
+   (ibuf :initform "" :initarg :ibuf :accessor generic-ibuf)
+   (isize :initform 0 :accessor generic-isize)
+   (iindex :initform 0 :accessor generic-iindex)
+   (obuf :initform "" :initarg :obuf :accessor generic-obuf)
+   (osize :initform 0 :accessor generic-osize)
+   (oindex :initform 0 :accessor generic-oindex)
+   (closed :initform nil :accessor generic-closed)
+   (name :initform nil :accessor generic-name)))
+
+(defclass chez-generic-input-port (chez-generic-port trivial-gray-streams:fundamental-character-input-stream) ())
+(defclass chez-generic-output-port (chez-generic-port trivial-gray-streams:fundamental-character-output-stream) ())
+(defclass chez-generic-io-port (chez-generic-input-port trivial-gray-streams:fundamental-character-output-stream) ())
+
+(defun generic-message (port message &rest args)
+  (apply (generic-handler port) (ps:intern-scheme-symbol message) args))
+
+(defun generic-return-char (port result who)
+  (cond ((characterp result) result)
+	((eq result ps:eof-object) :eof)
+	(t (r6rs-assertion-violation (ps:intern-scheme-symbol "generic-port-handler")
+				     (format nil "invalid ~A return value ~~s" who) result))))
+(defmethod trivial-gray-streams:stream-read-char ((s chez-generic-input-port))
+  (if (< (generic-iindex s) (generic-isize s))
+      (prog1 (char (generic-ibuf s) (generic-iindex s)) (incf (generic-iindex s)))
+      (generic-return-char s (generic-message s "read-char" s) "read-char")))
+(defmethod trivial-gray-streams:stream-peek-char ((s chez-generic-input-port))
+  (if (< (generic-iindex s) (generic-isize s))
+      (char (generic-ibuf s) (generic-iindex s))
+      (generic-return-char s (generic-message s "peek-char" s) "peek-char")))
+(defmethod trivial-gray-streams:stream-unread-char ((s chez-generic-input-port) c)
+  (if (plusp (generic-iindex s))
+      (decf (generic-iindex s))
+      (generic-message s "unread-char" c s))
+  nil)
+(defmethod trivial-gray-streams:stream-listen ((s chez-generic-input-port))
+  (or (< (generic-iindex s) (generic-isize s))
+      (not (eq (generic-message s "char-ready?" s) ps:false))))
+(defmethod trivial-gray-streams:stream-clear-input ((s chez-generic-input-port))
+  (generic-message s "clear-input-port" s)
+  nil)
+
+(defmethod trivial-gray-streams:stream-write-char ((s chez-generic-port) c)
+  (if (< (generic-oindex s) (generic-osize s))
+      (progn (setf (char (generic-obuf s) (generic-oindex s)) c) (incf (generic-oindex s)))
+      (generic-message s "write-char" c s))
+  c)
+(defmethod trivial-gray-streams:stream-write-string ((s chez-generic-port) string &optional (start 0) end)
+  (let* ((end (or end (length string))) (n (- end start)))
+    (cond ((<= n (- (generic-osize s) (generic-oindex s)))
+	   (replace (generic-obuf s) string :start1 (generic-oindex s) :start2 start :end2 end)
+	   (incf (generic-oindex s) n))
+	  (t (generic-message s "block-write" s (subseq string start end) n)))
+    string))
+(defmethod trivial-gray-streams:stream-force-output ((s chez-generic-port))
+  (generic-message s "flush-output-port" s) nil)
+(defmethod trivial-gray-streams:stream-finish-output ((s chez-generic-port))
+  (generic-message s "flush-output-port" s) nil)
+(defmethod trivial-gray-streams:stream-clear-output ((s chez-generic-port))
+  (generic-message s "clear-output-port" s) nil)
+(defmethod trivial-gray-streams:stream-line-column ((s chez-generic-port)) nil)
+
+(defmethod close ((s chez-generic-port) &key abort)
+  (declare (ignore abort))
+  (unless (generic-closed s)
+    (generic-message s "close-port" s)
+    (setf (generic-closed s) t))
+  t)
+(defmethod open-stream-p ((s chez-generic-port)) (not (generic-closed s)))
+
+(defun check-generic-handler (who handler)
+  (unless (functionp handler)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a procedure" handler)))
+
+(defun check-generic-buffer (who buffer)
+  (unless (stringp buffer)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a string" buffer)))
+
+(defprim "chez:make-input-port" (handler buffer)
+  (check-generic-handler "make-input-port" handler)
+  (check-generic-buffer "make-input-port" buffer)
+  (let ((p (make-instance 'chez-generic-input-port :handler handler :ibuf buffer)))
+    (setf (generic-isize p) (length buffer))
+    p))
+(defprim "chez:make-output-port" (handler buffer)
+  (check-generic-handler "make-output-port" handler)
+  (check-generic-buffer "make-output-port" buffer)
+  (let ((p (make-instance 'chez-generic-output-port :handler handler :obuf buffer)))
+    (setf (generic-osize p) (length buffer))
+    p))
+(defprim "chez:make-input/output-port" (handler input-buffer output-buffer)
+  (check-generic-handler "make-input/output-port" handler)
+  (check-generic-buffer "make-input/output-port" input-buffer)
+  (check-generic-buffer "make-input/output-port" output-buffer)
+  (let ((p (make-instance 'chez-generic-io-port :handler handler :ibuf input-buffer :obuf output-buffer)))
+    (setf (generic-isize p) (length input-buffer)
+	  (generic-osize p) (length output-buffer))
+    p))
+
+(defun generic-port (who x direction)
+  "X, a generic port with the DIRECTION (:input, :output) buffers."
+  (unless (and (typep x 'chez-generic-port)
+	       (if (eq direction :input) (typep x 'chez-generic-input-port) (output-stream-p x)))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who)
+			      (format nil "~~s is not a generic ~A port" (string-downcase (symbol-name direction))) x))
+  x)
+
+(defprim "chez:port-handler" (port)
+  (if (typep port 'chez-generic-port)
+      (generic-handler port)
+      (lambda (&rest args) (declare (ignore args))
+	(r6rs-assertion-violation (ps:intern-scheme-symbol "port-handler") "the handler of ~s can't be called" port))))
+
+(macrolet ((accessors (&rest specs)
+	     `(progn
+		,@(loop for (name direction reader) in specs
+			collect `(defprim ,(format nil "chez:~A" name) (port)
+				   (,reader (generic-port ,name ,direction port)))))))
+  (accessors ("port-input-buffer" :input generic-ibuf) ("port-input-size" :input generic-isize)
+	     ("port-input-index" :input generic-iindex)
+	     ("port-output-buffer" :output generic-obuf) ("port-output-size" :output generic-osize)
+	     ("port-output-index" :output generic-oindex)))
+
+(defprim "chez:port-input-count" (port)
+  (let ((p (generic-port "port-input-count" :input port))) (- (generic-isize p) (generic-iindex p))))
+(defprim "chez:port-input-empty?" (port)
+  (let ((p (generic-port "port-input-empty?" :input port))) (bool (>= (generic-iindex p) (generic-isize p)))))
+
+(defun check-generic-index (who n limit)
+  (unless (and (integerp n) (<= 0 n limit))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "invalid index ~s" n)))
+
+(defprim "chez:set-port-input-index!" (port n)
+  (let ((p (generic-port "set-port-input-index!" :input port)))
+    (check-generic-index "set-port-input-index!" n (generic-isize p))
+    (setf (generic-iindex p) n)
+    ps:unspecific))
+(defprim "chez:set-port-input-size!" (port n)
+  (let ((p (generic-port "set-port-input-size!" :input port)))
+    (check-generic-index "set-port-input-size!" n (length (generic-ibuf p)))
+    (setf (generic-isize p) n (generic-iindex p) 0)
+    ps:unspecific))
+(defprim "chez:set-port-input-buffer!" (port buffer)
+  (let ((p (generic-port "set-port-input-buffer!" :input port)))
+    (check-generic-buffer "set-port-input-buffer!" buffer)
+    (setf (generic-ibuf p) buffer (generic-isize p) (length buffer) (generic-iindex p) 0)
+    ps:unspecific))
+(defprim "chez:set-port-output-index!" (port n)
+  (let ((p (generic-port "set-port-output-index!" :output port)))
+    (check-generic-index "set-port-output-index!" n (generic-osize p))
+    (setf (generic-oindex p) n)
+    ps:unspecific))
+(defprim "chez:set-port-output-size!" (port n)
+  (let ((p (generic-port "set-port-output-size!" :output port)))
+    (check-generic-index "set-port-output-size!" n (length (generic-obuf p)))
+    (setf (generic-osize p) n (generic-oindex p) 0)
+    ps:unspecific))
+(defprim "chez:set-port-output-buffer!" (port buffer)
+  (let ((p (generic-port "set-port-output-buffer!" :output port)))
+    (check-generic-buffer "set-port-output-buffer!" buffer)
+    (setf (generic-obuf p) buffer (generic-osize p) (length buffer) (generic-oindex p) 0)
+    ps:unspecific))
+
+(defprim "chez:mark-port-closed!" (port)
+  (if (typep port 'chez-generic-port)
+      (setf (generic-closed port) t)
+      (close port))
+  ps:unspecific)
+
+;;; block-read and block-write: a count of characters, straight to or
+;;; from the port (a generic port's handler does it)
+(defprim "chez:block-read" (port string count)
+  (if (typep port 'chez-generic-port)
+      (generic-message port "block-read" port string count)
+      (let ((n (loop for i below count
+		     for c = (read-char port nil :eof)
+		     until (eq c :eof)
+		     do (setf (char string i) c)
+		     finally (return i))))
+	(if (and (zerop n) (plusp count)) ps:eof-object n))))
+(defprim "chez:block-write" (port string count)
+  (if (typep port 'chez-generic-port)
+      (generic-message port "block-write" port string count)
+      (write-string string port :end count))
+  ps:unspecific)
+
+(defvar *chez-port-names* (make-hash-table :test 'eq :weakness :key :synchronized t))
+(defprim "chez:port-name" (port)
+  (cond ((nth-value 1 (gethash port *chez-port-names*)) (gethash port *chez-port-names*))
+	((typep port 'chez-generic-port) (generic-message port "port-name" port))
+	(t "")))
+(defprim "chez:set-port-name!" (port name)
+  (setf (gethash port *chez-port-names*) name)
+  ps:unspecific)
+
+;;; file-position and file-length on the ports that have them
+(defprim "chez:file-position" (port &optional (position nil position-p))
+  (cond ((typep port 'chez-generic-port)
+	 (if position-p
+	     (generic-message port "file-position" port position)
+	     (generic-message port "file-position" port)))
+	(position-p (funcall (prim "set-port-position!") port position))
+	(t (funcall (prim "port-position") port))))
+(defprim "chez:file-length" (port)
+  (if (typep port 'chez-generic-port)
+      (generic-message port "file-length" port)
+      (funcall (prim "chez:port-length") port)))

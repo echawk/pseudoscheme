@@ -76,6 +76,10 @@
   (or (eq a b) (and (consp a) (consp b) (eq (car a) (car b)) (eql (cdr a) (cdr b)))))
 
 (defun raise-chaperone-error (who what orig new)
+  ;; a box's or vector's chaperone says it differently
+  (when (string= what "result")
+    (racket-error who "chaperone produced a result that is not a chaperone of the original result~%  chaperone result: ~A~%  original result: ~A"
+		  (written new) (written orig)))
   (racket-error who "non-chaperone result; received a~A ~A that is not a chaperone of the original ~A~%  original: ~A~%  received: ~A"
 		(if (string= what "argument") "n" "") what what (written orig) (written new)))
 
@@ -429,9 +433,8 @@ numbers of arguments."
   "Whether TYPE's instances show their fields: made with inspector #f, or prefab."
   (or (eq (struct-type-inspector type) ps:false) (struct-type-prefab-key type)))
 
-(defnative "current-inspector" (&optional (i nil i-p)) (:leaf t)
-  (if i-p (progn (setq *current-inspector* i) *void*) *current-inspector*))
-(defnative "make-inspector" (&optional (superior *current-inspector*)) (:leaf t)
+;;; (current-inspector is a parameter: hash.lisp)
+(defnative "make-inspector" (&optional (superior (current-inspector*))) (:leaf t)
   (make-inspector* superior))
 (defnative "make-sibling-inspector" (&optional (inspector (current-inspector*))) (:leaf t)
   (make-inspector* (inspector-superior inspector)))

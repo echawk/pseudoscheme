@@ -122,3 +122,53 @@
       (if (null? ls)
           bv
           (begin (bytevector-s8-set! bv i (car ls)) (loop (+ i 1) (cdr ls)))))))
+
+;;; Generic ports (host.lisp): Chez's make-input-port and the like, with
+;;; the accessors of their buffers; the textual- names are the same here.
+(define make-input-port %chez:make-input-port)
+(define make-output-port %chez:make-output-port)
+(define make-input/output-port %chez:make-input/output-port)
+(define port-handler %chez:port-handler)
+(define port-input-buffer %chez:port-input-buffer)
+(define port-input-size %chez:port-input-size)
+(define port-input-index %chez:port-input-index)
+(define port-input-count %chez:port-input-count)
+(define port-input-empty? %chez:port-input-empty?)
+(define port-output-buffer %chez:port-output-buffer)
+(define port-output-size %chez:port-output-size)
+(define port-output-index %chez:port-output-index)
+(define set-port-input-index! %chez:set-port-input-index!)
+(define set-port-input-size! %chez:set-port-input-size!)
+(define set-port-input-buffer! %chez:set-port-input-buffer!)
+(define set-port-output-index! %chez:set-port-output-index!)
+(define set-port-output-size! %chez:set-port-output-size!)
+(define set-port-output-buffer! %chez:set-port-output-buffer!)
+(define mark-port-closed! %chez:mark-port-closed!)
+(define port-name %chez:port-name)
+(define set-port-name! %chez:set-port-name!)
+(define textual-port-input-buffer %chez:port-input-buffer)
+(define textual-port-input-size %chez:port-input-size)
+(define textual-port-input-index %chez:port-input-index)
+(define textual-port-input-count %chez:port-input-count)
+(define textual-port-output-buffer %chez:port-output-buffer)
+(define textual-port-output-size %chez:port-output-size)
+(define textual-port-output-index %chez:port-output-index)
+(define set-textual-port-input-index! %chez:set-port-input-index!)
+(define set-textual-port-input-size! %chez:set-port-input-size!)
+(define set-textual-port-input-buffer! %chez:set-port-input-buffer!)
+(define set-textual-port-output-index! %chez:set-port-output-index!)
+(define set-textual-port-output-size! %chez:set-port-output-size!)
+(define set-textual-port-output-buffer! %chez:set-port-output-buffer!)
+(define block-read
+  (case-lambda
+    ((p s) (%chez:block-read p s (string-length s)))
+    ((p s n) (%chez:block-read p s n))))
+(define block-write
+  (case-lambda
+    ((p s) (%chez:block-write p s (string-length s)))
+    ((p s n) (%chez:block-write p s n))))
+(define file-position
+  (case-lambda
+    ((p) (%chez:file-position p))
+    ((p pos) (%chez:file-position p pos))))
+(define file-length %chez:file-length)

@@ -69,6 +69,11 @@ and called KIND in messages: (values start end)."
 (defun case-folded (s)
   (fresh-string (unicode-call "CASEFOLD" #'string-downcase s)))
 
+(defun at-least-one (who args)
+  "ARGS, which Racket's variadic comparison WHO needs at least one of."
+  (when (null args) (racket-arity-error who 0 "at least 1"))
+  args)
+
 (defun string-chain (who test strings fold)
   (dolist (s strings) (check-string who s))
   (let ((strings (if fold (mapcar #'case-folded strings) strings)))
@@ -96,8 +101,8 @@ and called KIND in messages: (values start end)."
 (macrolet ((strings (&rest specs)
 	     `(progn
 		,@(loop for (name test fold) in specs
-			collect `(defnative ,name (a &rest more) (:leaf t)
-				   (string-chain ,name ,test (cons a more) ,fold))))))
+			collect `(defnative ,name (&rest args) (:leaf t)
+				   (string-chain ,name ,test (at-least-one ,name args) ,fold))))))
   (strings ("string=?" #'string= nil)
 	   ("string<?" #'string< nil)
 	   ("string>?" #'string> nil)
@@ -119,17 +124,20 @@ and called KIND in messages: (values start end)."
 (macrolet ((chars (&rest specs)
 	     `(progn
 		,@(loop for (name test) in specs
-			collect `(defnative ,name (a &rest more) (:leaf t)
-				   (char-chain ,name ,test (cons a more)))))))
+			collect `(defnative ,name (&rest args) (:leaf t)
+				   (char-chain ,name ,test (at-least-one ,name args)))))))
   (chars ("char-ci=?" #'char=)
 	 ("char-ci<?" #'char<)
 	 ("char-ci>?" #'char>)
 	 ("char-ci<=?" #'char<=)
 	 ("char-ci>=?" #'char>=)))
 
-(defnative "bytes<?" (a &rest more) (:leaf t) (bytes-chain "bytes<?" #'bytes-lessp (cons a more)))
-(defnative "bytes>?" (a &rest more) (:leaf t)
-  (bytes-chain "bytes>?" (lambda (x y) (bytes-lessp y x)) (cons a more)))
+(defnative "bytes<?" (&rest args) (:leaf t)
+  (bytes-chain "bytes<?" #'bytes-lessp (at-least-one "bytes<?" args)))
+(defnative "bytes>?" (&rest args) (:leaf t)
+  (bytes-chain "bytes>?" (lambda (x y) (bytes-lessp y x)) (at-least-one "bytes>?" args)))
+(defnative "bytes=?" (&rest args) (:leaf t)
+  (bytes-chain "bytes=?" #'equalp (at-least-one "bytes=?" args)))
 
 ;;; ------------------------------------------------------------------
 ;;; Copying and filling, with Racket's arities
