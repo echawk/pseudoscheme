@@ -377,7 +377,12 @@ circular, R7RS 2.4)."
 ;;;    the variable, not a direct one, unless the check is beside the
 ;;;    call ((begin check (v arg ...))), which is how a call is checked.
 ;;;    A body of procedure definitions and then expressions, the usual
-;;;    kind, gets no checks.
+;;;    kind, gets no checks.  A statement that is only a reference calls
+;;;    nothing; one whose value is a call of a procedure doesn't call the
+;;;    lambdas that procedure returns, which are the value, but a later
+;;;    statement calling the variable does: it reaches them, as the
+;;;    procedure's body (so (define red-edges (make-edge-getter ...))
+;;;    doesn't put checks in every edge getter).
 ;;;
 ;;;  - A letrec whose inits aren't all lambdas: a reference to one of its
 ;;;    variables in an init, in a procedure there included, checks a flag
@@ -392,6 +397,10 @@ circular, R7RS 2.4)."
 				(member (cadr s) vars)))
 	   (flag-for (v) (sym (format nil "~A%defined" (ps:scheme-symbol-name v))))
 	   (check (flag v) `(,(sym "%letrec-check") ,flag ,v (,(sym "quote") ,v)))
+	   ;; a check before a call or assignment of V, which needs no value
+	   ;; of V: one that mentioned V would let V escape, so that the
+	   ;; continuation transformation couldn't know V's calls
+	   (check-only (flag v) `(,(sym "%letrec-check") ,flag (,(sym "quote") ,ps:false) (,(sym "quote") ,v)))
 	   (mentioned (e table)
 	     ;; the variables of TABLE (a hash set) E mentions
 	     (let ((found '()))
@@ -404,6 +413,18 @@ circular, R7RS 2.4)."
 					 while (consp (cdr x)))))))
 		 (scan e))
 	       found))
+	   (mentioned-but-returned-lambdas (lam table)
+	     ;; the variables of TABLE that lambda LAM's body mentions,
+	     ;; except in the lambdas it returns (in tail position)
+	     (labels ((tail (e)
+			(cond ((lambda-p e) '())
+			      ((and (consp e) (keyword-p (car e) "IF") (consp (cdr e)) (consp (cddr e)))
+			       (union (mentioned (cadr e) table)
+				      (union (tail (caddr e)) (if (cdddr e) (tail (cadddr e)) '()))))
+			      ((and (consp e) (keyword-p (car e) "BEGIN") (cdr e))
+			       (union (mentioned (butlast (cdr e)) table) (tail (car (last e)))))
+			      (t (mentioned e table)))))
+	       (tail (caddr lam))))
 	   (guard-references (e flags)
 	     ;; E with each reference to and assignment of a variable of
 	     ;; FLAGS, ((v . flag) ...), checking its flag; a call of one
@@ -413,10 +434,10 @@ circular, R7RS 2.4)."
 		   ((atom e) e)
 		   ((quote-p e) e)
 		   ((and (symbolp (car e)) (assoc (car e) flags))
-		    `(,(sym "begin") ,(check (cdr (assoc (car e) flags)) (car e))
+		    `(,(sym "begin") ,(check-only (cdr (assoc (car e) flags)) (car e))
 		      (,(car e) ,@(guard-list (cdr e) flags))))
 		   ((and (keyword-p (car e) "SET!") (consp (cdr e)) (assoc (cadr e) flags))
-		    `(,(sym "begin") ,(check (cdr (assoc (cadr e) flags)) (cadr e))
+		    `(,(sym "begin") ,(check-only (cdr (assoc (cadr e) flags)) (cadr e))
 		      (,(car e) ,(cadr e) ,@(guard-list (cddr e) flags))))
 		   ((and (keyword-p (car e) "LAMBDA") (consp (cdr e)))
 		    `(,(car e) ,(cadr e) ,@(guard-list (cddr e) flags)))
@@ -449,12 +470,20 @@ circular, R7RS 2.4)."
 		   (let ((table (make-hash-table :test 'eq))
 			 (index (make-hash-table :test 'eq))	; v -> where it's defined
 			 (lambdas (make-hash-table :test 'eq))	; v -> its lambda, if it's defined by one
+			 (made-by (make-hash-table :test 'eq))	; v -> p, if v is defined as (p arg ...), p a lambda's
 			 (danger (make-hash-table :test 'eql)))	; procedure v or statement j -> vars to check there
 		     (dolist (v vars) (setf (gethash v table) t))
 		     (loop for s in statements for j from 0
 			   do (when (and (set-p s vars) (not (gethash (cadr s) index)))
 				(setf (gethash (cadr s) index) j)
 				(when (lambda-p (caddr s)) (setf (gethash (cadr s) lambdas) (caddr s)))))
+		     ;; a variable whose value a procedure made: the lambdas it
+		     ;; returned are that value, and run when the variable is called
+		     (loop for s in statements for j from 0
+			   do (when (and (set-p s vars) (eql (gethash (cadr s) index) j)
+					 (consp (caddr s)) (symbolp (car (caddr s)))
+					 (gethash (car (caddr s)) lambdas))
+				(setf (gethash (cadr s) made-by) (car (caddr s)))))
 		     (flet ((undefined-at (v j)
 			      ;; is V not yet defined while statement J (not a
 			      ;; lambda definition) runs?
@@ -474,16 +503,34 @@ circular, R7RS 2.4)."
 								   (cons (cadr s) refs)
 								   refs))))
 				      (when here (setf (gethash j danger) here)))
-				    ;; the procedures it can reach
-				    (let ((seen '()) (stack (copy-list refs)))
+				    ;; the procedures it can reach: none if it's only a
+				    ;; reference ((define x y) calls nothing).  If its
+				    ;; value is a call of a procedure, the lambdas that
+				    ;; procedure returns are the value, not called
+				    ;; (make-edge-getter in conform's
+				    ;; (define red-edges (make-edge-getter ...))).
+				    (let* ((value-call (and definition (consp code) (symbolp (car code))
+							    (gethash (car code) lambdas)
+							    ;; and nowhere else in the statement
+							    (not (member (car code) (mentioned (cdr code) table)))
+							    (car code)))
+					   (seen '())
+					   (stack (if (symbolp code) '() (copy-list refs))))
 				      (loop while stack
-					    do (let ((p (pop stack)))
-						 (unless (or (member p seen) (not (gethash p lambdas)))
+					    do (let* ((p (pop stack))
+						      ;; calling a variable a procedure made calls
+						      ;; the lambdas that procedure returned: in
+						      ;; its body, which is checked if need be
+						      (maker (and (not (gethash p lambdas)) (gethash p made-by))))
+						 (unless (or (member p seen) (not (or (gethash p lambdas) maker)))
 						   (push p seen)
-						   (let ((body-refs (mentioned (caddr (gethash p lambdas)) table)))
+						   (let* ((proc (or maker p))
+							  (body-refs (if (eq p value-call)
+									 (mentioned-but-returned-lambdas (gethash p lambdas) table)
+									 (mentioned (caddr (gethash proc lambdas)) table))))
 						     (dolist (v body-refs)
 						       (when (undefined-at v j)
-							 (pushnew v (gethash p danger))))
+							 (pushnew v (gethash proc danger))))
 						     (setq stack (append body-refs stack)))))))))))
 		     (let ((checked '()))
 		       (maphash (lambda (k vs)
