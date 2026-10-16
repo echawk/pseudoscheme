@@ -1281,11 +1281,32 @@ returns NIL if there is no such library.")
 	    ((and *c-extension-loader* (funcall *c-extension-loader* library init))
 	     (return-from load-extension *unspecified*)))
       (fill-unbound-exports init)
+      (when (string= init "scm_init_ice_9_ports") (share-root-variables *current-module*))
       ;; (rnrs bytevectors)'s mutators refuse read-only bytevectors
       (dolist (name +bytevector-mutators+)
 	(let ((v (module-local-variable* *current-module* (ssym name))))
 	  (when v (wrap-bytevector-mutator v name))))
       *unspecified*)))
+
+(defun share-root-variables (module)
+  "Make MODULE's variables of the names the root module binds, the root's
+variables, as in Guile, whose C code defines them once.  (ice-9 ports)
+that defined its own made a module that imported it, (scheme base),
+warn that it overrode core bindings, which only differing variables do."
+  (let ((shared '()))
+    (funcall (root-value "module-for-each")
+	     (lambda (name variable)
+	       (let ((root (obarray-variable name)))
+		 (when (and root (not (eq root variable))
+			    (not (eq (gvariable-value root) +unbound+)))
+		   (push (cons name root) shared))))
+	     module)
+    (let ((interface (module-public-interface* module)))
+      (loop for (name . root) in shared
+	    do (funcall (root-value "module-add!") module name root)
+	       ;; the exports were made already, holding the old variables
+	       (when (and interface (funcall (root-value "module-local-variable") interface name))
+		 (funcall (root-value "module-add!") interface name root))))))
 
 (defvar *extension-primitives* (make-hash-table :test 'equal)
   "Procedures of Guile's C extensions that aren't in the root module:

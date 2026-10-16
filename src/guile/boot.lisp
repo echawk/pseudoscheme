@@ -136,6 +136,47 @@ an imported one, else its binder's.  MODULE :root is (guile)."
 push-fluid, ...), which are Pseudoscheme's own procedures instead: the
 name, and a function returning the replacement.")
 
+(defparameter *boot-wrappers*
+  '(("map" . fast-map-wrapper)
+    ("for-each" . fast-for-each-wrapper))
+  "Procedures boot-9 defines in Scheme that get a fast path: the name, and
+a function of boot-9's procedure making the one to bind.")
+
+(defun proper-list-p (x)
+  "Is X a finite list ending in ()?"
+  (let ((slow x))
+    (loop
+      (when (null x) (return t))
+      (unless (consp x) (return nil))
+      (setq x (cdr x))
+      (when (null x) (return t))
+      (unless (consp x) (return nil))
+      (setq x (cdr x) slow (cdr slow))
+      (when (eq x slow) (return nil)))))
+
+(defun fast-list-procedure-wrapper (original host-name)
+  "Guile's ORIGINAL map or for-each (boot-9's, in Scheme, which checks its
+lists for being proper and not circular as it goes) with the host's
+procedure HOST-NAME (frame-aware, in order, re-entrant) for one or two
+proper lists (of one length) and a procedure, which is the same and several times faster.
+Anything else, and so every error, is the original's."
+  (let ((host nil))
+    (lambda (f list &rest more)
+      (if (and (functionp f) (proper-list-p list)
+	       (or (null more) (and (null (cdr more)) (proper-list-p (car more))
+				   (= (length list) (length (car more))))))
+	  (apply (or host (setq host (host-procedure host-name))) f list more)
+	  (apply original f list more)))))
+
+(defun fast-map-wrapper (original) (fast-list-procedure-wrapper original "map"))
+
+(defun fast-for-each-wrapper (original)
+  (let ((fast (fast-list-procedure-wrapper original "for-each")))
+    (lambda (f list &rest more)
+      (let ((value (apply fast f list more)))
+	(declare (ignore value))
+	*unspecified*))))
+
 (defun host-procedure (name)
   "The host's procedure NAME, or with full continuations its frame-aware
 version (src/continuations.lisp)."
@@ -181,7 +222,9 @@ version (src/continuations.lisp)."
     (when root
       ;; before the module system: boot-9's own definitions
       (let ((override (cdr (assoc (ps:scheme-symbol-name name) *boot-overrides* :test #'string=))))
-	(when override (setq value (funcall override)))))
+	(when override (setq value (funcall override)))
+	(let ((wrapper (cdr (assoc (ps:scheme-symbol-name name) *boot-wrappers* :test #'string=))))
+	  (when (and wrapper (functionp value)) (setq value (funcall wrapper value))))))
     ;; named after its definition, unless it's a primitive, which has its
     ;; own name ((define module-gensym gensym) doesn't rename gensym)
     (when (and (functionp value) (not (gethash value *procedure-properties*))

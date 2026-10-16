@@ -545,6 +545,46 @@ and `suspendable-ports` (514 pass: a port's buffers are Guile's own
 | stack overflow handlers | a limit in words | the control stack's own limit |
 | recursion depth | memory | the control stack: 500 MB in the main thread (as run by the tests), 256 MB in a thread Guile makes |
 
+### Speed
+
+A program file given to `--guile` is read and evaluated form by form in
+`(guile-user)`: psyntax (Guile's own) expands each form to Tree-IL, which
+compile.lisp turns to core Scheme and SBCL compiles to native code. Guile's
+evaluator, its compiler to bytecode and the VM are not involved; the VM runs
+only `.go` files that are loaded.
+
+What the native code costs, against `--r7rs` on the same program (the
+r7rs-benchmarks, `bench/run.sh pseudoscheme-guile`):
+
+- **Top-level references.** A call of a top-level procedure, `(fib ...)`,
+  reads its variable each time (a *site*, cached after the first lookup;
+  inline in the caller), because Guile lets any module variable be
+  redefined; `--r7rs` calls a procedure it has just defined directly. A call
+  through a variable is also a point where a continuation may be captured, so
+  it gets a frame, which a known procedure that can't capture doesn't.
+- **Root primitives.** Guile's compiler turns `(+ a b)`, `(car x)`, `(< a b)`
+  and the like, when the name is the `(guile)` module's variable, into
+  primcalls (its `resolve-primitives` pass), which are open-coded. The native
+  compiler does the same (`*RESOLVABLE-PRIMITIVES*` in compile.lisp), at
+  compile time and by variable, as Guile does, so a module that defines its
+  own `+` keeps it. Before this every `+` and `<` was a call of a
+  rest-argument procedure, which made fib 20 times slower than it need be.
+  Comparisons and `-` of two arguments go through helpers (`%guile-<` and so
+  on) with a fixnum case inlined by a compiler macro, and a wrong type is
+  Guile's error from the root procedure.
+- **`map` and `for-each`** are boot-9's, in Scheme, checking the list for
+  circularity as they go. A procedure and one or two proper lists of one
+  length (so every error but not the common case) go to the host's
+  frame-aware `map`, which is in order and re-entrant, 4 to 5 times faster.
+- **Allocation, GC and the rest** are those of every mode.
+
+What remains is the top-level call: `fib`, `tak` and the like run 3 to 5
+times slower than `--r7rs`. Closing that needs the continuation
+transformation (src/continuations.lisp) to treat a procedure's calls of its
+own name as safe when the rest of the body can't capture, as it does a known
+local, which assumes that the definition isn't replaced by something that
+captures.
+
 ### Emacs Lisp
 
 Guile's elisp front end (`language/elisp/`) runs unmodified. It compiles

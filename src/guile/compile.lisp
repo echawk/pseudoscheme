@@ -123,7 +123,7 @@ a later definition first (boot.lisp's EVAL-LOAD-FORM).")
     (funcall *unbound-variable-hook* name module))
   (guile-error (ssym "unbound-variable") ps:false "Unbound variable: ~S" (list name) ps:false))
 
-(defun site-ref (site)
+(defun site-ref-slowly (site)
   (let ((v (or (site-variable site)
 	       (let ((v (site-lookup site)))
 		 (unless v (signal-unbound-variable (site-name site) (and (eq (site-kind site) :toplevel) (site-module site))))
@@ -131,6 +131,17 @@ a later definition first (boot.lisp's EVAL-LOAD-FORM).")
     (let ((x (gvariable-value v)))
       (when (eq x +unbound+) (signal-unbound-variable (site-name site) (and (eq (site-kind site) :toplevel) (site-module site))))
       x)))
+
+(declaim (inline site-ref))
+(defun site-ref (site)
+  ;; the fast path of every top-level reference: the variable found
+  ;; already, and bound
+  (declare (optimize speed (safety 0)) (type site site))
+  (let ((v (site-variable site)))
+    (if v
+	(let ((x (gvariable-value (the gvariable v))))
+	  (if (eq x +unbound+) (site-ref-slowly site) x))
+	(site-ref-slowly site))))
 
 (defun site-set (site value)
   (let ((v (or (site-variable site)
@@ -251,6 +262,61 @@ references to these."
   "A reference to NAME in the (guile) module."
   (list (core "%guile-ref") (quoted (make-site :root name nil :toplevel))))
 
+;;; Calls of the root module's primitives by name: Guile's resolve-primitives
+;;; pass turns (+ a b), where + is the (guile) module's variable, into a
+;;; primcall; Pseudoscheme's native compiler doesn't run that pass, so this
+;;; does the same for the hot ones.  Without it every + goes through
+;;; %guile-ref and a generic, rest-argument procedure.  As Guile's, it is
+;;; decided when the call is compiled: the module's variable is the root
+;;; module's then, and not a later redefinition's.
+
+(defparameter *resolvable-primitives*
+  '(("+" 0 nil) ("*" 0 nil) ("-" 1 2) ("<" 2 2) (">" 2 2) ("<=" 2 2) (">=" 2 2) ("=" 2 2)
+    ("car" 1 1) ("cdr" 1 1) ("cadr" 1 1) ("cddr" 1 1) ("caar" 1 1) ("cdar" 1 1) ("caddr" 1 1)
+    ("cdddr" 1 1) ("cadddr" 1 1) ("pair?" 1 1) ("vector?" 1 1) ("string?" 1 1)
+    ("procedure?" 1 1) ("char?" 1 1) ("number?" 1 1) ("integer?" 1 1) ("zero?" 1 1)
+    ("null?" 1 1) ("not" 1 1) ("vector-length" 1 1) ("string-length" 1 1)
+    ("cons" 2 2) ("eq?" 2 2) ("eqv?" 2 2) ("vector-ref" 2 2) ("string-ref" 2 2)
+    ("set-car!" 2 2) ("set-cdr!" 2 2) ("char=?" 2 2) ("vector-set!" 3 3))
+  "Root primitives a call of which is made a primcall, with their numbers of
+arguments allowed: the others stay calls of the variable.  Not boolean?,
+which the host's has #f for #nil.")
+
+(defvar *resolve-primitives* t
+  "Whether calls of the root module's primitives compile to primcalls.")
+
+(defun resolved-primitive (f args)
+  "The name (a symbol) of the root primitive that the call (F . ARGS)
+calls, if F is a reference to the root module's variable of a primitive in
+*RESOLVABLE-PRIMITIVES* and ARGS fit it; else NIL."
+  (when (and *resolve-primitives* (eq (node-type f) :toplevel-ref))
+    (let* ((name (node-field f 2))
+	   (entry (and (ps:scheme-symbol-p name)
+		       (assoc (ps:scheme-symbol-name name) *resolvable-primitives* :test #'string=))))
+      (when entry
+	(let ((n (length args)))
+	  (when (and (>= n (second entry)) (or (null (third entry)) (<= n (third entry)))
+		     (not (goops-generic-primitive-p (car entry))))
+	    (let ((root (obarray-variable name))
+		  (module (node-module f)))
+	      (and root (not (eq module :root)) (module-p* module)
+		   (eq root (module-variable* module name))
+		   name))))))))
+
+(defun compile-resolved-primitive (name args)
+  (let ((string (ps:scheme-symbol-name name)))
+    (if (and (string= string "-") (= (length args) 2)
+	     (not (and (eq (node-type (second args)) :const) (rationalp (node-field (second args) 1)))))
+	;; exact 0 minus a flonum zero is -0.0 in Guile's (see "-" in runtime.lisp)
+	(list (core "%guile-sub2") (compile-tree-il (first args)) (compile-tree-il (second args)))
+	(let ((helper (cdr (assoc string '(("<" . "%guile-<") (">" . "%guile->") ("<=" . "%guile-<=")
+					   (">=" . "%guile->=") ("=" . "%guile-=")
+					   ("null?" . "%guile-null?") ("not" . "%guile-not"))
+				  :test #'string=))))
+	  ;; the comparisons report a wrong type as Guile's do: the root
+	  ;; procedure's, after the fixnum case
+	  (cons (core (or helper string)) (mapcar #'compile-tree-il args))))))
+
 (defun compile-tree-il (x)
   (ecase (node-type x)
     (:void (quoted *unspecified*))
@@ -295,7 +361,10 @@ references to these."
      (list (core "if") (compile-test (node-field x 1)) (compile-tree-il (node-field x 2))
 	   (compile-tree-il (node-field x 3))))
     (:call (let* ((f (node-field x 1)) (args (node-field x 2))
+		  (resolved (resolved-primitive f args))
 		  (body (inline-body-position f (length args))))
+	     (when resolved
+	       (return-from compile-tree-il (compile-resolved-primitive resolved args)))
 	     ;; a prompt's or fluid binding's body: inline in Guile
 	     (cons (compile-tree-il f)
 		   (loop for a in args for i from 0
@@ -697,6 +766,22 @@ proved safe, defined in a declarative module."
   (setq psx::*definition-operators* '("%guile-define!")
 	psx::*safe-operator-hook* 'safe-operator-form-p)
   (psx:defhost "%guile-ref" (site) (site-ref site))
+  (psx:defhost "%guile-sub2" (x y)
+    (if (and (typep x 'fixnum) (typep y 'fixnum))
+	(- x y)
+	(funcall (root-value "-") x y)))
+  (macrolet ((comparisons (&rest pairs)
+	       `(progn
+		  ,@(loop for (name test) in pairs
+			  collect `(psx:defhost ,(format nil "%guile-~A" name) (x y)
+				     (if (and (typep x 'fixnum) (typep y 'fixnum))
+					 (bool (,test x y))
+					 (funcall (root-value ,name) x y)))))))
+    (comparisons ("<" <) (">" >) ("<=" <=) (">=" >=) ("=" =)))
+  ;; null? and not, for which Emacs Lisp's nil, #nil, counts as the empty
+  ;; list and as false
+  (psx:defhost "%guile-null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
+  (psx:defhost "%guile-not" (x) (bool (or (eq x ps:false) (eq x *elisp-nil*))))
   (psx:defhost "%guile-true" (x) (if (eq x *elisp-nil*) ps:false x))
   (psx:defhost "%guile-set!" (site value) (site-set site value))
   (psx:defhost "%guile-define!" (module name value) (define-in-module module name value))
@@ -745,11 +830,52 @@ proved safe, defined in a declarative module."
 			  (setq tail (cddr tail)))
 		   (setq tail (cdr tail))))
       value))
+  (install-guile-inline-primitives)
   (psx::register-primitive-names
-   '("%guile-ref" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
+   '("%guile-ref" "%guile-sub2" "%guile-<" "%guile->" "%guile-<=" "%guile->=" "%guile-=" "%guile-null?" "%guile-not" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
      "%guile-with-meta" "%guile-inline"
      "%guile-nargs>=" "%guile-nargs-between" "%guile-keywords-fit?" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
+
+;;; Inline code for the hottest of those helpers.  The host calls a
+;;; primitive out of line; as src/psyntax.lisp's *INLINE-PRIMITIVES* do, a
+;;; compiler macro on the host global's function puts the common case in
+;;; the caller (a fixnum comparison, a top-level variable already found
+;;; and bound) and calls the function otherwise, for its error or its
+;;; lookup.  Without them a call of fib costs several full calls.
+
+(defparameter *guile-inline-primitives*
+  `(("%guile-ref" (s)
+     (let ((v (site-variable (sb-ext:truly-the site s))))
+       (if v
+	   (let ((value (gvariable-value (sb-ext:truly-the gvariable v))))
+	     (if (eq value +unbound+) :call value))
+	   :call)))
+    ("%guile-sub2" (x y)
+     (if (and (typep x 'fixnum) (typep y 'fixnum)) (- x y) :call))
+    ,@(loop for (name test) in '(("<" <) (">" >) ("<=" <=) (">=" >=) ("=" =))
+	    collect `(,(format nil "%guile-~A" name) (x y)
+		      (if (and (typep x 'fixnum) (typep y 'fixnum)) (bool (,test x y)) :call)))
+    ("%guile-null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
+    ("%guile-not" (x) (bool (or (eq x ps:false) (eq x *elisp-nil*))))
+    ("%guile-true" (x) (if (eq x *elisp-nil*) ps:false x)))
+  "(name lambda-list body), as in PSX::*INLINE-PRIMITIVES*.")
+
+(defun install-guile-inline-primitives ()
+  (loop for (name params body) in *guile-inline-primitives*
+	for global = (psx:location (ssym name))
+	do (let ((global global) (params params) (body body))
+	     (setf (compiler-macro-function global)
+		   (lambda (form env)
+		     (declare (ignore env))
+		     (let ((args (if (eq (car form) 'funcall) (cddr form) (cdr form))))
+		       (if (or (eq (car form) 'funcall) (/= (length args) (length params)))
+			   form		; the call in the slow path, or another arity
+			   (let ((vars (mapcar (lambda (p) (gensym (symbol-name p))) params)))
+			     `(let ,(mapcar #'list vars args)
+				,(sublis (acons :call `(funcall #',global ,@vars)
+						(mapcar #'cons params vars))
+					 body))))))))))
 
 (defun nthcdr-p (list n)
   "Whether LIST has at least N elements."
