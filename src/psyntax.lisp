@@ -384,7 +384,8 @@ circular, R7RS 2.4)."
 ;;;    procedure's body (so (define red-edges (make-edge-getter ...))
 ;;;    doesn't put checks in every edge getter).
 ;;;
-;;;  - A letrec whose inits aren't all lambdas: a reference to one of its
+;;;  - A letrec with an init that runs code (not a lambda, constant or
+;;;    variable) or is one of its variables: a reference to one of its
 ;;;    variables in an init, in a procedure there included, checks a flag
 ;;;    set once all of them have been evaluated.
 
@@ -559,7 +560,14 @@ circular, R7RS 2.4)."
 	   (letrec-checked (e)
 	     (when (and (keyword-p (car e) "LETREC") (consp (cdr e)) (listp (cadr e)) (cadr e)
 			(every (lambda (b) (and (consp b) (consp (cdr b)))) (cadr e))
-			(notevery (lambda (b) (lambda-p (cadr b))) (cadr e)))
+			;; an init can reach a variable before all are defined
+			;; only if it runs code (a call, say) or is one of them;
+			;; lambdas, constants and other variables run nothing
+			(some (lambda (b)
+				(let ((init (cadr b)))
+				  (not (or (lambda-p init) (quote-p init)
+					   (and (atom init) (not (and (symbolp init) (assoc init (cadr e)))))))))
+			      (cadr e)))
 	       (let* ((vars (mapcar #'car (cadr e)))
 		      (table (let ((h (make-hash-table :test 'eq))) (dolist (v vars h) (setf (gethash v h) t))))
 		      (flag (flag-for (car vars)))

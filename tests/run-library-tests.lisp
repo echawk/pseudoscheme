@@ -147,6 +147,15 @@ program after them, through psyntax; return the program's last value."
 (deftest "letrec*: a closure a procedure made, called once defined" (r7)
   "(import (scheme base)) (let () (define (mk) (lambda (n) (eq? n x))) (define g (mk)) (define x 1) (g 1))"
   "#t")
+(deftest "letrec: lambdas and constants, no check needed" (r7)
+  "(import (scheme base)) (letrec ((f (lambda () x)) (x 5)) (f))"
+  "5")
+(deftest "letrec: an init that calls a procedure referring to a variable not yet defined" (r7)
+  "(import (scheme base)) (letrec ((f (lambda () x)) (y (f)) (x 5)) y)"
+  :error)
+(deftest "letrec: an init that is another of its variables" (r7)
+  "(import (scheme base)) (letrec ((a b) (b 1)) a)"
+  :error)
 (deftest "letrec*: called once everything is defined" (r7)
   "(import (scheme base)) (let () (define (f) (k x)) (define (k z) z) (define x 1) (define y (f)) y)"
   "1")
