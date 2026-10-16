@@ -203,7 +203,7 @@
 			     (:file "ftype" :depends-on ("host"))
 			     (:static-file "chezscheme.scm") (:static-file "ffi.scm") (:static-file "lists.scm")
 			     (:static-file "syntax.scm") (:static-file "extend-syntax.sls")
-			     (:static-file "ftype.scm") (:static-file "ftype-helpers.sls")
+			     (:static-file "ftype.scm") (:static-file "ftype-helpers.sls") (:static-file "system.scm") (:static-file "more.scm")
 			     (:static-file "numbers.scm") (:static-file "hashtables.scm")
 			     (:static-file "threads.scm") (:static-file "conditions.scm")
 			     (:static-file "top-level.scm")))

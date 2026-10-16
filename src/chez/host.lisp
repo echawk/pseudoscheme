@@ -867,8 +867,10 @@ nothing is ready.")
 
 ;;; Stencil vectors (ps:stencil-vector, src/core.lisp)
 
+(defstruct (system-stencil-vector (:include ps:stencil-vector)))
+
 (defun check-stencil-vector (who x)
-  (unless (ps:stencil-vector-p x)
+  (unless (and (ps:stencil-vector-p x) (not (system-stencil-vector-p x)))
     (ps:scheme-error "~A: ~S is not a stencil vector" who x))
   x)
 
@@ -880,7 +882,7 @@ nothing is ready.")
 (defprim "chez:stencil-vector" (mask &rest elements)
   (ps:make-stencil-vector mask elements))
 
-(defprim "chez:stencil-vector?" (x) (ps:true? (ps:stencil-vector-p x)))
+(defprim "chez:stencil-vector?" (x) (bool (and (ps:stencil-vector-p x) (not (system-stencil-vector-p x)))))
 
 (defprim "chez:stencil-vector-mask" (sv)
   (ps:stencil-vector-mask (check-stencil-vector "stencil-vector-mask" sv)))
@@ -899,30 +901,38 @@ nothing is ready.")
 
 (defprim "chez:stencil-vector-mask-width" () ps:stencil-vector-mask-width)
 
-(defprim "chez:stencil-vector-update" (sv remove add &rest new)
-  (check-stencil-vector "stencil-vector-update" sv)
+(defun stencil-vector-updated (who sv remove add new make)
+  "SV without the elements of the bits REMOVE and with those of ADD,
+NEW, as MAKE (of a mask and a list of elements) makes it."
   (let* ((mask (ps:stencil-vector-mask sv))
 	 (kept (logandc2 mask remove)))
     (unless (and (integerp remove) (integerp add) (>= remove 0) (>= add 0)
 		 (= (logand mask remove) remove)
 		 (zerop (logand kept add))
 		 (= (logcount add) (length new)))
-      (ps:scheme-error "stencil-vector-update: invalid masks ~S and ~S for ~S" remove add sv))
+      (ps:scheme-error "~A: invalid masks ~S and ~S for ~S" who remove add sv))
     (let ((old (ps:stencil-vector-elements sv)) (oi 0) (out '()))
       (loop for bit from 0 below ps:stencil-vector-mask-width
 	    do (cond ((logbitp bit add) (push (pop new) out))
 		     ((logbitp bit kept) (push (svref old oi) out)))
 	       (when (logbitp bit mask) (incf oi)))
-      (ps:make-stencil-vector (logior kept add) (nreverse out)))))
+      (funcall make (logior kept add) (nreverse out)))))
 
-(defprim "chez:stencil-vector-truncate!" (sv mask)
-  (check-stencil-vector "stencil-vector-truncate!" sv)
+(defun stencil-vector-truncated (who sv mask)
   (let ((old (ps:stencil-vector-elements sv)))
     (unless (and (integerp mask) (>= mask 0) (<= (logcount mask) (length old)))
-      (ps:scheme-error "stencil-vector-truncate!: invalid mask ~S for ~S" mask sv))
+      (ps:scheme-error "~A: invalid mask ~S for ~S" who mask sv))
     (setf (ps:stencil-vector-elements sv) (subseq old 0 (logcount mask))
 	  (ps:stencil-vector-mask sv) mask)
     ps:unspecific))
+
+(defprim "chez:stencil-vector-update" (sv remove add &rest new)
+  (check-stencil-vector "stencil-vector-update" sv)
+  (stencil-vector-updated "stencil-vector-update" sv remove add new #'ps:make-stencil-vector))
+
+(defprim "chez:stencil-vector-truncate!" (sv mask)
+  (check-stencil-vector "stencil-vector-truncate!" sv)
+  (stencil-vector-truncated "stencil-vector-truncate!" sv mask))
 
 ;;; ------------------------------------------------------------------
 ;;; For format (src/chez/format.scm, Chez Scheme's own): its column-
@@ -1775,3 +1785,369 @@ reaches it goes to the invoker.")
 (defprim "chez:library-id" (name)
   (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
     (if (consp spec) (first spec) ps:false)))
+
+;;; ------------------------------------------------------------------
+;;; Chez's system procedures, which Racket CS's rumble layer uses
+;;; (src/chez/system.scm names them $name, for #%$name).  Upstream Chez
+;;; has them all; docs/racket.md, "The Chez fork's additions".
+
+;;; Records
+
+(defprim "chez:sys-record?" (x) (bool (record-p x)))
+
+(defprim "chez:sys-record-type-field-count" (rtd)
+  (check-rtd "$record-type-field-count" rtd)
+  (rtd-count rtd))
+
+(defprim "chez:sys-record-cas!" (x i old new)
+  (unless (record-p x) (ps:scheme-error "$record-cas!: ~S is not a record" x))
+  (let ((fields (record-values x)))
+    (unless (and (typep i 'fixnum) (< -1 i (length fields)))
+      (ps:scheme-error "$record-cas!: invalid index ~S for ~S" i x))
+    (bool (eq (sb-ext:compare-and-swap (svref fields i) old new) old))))
+
+(defprim "chez:sys-sealed-record?" (x rtd)
+  (check-rtd "$sealed-record?" rtd)
+  (bool (and (record-p x) (eq (record-rtd x) rtd))))
+
+(defvar *act-sealed* (make-hash-table :test 'eq :weakness :key :synchronized t))
+
+(defprim "chez:sys-record-type-act-sealed?" (rtd)
+  (check-rtd "$record-type-act-sealed?" rtd)
+  (bool (gethash rtd *act-sealed*)))
+
+(defprim "chez:sys-record-type-act-sealed!" (rtd)
+  (check-rtd "$record-type-act-sealed!" rtd)
+  (setf (gethash rtd *act-sealed*) t)
+  ps:unspecific)
+
+;;; Stencil vectors of both kinds: $-names work on either, and
+;;; $system-stencil-vector ones on the system's own only
+
+(defun any-stencil-vector (who x)
+  (unless (ps:stencil-vector-p x) (ps:scheme-error "~A: ~S is not a stencil vector" who x))
+  x)
+
+(defun make-system-stencil (mask elements)
+  (unless (and (integerp mask) (<= 0 mask) (< mask (ash 1 ps:stencil-vector-mask-width))
+	       (= (logcount mask) (length elements)))
+    (ps:scheme-error "$system-stencil-vector: invalid mask ~S for ~D elements" mask (length elements)))
+  (make-system-stencil-vector :mask mask :elements (coerce elements 'simple-vector)))
+
+(defprim "chez:sys-stencil-vector?" (x) (bool (ps:stencil-vector-p x)))
+(defprim "chez:sys-system-stencil-vector?" (x) (bool (system-stencil-vector-p x)))
+(defprim "chez:sys-system-stencil-vector" (mask &rest elements) (make-system-stencil mask elements))
+(defprim "chez:sys-stencil-vector-mask" (sv)
+  (ps:stencil-vector-mask (any-stencil-vector "$stencil-vector-mask" sv)))
+(defprim "chez:sys-stencil-vector-length" (sv)
+  (length (ps:stencil-vector-elements (any-stencil-vector "$stencil-vector-length" sv))))
+(defprim "chez:sys-stencil-vector-ref" (sv i)
+  (any-stencil-vector "$stencil-vector-ref" sv)
+  (svref (ps:stencil-vector-elements sv) (stencil-vector-index "$stencil-vector-ref" sv i)))
+(defprim "chez:sys-stencil-vector-set!" (sv i x)
+  (any-stencil-vector "$stencil-vector-set!" sv)
+  (setf (svref (ps:stencil-vector-elements sv) (stencil-vector-index "$stencil-vector-set!" sv i)) x)
+  ps:unspecific)
+(defprim "chez:sys-system-stencil-vector-update" (sv remove add &rest new)
+  (unless (system-stencil-vector-p sv)
+    (ps:scheme-error "$system-stencil-vector-update: ~S is not a system stencil vector" sv))
+  (stencil-vector-updated "$system-stencil-vector-update" sv remove add new #'make-system-stencil))
+(defprim "chez:sys-system-stencil-vector-truncate!" (sv mask)
+  (unless (system-stencil-vector-p sv)
+    (ps:scheme-error "$system-stencil-vector-truncate!: ~S is not a system stencil vector" sv))
+  (stencil-vector-truncated "$system-stencil-vector-truncate!" sv mask))
+
+;;; Immutability, and the checks inline vector operations make
+
+(defprim "chez:sys-vector-set-immutable!" (v)
+  (check-vector "$vector-set-immutable!" v)
+  (mark-immutable v)
+  ps:unspecific)
+(defprim "chez:sys-string-set-immutable!" (s)
+  (unless (stringp s)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "$string-set-immutable!") "~s is not a string" s))
+  (when (typep s '(simple-array * (*))) (mark-immutable s))
+  ps:unspecific)
+(defprim "chez:sys-bytevector-set-immutable!" (bv)
+  (unless (typep bv '(simple-array (unsigned-byte 8) (*)))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "$bytevector-set-immutable!") "~s is not a bytevector" bv))
+  (mark-immutable bv)
+  ps:unspecific)
+(defprim "chez:sys-vector-ref-check?" (v i)
+  (bool (and (simple-vector-p v) (typep i 'fixnum) (< -1 i (length v)))))
+(defprim "chez:sys-vector-set!-check?" (v i)
+  (bool (and (simple-vector-p v) (not (immutable-p v)) (typep i 'fixnum) (< -1 i (length v)))))
+
+;;; Numbers, time, memory, threads
+
+(defprim "chez:sys-flhash" (x)
+  (unless (typep x 'double-float)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "$flhash") "~s is not a flonum" x))
+  (logand (sxhash x) most-positive-fixnum))
+
+(defprim "chez:sys-quotient-remainder" (n m)
+  (unless (and (integerp n) (integerp m))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "$quotient-remainder") "~s is not an exact integer" (if (integerp n) m n)))
+  (when (zerop m)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "$quotient-remainder") "undefined for ~s" 0))
+  (multiple-value-bind (q r) (truncate n m) (cons q r)))
+
+(defprim "chez:sys-active-threads" ()
+  (max 1 (count-if #'sb-thread:thread-alive-p (sb-thread:list-all-threads))))
+
+(defprim "chez:sys-bytes-deallocated" ()
+  (max 0 (- (sb-ext:get-bytes-consed) (sb-kernel:dynamic-usage))))
+
+;;; Procedures: a procedure is its own code object here
+
+(defun procedure-name-string (f)
+  (let ((name (ignore-errors
+	       (sb-kernel:%fun-name (if (sb-kernel:closurep f) (sb-kernel:%closure-fun f) f)))))
+    (cond ((and name (symbolp name)) (symbol-name name))
+	  ((and (consp name) (member (car name) '(flet labels)) (symbolp (cadr name)) (cadr name))
+	   (symbol-name (cadr name)))
+	  (t nil))))
+
+(defprim "chez:sys-code-name" (f)
+  (or (and (functionp f) (procedure-name-string f)) ps:false))
+
+;;; The winders and the handler stack, which rumble saves and restores
+
+(defprim "chez:sys-current-winders" (&optional (w nil w-p))
+  (if w-p
+      (progn (setf psx::*winders* w) ps:unspecific)
+      psx::*winders*))
+
+(defprim "chez:sys-handler-stack" (&optional (stack nil stack-p))
+  (if stack-p
+      (progn (setf ps-r7rs::*handlers* stack) ps:unspecific)
+      ps-r7rs::*handlers*))
+
+;;; Continuation attachments, on the continuation marks above.  Chez's
+;;; attachments are a list of values, one for each frame that has one;
+;;; here they are the marks of one key.  $call-setting-continuation-
+;;; attachment is with-continuation-mark of that key (the same frame
+;;; arithmetic for tail position), getting is call-with-immediate-
+;;; continuation-mark, and consuming takes the frame's mark away.
+;;; Known limits: a Lisp function calls the body, so a continuation
+;;; captured in it isn't re-entrant (as with-continuation-mark's isn't),
+;;; and the attachment lists are made from the marks.
+
+(defvar *attachment-key* (make-symbol "attachment"))
+(defvar *fake-frame* 0)
+(defvar *attachment-lists* (make-hash-table :test 'eq :weakness :key :synchronized t))
+
+(defun attachment-list (marks)
+  "The attachments among MARKS, innermost first; the same list for the
+same MARKS, so that eq? says whether two continuations' agree."
+  (if (null marks)
+      '()
+      (multiple-value-bind (list found) (gethash marks *attachment-lists*)
+	(if found
+	    list
+	    (setf (gethash marks *attachment-lists*)
+		  (loop for m in marks when (eq (cadr m) *attachment-key*) collect (cddr m)))))))
+
+(declaim (notinline call-with-consumed-mark))
+(defun call-with-consumed-mark (key proc default)
+  (declare (function proc))
+  (let* ((fp (own-frame))
+	 (m (find-if (lambda (m) (and (= (car m) fp) (eq (cadr m) key))) *marks*)))
+    (if m
+	(let ((*marks* (remove m *marks* :count 1 :test #'eq)))
+	  (funcall proc (cddr m)))
+	(funcall proc default))))
+
+(defprim "chez:sys-call-setting-attachment" (value thunk)
+  (call-with-mark *attachment-key* value thunk))
+(defprim "chez:sys-call-getting-attachment" (default proc)
+  (call-with-immediate-mark *attachment-key* proc default))
+(defprim "chez:sys-call-consuming-attachment" (default proc)
+  (call-with-consumed-mark *attachment-key* proc default))
+
+(defprim "chez:sys-current-attachments" (&optional (l nil l-p))
+  (cond (l-p
+	 (setf *marks* (loop for v in l collect (list* (decf *fake-frame*) *attachment-key* v)))
+	 ps:unspecific)
+	(t (attachment-list *marks*))))
+
+(defprim "chez:sys-continuation-attachments" (k)
+  (attachment-list (gethash k *continuation-marks* '())))
+
+;;; Timer interrupts.  A tick is a span of time, as the engines' (*TICK-
+;;; SECONDS*); when the timer runs out the thread that set it is
+;;; interrupted and calls the timer interrupt handler, unless interrupts
+;;; are disabled (disable-interrupts counts), when it waits for
+;;; enable-interrupts.  The handler is called by Lisp from a timer:
+;;; a continuation captured in it can't be re-entered.
+
+(defvar *interrupt-level* 0)
+(defvar *timer* nil)
+(defvar *timer-deadline* nil)
+(defvar *timer-pending* nil)
+(defvar *timer-trampoline* nil)
+
+(defun timer-remaining-ticks ()
+  (if *timer-deadline*
+      (max 1 (ceiling (/ (/ (- *timer-deadline* (get-internal-real-time)) internal-time-units-per-second)
+			 *tick-seconds*)))
+      0))
+
+(defun fire-timer ()
+  (setf *timer-deadline* nil)
+  (if (plusp *interrupt-level*)
+      (setf *timer-pending* t)
+      (when *timer-trampoline* (funcall *timer-trampoline*))))
+
+(defprim "chez:sys-set-timer-trampoline" (thunk) (setf *timer-trampoline* thunk) ps:unspecific)
+
+(defprim "chez:sys-set-timer" (n)
+  (unless (typep n '(integer 0))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "set-timer") "~s is not a nonnegative integer" n))
+  (let ((old (timer-remaining-ticks)))
+    (when *timer*
+      (sb-ext:unschedule-timer *timer*)
+      (setf *timer* nil *timer-deadline* nil))
+    (setf *timer-pending* nil)
+    (when (plusp n)
+      (let ((seconds (max 0.000001d0 (* n *tick-seconds*))))
+	(setf *timer* (sb-ext:make-timer #'fire-timer :name "chez timer" :thread sb-thread:*current-thread*)
+	      *timer-deadline* (+ (get-internal-real-time)
+				  (ceiling (* seconds internal-time-units-per-second))))
+	(sb-ext:schedule-timer *timer* seconds)))
+    old))
+
+(defprim "chez:sys-disable-interrupts" () (incf *interrupt-level*))
+(defprim "chez:sys-enable-interrupts" ()
+  (when (plusp *interrupt-level*) (decf *interrupt-level*))
+  (when (and (zerop *interrupt-level*) *timer-pending*)
+    (setf *timer-pending* nil)
+    (when *timer-trampoline* (funcall *timer-trampoline*)))
+  *interrupt-level*)
+
+;;; Chez's own vector-copy!
+
+(defprim "chez:vector-copy!" (src src-start dst dst-start n)
+  (check-mutable-object "vector-copy!" dst "vector")
+  (vector-copy! "vector-copy!" #'check-vector src src-start dst dst-start n))
+
+;;; Pseudo-random generators: Chez's own (c/random.c, L'Ecuyer's
+;;; MRG32k3a), so that a seed gives Chez's numbers
+
+(defstruct (prgen (:constructor make-prgen (state))) state)
+
+(defconstant +prgen-im1+ #xffffff2f)
+(defconstant +prgen-im2+ #xffffa6bb)
+
+(defun prgen-step (state)
+  "The next number of the generator whose six doubles are STATE, in {0..m1-1}."
+  (let ((m1 4294967087d0) (m2 4294944443d0))
+    (let* ((x10 (- (* 1403580d0 (aref state 1)) (* 810728d0 (aref state 2))))
+	   (k10 (truncate (/ x10 m1))))
+      (decf x10 (* k10 m1))
+      (when (< x10 0d0) (incf x10 m1))
+      (setf (aref state 2) (aref state 1) (aref state 1) (aref state 0) (aref state 0) x10)
+      (let* ((x20 (- (* 527612d0 (aref state 3)) (* 1370589d0 (aref state 5))))
+	     (k20 (truncate (/ x20 m2))))
+	(decf x20 (* k20 m2))
+	(when (< x20 0d0) (incf x20 m2))
+	(setf (aref state 5) (aref state 4) (aref state 4) (aref state 3) (aref state 3) x20)
+	(let ((y (- x10 x20)))
+	  (when (< y 0d0) (incf y m1))
+	  y)))))
+
+(defun prgen-double (g) (* (+ (prgen-step (prgen-state g)) 1d0) 2.328306549295728d-10))
+
+(defun prgen-int (g n)
+  (let* ((q (float (truncate (/ 4294967087d0 (float n 1d0))) 1d0))
+	 (qn (* q n))
+	 (x (prgen-step (prgen-state g))))
+    (loop while (>= x qn) do (setf x (prgen-step (prgen-state g))))
+    (truncate (/ x q))))
+
+(defun prgen-integer (g x)
+  (loop
+    (let ((y (1- x)) (r 0) (shift 0))
+      (let ((len (integer-length y)))
+	(loop
+	  (if (< len 32)
+	      (progn (incf r (ash (prgen-int g (+ (ldb (byte 31 shift) y) 1)) shift))
+		     (return))
+	      (progn (incf r (ash (prgen-int g #x80000000) shift))
+		     (decf len 31)
+		     (incf shift 31)))))
+      (when (< r x) (return r)))))
+
+(defun prgen-seed-half (state x)
+  "c/random.c's sch_srand_half: mix the 16 bits X into STATE."
+  (let ((mask #xffffffff))
+    (labels ((m ()
+	       (let ((y (logand x #xffff)))
+		 (setf x (logand mask (+ (* 30903 y) (ash x -16))))
+		 y))
+	     (n (k) (mod (logand mask (+ (ash (m) 16) (m))) k))
+	     (field (i modulus plus)
+	       (let ((z (n modulus)))
+		 (setf (aref state i)
+		       (float (+ plus (mod (logand mask (+ (truncate (aref state i)) z)) modulus))
+			      1d0)))))
+      (field 0 (1- +prgen-im1+) 1)
+      (field 1 +prgen-im1+ 0)
+      (field 2 +prgen-im1+ 0)
+      (field 3 (1- +prgen-im2+) 1)
+      (field 4 +prgen-im2+ 0)
+      (field 5 +prgen-im2+ 0)
+      (when (and (zerop (aref state 0)) (zerop (aref state 1)) (zerop (aref state 2)))
+	(setf (aref state 0) 1d0))
+      (when (and (zerop (aref state 3)) (zerop (aref state 4)) (zerop (aref state 5)))
+	(setf (aref state 3) 1d0)))))
+
+(defun prgen-seed (g x)
+  (let ((state (prgen-state g)))
+    (replace state '(1062452522d0 2961816100d0 342112271d0 2854655037d0 3321940838d0 3542344109d0))
+    (prgen-seed-half state (logand x #xffff))
+    (prgen-seed-half state (logand (ash x -16) #xffff))))
+
+(defun check-prgen (who x)
+  (unless (prgen-p x)
+    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "not a pseudo-random generator ~s" x)))
+
+(defprim "chez:make-pseudo-random-generator" ()
+  (let ((g (make-prgen (make-array 6 :element-type 'double-float :initial-element 0d0))))
+    (prgen-seed g (logand (+ (get-universal-time) (get-internal-real-time)) #xffffffff))
+    g))
+(defprim "chez:pseudo-random-generator?" (x) (bool (prgen-p x)))
+(defprim "chez:pseudo-random-generator-seed!" (g n)
+  (check-prgen "pseudo-random-generator-seed!" g)
+  (unless (typep n '(integer 0))
+    (r6rs-assertion-violation (ps:intern-scheme-symbol "pseudo-random-generator-seed!")
+			      "not a nonnegative exact integer ~s" n))
+  (prgen-seed g (logand n #xffffffff))
+  ps:unspecific)
+(defprim "chez:pseudo-random-generator-next!" (g &optional (n nil n-p))
+  (check-prgen "pseudo-random-generator-next!" g)
+  (cond ((not n-p) (prgen-double g))
+	((not (typep n '(integer 1)))
+	 (r6rs-assertion-violation (ps:intern-scheme-symbol "pseudo-random-generator-next!")
+				   "not a positive exact integer ~s" n))
+	((<= n 4294967087) (prgen-int g n))
+	(t (prgen-integer g n))))
+(defprim "chez:pseudo-random-generator->vector" (g)
+  (check-prgen "pseudo-random-generator->vector" g)
+  (map 'simple-vector #'truncate (prgen-state g)))
+(defprim "chez:vector->pseudo-random-generator" (g v)
+  (let ((who "vector->pseudo-random-generator"))
+    (unless (or (eq g ps:false) (prgen-p g)) (check-prgen who g))
+    (flet ((bad () (r6rs-assertion-violation (ps:intern-scheme-symbol who)
+					     "not a valid pseudo-random generator state vector ~s" v)))
+      (unless (and (simple-vector-p v) (= (length v) 6) (every #'integerp v)) (bad))
+      (let ((state (map '(simple-array double-float (6)) (lambda (i) (float i 1d0)) v)))
+	(loop for i from 0 below 6
+	      for top = (if (< i 3) +prgen-im1+ +prgen-im2+)
+	      do (unless (<= 0 (aref state i) (1- top)) (bad)))
+	(when (or (and (zerop (aref state 0)) (zerop (aref state 1)) (zerop (aref state 2)))
+		  (and (zerop (aref state 3)) (zerop (aref state 4)) (zerop (aref state 5))))
+	  (bad))
+	(if (eq g ps:false)
+	    (make-prgen state)
+	    (progn (replace (prgen-state g) state) ps:unspecific))))))

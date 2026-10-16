@@ -17,7 +17,7 @@
 
 (defparameter *chezscheme-sources*
   '("chezscheme.scm" "lists.scm" "records.scm" "syntax.scm" "numbers.scm" "hashtables.scm" "threads.scm"
-    "conditions.scm" "top-level.scm" "format.scm" "ffi.scm" "ftype.scm")
+    "conditions.scm" "top-level.scm" "system.scm" "more.scm" "format.scm" "ffi.scm" "ftype.scm")
   "The files of (chezscheme)'s body, in order.")
 
 (defparameter *chezscheme-extras*
@@ -178,7 +178,32 @@
     "locate-source" "locate-source-object-source" "current-locate-source-object-source"
     "open-source-file"
     "get-datum/annotations" "read-token" "compile-library-handler" "engine-block" "engine-return"
-    "date->time-utc" "date-week-day" "define-values" "abort-handler")
+    "date->time-utc" "date-week-day" "define-values" "abort-handler"
+    ;; system.scm
+    "vector-copy!" "call-in-continuation" "procedure-known-single-valued?" "keep-live"
+    "black-box" "assert-unreachable" "pariah" "memory-order-acquire" "memory-order-release"
+    "current-generate-id" "current-memory-bytes" "maximum-memory-bytes"
+    "reset-maximum-memory-bytes!" "bytes-deallocated" "bytes-finalized"
+    "initial-bytes-allocated" "enable-object-backreferences" "object-backreferences"
+    "thread-preserve-ownership!" "get-initial-thread" "create-exception-state"
+    "current-exception-state" "base-exception-handler" "format-condition?"
+    "continuation-condition?" "condition-continuation" "date-year-day" "date-dst?"
+    "date-zone-name" "print-subnormal-precision" "print-positive-exponent-sign"
+    "make-pseudo-random-generator" "pseudo-random-generator?" "pseudo-random-generator-seed!"
+    "pseudo-random-generator-next!" "pseudo-random-generator->vector"
+    "vector->pseudo-random-generator" "vector->pseudo-random-generator!"
+    ;; more.scm
+    "r6rs:=" "r6rs:<" "r6rs:>" "r6rs:<=" "r6rs:>=" "r6rs:string->number"
+    "r6rs:number->string" "r6rs:eval" "r6rs:hashtable-keys" "r6rs:hashtable-entries"
+    "r6rs:flush-output-port" "r6rs:delete-file" "r6rs:file-exists?" "r6rs:exit"
+    "r6rs:standard-input-port" "r6rs:standard-output-port" "r6rs:standard-error-port"
+    "r6rs:call-with-input-file" "r6rs:call-with-output-file" "r6rs:with-input-from-file"
+    "r6rs:with-output-to-file" "r6rs:open-input-file" "r6rs:open-output-file"
+    "r6rs:make-record-type-descriptor" "r6rs:case"
+    "make-hash-table" "hash-table?" "put-hash-table!" "get-hash-table" "remove-hash-table!"
+    "hash-table-map" "hash-table-for-each" "hashtable-ref-cell" "eq-hashtable-ref-cell"
+    "symbol-hashtable-ref-cell" "eq-hashtable-try-atomic-cell" "bytevector->s8-list"
+    "s8-list->bytevector")
   "What src/chez/*.scm defines that (chezscheme) exports, besides R6RS.")
 
 (defparameter *chezscheme-from-psyntax*
@@ -411,6 +436,18 @@ Called while the standard libraries are installed."
      (list (ssym "library") (list (ssym "scheme"))
 	   (cons (ssym "export") (mapcar #'ssym exports))
 	   (list (ssym "import") (list (ssym "chezscheme"))))))
+  ;; ($system), which Racket CS's chezpart imports $begin-unsafe from:
+  ;; here it is begin
+  (handler-case
+      (psx:eval-library
+       (car (read-scheme "(library ($system)
+                            (export $begin-unsafe $lambda/lift-barrier)
+                            (import (chezscheme))
+                            (define-syntax $begin-unsafe
+                              (syntax-rules () ((_ e1 e2 ...) (begin e1 e2 ...))))
+                            (define-syntax $lambda/lift-barrier
+                              (syntax-rules () ((_ . x) (lambda . x)))))")))
+    (error () nil))
   (install-interaction-library *chez-interaction-library*)
   (pushnew 'load-library-file-at-top-level psx::*library-loaders*))
 

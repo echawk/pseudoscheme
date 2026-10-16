@@ -641,7 +641,10 @@ the custodian's shutdown.  Raises if C is shut down."
       (setq *threads* (append *threads* (list me)))
       me)))
 
-(defnative "thread" (thunk) ()
+;; the second argument: a parallel-thread pool (racket/base's #:pool), or #f;
+;; threads here are never parallel
+(defnative "thread" (thunk &optional pool) ()
+  (declare (ignore pool))
   (unless (accepts-arity-p thunk 0) (arg-error "thread" "(procedure-arity-includes/c 0)" thunk))
   (create-thread "thread" thunk))
 
@@ -795,7 +798,13 @@ the custodian's shutdown.  Raises if C is shut down."
 	      (let ((v (property-value e *prop-evt*)))
 		(cond ((evt-value-p v) (expand-evt v who poll groups wraps))
 		      ((functionp v) (expand-guard (funcall v e) who poll groups wraps e))
-		      ((integerp v) (expand-evt (svref (struct-fields e) v) who poll groups wraps))
+		      ;; a field: an event, or a procedure of the struct (racket/base's
+		      ;; guard-evt is such a struct)
+		      ((integerp v)
+		       (let ((f (svref (struct-fields e) v)))
+			 (cond ((evt-value-p f) (expand-evt f who poll groups wraps))
+			       ((functionp f) (expand-guard (funcall f e) who poll groups wraps e))
+			       (t (list (make-branch (make-revt :never) wraps groups))))))
 		      (t (list (make-branch (make-revt :never) wraps groups))))))
 	     (t (list (make-branch e wraps groups)))))))
 
@@ -875,7 +884,8 @@ the custodian's shutdown.  Raises if C is shut down."
 (defun do-sync (who evts timeout enable-break)
   "sync on EVTS (a list), with TIMEOUT (#f, seconds, or a thunk)."
   (check-sync-timeout who timeout)
-  (let* ((poll (and (realp timeout) (zerop timeout)))
+  ;; a thunk as the timeout: poll once, and call it if nothing is ready
+  (let* ((poll (or (and (realp timeout) (zerop timeout)) (functionp timeout)))
 	 (branches (loop for e in evts append (expand-evt e who poll '() '())))
 	 (wait (make-wait *self* (coerce branches 'simple-vector))))
     (setf (wait-enable-break wait) enable-break)

@@ -621,14 +621,39 @@
 ;; The printer's parameters; print-length and print-level are honoured
 ;; only as far as the writer does (not yet)
 (define print-graph (make-parameter #f ->boolean))
-(define print-length (make-parameter #f))
-(define print-level (make-parameter #f))
-(define print-radix (make-parameter 10))
-(define print-gensym (make-parameter #t))
+(define print-length
+  (make-parameter #f
+    (lambda (x)
+      (unless (or (not x) (and (fixnum? x) (>= x 0)))
+        (assertion-violation 'print-length "invalid value" x))
+      x)))
+(define print-level
+  (make-parameter #f
+    (lambda (x)
+      (unless (or (not x) (and (fixnum? x) (>= x 0)))
+        (assertion-violation 'print-level "invalid value" x))
+      x)))
+(define print-radix
+  (make-parameter 10
+    (lambda (x)
+      (unless (and (fixnum? x) (<= 2 x 36))
+        (assertion-violation 'print-radix "invalid value" x))
+      x)))
+(define print-gensym
+  (make-parameter #t
+    (lambda (x)
+      (unless (memq x '(#t #f pretty pretty/suffix))
+        (assertion-violation 'print-gensym "invalid value" x))
+      x)))
 (define print-brackets (make-parameter #t ->boolean))
 (define print-char-name (make-parameter #f ->boolean))
 (define print-vector-length (make-parameter #f ->boolean))
-(define print-precision (make-parameter #f))
+(define print-precision
+  (make-parameter #f
+    (lambda (x)
+      (unless (or (not x) (and (fixnum? x) (> x 0)))
+        (assertion-violation 'print-precision "invalid value" x))
+      x)))
 (define print-extended-identifiers (make-parameter #f ->boolean))
 (define print-unicode (make-parameter #t ->boolean))
 (define pretty-line-length (make-parameter 75))
@@ -661,21 +686,24 @@
 (define (cd . dir) (apply current-directory dir))
 
 ;;; Interrupts, timers and engines.  Nothing interrupts Scheme code
-;;; here, so disabling interrupts does nothing; engines, which need a
-;;; timer interrupt, aren't supported (docs/chez.md).
+;;; but the timer, a span of time for a tick (host.lisp), and a thread's
+;;; engines, which run in threads of their own.  Disabling interrupts
+;;; holds the timer's handler back until they are enabled again.
 
-(define interrupt-level 0)
-(define (disable-interrupts) (set! interrupt-level (+ interrupt-level 1)) interrupt-level)
-(define (enable-interrupts)
-  (when (> interrupt-level 0) (set! interrupt-level (- interrupt-level 1)))
-  interrupt-level)
+(define (disable-interrupts) (%chez:sys-disable-interrupts))
+(define (enable-interrupts) (%chez:sys-enable-interrupts))
 (define-syntax with-interrupts-disabled
-  (syntax-rules () ((_ body1 body2 ...) (let () body1 body2 ...))))
+  (syntax-rules ()
+    ((_ body1 body2 ...)
+     (dynamic-wind disable-interrupts (lambda () body1 body2 ...) enable-interrupts))))
 (define-syntax critical-section
-  (syntax-rules () ((_ body1 body2 ...) (let () body1 body2 ...))))
+  (syntax-rules ()
+    ((_ body1 body2 ...)
+     (dynamic-wind disable-interrupts (lambda () body1 body2 ...) enable-interrupts))))
 (define keyboard-interrupt-handler (make-parameter (lambda () (exit 130))))
 (define timer-interrupt-handler (make-parameter (lambda () (if #f #f))))
-(define (set-timer n) 0)
+(define (set-timer n) (%chez:sys-set-timer n))
+(define timer-trampoline (%chez:sys-set-timer-trampoline (lambda () ((timer-interrupt-handler)))))
 (define (register-signal-handler sig proc) (if #f #f))
 (define make-engine %chez:make-engine)   ; engines run in threads (host.lisp)
 (define engine-return %chez:engine-return)

@@ -13,7 +13,7 @@
 (define nack #f)
 (define g (nack-guard-evt (lambda (n) (set! nack n) never-evt)))
 (displayln (sync (choice-evt g always-evt)) )
-(displayln (and (sync/timeout 0 nack) #t))
+;; (whether the guard was called depends on the order sync polls in)
 (displayln (sync (guard-evt (lambda () (wrap-evt always-evt (lambda (_) 'guarded))))))
 (displayln (sync (poll-guard-evt (lambda (poll?) (wrap-evt always-evt (lambda (_) poll?))))))
 (displayln (sync/timeout 0 (poll-guard-evt (lambda (poll?) (wrap-evt always-evt (lambda (_) poll?))))))

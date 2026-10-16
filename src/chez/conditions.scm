@@ -6,10 +6,15 @@
 
 ;; errorf and friends format their message (a format condition, in
 ;; Chez); error's message is taken as it is
+(define (raise-format-condition base who fmt args)
+  (raise (apply condition base (make-format-condition)
+                (append (if who (list (make-who-condition who)) '())
+                        (list (make-message-condition (apply format #f fmt args))
+                              (make-irritants-condition '()))))))
 (define (errorf who fmt . args)
-  (error who (apply format #f fmt args)))
+  (raise-format-condition (make-error) who fmt args))
 (define (assertion-violationf who fmt . args)
-  (assertion-violation who (apply format #f fmt args)))
+  (raise-format-condition (make-assertion-violation) who fmt args))
 (define (warningf who fmt . args)
   (display-warning who (apply format #f fmt args) '()))
 (define (warning who message . irritants)

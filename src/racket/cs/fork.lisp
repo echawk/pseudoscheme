@@ -14,16 +14,23 @@
 (in-package "PSEUDOSCHEME-RACKET")
 
 (defparameter *fork-additions*
-  '((:attachments "call-setting-continuation-attachment" "call-getting-continuation-attachment"
-     "call-consuming-continuation-attachment" "$current-attachments")
-    (:engines "make-engine" "engine-block" "engine-return" "set-timer" "timer-interrupt-handler")
+  '((:attachments "$call-setting-continuation-attachment" "$call-getting-continuation-attachment"
+     "$call-consuming-continuation-attachment" "$current-attachments" "$continuation-attachments"
+     "$call-in-continuation" "$null-continuation")
+    (:engines "set-timer" "timer-interrupt-handler" "$current-winders"
+     "current-exception-state" "create-exception-state")
     (:wrapper-procedures "make-wrapper-procedure" "make-arity-wrapper-procedure"
-     "wrapper-procedure?" "wrapper-procedure-data" "set-wrapper-procedure!" "$app")
-    (:records "$record-ref" "$record-set!" "$sealed-record?" "record-type-sealed?")
+     "wrapper-procedure?" "wrapper-procedure-data" "$app" "$app/no-inline" "$app/no-return"
+     "$app/value")
+    (:records "$record-ref" "$record-set!" "$sealed-record?" "$record-type-act-sealed?"
+     "$record-type-act-sealed!" "$record-cas!" "$record-type-field-count")
+    (:stencil-vectors "$system-stencil-vector" "$system-stencil-vector-update" "$stencil-vector-mask")
     (:memory "make-ephemeron-eq-hashtable" "make-phantom-bytevector" "make-guardian")
     (:ffi "foreign-procedure" "foreign-callable" "make-ftype-pointer"))
-  "What rumble needs beyond Chez Scheme, by kind; filled in by milestone
-0's inventory, which finds the exact list in Racket's source.")
+  "What rumble needs beyond Chez Scheme, by kind.  At the pinned Racket
+(build/external/racket) the fork's primdata.ss is upstream's but for two
+flags, so all of them are upstream's too, and src/chez/ (system.scm,
+host.lisp) has them: build/agents/chez-fork-inventory.txt.")
 
 (defun source-tokens (path)
   "The tokens of Scheme source PATH: what lies between delimiters,
@@ -65,10 +72,16 @@ primitive reference #%name, #2%name, #3%name."
 	  (directory (racket-source "racket/src/cs/schemified/*.scm"))))
 
 (defun chez-bound-p (name)
+  "Is NAME bound at the Chez top level, or, as #%NAME says it, a name of
+the (chezscheme) library's body (the $-names it doesn't export)?"
   (pseudoscheme-api::ensure-psyntax)
-  (truthy (ps-r7rs::eval-at-chez-top-level
-	   (list (ps:intern-scheme-symbol "top-level-bound?")
-		 (list (ps:intern-scheme-symbol "quote") (ps:intern-scheme-symbol name))))))
+  (or (truthy (ps-r7rs::eval-at-chez-top-level
+	       (list (ps:intern-scheme-symbol "top-level-bound?")
+		     (list (ps:intern-scheme-symbol "quote") (ps:intern-scheme-symbol name)))))
+      (handler-case (progn (ps-r7rs::eval-at-chez-top-level
+			    (list (ps:intern-scheme-symbol "$primitive") (ps:intern-scheme-symbol name)))
+			   t)
+	(error () nil))))
 
 (defun upstream-chez-names ()
   "The names upstream Chez Scheme has (build/external/chezscheme/, as
