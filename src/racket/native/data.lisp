@@ -1271,3 +1271,14 @@ day, month, year, week day, year day, dst?, offset and zone name; or NIL."
 			(racket-error "length" "~A is circular" (written l))
 			(arg-error "length" "list?" l)))
 	  (t (arg-error "length" "list?" l)))))
+
+;;; string->number: the reader's (the expander's read/number.rkt, with
+;;; its radix, conversion and decimal modes), once the expander is up
+;;; (sources.lisp); the host's until then
+(defvar *expander-string->number* nil)
+
+(defnative "string->number" (s &rest more) ()
+  (if *expander-string->number*
+      (apply *expander-string->number* s more)
+      (let ((radix (if more (car more) 10)))
+	(funcall (psx:host-ref "string->number") s radix))))

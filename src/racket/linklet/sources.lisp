@@ -153,6 +153,11 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 			   "(begin (current-library-collection-links (find-library-collection-links))
                                    (current-library-collection-paths (find-library-collection-paths)))")))
     (install-zo-writer)
+    ;; Racket's string->number is the reader's, which #%kernel re-exports
+    ;; from #%read (data.lisp)
+    (setq *expander-string->number*
+	  (funcall (expander-export "dynamic-require")
+		   (list (rsym "quote") (rsym "#%read")) (rsym "string->number")))
     (setq *expander-booted* t))
   (funcall (expander-export "eval") datum))
 

@@ -677,7 +677,9 @@ true if it wrote the object.")
   (when *chez-reader*
     (setf (gethash port *port-r6rs*) r6rs)))
 
-(defun port-r6rs-p (port) (values (gethash port *port-r6rs*)))
+(defun port-r6rs-p (port)
+  ;; asked of every symbol read: the table only holds ports in --chez mode
+  (and *chez-reader* (values (gethash port *port-r6rs*))))
 
 (defvar *char-category-function* nil
   "A function from a character to its Unicode general category, a string

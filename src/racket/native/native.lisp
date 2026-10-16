@@ -49,7 +49,7 @@ one: every primitive the instances have that isn't host-shared."
     "abs" "max" "min" "quotient" "remainder" "modulo" "gcd" "lcm" "expt" "exp" "log" "sqrt"
     "sin" "cos" "tan" "asin" "acos" "atan" "floor" "ceiling" "round" "truncate"
     "number?" "integer?" "rational?" "real?" "complex?" "exact?" "inexact?"
-    "exact->inexact" "inexact->exact" "string->number"
+    "exact->inexact" "inexact->exact"
     "numerator" "denominator"
     ;; characters, strings, symbols
     "char?" "char=?" "char<?" "char>?" "char->integer" "integer->char" "char-upcase" "char-downcase"
