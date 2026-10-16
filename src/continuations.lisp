@@ -881,6 +881,10 @@ primitive's name (psyntax renames everything else), or (primitive x)."
   (cond ((and (consp x) (keyword-p (car x) "PRIMITIVE")) (ps:scheme-symbol-name (cadr x)))
 	((scheme-symbol-p x)
 	 (let ((name (ps:scheme-symbol-name x)))
+	   ;; %builtin:NAME is R5RS's NAME where the host's NAME is an
+	   ;; extension of it (src/psyntax.lisp, DEFINE-BUILTIN-ALIAS)
+	   (when (and (> (length name) 9) (string= name "%builtin:" :end1 9))
+	     (setq name (subseq name 9)))
 	   (and (gethash name (primitive-names)) name)))))
 
 (defvar *known-procedures* nil
