@@ -40,7 +40,7 @@ one: every primitive the instances have that isn't host-shared."
 (defparameter *host-shared*
   '(;; pairs and lists
     "car" "cdr" "cons" "caar" "cadr" "cdar" "cddr" "caddr" "cdddr" "cadddr"
-    "list" "append" "reverse" "length" "list-ref" "list-tail"
+    "list" "append" "reverse" "list-ref" "list-tail"
     "memq" "memv" "assq" "assv" "null?" "pair?" "list?"
     ;; equivalence, booleans
     "eq?" "eqv?" "not" "boolean?"

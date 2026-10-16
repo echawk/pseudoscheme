@@ -1259,3 +1259,15 @@ day, month, year, week day, year day, dst?, offset and zone name; or NIL."
 	(racket-error "seconds->date" "integer is out-of-range~%  integer: ~D" whole))
       (funcall *date*-constructor* second minute hour day month year week-day year-day (bool dst?) offset
 	       nanos zone))))
+
+;;; length: of a proper list only (the host's takes any sequence, and
+;;; loops on a cycle)
+(defnative "length" (l) (:leaf t)
+  ;; list-length: an error for an improper list, NIL for a cycle (which
+  ;; Racket shows in graph notation)
+  (let ((n (and (listp l) (handler-case (list-length l) (error () :improper)))))
+    (cond ((integerp n) n)
+	  ((null n) (if (listp l)
+			(racket-error "length" "~A is circular" (written l))
+			(arg-error "length" "list?" l)))
+	  (t (arg-error "length" "list?" l)))))

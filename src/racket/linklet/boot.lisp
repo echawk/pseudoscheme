@@ -33,10 +33,15 @@ expander (src/racket/linklet/sources.lisp), about half a minute."
     (unless *expander-instance*
       (unless (instantiate-expander :stream nil)
 	(racket-error "racket" "the expander didn't instantiate")))
+    ;; as LINKLET-LOAD: Lisp errors raised as Racket's outside the base
+    ;; of continuations, which is outside each form's default prompt
     (dolist (form forms)
-      (call-with-continuation-prompt
-       (lambda () (with-racket-errors (setq values (multiple-value-list (expander-eval form)))))
-       *default-prompt-tag* nil))
+      (with-racket-errors
+	(psx::call-with-continuation-base
+	 (lambda ()
+	   (call-with-continuation-prompt
+	    (lambda () (with-racket-errors (setq values (multiple-value-list (expander-eval form)))))
+	    *default-prompt-tag* nil)))))
     (print-stats)
     (when *uncaught* (finish-output) (uiop:quit 1))
     (values-list values)))

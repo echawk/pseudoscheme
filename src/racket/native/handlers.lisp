@@ -105,9 +105,25 @@ stand-in of KIND."
       (concatenate 'string (subseq s 0 (max 0 (- len 3))) "...")
       s))
 
+(defclass bounded-output (trivial-gray-streams:fundamental-character-output-stream)
+  ((out :initform (make-string-output-stream) :reader bounded-out)
+   (left :initarg :left :accessor bounded-left))
+  (:documentation "A string output stream that gives up past a limit."))
+
+(defmethod trivial-gray-streams:stream-write-char ((s bounded-output) c)
+  (when (minusp (decf (bounded-left s))) (throw 'bounded-output nil))
+  (write-char c (bounded-out s)))
+
+(defun bounded-print (v len)
+  "V as print writes it, cut off a little past LEN characters, so that a
+cyclic value is printed only as far as is shown."
+  (let ((s (make-instance 'bounded-output :left (+ len 1))))
+    (catch 'bounded-output (print-quoted v s))
+    (get-output-stream-string (bounded-out s))))
+
 (defun default-error-value->string-handler (v len)
   "Racket's: V as print writes it, in at most LEN characters."
-  (truncated-string (with-output-to-string (s) (print-quoted v s)) len))
+  (truncated-string (bounded-print v len) len))
 
 (define-param *error-value->string-handler* "error-value->string-handler"
   #'default-error-value->string-handler

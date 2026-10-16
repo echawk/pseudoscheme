@@ -11,7 +11,9 @@
 # seconds (default 600).  J files run at a time (default 2).
 #
 # PSEUDOSCHEME names the binary to run (default: bin/pseudoscheme), so a
-# long run can go on while bin/ is rebuilt.  REF=1 runs the installed racket on the same files instead, for the
+# long run can go on while bin/ is rebuilt; it then has a compiled-file
+# cache of its own (build/suite-cache), since each build prunes the
+# others' generations of the shared one.  REF=1 runs the installed racket on the same files instead, for the
 # reference counts (some tests depend on the machine).  Results go to
 # $OUT/suite-{ours,racket}/: NAME.out per file and summary.txt.
 # Needs sh utils/racket/setup.sh first.
@@ -25,6 +27,10 @@ J=${J:-2}
 if [ -n "$REF" ]; then who=racket; else who=ours; fi
 DIR=$OUT/suite-$who
 mkdir -p "$DIR"
+if [ -n "$PSEUDOSCHEME" ] && [ -z "$PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY" ]; then
+  export PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$ROOT/build/suite-cache/libraries
+  mkdir -p "$PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY"
+fi
 
 # core-tests.rktl's files, then all.rktl's
 CORE="basic unicode rx read print macro syntax letrec procs stx linklet module
