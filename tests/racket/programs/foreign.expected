@@ -1,0 +1,113 @@
+(5 42)
+(7 -9 2.5 247)
+(5 1.5 -3 24 8)
+(1 3 5 7 9)
+-1
+#t
+(0 0 2 1 0 0 0 0)
+(2 3 #t)
+#t
+xyz
+#f
+42
+(4 4 8 8)
+ptr-set!: given value does not fit primitive C type
+  C type: _int8
+  value: 200
+_bytes: given value does not fit primitive C type
+  C type: ptr-set!
+  value: 5
+ptr-set!: given value does not fit primitive C type
+  C type: _float
+  value: 'a
+_string/utf-16: given value does not fit primitive C type
+  C type: ptr-set!
+  value: 5
+_void: cannnot dereference void
+_void: cannnot set void content
+cpointer-accessor: contract violation
+  expected: cpointer?
+  given: 5
+ptr-ref: contract violation
+  expected: ctype?
+  given: 5
+ptr-ref: contract violation
+  expected: 'abs
+  given: 'x
+ptr-ref: contract violation
+  expected: fixnum?
+  given: 1.5
+malloc: contract violation
+  expected: (or/c (and/c exact-nonnegative-integer? fixnum?)
+                  ctype? cpointer?
+                  (or/c 'raw 'atomic 'nonatomic 'tagged
+                        'atomic-interior 'interior
+                        'zeroed-atomic 'zeroed-atomic-interior
+                        'stubborn 'uncollectable 'eternal)
+                  'fail-ok)
+  given: 'x
+malloc: arity mismatch;
+ the expected number of arguments does not match the given number
+  given: 0
+malloc: multiple size arguments
+  first: 4
+  second: 4
+malloc: 'tagged mode is not supported
+_bytes: given value does not fit primitive C type
+  C type: strlen
+  value: 5
+5
+set-cpointer-tag!: contract violation
+  expected: cpointer?
+  given: 5
+cpointer-tag: contract violation
+  expected: cpointer?
+  given: 5
+ptr-add: contract violation
+  expected: cpointer?
+  given: 5
+vector->cpointer: unsupported
+#<cpointer>
+make-sized-byte-string: unsupported
+end-stubborn-change: unsupported
+2
+33
+#f
+ctype-sizeof: contract violation
+  expected: ctype?
+  given: 5
+make-array-type: contract violation
+  expected: exact-nonnegative-integer?
+  given: -1
+compiler-sizeof: contract violation
+  expected: (or/c ctype-symbol? (listof ctype-symbol?))
+  given: 'foo
+8
+compiler-sizeof: cannot use 'void without a '*
+memcpy: contract violation
+  expected: cpointer?
+  given: 5
+memset: contract violation
+  expected: byte?
+  given: 300
+offset-ptr?: contract violation
+  expected: cpointer?
+  given: 5
+ptr-offset: contract violation
+  expected: cpointer?
+  given: 5
+set-ptr-offset!: contract violation
+  expected: (and/c cpointer? ptr-offset?)
+  given: #<cpointer>
+cpointer-accessor: contract violation
+  expected: cpointer?
+  given: 5
+cpointer-accessor: contract violation
+  expected: cpointer?
+  given: 5
+make-ctype: contract violation
+  expected: ctype?
+  given: 5
+ptr-ref: contract violation
+  expected: fixnum?
+  given: 2.5

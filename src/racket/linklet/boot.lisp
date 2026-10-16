@@ -61,6 +61,7 @@ written to OUTPUT."
 	  ;; each under the default prompt, as a module body's forms are,
 	  ;; inside the base of continuations (which, made by the
 	  ;; instantiation inside, would hide the prompt from it)
+	  (with-racket-errors
 	  (psx::call-with-continuation-base
 	   (lambda ()
 	  (call-with-continuation-prompt
@@ -73,7 +74,7 @@ written to OUTPUT."
 		       (unless (eq v *void*)
 			 (funcall (psx:host-ref "write") v output)
 			 (terpri output)))))))
-	   *default-prompt-tag* nil))))))))
+	   *default-prompt-tag* nil)))))))))
 
 (defun linklet-load (path)
   "PATH: a file of linklets (.rktl, the test harness above), or a module,
@@ -86,6 +87,12 @@ its main submodule if it has one)."
 	(unless *expander-instance*
 	  (unless (instantiate-expander :stream nil)
 	    (racket-error "racket" "the expander didn't instantiate")))
+	;; the base of continuations outside the default prompt, as in
+	;; RUN-LINKLET-FORMS, and Lisp errors raised as Racket's outside the
+	;; base: a continuation re-entered runs the rest under the base
+	(with-racket-errors
+	(psx::call-with-continuation-base
+	 (lambda ()
 	(call-with-continuation-prompt
 	 (lambda ()
 	   (with-racket-errors
@@ -95,7 +102,7 @@ its main submodule if it has one)."
 	      (read-racket (make-string-input-stream
 			    (format nil "(if (module-declared? '(submod (file ~S) main) #t) (dynamic-require '(submod (file ~S) main) #f) (void))"
 				    file file))))))
-	 *default-prompt-tag* nil)))
+	 *default-prompt-tag* nil))))))
   (print-stats)
   ;; as racket's: an uncaught exception makes the exit status 1
   (when *uncaught* (finish-output) (uiop:quit 1)))

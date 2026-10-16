@@ -319,21 +319,47 @@
 	     ;; ready at once, with the thunk's value (port-ops.lisp)
 	     (:thunk (values (funcall (revt-target e)) t))
 	     ;; a log receiver's next message (handlers.lisp)
-	     (:log-receiver (log-receiver-poll e))))))
+	     (:log-receiver (log-receiver-poll e))
+	     ;; a socket's: a thunk that polls (network.lisp)
+	     (:poll (funcall (revt-target e)))))))
 
 (defun sync-ready (evts)
   (dolist (e evts (values nil nil))
     (multiple-value-bind (v ready) (evt-ready e)
       (when ready (return (values v t))))))
 
+(defun external-evt-p (e)
+  "Whether E can become ready by itself, while this one thread waits: a
+socket's (network.lisp)."
+  (and (revt-p e) (eq (revt-kind e) :poll)))
+
+(defun sync-polling (evts deadline)
+  "Poll EVTS until one is ready or DEADLINE (internal real time, or NIL
+for none) passes: its result and T, or NIL."
+  (loop
+    (multiple-value-bind (v ready) (sync-ready evts)
+      (when ready (return (values v t))))
+    (when (and deadline (>= (get-internal-real-time) deadline))
+      (return (values nil nil)))
+    (sleep 0.001)))
+
 (defnative "sync" (&rest evts) ()
   (multiple-value-bind (v ready) (sync-ready evts)
-    (if ready v (racket-error "sync" "would block forever (one thread)"))))
+    (cond (ready v)
+	  ((some #'external-evt-p evts) (values (sync-polling evts nil)))
+	  (t (racket-error "sync" "would block forever (one thread)")))))
 (defnative "sync/timeout" (timeout &rest evts) ()
   (multiple-value-bind (v ready) (sync-ready evts)
     (cond (ready v)
 	  ((and (realp timeout) (zerop timeout)) ps:false)
 	  ((functionp timeout) (funcall timeout))
+	  ((realp timeout)
+	   ;; whatever can become ready meanwhile, until the time is up
+	   (multiple-value-bind (v ready)
+	       (sync-polling evts (+ (get-internal-real-time)
+				     (round (* timeout internal-time-units-per-second))))
+	     (if ready v ps:false)))
+	  ((some #'external-evt-p evts) (values (sync-polling evts nil)))
 	  (t (racket-error "sync/timeout" "would block (one thread)")))))
 
 ;;; One thread: holding the semaphore is calling the procedure

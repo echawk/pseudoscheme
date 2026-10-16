@@ -275,7 +275,15 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
     ports and file status, regexps on ports (ports.lisp, port-ops.lisp);
   - strings and characters (comparisons of one argument or more,
     graphemes, normalization), vectors, SHA-1/224/256, byte converters,
-    stencil vectors, dates (data.lisp).
+    stencil vectors, dates (data.lisp);
+  - `#%foreign` (foreign.lisp), on the FFI layer the other modes share
+    (src/ffi.lisp): ctypes, cpointers, memory, cstructs, calls and
+    callbacks, errno, so `ffi/unsafe` works;
+  - `#%network` (network.lisp): TCP and UDP on libc's sockets, their
+    ports ordinary ports, their events polled;
+  - places and futures without parallelism, as Racket CS has where
+    they're unavailable, and will executors whose wills never become
+    ready (more.lisp).
   - Literal strings, byte strings and vectors are immutable: the header
     flag the Chez mode uses, or the one SBCL's fasl loader gives
     constants, so they stay immutable in cached compiled code.
@@ -295,7 +303,8 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   89 files that report pass about 1.15 million tests with 3 failures
   (optimize 1, subprocess 2); seven don't report under this harness
   even there (module, submodule, sandbox, future, promise, place,
-  syntax). Here, loading `racket` itself still fails (milestone 7).
+  syntax). Here, `racket` itself now loads (`#lang racket`); the suite's
+  tally is next.
 - **Coverage:** `sbcl --script tests/racket/coverage.lisp [--missing]`
   counts how much of each of Racket CS's primitive tables the instances
   have. It reads the tables from the pinned source, which is the

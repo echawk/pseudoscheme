@@ -251,7 +251,9 @@ numbers of arguments."
 					     (can-impersonate? ps:false) accessor-name contract realm)
     (:rumble "make-struct-type-property")
   (declare (ignore can-impersonate? accessor-name contract realm))
-  (let ((p (%make-struct-type-property name (and (truthy guard) guard) supers)))
+  ;; the guard may be the symbol can-impersonate: no guard, the property
+  ;; allowing impersonators (which aren't distinguished here)
+  (let ((p (%make-struct-type-property name (and (functionp guard) guard) supers)))
     (values p
 	    (lambda (x) (bool (and (or (struct-type-p x) (struct-instance-p x))
 				   (nth-value 1 (property-value x p)))))

@@ -136,7 +136,8 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 ;;; the expander gave it, decorrelated: reading it compiles it again,
 ;;; which lowers it (fast) and finds its machine code in the fasl cache,
 ;;; keyed by the same text.  Our values without a Racket syntax are
-;;; tagged lists: (#%pseudoscheme-void), (#%pseudoscheme-path "...").
+;;; tagged lists: (#%pseudoscheme-void), (#%pseudoscheme-path "..."),
+;;; (#%pseudoscheme-srcloc source line column position span).
 
 (defun zo-encode (x)
   (cond ((compiled-linklet-p x)
@@ -145,6 +146,9 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 	((eq x *void*) (list (rsym "#%pseudoscheme-void")))
 	((eq x ps:eof-object) (list (rsym "#%pseudoscheme-eof")))
 	((rpath-p x) (list (rsym "#%pseudoscheme-path") (rpath-string x)))
+	;; a srcloc (the expander's serialized syntax holds them)
+	((and (struct-instance-p x) (eq (struct-of-type x) *srcloc-type*))
+	 (cons (rsym "#%pseudoscheme-srcloc") (map 'list #'zo-encode (struct-fields x))))
 	((correlated-p x) (zo-encode (correlated->datum x)))
 	((rregexp-p x)
 	 ;; as the #rx or #px literal it prints as
@@ -168,6 +172,8 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 		 ((string= head "#%pseudoscheme-void") *void*)
 		 ((string= head "#%pseudoscheme-eof") ps:eof-object)
 		 ((string= head "#%pseudoscheme-path") (make-rpath (second x)))
+		 ((string= head "#%pseudoscheme-srcloc")
+		  (apply (primitive "srcloc") (mapcar #'zo-decode (cdr x))))
 		 (t (cons (zo-decode (car x)) (zo-decode (cdr x)))))))
 	((consp x) (cons (zo-decode (car x)) (zo-decode (cdr x))))
 	((simple-vector-p x) (map 'simple-vector #'zo-decode x))

@@ -342,3 +342,118 @@
   (declare (ignore err-char))
   (sb-ext:octets-to-string b :external-format '(:utf-8 :replacement #\?) :start start :end end))
 (defnative "locale-string-encoding" () (:leaf t) "UTF-8")
+
+;;; ------------------------------------------------------------------
+;;; Places and futures, without parallelism, as Racket CS is where
+;;; neither is available: place-enabled? and futures-enabled? are #f, a
+;;; future runs when it is touched, and a place channel is a queue
+;;; within the one place there is.  Making a place is unsupported.
+
+(defun unsupported (who what)
+  (error 'racket-error :who who :type "exn:fail:unsupported"
+		       :message (format nil "~A are not supported" what)))
+
+(defstruct (place-channel-end (:constructor make-place-channel-end (in out)))
+  in out)				; conses whose cdr is a queue's list
+
+(defnative "place-enabled?" () (:instance "#%place" :leaf t) ps:false)
+(defnative "place?" (x) (:instance "#%place" :leaf t) (declare (ignore x)) ps:false)
+(defnative "place-channel?" (x) (:instance "#%place" :leaf t) (bool (place-channel-end-p x)))
+(defnative "place-shared?" (x) (:instance "#%place" :leaf t) (declare (ignore x)) ps:false)
+(defnative "place-channel" () (:instance "#%place" :leaf t)
+  (let ((a (list :queue)) (b (list :queue)))
+    (values (make-place-channel-end a b) (make-place-channel-end b a))))
+(defnative "place-channel-put" (ch v) (:instance "#%place" :leaf t)
+  (let ((q (place-channel-end-out ch)))
+    (setf (cdr q) (append (cdr q) (list v))))
+  *void*)
+(defnative "place-channel-get" (ch) (:instance "#%place" :leaf t)
+  (let ((q (place-channel-end-in ch)))
+    (if (cdr q)
+	(pop (cdr q))
+	(racket-error "place-channel-get" "would block forever (one place, one thread)"))))
+(defnative "place-message-allowed?" (v) (:instance "#%place" :leaf t)
+  (labels ((ok (x)
+	     (or (numberp x) (characterp x) (symbolp x) (stringp x) (null x)
+		 (typep x '(simple-array (unsigned-byte 8) (*)))
+		 (eq x ps:true) (eq x ps:false) (eq x *void*)
+		 (place-channel-end-p x)
+		 (and (consp x) (ok (car x)) (ok (cdr x)))
+		 (and (simple-vector-p x) (every #'ok x)))))
+    (bool (ok v))))
+(defnatives "#%place"
+  ("dynamic-place" (&rest args) (declare (ignore args)) (unsupported "dynamic-place" "places"))
+  ("place-break" (&rest args) (declare (ignore args)) (unsupported "place-break" "places"))
+  ("place-kill" (p) (declare (ignore p)) (unsupported "place-kill" "places"))
+  ("place-wait" (p) (declare (ignore p)) (unsupported "place-wait" "places"))
+  ("place-dead-evt" (p) (declare (ignore p)) (unsupported "place-dead-evt" "places"))
+  ("place-pumper-threads" (&rest args) (declare (ignore args)) (unsupported "place-pumper-threads" "places")))
+
+(defstruct (rfuture (:constructor make-rfuture (thunk))) thunk (values nil) (done nil))
+
+(defnative "futures-enabled?" () (:instance "#%futures" :leaf t) ps:false)
+(defnative "future?" (x) (:instance "#%futures" :leaf t) (bool (rfuture-p x)))
+(defnative "current-future" () (:instance "#%futures" :leaf t) ps:false)
+(defnative "future" (thunk) (:instance "#%futures" :leaf t)
+  (unless (functionp thunk)
+    (racket-error "future" "contract violation~%  expected: (-> any)~%  given: ~A" (written thunk)))
+  (make-rfuture thunk))
+(defnative "would-be-future" (thunk) (:instance "#%futures" :leaf t) (make-rfuture thunk))
+(defnative "touch" (f) (:instance "#%futures")
+  (unless (rfuture-p f)
+    (racket-error "touch" "contract violation~%  expected: future?~%  given: ~A" (written f)))
+  (unless (rfuture-done f)
+    (setf (rfuture-values f) (multiple-value-list (funcall (rfuture-thunk f)))
+	  (rfuture-done f) t
+	  (rfuture-thunk f) nil))
+  (values-list (rfuture-values f)))
+
+(defstruct (fsemaphore (:constructor make-fsemaphore* (count))) count)
+(defnatives "#%futures"
+  ("make-fsemaphore" (n) (make-fsemaphore* n))
+  ("fsemaphore?" (x) (bool (fsemaphore-p x)))
+  ("fsemaphore-count" (s) (fsemaphore-count s))
+  ("fsemaphore-post" (s) (incf (fsemaphore-count s)) *void*)
+  ("fsemaphore-try-wait?" (s) (if (plusp (fsemaphore-count s))
+				  (progn (decf (fsemaphore-count s)) ps:true)
+				  ps:false))
+  ("fsemaphore-wait" (s) (if (plusp (fsemaphore-count s))
+			     (progn (decf (fsemaphore-count s)) *void*)
+			     (racket-error "fsemaphore-wait" "would block forever (one thread)")))
+  ("processor-count" () (processor-count))
+  ("mark-future-trace-end!" () *void*)
+  ("reset-future-logs-for-tracing!" () *void*)
+  ("make-parallel-thread-pool" (&optional n) (declare (ignore n)) (unsupported "make-parallel-thread-pool" "parallel threads"))
+  ("parallel-thread-pool?" (x) (declare (ignore x)) ps:false)
+  ("parallel-thread-pool-close" (p) (declare (ignore p)) (unsupported "parallel-thread-pool-close" "parallel threads"))
+  ("thread/parallel" (&rest args) (declare (ignore args)) (unsupported "thread/parallel" "parallel threads")))
+
+(defun processor-count ()
+  "The processors online, as sysconf says."
+  (max 1 (sb-alien:alien-funcall
+	  (sb-alien:extern-alien "sysconf" (function sb-alien:long sb-alien:int))
+	  #+darwin 58 #-darwin 84)))	; _SC_NPROCESSORS_ONLN
+
+;;; ------------------------------------------------------------------
+;;; Will executors.  A will is registered for a value, but SBCL's
+;;; finalizers can't hand a dead object back to be passed to its will,
+;;; so no will becomes ready: will-try-execute gives #f, and
+;;; will-execute would wait forever.  Racket promises nothing about when
+;;; a will runs, so this is allowed, if unhelpful.
+
+(defstruct (will-executor (:constructor make-will-executor* ())) (wills '()))
+
+(defnatives "#%kernel"
+  ("make-will-executor" () (make-will-executor*))
+  ("will-executor?" (x) (bool (will-executor-p x)))
+  ("will-register" (e v proc)
+   (unless (will-executor-p e)
+     (racket-error "will-register" "contract violation~%  expected: will-executor?~%  given: ~A" (written e)))
+   (push (cons (sb-ext:make-weak-pointer v) proc) (will-executor-wills e))
+   *void*)
+  ("will-try-execute" (e &optional (none ps:false))
+   (declare (ignore e))
+   none)
+  ("will-execute" (e)
+   (declare (ignore e))
+   (racket-error "will-execute" "would block forever (one thread)")))

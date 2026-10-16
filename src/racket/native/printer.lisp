@@ -152,6 +152,9 @@ the trailing ones equal to the one before."
 	       (loop for i below n
 		     do (unless (zerop i) (write-char #\Space stream)) (p (svref x i)))
 	       (write-char #\) stream)))
+	    ((and (typep x '(simple-array (unsigned-byte 8) (*))) (eq mode :display))
+	     ;; displayed: the bytes themselves, as UTF-8
+	     (write-string (sb-ext:octets-to-string x :external-format '(:utf-8 :replacement #\?)) stream))
 	    ((typep x '(simple-array (unsigned-byte 8) (*)))
 	     (write-string "#\"" stream)
 	     (loop for i from 0 below (length x)

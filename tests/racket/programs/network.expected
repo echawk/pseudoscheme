@@ -1,0 +1,54 @@
+(127.0.0.1 #t 0.0.0.0 0 #t #f #f)
+(#t #t #t #t #t)
+12
+(hello wor world
+)
+(127.0.0.1 #t 127.0.0.1 #t)
+(#<eof> #t #t #f)
+4
+back
+(tcp-addresses: port is closed
+  port: #<input-port:127.0.0.1>)
+(tcp-close: listener is closed
+  listener: #<tcp-listener>)
+(tcp-accept: contract violation
+  expected: tcp-listener?
+  given: 5)
+(tcp-connect: contract violation
+  expected: port-number?
+  given: 0)
+(tcp-listen: contract violation
+  expected: listen-port-number?
+  given: 70000)
+(tcp-connect: host not found)
+#f
+(#t #t #f (udp-bind!: udp socket is already bound
+  socket: #<udp>))
+(5 127.0.0.1 #t world...)
+(#f #f #f)
+(#t (udp-send-to: udp socket is connected
+  socket: #<udp>))
+#t
+(2 127.0.0.1)
+wabld...
+(#f (udp-send: udp socket is not connected
+  socket: #<udp>))
+(udp-send-to: ending index is out of range
+  ending index: 9
+  valid range: [2, 3]
+  byte string: #"abc")
+(udp-receive!: udp socket is not bound
+  socket: #<udp>)
+(udp-send-to: can't resolve address)
+(9 (udp-set-ttl!: contract violation
+  expected: byte?
+  given: 300))
+(1 #t 0.0.0.0)
+(udp-close: udp socket was already closed
+  socket: #<udp>)
+(udp-send-to: udp socket is closed
+  socket: #<udp>)
+(udp-bound?: contract violation
+  expected: udp?
+  given: 5)
+#<udp-send-ready-evt>
