@@ -330,6 +330,12 @@
     (cond ((struct-type-prefab-key type)
 	   `(prefab-instance ',(struct-type-prefab-key type) ,(length (rstruct-fields x)) ',(rstruct-fields x)))
 	  ((eq type *srcloc-type*) `(srcloc-instance ',(rstruct-fields x)))
+	  ;; one of the regexp layer's regexps (regexp-layer.lisp): its
+	  ;; literal, compiled again by the layer when it's loaded, or kept
+	  ;; as the literal, which the natives take, before the layer is in
+	  ((layer-regexp-literal x)
+	   `(let ((literal ',(layer-regexp-literal x)))
+	      (if *regexp-instance* (literal-regexp literal) literal)))
 	  (t (error "~S can't be in a compiled file: not a prefab struct" x)))))
 
 (defmethod make-load-form ((x rregexp) &optional environment)

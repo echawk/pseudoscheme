@@ -21,11 +21,91 @@
   (install-host-globals)
   (prune-extra-primitives))
 
+;;; ------------------------------------------------------------------
+;;; Start-up from a saved image
+;;;
+;;; Instantiating the expander (loading its compiled code, running its
+;;; 2,000 top-level forms) takes a second, most of what a `racket/base'
+;;; program's start-up costs.  So with PSEUDOSCHEME_RACKET_CORE=1, the
+;;; first --racket=linklet run saves an image of this program with the
+;;; expander instantiated, in the Racket cache (its generation,
+;;; cache.lisp), and each run after replaces itself with that image
+;;; (exec), given the same arguments.  The image is made by a run of this
+;;; program with PSEUDOSCHEME_RACKET_SAVE_CORE set to its path.  It is
+;;; opt-in because Racket's threads crash in it (tests/racket/programs/
+;;; threads*.rkt: a fault at the bottom of a new thread's stack, under the
+;;; ticker's interrupts), which runs without the image don't.  The expander
+;;; is only instantiated, not booted: that, and the collection paths,
+;;; are the run's own (EXPANDER-EVAL).
+
+(defun racket-core-path ()
+  "Where this program's image with the expander instantiated is kept: by the
+program file's date and size, as well as the cache's own key."
+  (let* ((exe (and sb-ext:*runtime-pathname* (probe-file sb-ext:*runtime-pathname*)))
+	 (stamp (and exe (list (file-write-date exe)
+			       (with-open-file (in exe :element-type '(unsigned-byte 8)) (file-length in))))))
+    (and stamp
+	 (merge-pathnames (format nil "core-~36R" (psx::fnv-1a (prin1-to-string stamp)))
+			  (racket-cache-directory)))))
+
+(defun exec-program (path arguments)
+  "Replace this process with PATH, run with ARGUMENTS (its argv, the
+first the program's name).  Returns only if that fails."
+  (let* ((n (length arguments))
+	 (argv (sb-alien:make-alien sb-alien:c-string (1+ n))))
+    (loop for i from 0 for a in arguments do (setf (sb-alien:deref argv i) a))
+    (setf (sb-alien:deref argv n) nil)
+    (finish-output *standard-output*)
+    (finish-output *error-output*)
+    (sb-alien:alien-funcall
+     (sb-alien:extern-alien "execv" (function sb-alien:int sb-alien:c-string (* sb-alien:c-string)))
+     path argv)))
+
+(defun start-from-racket-core ()
+  "Called as --racket=linklet is selected: if this program isn't the saved
+image, run it instead, making it first if need be."
+  (unless (or (uiop:getenv "PSEUDOSCHEME_RACKET_SAVE_CORE")
+	      (uiop:getenv "PSEUDOSCHEME_RACKET_CORE_ACTIVE")
+	      ;; opt-in for now: Racket's threads crash in the saved image
+	      ;; (a fault in a new thread's stack under the ticker's interrupts)
+	      (not (member (uiop:getenv "PSEUDOSCHEME_RACKET_CORE") '("1" "yes" "on") :test #'equal))
+	      (null sb-ext:*runtime-pathname*))
+    (ignore-errors
+     (let ((core (racket-core-path)))
+       (when core
+	 (unless (probe-file core)
+	   (let ((temp (format nil "~A.~36R" (sb-ext:native-namestring core)
+			       (random (expt 36 8) (make-random-state t)))))
+	     (ensure-directories-exist core)
+	     (unwind-protect
+		  (when (zerop (nth-value 2 (uiop:run-program
+					     (list "env" (format nil "PSEUDOSCHEME_RACKET_SAVE_CORE=~A" temp)
+						   (sb-ext:native-namestring sb-ext:*runtime-pathname*) "--no-userinit" "--racket=linklet"
+						   "-e" "(void)")
+					     :ignore-error-status t :output nil :error-output nil :input nil)))
+		    (when (probe-file temp)
+		      (sb-posix:rename temp (sb-ext:native-namestring core))))
+	       (ignore-errors (when (probe-file temp) (delete-file temp))))))
+	 (when (probe-file core)
+	   (sb-posix:setenv "PSEUDOSCHEME_RACKET_CORE_ACTIVE" "1" 1)
+	   (exec-program (sb-ext:native-namestring core) sb-ext:*posix-argv*)))))))
+
+(defun save-racket-core (path)
+  "Instantiate the expander and save this program, so, as PATH, which
+doesn't return."
+  (unless *expander-instance*
+    (unless (instantiate-expander :stream nil)
+      (uiop:quit 1)))
+  (sb-posix:unsetenv "PSEUDOSCHEME_RACKET_SAVE_CORE")
+  (uiop:dump-image path :executable t))
+
 (defun linklet-eval (text)
   "TEXT's forms, each evaluated by Racket's expander in a namespace with
 #%kernel (as racket -I '#%kernel -e would), under the default prompt;
 the last one's values.  The first use compiles and instantiates the
 expander (src/racket/linklet/sources.lisp), about half a minute."
+  (let ((save (uiop:getenv "PSEUDOSCHEME_RACKET_SAVE_CORE")))
+    (when save (save-racket-core save)))
   (let ((forms (with-input-from-string (in text)
 		 (loop for form = (read-racket in) until (eq form *eof*) collect form)))
 	(values (list *void*)))

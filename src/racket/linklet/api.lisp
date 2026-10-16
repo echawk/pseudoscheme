@@ -155,7 +155,7 @@ time units), and how many: PSEUDOSCHEME_RACKET_STATS prints them.")
     (let ((compiled (compile-linklet-form form :name name)))
       ;; its compiled code is cached, keyed by the linklet as given
       (unless (compiled-linklet-source-key compiled)
-	(setf (compiled-linklet-source-key compiled) (linklet-text form)))
+	(setf (compiled-linklet-source-key compiled) (linklet-hash form)))
       (setf (compiled-linklet-source-form compiled) form)
       compiled)))
 
@@ -165,6 +165,52 @@ what identifies it in the cache."
   (with-standard-io-syntax
     (let ((*package* (find-package "SCHEME")) (*print-circle* t) (*print-readably* nil))
       (prin1-to-string (correlated->datum form)))))
+
+(defun linklet-hash (form)
+  "A 64-bit digest of FORM, a linklet, without its correlated objects'
+locations: what identifies it in the cache.  Printing it (LINKLET-TEXT)
+and hashing the text took a tenth of a warm start's time, SBCL's printer
+checking each symbol's name for normalization; this walks the tree.  Each
+uninterned symbol counts by its name and the order it first appears in,
+as printing with *PRINT-CIRCLE* labels them; a leaf of a kind not listed
+is hashed by its printed text."
+  (let ((hash #xcbf29ce484222325)
+	(scheme (find-package "SCHEME"))
+	(uninterned (make-hash-table :test 'eq)))
+    (declare (type (unsigned-byte 64) hash))
+    (labels ((mix (n)
+	       (setq hash (ldb (byte 64 0) (* (logxor hash (ldb (byte 64 0) n)) #x100000001b3))))
+	     (mix-string (string)
+	       (mix (length string))
+	       (loop for c across string do (mix (char-code c))))
+	     (walk (x)
+	       (loop
+		 (cond ((consp x) (mix 1) (walk (car x)) (setq x (cdr x)))
+		       ((null x) (mix 2) (return))
+		       ((symbolp x)
+			(let ((package (symbol-package x)))
+			  (cond ((null package)
+				 (mix 3)
+				 (mix (or (gethash x uninterned)
+					  (setf (gethash x uninterned) (hash-table-count uninterned))))
+				 (mix-string (symbol-name x)))
+				(t (mix 4)
+				   (unless (eq package scheme)
+				     (mix-string (package-name package)))
+				   (mix-string (symbol-name x)))))
+			(return))
+		       ((typep x 'fixnum) (mix 5) (mix x) (return))
+		       ((stringp x) (mix 6) (mix-string x) (return))
+		       ((characterp x) (mix 7) (mix (char-code x)) (return))
+		       ((simple-vector-p x) (mix 8) (mix (length x)) (map nil #'walk x) (return))
+		       (t (mix 9)
+			  (mix-string (with-standard-io-syntax
+					(let ((*package* (find-package "SCHEME")) (*print-circle* t)
+					      (*print-readably* nil))
+					  (prin1-to-string x))))
+			  (return))))))
+      (walk (correlated->datum form)))
+    hash))
 
 (defun linklet-function (compiled)
   "COMPILED's instantiation function, of the instance and the variable

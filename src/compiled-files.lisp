@@ -88,6 +88,12 @@ HOST-EVAL runs it: escape-only, a top-level PROGN is its forms."
       (read-sequence bytes in)
       bytes)))
 
+(defvar *accept-compile-failure* nil
+  "True if a fasl whose compilation reported failure (SBCL turned a
+compile-time error in some code into a call that signals it when it
+runs, as EVAL does) is kept: a Racket linklet's, which has code that
+is never reached.")
+
 (defun compile-forms-chunk (forms lisp fasl source)
   (with-open-file (out lisp :direction :output :if-exists :supersede)
     (format out ";;; ~A, compiled by Pseudoscheme~%(cl:in-package \"SCHEME\")~%" source)
@@ -111,7 +117,7 @@ HOST-EVAL runs it: escape-only, a top-level PROGN is its forms."
 		     ;; a big chunk leaves much garbage in older generations;
 		     ;; a small one (a --racket linklet) isn't worth a full GC
 		     #+sbcl (when (> (reduce #'+ forms :key #'tree-size) 100000) (sb-ext:gc :full t))
-		     (and output (not failure-p)))))
+		     (and output (or (not failure-p) *accept-compile-failure*)))))
 	    ;; a form too big for SBCL (a branch past its reach, on arm64)
 	    ;; goes again with compact frames
 	    (or (try)

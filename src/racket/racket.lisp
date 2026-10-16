@@ -55,7 +55,12 @@ cs), made current."
 	 (s (cdr (assoc name *strategies* :test #'string=))))
     (unless s
       (error "--racket=~A: the strategies are ~{~A~^, ~}" name (strategy-names)))
-    (setq *strategy* s)))
+    (setq *strategy* s)
+    ;; strategy B starts from an image with the expander instantiated
+    ;; (linklet/boot.lisp), if there's one: this doesn't return then
+    (when (and (string= name "linklet") (fboundp 'start-from-racket-core))
+      (funcall 'start-from-racket-core))
+    s))
 
 (defun boot ()
   (unless *strategy* (select-strategy))
@@ -74,7 +79,14 @@ cs), made current."
 ;;; ------------------------------------------------------------------
 ;;; Values and errors every strategy's Lisp side uses
 
-(defun rsym (name) "The Racket symbol named NAME." (ps:intern-scheme-symbol name))
+(defvar *rsym-cache* (make-hash-table :test 'equal :synchronized t)
+  "Name -> symbol: reading a .zo interns tens of thousands of names, each
+of which INTERN-SCHEME-SYMBOL would case-convert (allocating) and hash.")
+
+(defun rsym (name)
+  "The Racket symbol named NAME."
+  (or (gethash name *rsym-cache*)
+      (setf (gethash (copy-seq name) *rsym-cache*) (ps:intern-scheme-symbol name))))
 (defun rname (symbol) "SYMBOL's Racket name." (ps:scheme-symbol-name symbol))
 (defun bool (x) (if x ps:true ps:false))
 (defun truthy (x) (not (eq x ps:false)))

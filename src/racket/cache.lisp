@@ -27,7 +27,7 @@
   (imports '())				; per import set, the external names
   (exports '())				; the external names of the exports
   (export-internals '())		; ... and their names inside the linklet
-  (source-key nil)			; a string identifying its source, for the cache
+  (source-key nil)			; a string or a digest identifying its source, for the cache
   (source-form nil)			; the linklet as given, for .zo files
   (function nil))			; once loaded: the instantiation function
 
@@ -57,7 +57,7 @@ global (native.lisp), whichever native is behind it."
   (let ((source (compiled-linklet-source-key compiled)))
     (and source
 	 (format nil "~36R-~36R"
-		 (psx::fnv-1a source)
+		 (if (integerp source) source (psx::fnv-1a source))
 		 (psx::fnv-1a (format nil "~A ~A" (racket-signature) (compiled-linklet-strategy compiled)))))))
 
 (defun racket-cache-directory ()
@@ -76,7 +76,8 @@ global (native.lisp), whichever native is behind it."
 into the fasl at PATH.  The compiler's notes, and the summary of a
 compilation unit a form too big for SBCL aborted (compiled again with
 compact frames), aren't the program's output."
-  (let ((*error-output* (make-broadcast-stream)))
+  (let ((*error-output* (make-broadcast-stream))
+	(psx::*accept-compile-failure* t))
     (write-split-fasl-1 path forms)))
 
 (defun write-split-fasl-1 (path forms)
@@ -91,10 +92,29 @@ compact frames), aren't the program's output."
 (defun load-split-fasl (path n)
   "The N functions of the split linklet whose fasl is at PATH."
   (let ((*loading-split-functions* (make-array n :initial-element nil)))
-    (psx::load-compiled-file path)
+    ;; from a stream: loading by name looks the file up (stat, a dozen
+    ;; times a path) for each of a few thousand fasls
+    (with-open-file (in path :element-type '(unsigned-byte 8))
+      (handler-bind ((warning #'muffle-warning))
+	(load in)))
     (when (find nil *loading-split-functions*)
       (error "~A doesn't hold all ~D forms" path n))
     (coerce *loading-split-functions* 'list)))
+
+(defun fail-marker (fasl)
+  "The file whose presence says that compiling FASL's forms failed (a
+form too big for SBCL, say), so that the next process doesn't try
+again: that costs seconds, twice (with compact frames)."
+  (make-pathname :type "fail" :defaults fasl))
+
+(defun write-fasl-or-mark (fasl forms)
+  "Write FASL from FORMS; if compiling them fails, leave a fail marker
+beside it and return NIL."
+  (cond ((probe-file (fail-marker fasl)) nil)
+	((ignore-errors (ensure-directories-exist fasl) (write-split-fasl fasl forms) t) t)
+	(t (ignore-errors (with-open-file (out (fail-marker fasl) :direction :output :if-exists :supersede)
+			    (declare (ignorable out))))
+	   nil)))
 
 (defun whole-function (compiled)
   "The instantiation function of COMPILED, not split: from its fasl if
@@ -102,13 +122,10 @@ there is one, else compiled now, into the cache if COMPILED has a key."
   (let* ((form (compiled-linklet-form compiled))
 	 (key (linklet-key compiled))
 	 (fasl (and key (linklet-fasl key))))
-    (or (and fasl (probe-file fasl)
-	     (car (ignore-errors (load-split-fasl fasl 1))))
+    (or (and fasl (car (ignore-errors (load-split-fasl fasl 1))))
 	(and fasl
-	     (car (ignore-errors
-		   (ensure-directories-exist fasl)
-		   (write-split-fasl fasl (list form))
-		   (load-split-fasl fasl 1))))
+	     (write-fasl-or-mark fasl (list form))
+	     (car (ignore-errors (load-split-fasl fasl 1))))
 	(psx:host-eval form))))
 
 (defun split-functions (compiled)
@@ -118,13 +135,10 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 	 (n (length (cddr form)))
 	 (key (linklet-key compiled))
 	 (fasl (and key (linklet-fasl key))))
-    (or (and fasl (probe-file fasl)
-	     (ignore-errors (load-split-fasl fasl n)))
+    (or (and fasl (ignore-errors (load-split-fasl fasl n)))
 	(and fasl
-	     (ignore-errors
-	      (ensure-directories-exist fasl)
-	      (write-split-fasl fasl (cddr form))
-	      (load-split-fasl fasl n)))
+	     (write-fasl-or-mark fasl (cddr form))
+	     (ignore-errors (load-split-fasl fasl n)))
 	(mapcar #'psx:host-eval (cddr form)))))
 
 ;;; ------------------------------------------------------------------
@@ -157,6 +171,8 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 		(zo-encode (struct-type-prefab-key (struct-of-type x)))
 		(map 'list #'zo-encode (struct-fields x))))
 	((correlated-p x) (zo-encode (correlated->datum x)))
+	;; the regexp layer's regexps, too (regexp-layer.lisp)
+	((layer-regexp-literal x))
 	((rregexp-p x)
 	 ;; as the #rx or #px literal it prints as
 	 (make-regexp-literal (if (rregexp-px x) :px :rx) (rregexp-source x)))

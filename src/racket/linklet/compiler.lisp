@@ -49,6 +49,14 @@
 (defun quoted (x) (list (core "quote") x))
 (defun form-p (x name) (and (consp x) (symbolp (car x)) (string= (rname (car x)) name)))
 
+;; With a constant NAME, the symbol itself is compared: (rname symbol)
+;; makes a string each time, and lowering asks this of every form.
+(define-compiler-macro form-p (&whole whole x name)
+  (if (stringp name)
+      (let ((v (gensym "X")))
+	`(let ((,v ,x)) (and (consp ,v) (eq (car ,v) (load-time-value (rsym ,name))))))
+      whole))
+
 (defvar *lexical-tag* "r"
   "Part of each lexical name, new in each process, as Tree-IL's (big
 top-level forms' lexicals become global definitions).")
@@ -64,7 +72,7 @@ top-level forms' lexicals become global definitions).")
   "A new lexical: STEM (the Racket name, so that backtraces show it), and
 a number and tag that make it unique."
   (psx::make-lexical
-   (ps::invert-case (format nil "~A~~~D.~A" stem (incf *lexical-count*) *lexical-tag*))))
+   (ps::invert-case (concatenate 'string stem "~" (write-to-string (incf *lexical-count*) :base 10 :radix nil) "." *lexical-tag*))))
 
 ;;; ------------------------------------------------------------------
 ;;; Pass 1: correlated objects off
@@ -232,6 +240,25 @@ NAME, if the lambda is bound to a variable: its object-name."
 	       ;; its name, for object-name
 	       (and name (symbolp name) (not (eq name ps:false)) (list (quoted name)))))))
 
+(defun assigned-p (id x)
+  "Does X (Racket code) hold a set! of ID?  Any one, even of another
+variable of the same name: this only has to say no when it's so."
+  (cond ((form-p x "quote") nil)
+	((form-p x "set!") (or (eq (cadr x) id) (assigned-p id (cddr x))))
+	((consp x) (loop for tail = x then (cdr tail)
+			 while (consp tail)
+			 thereis (assigned-p id (car tail))))
+	(t nil)))
+
+(defun procedures-only-p (bindings body)
+  "Are BINDINGS (letrec-values') each one variable, bound to a lambda,
+and none of them assigned in them or BODY?"
+  (and (every (lambda (b) (and (consp (car b)) (null (cdr (car b))) (form-p (cadr b) "lambda")))
+	      bindings)
+       (notany (lambda (b) (or (assigned-p (car (car b)) body)
+			       (some (lambda (b2) (assigned-p (car (car b)) (cadr b2))) bindings)))
+	       bindings)))
+
 (defun lower-let-values (bindings body env &optional recursive)
   "let-values: each right-hand side in the outer ENV, then all bound.
 letrec-values: as Racket's, a letrec* (left to right, each variable
@@ -240,12 +267,20 @@ assigned as its right-hand side returns)."
       (let* ((ids (loop for (ids) in bindings append ids))
 	     (env (bind ids env))
 	     (vars (mapcar (lambda (id) (cdr (assoc id env))) ids)))
+       (if (procedures-only-p bindings body)
+	;; every right-hand side a lambda, none assigned: a letrec the
+	;; translator makes into labels, whose calls SBCL compiles as local
+	;; ones (a named let's loop, say)
+	(list (core "letrec")
+	      (loop for (ids rhs) in bindings
+		    collect (list (cdr (assoc (car ids) env)) (lower-expr rhs env)))
+	      (lower-body body env))
 	(cons (list (core "lambda") vars
 		    (cons (core "begin")
 			  (append (loop for (ids rhs) in bindings
 					collect (lower-assignment ids rhs env))
 				  (list (lower-body body env)))))
-	      (mapcar (constantly (quoted ps:false)) vars)))
+	      (mapcar (constantly (quoted ps:false)) vars))))
       (labels ((nest (bindings inner-env)
 		 (if (null bindings)
 		     (lower-body body inner-env)
@@ -273,10 +308,38 @@ by their variables."
 		(quoted ps:false)))
 	core)))
 
+(defvar *self-call* nil
+  "While lowering a top-level procedure's lambda: (ID . LEXICAL), ID the
+variable it's defined as, never assigned otherwise, and LEXICAL the
+letrec variable that names the procedure itself.  A call of ID in its
+body is a call of it, whatever ID is then: the body runs only once ID
+has been defined.")
+
+(defun self-call-p (id rhs env)
+  "May a call of ID in RHS, the lambda it's defined as, be a direct
+call of the procedure?"
+  (and (not (assoc id env)) (form-p rhs "lambda")
+       (let ((v (gethash id (linklet-info-variables *info*))))
+	 (and v (member (variable-info-kind v) '(:defined :defined-exported))
+	      ;; not a split linklet's, whose variables are cells
+	      (variable-info-core v)
+	      (not (variable-info-mutated v))))))
+
+(defun lower-self-procedure (id rhs env)
+  "RHS, a lambda, lowered as (letrec ((SELF lambda)) SELF), its calls of
+ID being calls of SELF."
+  (let* ((self (fresh-lexical (rname id)))
+	 (*self-call* (cons id self)))
+    (list (core "letrec") (list (list self (lower-expr rhs env))) self)))
+
 (defun lower-assignment (ids rhs env)
   "IDS (already bound in ENV) assigned RHS's values."
   (if (and (consp ids) (null (cdr ids)))
-      (lower-set (car ids) (named (car ids) rhs (lower-expr rhs env) env) env)
+      (lower-set (car ids)
+		 (if (self-call-p (car ids) rhs env)
+		     (lower-self-procedure (car ids) rhs env)
+		     (named (car ids) rhs (lower-expr rhs env) env))
+		 env)
       (let ((temps (loop repeat (length ids) collect (fresh-lexical "v"))))
 	(list (core "call-with-values")
 	      (list (core "lambda") '() (lower-expr rhs env))
@@ -339,6 +402,8 @@ by their variables."
 		    (if args (quoted (car args)) (quoted ps:false))))
 	     (:define-values
 	      (error "compile-linklet: define-values not at a linklet's top level: ~S" x)))))
+	((and *self-call* (eq (car x) (car *self-call*)) (not (assoc (car x) env)))
+	 (cons (cdr *self-call*) (mapcar (lambda (y) (lower-expr y env)) (cdr x))))
 	(t (mapcar (lambda (y) (lower-expr y env)) x))))
 
 (defparameter *special-forms*
@@ -348,13 +413,22 @@ by their variables."
     ("with-continuation-mark" . :with-continuation-mark)
     ("#%variable-reference" . :variable-reference) ("#%foreign-inline" . :foreign-inline)))
 
-(defun special-form (symbol)
-  (cdr (assoc (rname symbol) *special-forms* :test #'string=)))
+(defvar *special-form-table*
+  (let ((table (make-hash-table :test 'eq)))
+    (loop for (name . keyword) in *special-forms* do (setf (gethash (rsym name) table) keyword))
+    table))
 
-(defparameter *split-size* 20000
+(defun special-form (symbol)
+  (gethash symbol *special-form-table*))
+
+(defparameter *split-size* 10000
   "A linklet bigger than this (in conses) is compiled form by form, as
 Racket CS compiles a big linklet's outer level piecewise: compiled whole,
-the expander's 2 MB linklet needs more than 8 GB to compile.")
+the expander's 2 MB linklet needs more than 8 GB to compile.  Lowered
+code is about ten times as big as the linklet, and SBCL on arm64 can't
+compile a code object past about 150,000 conses (a branch's reach): a
+linklet of 16,000 failed (racket/pretty's) and was interpreted, after
+twenty seconds of trying at each start.")
 
 ;;; Procedures that can't capture a continuation, in a split linklet.  A
 ;;; whole linklet's definitions are a letrec*, which the continuation
