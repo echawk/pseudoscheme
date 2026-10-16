@@ -76,7 +76,9 @@
 (defstruct (entry (:constructor make-entry (object address)))
   object address
   (snapshot nil)			; the words (or bytes) last written
-  (epoch -1))				; the crossing it was last synchronized in
+  (epoch -1)				; the crossing it was last synchronized in
+  (dead nil)				; its mirror is gone (REAP)
+  (pins 0))				; calls to C now holding it as an argument
 
 (defvar *lock* (sb-thread:make-mutex :name "libguile bridge"))
 (defvar *entries* (make-array 1024 :adjustable t :fill-pointer 1)
@@ -86,6 +88,10 @@
 (defvar *c-objects* (make-hash-table :test 'eql :weakness :value)
   "Address -> the C-OBJECT for C's object there.")
 (defvar *epoch* 0 "Counts crossings between C and Lisp.")
+(defvar *variable-entries* '()
+  "The entries of variables, which C reads and writes in place
+(SCM_VARIABLE_REF) between crossings: SYNC-VARIABLES-TO-C and
+SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 (defvar *c-ports*)			; api.lisp
 
 (defmacro with-bridge (&body body)
@@ -99,6 +105,7 @@
 	  (hidden address 0) handle
 	  (hidden address 1) 1)		; exported: not unreachable yet
     (c-call "psg_watch" sb-alien:void sb-sys:system-area-pointer (address-sap address))
+    (when (typep object (pg gvariable)) (push e *variable-entries*))
     e))
 
 (defun entry-at (address)
@@ -121,16 +128,41 @@
 		   ;; exported again since: watch it again
 		   (setf (hidden address 1) (logandc2 (hidden address 1) 1))
 		   (c-call "psg_watch" sb-alien:void sb-sys:system-area-pointer (address-sap address)))
+		  ((and (< 0 handle (fill-pointer *entries*)) (aref *entries* handle)
+			(plusp (entry-pins (aref *entries* handle))))
+		   ;; an argument of a call to C that hasn't returned: C
+		   ;; may have dropped it, but the call will read it again
+		   (c-call "psg_watch" sb-alien:void sb-sys:system-area-pointer (address-sap address)))
 		  ((and (< 0 handle (fill-pointer *entries*)) (aref *entries* handle))
 		   (let ((e (aref *entries* handle)))
 		     (remhash (entry-object e) *mirrors*)
+		     (setf (entry-dead e) t)
 		     (setf (aref *entries* handle) nil
 			   (hidden address 0) 0)
 		     (push handle *free-handles*))))))))))
 
 ;;; C's own objects, as the Lisp side holds them
-(defstruct (c-object (:constructor %make-c-object (address root)))
+;;; Two classes of them: a smob whose type has an apply function
+;;; (scm_set_smob_apply) can be called as a procedure, so it is a
+;;; funcallable instance; the others are not procedures
+(defstruct (c-plain (:constructor %make-c-plain (address root)))
   address root)
+
+(defclass c-applicable (sb-mop:funcallable-standard-object)
+  ((address :initarg :address) (root :initarg :root))
+  (:metaclass sb-mop:funcallable-standard-class))
+
+(deftype c-object () '(or c-plain c-applicable))
+(defun c-object-p (x) (typep x 'c-object))
+(defun c-object-address (x) (if (c-plain-p x) (c-plain-address x) (slot-value x 'address)))
+(defun c-object-root (x) (if (c-plain-p x) (c-plain-root x) (slot-value x 'root)))
+
+(defun %make-c-object (address root)
+  (if (smob-applicable-p address)
+      (let ((o (make-instance 'c-applicable :address address :root root)))
+	(sb-mop:set-funcallable-instance-function o (lambda (&rest args) (apply-c-object o args)))
+	o)
+      (%make-c-plain address root)))
 
 (defun c-object (address)
   (or (gethash address *c-objects*)
@@ -140,10 +172,13 @@
 			 :dont-save t)
 	(setf (gethash address *c-objects*) o))))
 
-(defmethod print-object ((o c-object) stream)
+(defun print-c-object (o stream)
   (if (smob-p o)
       (write-string (print-smob o) stream)
       (format stream "#<c-object ~(~X~)>" (c-object-address o))))
+
+(defmethod print-object ((o c-plain) stream) (print-c-object o stream))
+(defmethod print-object ((o c-applicable) stream) (print-c-object o stream))
 
 ;;; ------------------------------------------------------------------
 ;;; Immediates
@@ -287,8 +322,9 @@
 	       (setf (sb-sys:sap-ref-8 (address-sap buffer) i) (aref x i)))
 	     (setf (entry-snapshot e) (copy-seq x))))
 	  ((typep x (pg gvariable))
-	   (let ((bits (export-scm (funcall (pg gvariable-value) x))))
-	     (setf (word a 1) bits (entry-snapshot e) (vector bits))))
+	   (let* ((value (funcall (pg gvariable-value) x))
+		  (bits (export-scm value)))
+	     (setf (word a 1) bits (entry-snapshot e) (vector bits value))))
 	  ((funcall (pg struct-p) x)
 	   (let* ((vtable (funcall (pg struct-vtable-of) x))
 		  (slots (funcall (pg struct-slots-of) x))
@@ -328,6 +364,8 @@
 
 (defun import-c-object (a)
   "C's object at A, which has no entry: what it is in Lisp."
+  (when (< a 4096)			; an SCM C never set: not an object
+    (return-from import-c-object ps:unspecific))
   (let ((w0 (word a 0)))
     (cond ((zerop (logand w0 1))	; a pair C made
 	   (if (heap-object-p a)
@@ -376,8 +414,9 @@
 	  ((typep x (pg gvariable))
 	   (let ((w (word a 1)))
 	     (unless (= w (svref snapshot 0))
-	       (setf (svref snapshot 0) w)
-	       (funcall (fdefinition (list 'setf (pg gvariable-value))) (import-scm w) x))))
+	       (let ((value (import-scm w)))
+		 (setf (svref snapshot 0) w (svref snapshot 1) value)
+		 (funcall (fdefinition (list 'setf (pg gvariable-value))) value x)))))
 	  ((funcall (pg struct-p) x)
 	   (let* ((slots (funcall (pg struct-slots-of) x))
 		  (raw (raw-slots (funcall (pg struct-vtable-of) x) (length slots))))
@@ -412,6 +451,49 @@ characters if its first word has #x400."
 
 ;;; ------------------------------------------------------------------
 ;;; Crossings
+
+;;; Variables are read and written by C's inline macros in place, so
+;;; unlike the other mutable objects they are brought up to date at each
+;;; crossing, not just when they are passed.
+(defun sync-variables-to-c ()
+  "Write what Lisp changed in variables C holds to their mirrors."
+  (when *variable-entries*
+    (with-bridge
+      (dolist (e *variable-entries*)
+	(unless (entry-dead e)
+	  (let ((snapshot (entry-snapshot e)))
+	    (when (and snapshot (not (eq (svref snapshot 1) (funcall (pg gvariable-value) (entry-object e)))))
+	      (refresh e))))))))
+
+(defun sync-variables-to-lisp ()
+  "Copy into variables what C wrote in their mirrors."
+  (when *variable-entries*
+    (with-bridge
+      (setq *variable-entries* (delete-if #'entry-dead *variable-entries*))
+      (dolist (e *variable-entries*)
+	(let ((snapshot (entry-snapshot e)))
+	  (when (and snapshot (/= (word (entry-address e) 1) (svref snapshot 0)))
+	    (absorb e)))))))
+
+;;; The mirrors of a call's arguments stay while the call runs: C may
+;;; drop them, and the collector find them unreachable, before it returns
+(defun pin-words (words delta)
+  (with-bridge
+    (dolist (w words)
+      (unless (nth-value 1 (bits-immediate w))
+	(let ((e (entry-at w)))
+	  (when e (incf (entry-pins e) delta)))))))
+
+(defmacro with-pinned-words ((words) &body body)
+  `(let ((words ,words))
+     (pin-words words 1)
+     (unwind-protect (progn ,@body) (pin-words words -1))))
+
+(defmacro c-funcall (&rest alien-funcall-arguments)
+  "ALIEN-FUNCALL of C code that may read or write variables."
+  `(progn (sync-variables-to-c)
+	  (multiple-value-prog1 (sb-alien:alien-funcall ,@alien-funcall-arguments)
+	    (sync-variables-to-lisp))))
 
 (defmacro crossing (&body body)
   "BODY, as a new crossing between C and Lisp."

@@ -298,15 +298,17 @@ which GOOPS can make only once it is loaded."
 		   (funcall make-class meta (ssym name) (list port (goops-class super)) '()))))
   *unspecified*)
 
+(defun goops-instance-p (x)
+  (bool (and (struct-p x)
+	     (logtest (vtable-flags (struct-vtable-of x)) +vtable-flag-goops-class+))))
+
 (defextension "scm_init_goops_builtins"
   (setq *goops-module* *current-module*)
   (list
    (cons "%make-vtable-vtable" #'make-vtable-vtable)
    (cons "%init-layout!" #'init-layout)
    (cons "class-of" #'goops-class-of)
-   (cons "instance?" (lambda (x)
-		       (bool (and (struct-p x)
-				  (logtest (vtable-flags (struct-vtable-of x)) +vtable-flag-goops-class+)))))
+   (cons "instance?" #'goops-instance-p)
    (cons "generic-function-name" (lambda (g) (funcall (gethash "procedure-property" *guile-primitives*) g (ssym "name"))))
    (cons "%clear-fields!" #'clear-fields)
    (cons "%modify-instance" #'modify-instance)

@@ -860,6 +860,8 @@ not with Guile's behaviour.")
     (def "internal-time-units-per-second" internal-time-units-per-second)
     (def "%get-pre-modules-obarray" (lambda () *obarray*))
     (def "current-module" (lambda () *current-module*))
+    ;; a core binding in Guile (libguile's goops.c), which C programs look up
+    (def "instance?" (lambda (x) (goops-instance-p x)))
     (def "set-current-module" (lambda (m) (setq *current-module* m) *unspecified*))
     (def "module-variable" (lambda (m name) (or (module-variable* m name) ps:false)))
     (def "module-local-variable" (lambda (m name) (or (module-local-variable* m name) ps:false)))

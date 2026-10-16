@@ -14,12 +14,16 @@
 ;;; Lists
 
 ;; assq-ref and the other alist procedures: runtime.lisp
-(defguile "sloppy-assq" (key alist)
-  (or (find-if (lambda (e) (and (consp e) (eq (car e) key))) alist) ps:false))
-(defguile "sloppy-assv" (key alist)
-  (or (find-if (lambda (e) (and (consp e) (scheme-eqv (car e) key))) alist) ps:false))
-(defguile "sloppy-assoc" (key alist)
-  (or (find-if (lambda (e) (and (consp e) (scheme-equal (car e) key))) alist) ps:false))
+;; sloppy: an improper list, or anything but a list, just ends the search
+(defun sloppy-ass (test key alist)
+  (loop while (consp alist)
+	do (let ((e (car alist)))
+	     (when (and (consp e) (funcall test (car e) key)) (return e))
+	     (setq alist (cdr alist)))
+	finally (return ps:false)))
+(defguile "sloppy-assq" (key alist) (sloppy-ass #'eq key alist))
+(defguile "sloppy-assv" (key alist) (sloppy-ass #'scheme-eqv key alist))
+(defguile "sloppy-assoc" (key alist) (sloppy-ass #'scheme-equal key alist))
 
 (defguile "delq" (x list) (remove x list :test #'eq))
 (defguile "delv" (x list) (remove x list :test #'scheme-eqv))

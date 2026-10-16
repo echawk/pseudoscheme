@@ -333,6 +333,7 @@
 	       (:file "bridge")
 	       (:file "impl")
 	       (:file "api")
+	       (:static-file "build-core.lisp")
 	       (:static-file "core.c")
 	       (:static-file "data.c")
 	       (:static-file "psg.h")

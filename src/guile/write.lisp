@@ -156,6 +156,11 @@ INITIAL): letters, marks, numbers, punctuation and symbols."
   "A function writing a compiled program (src/guile/vm.lisp) and returning
 true, or NIL.")
 
+(defvar *write-object-hook* nil
+  "A function writing an object that is a procedure and something else
+too (our libguile's smobs with an apply function) and returning true,
+or NIL.")
+
 (defun write-procedure (f stream)
   (when (and *write-program-hook* (funcall *write-program-hook* f stream))
     (return-from write-procedure))
@@ -239,6 +244,7 @@ true, or NIL.")
 	((and (vectorp x) (ps::numeric-vector-tag x))
 	 (write-elements (format nil "#~A" (guile-uniform-tag x)) (coerce x 'list) stream display))
 	((struct-p x) (print-struct x stream))
+	((and *write-object-hook* (funcall *write-object-hook* x stream)))
 	((functionp x) (write-procedure x stream))
 	((ghash-p x) (print-object x stream))
 	((streamp x) (if (gport-p x) (print-object x stream) (print-object (stream-port x) stream)))

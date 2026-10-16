@@ -32,8 +32,34 @@
 (defimpl "scm_init_guile" () nil)
 
 (defimpl "scm_with_guile" (fptr data)
-  (sb-alien:alien-funcall (sb-alien:sap-alien (address-sap fptr) (function sb-alien:unsigned-long sb-alien:unsigned-long))
+  (c-funcall (sb-alien:sap-alien (address-sap fptr) (function sb-alien:unsigned-long sb-alien:unsigned-long))
 			  data))
+
+(defun c-argv (argc argv)
+  (loop for i below argc collect (c-string (word argv i))))
+
+(defun exit-from-c (status)
+  "Leave the program as C's exit(STATUS) does, after Guile's ports are
+flushed."
+  (psg::flush-all-ports)
+  (finish-output *standard-output*)
+  (finish-output *error-output*)
+  (c-call "exit" sb-alien:void sb-alien:int status))
+
+;; Guile's own start: the C main_func with the arguments, then an exit
+(defimpl "scm_boot_guile" (argc argv fptr closure)
+  (setq psg:*program-arguments* (c-argv argc argv))
+  (c-funcall
+   (sb-alien:sap-alien (address-sap fptr)
+		       (function sb-alien:void sb-alien:unsigned-long sb-alien:int sb-alien:unsigned-long))
+   closure argc argv)
+  (exit-from-c 0))
+
+;; The REPL, Guile's command line's when there are no switches
+(defimpl "scm_shell" (argc argv)
+  (setq psg:*program-arguments* (c-argv argc argv))
+  (scm "eval-string" "((@ (ice-9 top-repl) top-repl))")
+  (exit-from-c 0))
 
 (defimpl "scm_c_eval_string" (address) (scm "eval-string" (c-string address)))
 (defimpl "scm_c_eval_string_in_module" (address module)
@@ -83,14 +109,20 @@
   (make-subr (c-string name) req opt (/= rest 0) fptr))
 (defimpl "scm_c_define_gsubr" (name req opt rest fptr)
   (let ((f (make-subr (c-string name) req opt (/= rest 0) fptr)))
+    (when *trace-calls*
+      (format *error-output* ";;   ~A in ~S~%" (c-string name) (scm "module-name" (current-module))))
     (scm "module-define!" (current-module) (sym (c-string name)) f)
     f))
 
 (defimpl "scm_c_define_module" (name init data)
-  (let ((m (scm "resolve-module" (module-name-list name))))
+  ;; as define-module does: the module has a public interface, which
+  ;; scm_c_export adds to
+  (let ((m (let ((old (current-module)))
+	     (unwind-protect (scm "define-module*" (module-name-list name))
+	       (scm "set-current-module" old)))))
     (unless (zerop init)
       (call-with-module m (lambda ()
-			    (sb-alien:alien-funcall
+			    (c-funcall
 			     (sb-alien:sap-alien (address-sap init) (function sb-alien:void sb-alien:unsigned-long))
 			     data))))
     m))
@@ -102,7 +134,7 @@
 
 (defimpl "scm_c_call_with_current_module" (m fptr data)
   (call-with-module m (lambda ()
-			(import-scm (sb-alien:alien-funcall
+			(import-scm (c-funcall
 				     (sb-alien:sap-alien (address-sap fptr) (function sb-alien:unsigned-long sb-alien:unsigned-long))
 				     data)))))
 
@@ -328,7 +360,7 @@
   "A Scheme handler (key . args) that calls C's scm_t_catch_handler."
   (lambda (key &rest args)
     (crossing
-      (import-scm (sb-alien:alien-funcall
+      (import-scm (c-funcall
 		   (sb-alien:sap-alien (address-sap fptr) (function sb-alien:unsigned-long sb-alien:unsigned-long
 								    sb-alien:unsigned-long sb-alien:unsigned-long))
 		   data (export-scm key) (export-scm args))))))
@@ -336,7 +368,7 @@
 (defun c-body (fptr data)
   (lambda ()
     (crossing
-      (import-scm (sb-alien:alien-funcall
+      (import-scm (c-funcall
 		   (sb-alien:sap-alien (address-sap fptr) (function sb-alien:unsigned-long sb-alien:unsigned-long))
 		   data)))))
 
@@ -352,7 +384,7 @@
 
 (defun c-thunk (fptr data)
   (lambda () (unless (zerop fptr)
-	       (sb-alien:alien-funcall (sb-alien:sap-alien (address-sap fptr) (function sb-alien:void sb-alien:unsigned-long))
+	       (c-funcall (sb-alien:sap-alien (address-sap fptr) (function sb-alien:void sb-alien:unsigned-long))
 				       data))))
 (defimpl "scm_internal_dynamic_wind" (before inner after inner-data guard-data)
   (scm "dynamic-wind" (c-thunk before guard-data) (c-body inner inner-data) (c-thunk after guard-data)))
@@ -377,12 +409,31 @@
 ;;; ------------------------------------------------------------------
 ;;; The collector
 
-(defvar *protected* (make-hash-table :test 'eq) "Object -> count, for scm_gc_protect_object.")
+(defvar *protected* (make-hash-table :test 'eq) "Object -> (count . root), for scm_gc_protect_object.")
 
-(defimpl "scm_gc_protect_object" (x) (incf (gethash x *protected* 0)) x)
-(defimpl "scm_gc_unprotect_object" (x)
-  (when (<= (decf (gethash x *protected* 0)) 0) (remhash x *protected*)) x)
-(defimpl "scm_permanent_object" (x) (incf (gethash x *protected* 0)) x)
+;; The object's mirror, if it has one C can reach, is kept by a root cell
+;; for as long as it is protected: C may hold it where the collector
+;; doesn't look (memory from new or malloc)
+(defun protect (x)
+  (let ((cell (or (gethash x *protected*) (setf (gethash x *protected*) (cons 0 nil)))))
+    (incf (car cell))
+    (unless (cdr cell)
+      (let ((bits (export-scm x)))
+	(when (and (not (nth-value 1 (bits-immediate bits))) (heap-object-p bits))
+	  (setf (cdr cell) (c-call "psg_make_root" sb-alien:unsigned-long sb-sys:system-area-pointer
+				   (address-sap bits))))))
+    x))
+
+(defun unprotect (x)
+  (let ((cell (gethash x *protected*)))
+    (when (and cell (<= (decf (car cell)) 0))
+      (when (cdr cell) (c-call "psg_free_root" sb-alien:void sb-alien:unsigned-long (cdr cell)))
+      (remhash x *protected*))
+    x))
+
+(defimpl "scm_gc_protect_object" (x) (protect x))
+(defimpl "scm_gc_unprotect_object" (x) (unprotect x))
+(defimpl "scm_permanent_object" (x) (protect x))
 (defimpl "scm_remember_upto_here_1" (x) (declare (ignore x)) nil)
 (defimpl "scm_remember_upto_here_2" (x y) (declare (ignore x y)) nil)
 (defimpl "scm_gc" () (sb-ext:gc :full t) (c-call "psg_collect" sb-alien:void) ps:unspecific)
@@ -412,13 +463,34 @@
   (setter "scm_set_smob_free" :free)
   (setter "scm_set_smob_print" :print)
   (setter "scm_set_smob_equalp" :equalp))
+(defvar *smob-apply-arguments* (make-hash-table) "Smob number -> (required optional rest).")
+
 (defimpl "scm_set_smob_apply" (tag fptr req opt rest)
-  (declare (ignore req opt rest))
+  (setf (gethash (smob-number tag) *smob-apply-arguments*) (list req opt (/= rest 0)))
   (setf (sb-sys:sap-ref-64 (address-sap (smob-field (smob-number tag) :apply)) 0) fptr)
   nil)
 
+(defun smob-applicable-p (address)
+  "Whether C's object at ADDRESS is a smob whose type has an apply function."
+  (and (= (logand (word address 0) #x7f) +tc7-smob+)
+       (/= 0 (sb-sys:sap-ref-64 (address-sap (smob-field (smob-number (word address 0)) :apply)) 0))))
+
+(defun apply-c-object (o args)
+  "C-OBJECT O called as a procedure with ARGS: a smob with an apply function."
+  (let* ((a (c-object-address o))
+	 (n (and (= (logand (word a 0) #x7f) +tc7-smob+) (smob-number (word a 0))))
+	 (fptr (if n (sb-sys:sap-ref-64 (address-sap (smob-field n :apply)) 0) 0)))
+    (when (zerop fptr)
+      (guile-error "wrong-type-arg" ps:false "Wrong type to apply: ~S" (list o) (list o)))
+    (destructuring-bind (req opt rest) (gethash n *smob-apply-arguments*)
+      (apply (make-subr "smob-apply" (1+ req) opt rest fptr) o args))))
+
 (defun new-smob (words)
-  (let ((a (alloc (* 8 (length words)))))
+  (let ((a (if (zerop (sb-sys:sap-ref-64 (address-sap (smob-field (smob-number (first words)) :mark)) 0))
+	       (alloc (* 8 (length words)))
+	       ;; of the kind whose mark procedure calls the type's mark function (core.c)
+	       (sb-sys:sap-int (c-call "psg_alloc_marked" sb-sys:system-area-pointer
+				       sb-alien:unsigned-long (* 8 (length words)))))))
     (loop for w in words for i from 0 do (setf (word a i) w))
     (let ((free (sb-sys:sap-ref-64 (address-sap (smob-field (smob-number (first words)) :free)) 0)))
       (unless (zerop free)
@@ -448,7 +520,7 @@
 	(format nil "#<~A ~(~X~)>" name a)
 	(let ((port (scm "open-output-string")))
 	  (crossing
-	    (sb-alien:alien-funcall
+	    (c-funcall
 	     (sb-alien:sap-alien (address-sap print) (function sb-alien:int sb-alien:unsigned-long
 								sb-alien:unsigned-long sb-alien:unsigned-long))
 	     a (export-scm port) 0))
@@ -536,7 +608,7 @@
   "C's read or write function: size_t f (SCM port, SCM bv, size_t start, size_t count)."
   (incf *epoch*)
   (let* ((words (list (export-scm port) (export-scm bv) start count))
-	 (n (sb-alien:alien-funcall
+	 (n (c-funcall
 	     (sb-alien:sap-alien (address-sap fptr)
 				 (function sb-alien:unsigned-long sb-alien:unsigned-long sb-alien:unsigned-long
 					   sb-alien:unsigned-long sb-alien:unsigned-long))
@@ -551,10 +623,18 @@
 	 (write! (lambda (bv start count) (call-port-io (port-type-write type) port bv start count)))
 	 (close (lambda ()
 		  (unless (zerop (port-type-close type))
-		    (sb-alien:alien-funcall
+		    (c-funcall
 		     (sb-alien:sap-alien (address-sap (port-type-close type))
 					 (function sb-alien:void sb-alien:unsigned-long))
 		     (export-scm port)))))
+	 (seek (unless (zerop (port-type-seek type))
+		 (lambda (offset whence)
+		   (let ((position (c-funcall
+				    (sb-alien:sap-alien (address-sap (port-type-seek type))
+							(function sb-alien:long sb-alien:unsigned-long
+								  sb-alien:long sb-alien:int))
+				    (export-scm port) offset whence)))
+		     (and (>= position 0) position)))))
 	 (name (port-type-name type)))
     ;; a Guile port of Guile mode's own, bivalent (bytes and characters)
     ;; as Guile's ports are, with the C type's functions as its backend
@@ -563,6 +643,7 @@
 			       :buffering :full :encoding "UTF-8"
 			       :read (and (logtest mode +rdng+) read!)
 			       :write (and (logtest mode +wrtng+) write!)
+			       :seek seek
 			       :close close))
     (setf (gethash port *c-ports*) (list type-address stream mode))
     port))
@@ -627,3 +708,53 @@
   "A variadic function's first argument (word 1), then the rest (2...)."
   (let ((n (sb-sys:sap-ref-64 sap 0)))
     (cons (sb-sys:sap-ref-64 sap 8) (loop for i from 2 below (+ 2 n) collect (sb-sys:sap-ref-64 sap (* 8 i))))))
+
+;;; ------------------------------------------------------------------
+;;; Functions LilyPond calls
+
+(defimpl "scm_c_memq" (x list) (scm "memq" x list))
+(defimpl "scm_cons2" (w x y) (cons w (cons x y)))
+(defimpl "scm_c_with_fluid" (fluid value fptr data)
+  (scm "with-fluid*" fluid value
+       (lambda ()
+	 (import-scm (c-funcall
+		      (sb-alien:sap-alien (address-sap fptr) (function sb-alien:unsigned-long sb-alien:unsigned-long))
+		      data)))))
+
+(defimpl "scm_gc_register_collectable_memory" (mem size what)
+  (declare (ignore mem size what))
+  nil)
+(defimpl "scm_gc_unregister_collectable_memory" (mem size what)
+  (declare (ignore mem size what))
+  nil)
+(defimpl "scm_remember_upto_here" (x) (declare (ignore x)) nil)
+
+(defimpl "scm_internal_hash_fold" (fptr closure init table)
+  (scm "hash-fold"
+       (lambda (key value result)
+	 (import-scm (c-funcall
+		      (sb-alien:sap-alien (address-sap fptr)
+					  (function sb-alien:unsigned-long sb-alien:unsigned-long
+						    sb-alien:unsigned-long sb-alien:unsigned-long
+						    sb-alien:unsigned-long))
+		      closure (export-scm key) (export-scm value) (export-scm result))))
+       init table))
+
+(defimpl "scm_dynwind_fluid" (fluid value)
+  (when *dynwinds*
+    (let ((old (scm "fluid-ref" fluid)))
+      (scm "fluid-set!" fluid value)
+      (push (list :unwind (lambda (data) (declare (ignore data)) (scm "fluid-set!" fluid old)) nil 0)
+	    (dynwind-handlers (first *dynwinds*)))))
+  nil)
+
+(defimpl "scm_c_read_string" (address)
+  (scm "read" (scm "open-input-string" (c-string address))))
+
+;; their argument is the list of the lists to join
+(defimpl "scm_append" (lists) (apply #'scm "append" lists))
+(defimpl "scm_append_x" (lists) (apply #'scm "append!" lists))
+
+;; a smob that can be applied is still written by its print function
+(setq psg::*write-object-hook*
+      (lambda (x stream) (when (c-object-p x) (print-object x stream) t)))

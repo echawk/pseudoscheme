@@ -92,4 +92,30 @@ RUN cd /opt/src && cp -a guile-$GUILE_VERSION guile-build && cd guile-build \
 RUN chmod 1777 /tmp && apt-get update && apt-get install -y --no-install-recommends netbase \
     && rm -rf /var/lib/apt/lists/*
 
+# LilyPond 2.24 (docs/libguile.md, tests/lilypond/run.sh): the largest
+# program that embeds Guile, built against /opt/guile's Guile 3.0.11 and
+# installed in /opt/lilypond, to run on our libguile.  Its source is
+# pinned by sha256, taken from the first download (with LILYPOND_SHA256
+# empty the layer installs nothing).
+ARG LILYPOND_VERSION=2.24.4
+ARG LILYPOND_SHA256=e96fa03571c79f20e1979653afabdbe4ee42765a3d9fd14953f0cd9eea51781c
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      texinfo bison flex python3 gettext zip rsync perl \
+      fontforge t1utils texlive-binaries texlive-metapost texlive-font-utils \
+      fonts-texgyre fonts-urw-base35 ghostscript \
+      libfl-dev libfreetype-dev libfontconfig-dev libpango1.0-dev libglib2.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN if [ -z "$LILYPOND_SHA256" ]; then echo "LilyPond not installed: set LILYPOND_SHA256"; exit 0; fi \
+    && cd /opt/src \
+    && curl -fsSLO https://lilypond.org/download/sources/v2.24/lilypond-$LILYPOND_VERSION.tar.gz \
+    && echo "$LILYPOND_SHA256  lilypond-$LILYPOND_VERSION.tar.gz" | sha256sum -c - \
+    && tar xzf lilypond-$LILYPOND_VERSION.tar.gz && rm lilypond-$LILYPOND_VERSION.tar.gz \
+    && mkdir lilypond-build && cd lilypond-build \
+    && export PKG_CONFIG_PATH=/opt/guile/lib/pkgconfig LD_LIBRARY_PATH=/opt/guile/lib \
+    && { ../lilypond-$LILYPOND_VERSION/configure --prefix=/opt/lilypond --disable-documentation \
+         && make -j"$(nproc)" && make install; } > /opt/src/lilypond-build.log 2>&1 \
+       || { tail -60 /opt/src/lilypond-build.log; exit 1; } \
+    && cd .. && rm -rf lilypond-build \
+    && /opt/lilypond/bin/lilypond --version | head -1
+
 WORKDIR /work

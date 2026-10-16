@@ -5,6 +5,27 @@
 
 (in-package "PSEUDOSCHEME-LIBGUILE")
 
+(defvar *embedded* nil "True in the core a C program starts (START-EMBEDDED).")
+(defvar *trace-calls* nil
+  "Print each function C calls (PSEUDOSCHEME_LIBGUILE_TRACE=1), with its
+arguments and result (=2).")
+(defun brief (x depth)
+  "X as text for the trace: lists and atoms, not objects."
+  (cond ((null x) "()")
+	((consp x) (if (zerop depth)
+		       "(...)"
+		       (format nil "(~{~A~^ ~}~A)"
+			       (loop for y on x for n below 12
+				     collect (brief (car y) (1- depth)))
+			       (if (listp (cdr (last x))) "" " . ?"))))
+	((stringp x) (format nil "~S" (subseq x 0 (min 40 (length x)))))
+	((symbolp x) (symbol-name x))
+	((numberp x) (format nil "~A" x))
+	(t (format nil "<~(~A~)>" (type-of x)))))
+
+(defvar *call-count* 0 "The calls from C so far, when tracing.")
+(defvar *trace-after* 0 "Trace at level 2 only from this call on (PSEUDOSCHEME_LIBGUILE_TRACE_AFTER).")
+(defvar *entered* nil "True inside a call from C that embedded Lisp made Guile code.")
 (defvar *impls* (make-array 0 :adjustable t) "Index -> function of the args SAP.")
 
 ;;; ------------------------------------------------------------------
@@ -61,9 +82,27 @@
 
 (sb-alien:define-alien-callable psg-entry sb-alien:unsigned-long
     ((id sb-alien:unsigned-long) (args sb-sys:system-area-pointer))
-  (crossing
-    (with-bridge (reap))
-    (funcall (the function (aref *impls* id)) args)))
+  (flet ((call ()
+	   (when *trace-calls*
+	     (incf *call-count*)
+	     (format *error-output* "~&;; ~A~%" (api-name (aref *api* id)))
+	     (when (and (eql *trace-calls* 2) (> *call-count* *trace-after*))
+	       (format *error-output* ";;     ~{~A~^ ~}~%"
+		       (loop for type in (api-args (aref *api* id)) for i from 0
+			     collect (let ((w (sb-sys:sap-ref-64 args (* 8 i))))
+				       (handler-case (if (eq type :scm) (brief (import-scm w) 4) w)
+					 (error () w))))))
+	     (finish-output *error-output*))
+	   (crossing
+	     (with-bridge (reap))
+	     (sync-variables-to-lisp)
+	     (multiple-value-prog1 (funcall (the function (aref *impls* id)) args)
+	       (sync-variables-to-c)))))
+    ;; A C program that embeds us makes the first call outside any
+    ;; Guile code: errors become Guile exceptions from here
+    (if (and *embedded* (not *entered*))
+	(let ((*entered* t)) (psg::with-guile-errors (call)))
+	(call))))
 
 (defvar *impl-definitions* '() "(name . function), from DEFIMPL.")
 
@@ -96,6 +135,14 @@ arguments converted to Lisp, returning the Lisp value to convert back."
   (or (funcall (pg root-value) name)
       (gethash name (symbol-value (pg *guile-primitives*)))
       (ignore-errors (psx:host-ref name))
+      ;; defined in a module of Guile's own (ice-9 ports)
+      (loop for module in '("guile" "ice-9 ports" "oop goops")
+	    do (let ((value (scm "catch" ps:true
+				 (lambda ()
+				   (scm "module-ref" (scm "resolve-module" (mapcar (pg ssym) (uiop:split-string module)))
+					(funcall (pg ssym) name)))
+				 (lambda (&rest args) (declare (ignore args)) nil))))
+		 (when value (return value))))
       (error "libguile: no procedure ~A" name)))
 
 (defun scheme-impl (api)
@@ -112,7 +159,13 @@ arguments converted to Lisp, returning the Lisp value to convert back."
 			    until (and (>= i req) (= w +undefined+))
 			    collect (import-scm w)))
 	       (rest-list (and rest (import-scm (car (last args))))))
-	  (export-scm (apply procedure (append given rest-list))))))))
+	  (let ((result (apply procedure (append given rest-list))))
+	    ;; back to C: what the procedure changed (reverse!, append!,
+	    ;; vector-fill!) is written to the mirrors C holds, which
+	    ;; the arguments' import this crossing had marked up to date
+	    (incf *epoch*)
+	    (dolist (a given) (when (mutable-p a) (export-scm a)))
+	    (export-scm result)))))))
 
 (defun missing-impl (api)
   (lambda (sap)
@@ -139,17 +192,33 @@ built against Guile find their libguile already loaded."
       (unless (probe-file path)
 	(error "libguile: ~A isn't built (make -C src/libguile)" path))
       (sb-alien:load-shared-object path :dont-save t)
-      (let ((signature (c-string (sb-sys:sap-int (sb-sys:foreign-symbol-sap "psg_table_signature" t)))))
-	(unless (string= signature (table-signature))
-	  (error "libguile: ~A was built from another table (rebuild it: make -C src/libguile)" path)))
-      (install-default-impls)
-      (install-impls)
-      (install-varargs)
-      (c-call "psg_set_entry" sb-alien:void sb-sys:system-area-pointer
-	      (sb-alien:alien-sap (sb-alien:alien-callable-function 'psg-entry)))
-      (setq *library* path)
-      (initialize-data)))
+      (attach-library path)))
   *library*)
+
+(defun attach-library (path)
+  "Set up our libguile, now in this process, for this Lisp to serve."
+  (let ((signature (c-string (sb-sys:sap-int (sb-sys:foreign-symbol-sap "psg_table_signature" t)))))
+    (unless (string= signature (table-signature))
+      (error "libguile: ~A was built from another table (rebuild it: make -C src/libguile)" path)))
+  (install-default-impls)
+  (install-impls)
+  (install-varargs)
+  (c-call "psg_set_entry" sb-alien:void sb-sys:system-area-pointer
+	  (sb-alien:alien-sap (sb-alien:alien-callable-function 'psg-entry)))
+  (setq *library* path)
+  (initialize-data))
+
+(defun start-embedded ()
+  "The start-up of pseudoscheme-guile.core (src/libguile/build-core.lisp),
+which a C program linked against our libguile starts at its first call
+(core.c, boot_lisp): Lisp then serves the library already loaded."
+  (sb-ext:disable-debugger)
+  (setq *embedded* t
+	*trace-calls* (let ((n (parse-integer (or (uiop:getenv "PSEUDOSCHEME_LIBGUILE_TRACE") "") :junk-allowed t)))
+			(and n (plusp n) n)))
+  (setq *trace-after* (or (parse-integer (or (uiop:getenv "PSEUDOSCHEME_LIBGUILE_TRACE_AFTER") "") :junk-allowed t) 0))
+  (psg::add-environment-load-path)
+  (attach-library "libguile-3.0.so.1"))
 
 (defun data-address (name) (sb-sys:sap-int (sb-sys:foreign-symbol-sap name t)))
 
@@ -174,6 +243,11 @@ built against Guile find their libguile already loaded."
 			      ("scm_out_of_range_key" "out-of-range") ("scm_system_error_key" "system-error")
 			      ("scm_endianness_big" "big") ("scm_endianness_little" "little"))
 	  do (set-data c (funcall ssym scheme)))
+    ;; SCM_MODULEP compares a struct's first word with this: the module
+    ;; type's vtable, tagged
+    (setf (sb-sys:sap-ref-64 (address-sap (data-address "scm_module_tag")) 0)
+	  (word (export-scm (scm "resolve-module" (list (sym "guile")))) 0))
+    (setf (sb-sys:signed-sap-ref-32 (address-sap (data-address "scm_module_system_booted_p")) 0) 1)
     (setf (sb-sys:signed-sap-ref-32 (address-sap (data-address "scm_initialized_p")) 0) 1)))
 
 ;;; ------------------------------------------------------------------
@@ -184,7 +258,7 @@ built against Guile find their libguile already loaded."
   `(let ((f (address-sap ,fptr)) (w ,words))
      (case (length w)
        ,@(loop for n from 0 to 10
-	       collect `(,n (sb-alien:alien-funcall
+	       collect `(,n (c-funcall
 			     (sb-alien:sap-alien f (function sb-alien:unsigned-long
 							     ,@(make-list n :initial-element 'sb-alien:unsigned-long)))
 			     ,@(loop for i below n collect `(nth ,i w)))))
@@ -211,7 +285,7 @@ non-local exit through C) are closed."
 	     (let* ((fixed (loop for i below (+ req opt)
 				 collect (if args (export-scm (pop args)) +undefined+)))
 		    (words (if rest (append fixed (list (export-scm args))) fixed))
-		    (result (call-c fptr words)))
+		    (result (with-pinned-words (words) (call-c fptr words))))
 	       (crossing
 		 ;; what C did to the arguments shows
 		 (dolist (w words) (unless (= w +undefined+) (import-scm w)))
@@ -228,8 +302,11 @@ non-local exit through C) are closed."
 (defun close-dynwind (frame non-local)
   (dolist (h (dynwind-handlers frame))
     (destructuring-bind (kind fptr data flags) h
-      (when (and (eq kind :unwind) (or non-local (logtest +wind-explicitly+ flags)))
-	(sb-alien:alien-funcall (sb-alien:sap-alien (address-sap fptr) (function sb-alien:void sb-alien:unsigned-long))
+      (when (and (eq kind :unwind) (functionp fptr))
+	;; a handler written in Lisp (scm_dynwind_fluid): always runs
+	(funcall fptr data))
+      (when (and (eq kind :unwind) (integerp fptr) (or non-local (logtest +wind-explicitly+ flags)))
+	(c-funcall (sb-alien:sap-alien (address-sap fptr) (function sb-alien:void sb-alien:unsigned-long))
 				data)))))
 
 ;;; ------------------------------------------------------------------
@@ -259,7 +336,7 @@ LIBRARY isn't a shared library we can find."
       (sb-alien:load-shared-object path :dont-save t)
       (let ((f (sb-sys:foreign-symbol-sap init)))
 	(crossing
-	  (sb-alien:alien-funcall (sb-alien:sap-alien f (function sb-alien:void))))
+	  (c-funcall (sb-alien:sap-alien f (function sb-alien:void))))
 	t))))
 
 (setf (symbol-value (pg *c-extension-loader*)) 'load-c-extension)

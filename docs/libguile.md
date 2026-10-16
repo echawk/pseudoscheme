@@ -33,8 +33,12 @@ Status (October 2026):
   prints when `(rnrs io ports)` is imported. Its `port?`,
   `input-port?` and `output-port?` are other bindings than the root
   module's, where in Guile they are the same.
-- **Programs that embed Guile** (a C `main` calling `scm_with_guile`):
-  **not yet.** The design is under "Embedding" below.
+- **Programs that embed Guile** (a C `main` calling `scm_with_guile` or
+  `scm_boot_guile`): **working.** tests/libguile/embed-*.c, built once
+  against real Guile and once against ours, print the same. **LilyPond
+  2.24.4** (a binary built against Guile 3.0.11) runs on our library
+  and typesets a score to a PDF whose page is pixel-identical to the one
+  it makes on real Guile (tests/lilypond/run.sh; see "LilyPond").
 - Linux only so far. It is built and tested in the container
   (utils/container/), which has a real Guile 3.0.11 to compare with.
 
@@ -197,19 +201,62 @@ and the Lisp that called C (tested on arm64 macOS and Linux). C's
 **Threads.** A thread is registered with the Boehm collector the first
 time it allocates from our heap. It is unregistered when it exits.
 
-## Embedding (planned)
+## Embedding
 
 For a C `main` that calls `scm_with_guile` or `scm_boot_guile`, the
-library has to start Lisp itself:
-- SBCL can be built as a shared library, `libsbcl.so`; the container
-  builds one.
-- With a saved core holding the Guile mode and this bridge,
-  `scm_with_guile` would call `initialize_lisp` the first time.
-- The core's start-up sets the entry point and returns to C.
+library starts Lisp itself, at its first call:
+- SBCL is built as a shared library, `libsbcl.so`; the container has one.
+- `make -C src/libguile core` saves `build/libguile/pseudoscheme-guile.core`
+  (build-core.lisp): the command line's system, which has the Guile mode
+  booted, with `start-embedded` (impl.lisp) on `*init-hooks*` and
+  `psg-entry` as a callable export. SBCL's start-up then returns to C,
+  and writes the export's address into core.c's `psg_entry`.
+- core.c's `boot_entry` is the entry point until then. It `dlopen`s
+  `libsbcl.so` (`PSEUDOSCHEME_LIBSBCL`) and calls `initialize_lisp` on the
+  core, which is beside the library or named by `PSEUDOSCHEME_GUILE_CORE`
+  (`PSEUDOSCHEME_HEAP` is the heap limit, 8GB).
+- A call from the C main thread then arrives as a callback on a foreign
+  thread; errors become Guile exceptions (`with-guile-errors`) from the
+  first call on, and `scm_boot_guile` and `scm_shell` are in api.lisp.
 
-The same `libguile-3.0.so.1` then serves both cases. sbcl-librarian
+The same `libguile-3.0.so.1` serves both cases. sbcl-librarian
 (github.com/quil-lang/sbcl-librarian) shows that this works. We don't use
 its generated API, since ours has to be Guile's exact one.
+
+What embedding needed beyond the extension case:
+- **Variables are shared in place.** C reads and writes a variable's
+  value cell directly (`SCM_VARIABLE_REF`), so variables are the one
+  kind of object synchronized at every crossing (bridge.lisp,
+  `sync-variables-to-c` and `-to-lisp`), not only when passed.
+- **Mark functions run.** A smob type with a mark function
+  (`scm_set_smob_mark`) gets cells of a collector kind of its own
+  (core.c): its mark procedure calls the type's mark function, and
+  `scm_gc_mark` pushes what that marks. C++ objects whose members are
+  SCMs, in memory the collector doesn't scan, stay alive that way.
+- `scm_gc_protect_object` roots the object's mirror, not just the Lisp
+  object. The mirrors of a call's arguments stay while it runs.
+- A smob with an apply function (`scm_set_smob_apply`) is a funcallable
+  instance, so Scheme can call it.
+- The module system: `scm_c_define_module` makes the module as
+  `define-module` does, with a public interface; `scm_module_tag` is set.
+- Scheme procedures that change their arguments (`reverse!`, `append!`)
+  are written back to the mirrors C holds.
+
+Debugging: `PSEUDOSCHEME_LIBGUILE_TRACE=1` prints each libguile function
+C calls; `=2` also their arguments, from the call number in
+`PSEUDOSCHEME_LIBGUILE_TRACE_AFTER` on.
+
+## LilyPond
+
+The container builds LilyPond 2.24.4 (the Containerfile's last layer,
+pinned by sha256) against the real Guile 3.0.11 in /opt/lilypond.
+`sh utils/container/run.sh lilypond 'sh tests/lilypond/run.sh'` runs
+`{ c' d' e' }` on it, then the same binary with `LD_LIBRARY_PATH` on
+build/libguile, and compares ghostscript's rendering of the two PDFs.
+Status: the same page. Over 100,000 calls into libguile in the run,
+and all of LilyPond's Scheme (scm/*.scm, ly/*.ly) runs in Guile mode.
+Not tried yet: bigger scores, fonts and `\markup` text, MIDI, other
+backends; speed (the run takes several times as long as on real Guile).
 
 ## What's next
 
@@ -221,7 +268,7 @@ its generated API, since ours has to be Guile's exact one.
    - weak tables.
 
    Then Guix's TLS (`guix download`, substitutes) runs on them.
-2. Embedding, as above. Then LilyPond.
+2. More of LilyPond: bigger inputs (the ly/ regression files), speed.
 3. Our own `libguile.h`.
 4. Cheaper synchronization: Lisp-side dirty tracking (Guile mode's
    mutators note which mirrored objects they change), so that an

@@ -34,9 +34,15 @@ log=$LOGS/$name.log
     "$IMAGE" sh -c 'rsync -a --delete --files-from=/logs/files.list /src/ /work/ \
                       && rm /logs/files.list && cd /work && exec sh -c "$0" ' "$*" &
   pid=$!
+  sleeper=
   if [ -n "$LIMIT" ]; then
     ( sleep "$LIMIT"; podman $CONNECTION kill "pseudoscheme-$name" ) > /dev/null 2>&1 &
+    sleeper=$!
   fi
-  wait $pid
-  echo "# exit $?"
+  status=0
+  wait $pid || status=$?
+  # the time limit's watcher must not outlive the run, or it kills a
+  # later run of the same name
+  if [ -n "$sleeper" ]; then kill "$sleeper" 2>/dev/null || true; fi
+  echo "# exit $status"
 } 2>&1 | tee "$log"

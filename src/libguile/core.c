@@ -19,9 +19,13 @@
  * facts (type tags, layouts) are in src/libguile/abi.lisp, measured
  * from a real Guile build by tests/libguile/probe.c.  */
 
+#define _GNU_SOURCE 1
 #define GC_THREADS 1
 #include <gc/gc.h>
+#include <gc/gc_mark.h>
+#include <dlfcn.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -34,12 +38,90 @@
    order), ARGS are its arguments, each widened to a word.  The Lisp
    side sets it when it loads us (psg_set_entry).  */
 
-psg_entry_t psg_entry_fn = 0;
+static uintptr_t boot_entry (uintptr_t id, uintptr_t *args);
+
+psg_entry_t psg_entry_fn = boot_entry;
 
 void
 psg_set_entry (psg_entry_t f)
 {
   psg_entry_fn = f;
+}
+
+/* ------------------------------------------------------------------ */
+/* Embedding.  When a C program linked against us (rather than Lisp
+   loading us as an extension's libguile) makes its first call, there
+   is no Lisp yet: boot_entry starts one.  It loads SBCL's runtime as a
+   shared library (libsbcl.so) and starts it on the Guile mode's core
+   (pseudoscheme-guile.core, built by `make core`), whose start-up
+   sets the entry point (start-embedded in src/libguile/impl.lisp) and returns here.
+
+   PSEUDOSCHEME_GUILE_CORE names the core (default: the one beside this
+   library), PSEUDOSCHEME_LIBSBCL the runtime (default: libsbcl.so on
+   the library path), PSEUDOSCHEME_HEAP the heap's limit (8GB).  */
+
+/* Written by the core's start-up: its callable export, psg-entry.  */
+psg_entry_t psg_entry = 0;
+
+static pthread_mutex_t boot_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+boot_failed (const char *what, const char *detail)
+{
+  fprintf (stderr, "libguile (Pseudoscheme): %s%s%s\n", what,
+           detail ? ": " : "", detail ? detail : "");
+  abort ();
+}
+
+static void
+boot_lisp (void)
+{
+  char core[4096];
+  const char *env = getenv ("PSEUDOSCHEME_GUILE_CORE");
+  if (env)
+    snprintf (core, sizeof core, "%s", env);
+  else
+    {
+      Dl_info info;
+      if (!dladdr ((void *) boot_lisp, &info) || !info.dli_fname)
+        boot_failed ("can't find where this library is", 0);
+      snprintf (core, sizeof core, "%s", info.dli_fname);
+      char *slash = strrchr (core, '/');
+      snprintf (slash ? slash + 1 : core, sizeof core - (slash ? slash + 1 - core : 0),
+                "pseudoscheme-guile.core");
+    }
+  const char *libsbcl = getenv ("PSEUDOSCHEME_LIBSBCL");
+  void *runtime = dlopen (libsbcl ? libsbcl : "libsbcl.so", RTLD_NOW | RTLD_GLOBAL);
+  if (!runtime)
+    boot_failed ("can't load SBCL's runtime", dlerror ());
+  int (*initialize_lisp) (int, char **, char **)
+    = (int (*) (int, char **, char **)) dlsym (runtime, "initialize_lisp");
+  if (!initialize_lisp)
+    boot_failed ("no initialize_lisp in SBCL's runtime", dlerror ());
+  const char *heap = getenv ("PSEUDOSCHEME_HEAP");
+  char *argv[] = { "pseudoscheme", "--core", core,
+                   "--dynamic-space-size", (char *) (heap ? heap : "8GB"),
+                   "--control-stack-size", "256MB",
+                   "--noinform", "--disable-ldb", "--lose-on-corruption",
+                   "--end-runtime-options", 0 };
+  extern char **environ;
+  initialize_lisp (sizeof argv / sizeof argv[0] - 1, argv, environ);
+  if (psg_entry_fn == boot_entry)
+    {
+      if (!psg_entry)
+        boot_failed ("the core didn't start the Guile mode", core);
+      psg_entry_fn = psg_entry;
+    }
+}
+
+static uintptr_t
+boot_entry (uintptr_t id, uintptr_t *args)
+{
+  pthread_mutex_lock (&boot_lock);
+  if (psg_entry_fn == boot_entry)
+    boot_lisp ();
+  pthread_mutex_unlock (&boot_lock);
+  return psg_entry_fn (id, args);
 }
 
 /* ------------------------------------------------------------------ */
@@ -86,6 +168,7 @@ psg_ensure_thread (void)
    synchronization, which the Lisp side keeps).  */
 
 static int initialized = 0;
+static void init_marked_kind (void);
 
 static void
 psg_init_gc (void)
@@ -97,6 +180,7 @@ psg_init_gc (void)
   GC_set_finalize_on_demand (1);
   GC_INIT ();
   GC_allow_register_threads ();
+  init_marked_kind ();
   pthread_once (&key_once, make_key);
   pthread_setspecific (registered_key, (void *) 1);
 }
@@ -125,6 +209,73 @@ psg_alloc_pointerless (size_t bytes)
   if (!base)
     abort ();
   memset (base, 0, PSG_HIDDEN_BYTES + bytes);
+  return base + PSG_HIDDEN_BYTES;
+}
+
+/* Smobs whose type has a mark function (scm_set_smob_mark).  Their
+   data may sit where the collector doesn't look (memory from new or
+   malloc), reachable only through what the mark function marks, as in
+   Guile.  They are allocated of a kind of their own, whose mark
+   procedure scans the cell, calls the type's mark function and has
+   scm_gc_mark push what that marks.  */
+extern uintptr_t scm_smobs[];
+
+static int marked_kind = -1;
+static __thread struct GC_ms_entry *mark_top, *mark_limit;
+static __thread void **mark_source;
+
+static struct GC_ms_entry *
+marked_mark (GC_word *addr, struct GC_ms_entry *top, struct GC_ms_entry *limit,
+             GC_word env)
+{
+  size_t words = GC_size (addr) / sizeof (GC_word), i;
+  uintptr_t *cell = (uintptr_t *) ((char *) addr + PSG_HIDDEN_BYTES);
+  (void) env;
+  for (i = 0; i < words; i++)
+    top = GC_MARK_AND_PUSH ((void *) addr[i], top, limit, (void **) addr);
+  if (words > 2 && (cell[0] & 0x7f) == 0x77)
+    {
+      uintptr_t (*mark) (uintptr_t) = (uintptr_t (*) (uintptr_t)) scm_smobs[((cell[0] >> 8) & 0xff) * 8 + 2];
+      if (mark)
+        {
+          uintptr_t next;
+          mark_top = top;
+          mark_limit = limit;
+          mark_source = (void **) addr;
+          next = mark ((uintptr_t) cell);
+          top = mark_top;
+          if (next)
+            top = GC_MARK_AND_PUSH ((void *) next, top, limit, (void **) addr);
+          mark_top = 0;
+        }
+    }
+  return top;
+}
+
+/* scm_gc_mark, called by a mark function.  */
+uintptr_t
+scm_gc_mark (uintptr_t x)
+{
+  if (mark_top)
+    mark_top = GC_MARK_AND_PUSH ((void *) x, mark_top, mark_limit, mark_source);
+  return x;
+}
+
+static void
+init_marked_kind (void)
+{
+  void **free_list = (void **) GC_new_free_list ();
+  unsigned proc = GC_new_proc (marked_mark);
+  marked_kind = GC_new_kind (free_list, GC_MAKE_PROC (proc, 0), 0, 1);
+}
+
+void *
+psg_alloc_marked (size_t bytes)
+{
+  psg_ensure_thread ();
+  char *base = GC_generic_malloc (PSG_HIDDEN_BYTES + bytes, marked_kind);
+  if (!base)
+    abort ();
   return base + PSG_HIDDEN_BYTES;
 }
 
@@ -384,8 +535,6 @@ scm_c_export (const char *name, ...)
 
 /* A smob whose type has a free function: the function runs when the
    collector finds the smob unreachable (the descriptors, data.c).  */
-extern uintptr_t scm_smobs[];
-
 static void
 free_smob (void *base, void *ignore)
 {
