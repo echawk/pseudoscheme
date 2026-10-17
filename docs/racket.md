@@ -1,9 +1,71 @@
 # Racket on Pseudoscheme: a `--racket` mode
 
-Status: **design only; tabled** (October 2026). Nothing in this
-document is implemented except the experiment in contrib/racket-linklets,
-which this design retires. When the work resumes, it starts at
-"Milestones", step 0.
+Status: **running, on strategy B** (October 2026).
+`pseudoscheme --racket=linklet prog.rkt` runs `#lang racket/base` and
+`#lang racket` programs on Racket's own expander. Strategy A, Racket
+CS's layers on the Chez mode (the plan this document describes), has
+its pieces in src/racket/cs/ but doesn't get past booting rumble yet; strategy C, its hybrid,
+waits on A. See "Where it stands", next, then the design as it was
+written, which the strategies section compares.
+
+## Where it stands
+
+Strategy B (docs/racket-linklet-compiler.md): our compiler from
+linklets to Lisp, with Racket's primitives written natively in Lisp.
+
+- **Racket's own layers, extracted by Racket's own recipe.**
+  `utils/racket/setup.sh` fetches Racket's source at the pinned version;
+  `utils/racket/extract.sh` runs the expander's `bootstrap-run.rkt`, as
+  each layer's `main.zuo` does, with a `racket` of that version, to
+  flatten a layer into one S-expression linklet
+  (`build/external/racket-derived/LAYER.rktl`): the expander (8.7 MB),
+  thread, io and regexp. The expander and the regexp layer run here;
+  thread and io are extracted but not used, our natives standing in
+  for them. Without a Racket to extract with, the expander is read from
+  the copy in Racket BC's `startup.inc` instead
+  (src/racket/linklet/sources.lisp).
+- **The compiler** (src/racket/linklet/compiler.lisp) lowers each
+  linklet to core Scheme, which the translator and SBCL compile:
+  `letrec` checks, `with-continuation-mark` on our continuation marks,
+  boxes only for assigned variables, direct calls for a top-level
+  procedure's calls of itself and for `letrec`s of lambdas. Linklets
+  too big for SBCL to compile in one piece are split.
+- **The primitives** (src/racket/native/, about 20 files): structs and
+  properties, chaperones and impersonators, ports and `rktio`, the
+  printer, hash tables, `equal?`, exceptions and error messages,
+  parameters, continuation marks and prompts, threads, events and
+  custodians (SBCL threads with a baton, preempted every 10 ms),
+  `#%foreign` on CFFI, `#%network`, extflonum stubs, places, futures
+  and will executors as stand-ins. Regexps are Racket's own regexp
+  layer; the old cl-ppcre natives remain as the fallback
+  (`PSEUDOSCHEME_RACKET_REGEXP=native`).
+- **Modules** load from the collections in Racket's source tree, and
+  from collection links; `.zo` files are written and read, and each
+  compiled linklet is cached as a fasl (src/racket/cache.lisp). With a
+  warm cache, `#lang racket/base` hello starts in about 1.1 s and
+  `#lang racket` hello in about 3.4 s. A cold cache takes minutes, and
+  for now two or three runs to fill.
+- **Tests** (tests/racket/run.sh linklet): 6 hand-written linklet
+  programs, 14 expressions through the expander, and 18 `#lang
+  racket/base` programs in tests/racket/programs/, each checked
+  against what Racket 9.3 prints.
+- **Racket's own test suite** (`pkgs/racket-test-core`,
+  tests/racket/run-suite.sh, one file per process, against real
+  Racket's run as the reference): in the last full run, before the
+  regexp layer and the fixes for the crashes it found, 38 of the 91
+  files reported results (14 of them with no failures), 95,933 tests
+  ran and 52 files crashed or timed out; real Racket runs about 1.15
+  million tests in 89 of them. Most of that run's failures were
+  `rx.rktl`'s, cl-ppcre's differences from Racket's regexps, which
+  the regexp layer replaces.
+
+What's missing: a faster cold start (one run to fill the cache), the
+saved image with the expander instantiated
+(`PSEUDOSCHEME_RACKET_CORE=1`; Racket's threads crash in it for now),
+real places and futures, the thread and io layers themselves, and the
+crashes Racket's suite still finds. `--racket` with no strategy is
+strategy A, so it reports "not implemented yet"; use
+`--racket=linklet` (or `PSEUDOSCHEME_RACKET_STRATEGY=linklet`).
 
 The goal: `pseudoscheme --racket prog.rkt` runs Racket programs with
 `racket/base` and the packages on the package server, by reusing as much
@@ -470,7 +532,11 @@ plan would have had to write, and the notes are what it would have done:
 
 ## Milestones
 
-Each ends in something that runs, and in a test.
+Each ends in something that runs, and in a test. These are strategy
+A's. Strategy B has reached the equivalents of 2 (the regexp layer),
+4 (the expander evaluates in a `#%kernel` namespace), 5 (`racket/base`
+loads, cached) and 7 (Racket's suite runs, file by file); A stops at
+1, its boot step.
 
 0. **Inventory.** `utils/racket/setup.sh` fetches the pinned tag. A
    script lists every identifier that rumble and the schemified layers

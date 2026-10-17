@@ -1,9 +1,11 @@
 # A linklet-to-Common-Lisp compiler (the fallback for `--racket`)
 
-Status: **design only**, for the case docs/racket.md's plan can't
-cover. That plan runs Racket CS's own layers on the Chez mode and
-compiles what schemify produces. This document is what to build
-instead if schemify can't be used:
+Status: **implemented; this is the strategy that runs**
+(`--racket=linklet`, src/racket/linklet/ and src/racket/native/;
+docs/racket.md, "Where it stands"). It was written as the fallback for
+the case docs/racket.md's plan can't cover. That plan runs Racket CS's
+own layers on the Chez mode and compiles what schemify produces; this
+document is what to build instead if schemify can't be used:
 - rumble can't be made to run on `--chez`, so schemify's output has
   nothing to call;
 - or schemify's output turns out to be a poor fit for SBCL;
