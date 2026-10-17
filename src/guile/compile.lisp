@@ -277,10 +277,21 @@ references to these."
     ("procedure?" 1 1) ("char?" 1 1) ("number?" 1 1) ("integer?" 1 1) ("zero?" 1 1)
     ("null?" 1 1) ("not" 1 1) ("vector-length" 1 1) ("string-length" 1 1)
     ("cons" 2 2) ("eq?" 2 2) ("eqv?" 2 2) ("vector-ref" 2 2) ("string-ref" 2 2)
-    ("set-car!" 2 2) ("set-cdr!" 2 2) ("char=?" 2 2) ("vector-set!" 3 3))
+    ("set-car!" 2 2) ("set-cdr!" 2 2) ("char=?" 2 2) ("vector-set!" 3 3)
+    ("memq" 2 2) ("memv" 2 2) ("length" 1 1) ("append" 2 2) ("list" 0 nil))
   "Root primitives a call of which is made a primcall, with their numbers of
 arguments allowed: the others stay calls of the variable.  Not boolean?,
-which the host's has #f for #nil.")
+which the host's has #f for #nil.  All are in Guile's
+*interesting-primitive-names*, which its pass resolves.")
+
+(defun existing-module (name public)
+  "The module named NAME, or its public interface if PUBLIC, if it exists:
+resolving it mustn't load one (or NIL)."
+  (let* ((resolve (root-value "resolve-module"))
+	 (m (and resolve (consp name)
+		 (ignore-errors (funcall resolve name ps:false ps:false :ensure ps:false)))))
+    (and m (truthy m) (module-p* m)
+	 (if public (module-public-interface* m) m))))
 
 (defvar *resolve-primitives* t
   "Whether calls of the root module's primitives compile to primcalls.")
@@ -289,7 +300,7 @@ which the host's has #f for #nil.")
   "The name (a symbol) of the root primitive that the call (F . ARGS)
 calls, if F is a reference to the root module's variable of a primitive in
 *RESOLVABLE-PRIMITIVES* and ARGS fit it; else NIL."
-  (when (and *resolve-primitives* (eq (node-type f) :toplevel-ref))
+  (when (and *resolve-primitives* (member (node-type f) '(:toplevel-ref :module-ref)))
     (let* ((name (node-field f 2))
 	   (entry (and (ps:scheme-symbol-p name)
 		       (assoc (ps:scheme-symbol-name name) *resolvable-primitives* :test #'string=))))
@@ -297,8 +308,12 @@ calls, if F is a reference to the root module's variable of a primitive in
 	(let ((n (length args)))
 	  (when (and (>= n (second entry)) (or (null (third entry)) (<= n (third entry)))
 		     (not (goops-generic-primitive-p (car entry))))
+	    ;; (@@ (guile) memv), say, from a macro of boot-9's (case): Guile's
+	    ;; pass resolves a module reference too
 	    (let ((root (obarray-variable name))
-		  (module (node-module f)))
+		  (module (if (eq (node-type f) :module-ref)
+			      (existing-module (node-field f 1) (truthy (node-field f 3)))
+			      (node-module f))))
 	      (and root (not (eq module :root)) (module-p* module)
 		   (eq root (module-variable* module name))
 		   name))))))))
@@ -313,9 +328,50 @@ calls, if F is a reference to the root module's variable of a primitive in
 					   (">=" . "%guile->=") ("=" . "%guile-=")
 					   ("null?" . "%guile-null?") ("not" . "%guile-not"))
 				  :test #'string=))))
+	  ;; not of a predicate's value, which can't be #nil: the host's
+	  (when (and (string= string "not") (boolean-node-p (first args)))
+	    (setq helper nil))
+	  (cond ((and (string= string "append") (not (goops-generic-primitive-p string)))
+		 (setq helper "%guile-append2"))
+		((and (member string '("memq" "memv") :test #'string=)
+		      (constant-member-list-p (second args) (string= string "memv")))
+		 (return-from compile-resolved-primitive
+		   (compile-constant-member (first args) (node-field (second args) 1))))
+		((member string '("memq" "memv" "length") :test #'string=)
+		 ;; the procedures that take #nil as a list's end (elisp.lisp)
+		 (return-from compile-resolved-primitive
+		   (cons (primitive-operator name) (mapcar #'compile-tree-il args)))))
 	  ;; the comparisons report a wrong type as Guile's do: the root
 	  ;; procedure's, after the fixnum case
 	  (cons (core (or helper string)) (mapcar #'compile-tree-il args))))))
+
+(defparameter *constant-member-limit* 12
+  "The longest constant list that memq or memv of is made tests in line.")
+
+(defun constant-member-list-p (node eqv)
+  "Whether NODE is a constant short proper list, of objects that eq? tells
+apart as eqv? does if EQV."
+  (and (eq (node-type node) :const)
+       (let ((list (node-field node 1)))
+	 (and (consp list) (proper-list-p* list) (<= (length list) *constant-member-limit*)
+	      (or (not eqv)
+		  (every (lambda (x) (or (symbolp x) (typep x 'fixnum) (characterp x)
+					 (eq x ps:false) (eq x ps:true)))
+			 list))))))
+
+(defun compile-constant-member (key list)
+  ;; (memv k '(a b)), as Guile's peval makes it: a test of each element,
+  ;; whose value is the list's own tail
+  (let ((v (fresh-lexical)))
+    (list (list (core "lambda") (list v)
+		(labels ((tests (tail)
+			   (if (null tail)
+			       (quoted ps:false)
+			       (list (core "if") (list (core "eq?") v (quoted (car tail)))
+				     (quoted tail)
+				     (tests (cdr tail))))))
+		  (tests list)))
+	  (compile-tree-il key))))
 
 (defun compile-tree-il (x)
   (ecase (node-type x)
@@ -745,13 +801,18 @@ proved safe, defined in a declarative module."
   (let ((v (or (site-variable site)
 	       (and (eq (site-kind site) :toplevel)
 		    (or (eq (site-module site) :root) (module-p* (site-module site)))
-		    (module-variable* (site-module site) (site-name site))))))
+		    (module-variable* (site-module site) (site-name site)))
+	       (and (eq (site-kind site) :module)
+		    (let ((m (existing-module (site-module site) (site-public site))))
+		      (and m (module-variable* m (site-name site))))))))
     (and v
 	 (let ((value (gvariable-value v)))
 	   (and (functionp value)
 		(or (gethash value (safe-primitive-functions))
 		    (and (gethash value psx::*safe-functions*)
-			 (let ((m (if (eq (site-module site) :root) ps:false (site-module-object site)))
+			 (let ((m (cond ((eq (site-module site) :root) ps:false)
+					((eq (site-kind site) :module) (or (existing-module (site-module site) nil) ps:false))
+					(t (site-module-object site))))
 			       (declarative (root-value "module-declarative?")))
 			   (and (module-p* m) declarative (truthy (funcall declarative m)))))))))))
 
@@ -762,9 +823,29 @@ proved safe, defined in a declarative module."
        (site-p (cadr (cadr form)))
        (ignore-errors (safe-site-p (cadr (cadr form))))))
 
+(defun self-reference-form-p (form definition)
+  ":READS if FORM is (%guile-ref 'site), SITE being the top-level variable
+DEFINITION, (%guile-define! 'module 'name value), defines; :ASSIGNS if it
+is (%guile-set! 'site value) or defines the same variable
+(src/continuations.lisp, GUARD-SELF-CALLS)."
+  (flet ((same-site-p (x)
+	   (and (psx::quote-form-p x) (site-p (cadr x))
+		(let ((site (cadr x)))
+		  (and (eq (site-kind site) :toplevel)
+		       (psx::quote-form-p (second definition)) (psx::quote-form-p (third definition))
+		       (eq (site-module site) (cadr (second definition)))
+		       (eq (site-name site) (cadr (third definition))))))))
+    (and (consp form) (consp (cdr form))
+	 (cond ((eq (car form) (core "%guile-ref")) (and (same-site-p (cadr form)) :reads))
+	       ((eq (car form) (core "%guile-set!")) (and (same-site-p (cadr form)) :assigns))
+	       ((eq (car form) (core "%guile-define!"))
+		(and (consp (cddr form)) (equal (cadr form) (second definition))
+		     (equal (caddr form) (third definition)) :assigns))))))
+
 (defun install-compiler-primitives ()
   (setq psx::*definition-operators* '("%guile-define!")
-	psx::*safe-operator-hook* 'safe-operator-form-p)
+	psx::*safe-operator-hook* 'safe-operator-form-p
+	psx::*self-reference-hook* 'self-reference-form-p)
   (psx:defhost "%guile-ref" (site) (site-ref site))
   (psx:defhost "%guile-sub2" (x y)
     (if (and (typep x 'fixnum) (typep y 'fixnum))
@@ -783,6 +864,12 @@ proved safe, defined in a declarative module."
   (psx:defhost "%guile-null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
   (psx:defhost "%guile-not" (x) (bool (or (eq x ps:false) (eq x *elisp-nil*))))
   (psx:defhost "%guile-true" (x) (if (eq x *elisp-nil*) ps:false x))
+  (psx:defhost "%guile-append2" (x y)
+    ;; lists that don't end in #nil: the host's append; else the root's,
+    ;; which takes #nil as a list's end and reports the wrong type
+    (if (and (proper-list-p* x) (not (nil-terminated-p y)))
+	(append x y)
+	(funcall (root-value "append") x y)))
   (psx:defhost "%guile-set!" (site value) (site-set site value))
   (psx:defhost "%guile-define!" (module name value) (define-in-module module name value))
   (psx:defhost "%guile-unsupported" (name)
@@ -832,7 +919,10 @@ proved safe, defined in a declarative module."
       value))
   (install-guile-inline-primitives)
   (psx::register-primitive-names
-   '("%guile-ref" "%guile-sub2" "%guile-<" "%guile->" "%guile-<=" "%guile->=" "%guile-=" "%guile-null?" "%guile-not" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
+   '("%guile-append2" "%guile-nil:memq" "%guile-nil:memv" "%guile-nil:assq" "%guile-nil:assv"
+     "%guile-nil:length" "%guile-nil:list?" "%guile-nil:reverse" "%guile-nil:last-pair"
+     "%guile-nil:append"
+     "%guile-ref" "%guile-sub2" "%guile-<" "%guile->" "%guile-<=" "%guile->=" "%guile-=" "%guile-null?" "%guile-not" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
      "%guile-with-meta" "%guile-inline"
      "%guile-nargs>=" "%guile-nargs-between" "%guile-keywords-fit?" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
@@ -856,9 +946,10 @@ proved safe, defined in a declarative module."
     ,@(loop for (name test) in '(("<" <) (">" >) ("<=" <=) (">=" >=) ("=" =))
 	    collect `(,(format nil "%guile-~A" name) (x y)
 		      (if (and (typep x 'fixnum) (typep y 'fixnum)) (bool (,test x y)) :call)))
-    ("%guile-null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
-    ("%guile-not" (x) (bool (or (eq x ps:false) (eq x *elisp-nil*))))
-    ("%guile-true" (x) (if (eq x *elisp-nil*) ps:false x)))
+    ;; #nil is made once, at load, and never replaced
+    ("%guile-null?" (x) (bool (or (null x) (eq x (load-time-value *elisp-nil* t)))))
+    ("%guile-not" (x) (bool (or (eq x ps:false) (eq x (load-time-value *elisp-nil* t)))))
+    ("%guile-true" (x) (if (eq x (load-time-value *elisp-nil* t)) ps:false x)))
   "(name lambda-list body), as in PSX::*INLINE-PRIMITIVES*.")
 
 (defun install-guile-inline-primitives ()
@@ -876,6 +967,16 @@ proved safe, defined in a declarative module."
 				,(sublis (acons :call `(funcall #',global ,@vars)
 						(mapcar #'cons params vars))
 					 body))))))))))
+
+(defun proper-list-p* (x)
+  "Whether X is a list ending in (), not circular."
+  (let ((slow x))
+    (loop
+      (cond ((null x) (return t)) ((atom x) (return nil)))
+      (setq x (cdr x))
+      (cond ((null x) (return t)) ((atom x) (return nil)))
+      (setq x (cdr x) slow (cdr slow))
+      (when (eq x slow) (return nil)))))
 
 (defun nthcdr-p (list n)
   "Whether LIST has at least N elements."

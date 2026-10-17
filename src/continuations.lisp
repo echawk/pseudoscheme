@@ -530,8 +530,11 @@ call returns, then continue the frame."
       (:prompt (prompt-extent (vector :prompt nil (svref frame 2) (svref frame 3) *winders*) inner))
       (:resume (let ((value (with-frame (frame) (funcall inner))))
 		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
-      (:barrier (ps:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
-				 (svref frame 2)))
+      (:barrier (let ((what (svref frame 2)))
+		  (if (consp what)	; (:reason . text)
+		      (ps:scheme-error "~A" (cdr what))
+		      (ps:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
+				       what))))
       ((:vm :vm-prompt :vm-delimit) (funcall *frame-resumer* frame inner))
       (t (let ((value (with-frame (frame) (funcall inner))))
 	   (apply head (svref frame 2) value frame (make-list (svref frame 3))))))))
@@ -1866,6 +1869,7 @@ its own, of the chunk's free variables."
 	 (*safe-procedures* nil)
 	 (*known-procedures* nil)
 	 (*downward-parameters* nil)
+	 (form (guard-self-calls form))
 	 (*safe-procedures* (find-safe-procedures form))
 	 (*downward-parameters* (find-downward-parameters)))
     (find-safe-locations form)
@@ -1900,6 +1904,141 @@ procedure in *SAFE-FUNCTIONS*."
 			(cons (car e) (mapcar #'walk (cdr e))))
 		       (t e))))
 	(walk form))))
+
+;;; A top-level procedure's calls of itself.  Where top-level variables
+;;; can be defined again (Guile's), (define (fib n) ... (fib (- n 1)) ...)
+;;; calls whatever the variable holds when the call is made, so each such
+;;; call is a site, with a frame, though nothing but the variable stands
+;;; between fib and a known procedure.  The definition is made three:
+;;;
+;;;    (letrec ((F (lambda (n) ... <guarded (fib (- n 1))> ...))
+;;;             (M (lambda (n) ... (fib (- n 1)) ...))  ; as written
+;;;             (W (lambda (n) (if (eq? <fib's variable> W) (F n) (M n)))))
+;;;      W)
+;;;
+;;; with each call of fib in F made
+;;;
+;;;    ((lambda (g a) (if (eq? g W) (F a) (%self-call-barrier g a)))
+;;;     <fib's variable> (- n 1))
+;;;
+;;; W, the procedure defined, runs F while the variable holds W, and M,
+;;; the procedure as it would be without this, once it doesn't (an old
+;;; reference called after a redefinition, a wrapper calling what it
+;;; wraps): then every call of the variable is a site, as before.  F calls
+;;; itself, a known procedure, while the variable still holds W, which is
+;;; then exactly what the call would have called.  This is done only when
+;;; F can't capture (it calls nothing else that can) and doesn't assign
+;;; the variable, so F's calls of itself need no frames.  The variable
+;;; can change during a call of F then only by something F's extent runs
+;;; that assigns it without capturing (a primitive like module-define!
+;;; or eval, a procedure F calls, another thread); a call of
+;;; the new value then is made in a barrier frame, so a continuation
+;;; captured in it, re-entered once its extent is over, is an error
+;;; rather than a re-entry that skips F's frameless calls.  No program
+;;; that doesn't do that sees a difference.
+
+(defvar *self-reference-hook* nil
+  "NIL, or a function of a form (not a symbol) and a top-level definition
+(by one of *DEFINITION-OPERATORS*): :READS if the form reads the variable
+the definition defines, :ASSIGNS if it assigns or defines it, else NIL.")
+
+(defparameter *self-call-size-limit* 4000
+  "The biggest procedure, in conses, whose calls of itself are guarded:
+it is compiled twice.")
+
+(defmacro %self-call-barrier (f &rest args)
+  `(%barrier (:reason . "a continuation captured in a call of a top-level procedure's new value, made by its old one while it ran, can't be re-entered")
+	     (funcall ,f ,@args)))
+
+(defun guard-self-calls (form)
+  "FORM with the top-level definitions of procedures that call themselves
+through their variable made as above, where F can't capture, and recorded
+as safe (%note-safe) as NOTE-SAFE-DEFINITIONS records a lambda."
+  (if (or (null *self-reference-hook*) (null *definition-operators*))
+      form
+      (let ((guarded '()))		; (definition . F) of each rewritten
+	(labels ((walk (e only)
+		   (cond ((atom e) e)
+			 ((quote-form-p e) e)
+			 ((lambda-form-p e) e)
+			 ((and (scheme-symbol-p (car e))
+			       (member (ps:scheme-symbol-name (car e)) *definition-operators* :test #'string=)
+			       (= (length e) 4))
+			  (or (and (or (eq only :all) (member e only :test #'eq))
+				   (guard-definition e (lambda (f) (push (cons e f) guarded))))
+			      e))
+			 ((or (keyword-p (car e) "BEGIN") (keyword-p (car e) "IF"))
+			  (cons (car e) (mapcar (lambda (x) (walk x only)) (cdr e))))
+			 (t e))))
+	  (let ((new (walk form :all)))
+	    (if (null guarded)
+		form
+		;; again, with only those whose F can't capture
+		(let* ((safe (let ((*known-procedures* nil)) (find-safe-procedures new)))
+		       (keep (loop for (definition . f) in guarded
+				   when (gethash f safe) collect definition)))
+		  (cond ((null keep) form)
+			((= (length keep) (length guarded)) new)
+			(t (walk form keep))))))))))
+
+(defun guard-definition (definition note)
+  "DEFINITION's value made W, F and M as above, if the defined lambda
+calls itself through its variable, with F passed to NOTE; else NIL."
+  (let* ((value (fourth definition))
+	 (l (defined-lambda value))
+	 (formals (and l (cadr l)))
+	 (calls 0))
+    (when (and l (listp formals) (null (cdr (last formals))) (every #'symbolp formals)
+	       (<= (tree-size l) *self-call-size-limit*))
+      (let* ((f (fresh)) (w (fresh)) (m (fresh))
+	     (body (labels ((guard (e)
+			      (cond ((atom e) e)
+				    ((quote-form-p e) e)
+				    ((eq (funcall *self-reference-hook* e definition) :assigns)
+				     ;; the procedure assigns its own variable: not
+				     ;; guarded, the change being in its own extent
+				     (return-from guard-definition nil))
+				    ((and (consp (car e))
+					  (eq (funcall *self-reference-hook* (car e) definition) :reads)
+					  (listp (cdr e)) (= (length (cdr e)) (length formals)))
+				     (incf calls)
+				     (let ((g (fresh)) (temps (mapcar (lambda (a) (declare (ignore a)) (fresh)) (cdr e))))
+				       `((,(sym "lambda") (,g ,@temps)
+					  (,(sym "if") (,(sym "eq?") ,g ,w)
+					   (,f ,@temps)
+					   (%self-call-barrier ,g ,@temps)))
+					 ,(car e) ,@(mapcar #'guard (cdr e)))))
+				    (t (loop for x on e
+					     collect (guard (car x)) into new
+					     unless (listp (cdr x)) do (return (nconc new (cdr x)))
+					     finally (return new))))))
+		     (guard (caddr l)))))
+	(when (plusp calls)
+	  (multiple-value-bind (stripped name) (strip-procedure-name (caddr l))
+	    (declare (ignore stripped))
+	    (let* ((reference (find-self-reference (caddr l) definition))
+		   (dispatch `(,(sym "if") (,(sym "eq?") ,reference ,w) (,f ,@formals) (,m ,@formals)))
+		   (letrec `(,(sym "letrec")
+			     ((,f (,(car l) ,formals ,body))
+			      (,m ,l)
+			      (,w (,(car l) ,formals
+				   ,(if name
+					`(,(sym "begin") (,(sym "quote") (:procedure-name . ,name)) ,dispatch)
+					dispatch))))
+			     ,w)))
+	      (funcall note f)
+	      (list (first definition) (second definition) (third definition)
+		    (list (sym "%note-safe")
+			  (if (eq value l) letrec (list* (car value) letrec (cddr value))))))))))))
+
+(defun find-self-reference (e definition)
+  "The first operator form in E that reads DEFINITION's variable."
+  (cond ((atom e) nil)
+	((quote-form-p e) nil)
+	((and (consp (car e)) (eq (funcall *self-reference-hook* (car e) definition) :reads)) (car e))
+	(t (loop for x on e
+		 thereis (find-self-reference (car x) definition)
+		 while (listp (cdr x))))))
 
 (defparameter *cc-transform-limit* 175000
   "The largest top-level form, in conses after the transformation, that

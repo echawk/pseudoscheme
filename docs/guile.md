@@ -562,28 +562,58 @@ r7rs-benchmarks, `bench/run.sh pseudoscheme-guile`):
   redefined; `--r7rs` calls a procedure it has just defined directly. A call
   through a variable is also a point where a continuation may be captured, so
   it gets a frame, which a known procedure that can't capture doesn't.
+- **Calls of a procedure by its own name.** The continuation transformation
+  (src/continuations.lisp, `GUARD-SELF-CALLS`) compiles a top-level
+  definition that calls itself through its variable, and calls nothing else
+  that can capture, three times: `F`, the body with each such call made "if
+  the variable still holds this procedure, call `F` directly, without a
+  frame"; `M`, the body as written; and the procedure defined, which runs `F`
+  while its variable holds it and `M` once it doesn't (an old reference
+  called after a redefinition, a wrapper calling what it wraps). Each call
+  still reads the variable, so a redefinition is seen at the next call, as
+  in Guile. The one difference: if, while `F` runs, something it calls
+  without capturing (a primitive such as `variable-set!`, another thread)
+  gives the variable a new value, `F` calls that value in a barrier frame,
+  and a continuation captured in it is an error to re-enter after the call
+  returns. A procedure that `set!`s or defines its own name isn't compiled
+  so. This is not Guile's letrectify (below): `(guile-user)`, where a script
+  runs, is not declarative, so Guile itself calls through the variable
+  there.
 - **Root primitives.** Guile's compiler turns `(+ a b)`, `(car x)`, `(< a b)`
   and the like, when the name is the `(guile)` module's variable, into
   primcalls (its `resolve-primitives` pass), which are open-coded. The native
   compiler does the same (`*RESOLVABLE-PRIMITIVES*` in compile.lisp), at
   compile time and by variable, as Guile does, so a module that defines its
-  own `+` keeps it. Before this every `+` and `<` was a call of a
-  rest-argument procedure, which made fib 20 times slower than it need be.
+  own `+` keeps it. Module references, `(@@ (guile) memv)`, which boot-9's
+  macros (`case`) expand to, are resolved too, as in Guile's pass, but only
+  if the module is loaded already. `memq` and `memv` of a short constant
+  list are tests in line, as Guile's peval makes them in a test.
   Comparisons and `-` of two arguments go through helpers (`%guile-<` and so
   on) with a fixnum case inlined by a compiler macro, and a wrong type is
-  Guile's error from the root procedure.
+  Guile's error from the root procedure. Before this every `+` and `<` was a
+  call of a rest-argument procedure, which made fib 20 times slower than it
+  need be.
 - **`map` and `for-each`** are boot-9's, in Scheme, checking the list for
   circularity as they go. A procedure and one or two proper lists of one
   length (so every error but not the common case) go to the host's
   frame-aware `map`, which is in order and re-entrant, 4 to 5 times faster.
 - **Allocation, GC and the rest** are those of every mode.
 
-What remains is the top-level call: `fib`, `tak` and the like run 3 to 5
-times slower than `--r7rs`. Closing that needs the continuation
-transformation (src/continuations.lisp) to treat a procedure's calls of its
-own name as safe when the rest of the body can't capture, as it does a known
-local, which assumes that the definition isn't replaced by something that
-captures.
+On the r7rs-benchmarks (`bench/run.sh pseudoscheme-guile`), `fib`, `tak`,
+`lattice` and `nqueens` now run 1.3 to 1.6 times as long as with `--r7rs`
+(they ran 2 to 4 times as long). Left over are the reads of the variable
+that guard each call of a procedure by its own name, and the `#nil` checks
+of conditionals.
+
+Guile's own passes, against what the native compiler does:
+
+| Guile pass | here |
+|---|---|
+| resolve-primitives | the same, by variable at compile time (above) |
+| peval | `memq`/`memv` of constant lists only; no inlining of procedures |
+| letrectify (declarative modules: a module's single, unassigned definitions are lexical within the compilation unit) | not done: each top-level form is compiled apart. A call of another procedure of a declarative module, already defined and unable to capture, needs no frame (`SAFE-SITE-P`) |
+| fix-letrec, contification | psyntax's letrec of lambdas is a `LABELS`, which SBCL compiles as local functions and loops |
+| closure conversion, type inference, unboxing (CPS) | SBCL's |
 
 ### Emacs Lisp
 
