@@ -37,15 +37,25 @@ def main():
     results = {}          # (impl, bench) -> seconds or failure string
     impls, benches = [], []
     for path in sorted(glob.glob(os.path.join(rdir, "results.*"))):
+        rows = []
         for line in open(path, errors="replace"):
-            if not line.startswith("+!CSVLINE!+"):
-                continue
-            impl, bench, value = line[len("+!CSVLINE!+"):].strip().split(",")[:3]
-            impl, bench = short(impl), bench.split(":")[0]
+            if line.startswith("+!CSVLINE!+"):
+                rows.append(line[len("+!CSVLINE!+"):].strip().split(",")[:3])
+        # a timed line names the implementation as the program does
+        # ("pseudoscheme_racket-3.0"); a failure line, as the harness
+        # names the system ("pseudoscheme-racket"): that is the file's
+        # implementation, from its timed lines, if it has any, or else
+        # the system's name with _ for - (as -r6rs and the like's programs
+        # name themselves)
+        timed = [short(i) for i, _, v in rows if not v.isalpha()]
+        file_impl = max(set(timed), key=timed.count) if timed else None
+        for impl, bench, value in rows:
             try:
                 value = float(value)
+                impl = short(impl)
             except ValueError:
-                pass
+                impl = file_impl or impl.replace("-", "_")
+            bench = bench.split(":")[0]
             results[(impl, bench)] = value      # the last run wins
             if impl not in impls:
                 impls.append(impl)
