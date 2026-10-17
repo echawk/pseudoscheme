@@ -4,7 +4,7 @@
 (`--r7rs` by default, `--r6rs`, `--r5rs`, `--chez`, `--guile`, `--r4rs`
 ...). Every mode shares one REPL (src/repl/, the `pseudoscheme/repl`
 system). Guile's mode runs Guile's own REPL instead, with the same line
-editor in front of it (below).
+editor in front of it (below), and so does Racket's (`--racket`, below).
 
 ```
 $ bin/pseudoscheme
@@ -146,6 +146,20 @@ src/repl/guile.lisp:
 - The `interp` option is on: REPL input is evaluated by
   `primitive-eval` rather than compiled. Compiling each input natively
   would take SBCL about half a second.
+
+## Racket
+
+`--racket` (or `,language racket`) runs Racket's own REPL,
+`read-eval-print-loop`, with `racket/init` required as `racket` with no
+arguments does (docs/racket.md, "The REPL"). The banner and the prompt are
+Racket's, `print` is `pretty-print` as `racket/init` sets it, and there are
+no meta-commands: a comma is Racket's `unquote`, and `(exit)` or end of
+file leaves. At a terminal, which rktio decides (librktio built by
+utils/racket/rktio.sh; without it, the way the other languages decide),
+the line editor above supplies each input: `current-prompt-read` asks
+src/repl/racket.lisp for the text, and Racket's reader finds the data
+in it. History is kept for Racket separately, and Tab completes the names
+bound in the current namespace.
 
 ## Not yet
 

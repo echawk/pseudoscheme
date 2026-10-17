@@ -366,7 +366,7 @@
 	       ;; B: our linklet compiler
 	       (:module "linklet"
 		:serial t
-		:components ((:file "api") (:file "compiler") (:file "sources") (:file "regexp-layer") (:file "boot")))
+		:components ((:file "api") (:file "compiler") (:file "sources") (:file "regexp-layer") (:file "boot") (:file "repl")))
 	       ;; C: A plus native overrides
 	       (:module "hybrid" :components ((:file "overrides")))
 	       (:file "strategies")))
@@ -376,7 +376,7 @@
 (defsystem :pseudoscheme/repl
   :version "3.0"
   :pathname #p"src/repl/"
-  :depends-on (:pseudoscheme/api :pseudoscheme/guile
+  :depends-on (:pseudoscheme/api :pseudoscheme/guile :pseudoscheme/racket
 	       #+sbcl :sb-posix #+sbcl :sb-introspect)
   :serial t
   :components ((:file "terminal")
@@ -386,4 +386,5 @@
 	       (:file "commands")
 	       (:file "languages")
 	       (:file "guile")
+	       (:file "racket")
 	       (:file "ide")))

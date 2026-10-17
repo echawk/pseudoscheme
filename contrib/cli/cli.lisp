@@ -334,11 +334,16 @@ start as an inferior Lisp and load Swank or Slynk into."
   "The REPL, in the language of *STANDARD* (src/repl/): ,language moves
 to the others, ,help lists the commands."
   (setq pseudoscheme-repl:*quiet* *chez-quiet*)
-  (pseudoscheme-repl:run-repl
-   *standard*
-   :banner (and (not *chez-quiet*)
-		(format nil "Pseudoscheme ~A (~(~A~)) on ~A ~A" *version* *standard*
-		   (lisp-implementation-type) (lisp-implementation-version)))))
+  (if (eq *standard* :racket)
+      ;; Racket's own REPL, as `racket' runs it: its banner, its prompt
+      (let ((status (pseudoscheme-repl::racket-repl-main)))
+	(finish-output)
+	(uiop:quit status))
+      (pseudoscheme-repl:run-repl
+       *standard*
+       :banner (and (not *chez-quiet*)
+		    (format nil "Pseudoscheme ~A (~(~A~)) on ~A ~A" *version* *standard*
+			    (lisp-implementation-type) (lisp-implementation-version))))))
 
 (defun print-version-alist ()
   "SRFI 176's version output: one property to a line.  If the output goes

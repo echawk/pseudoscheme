@@ -78,6 +78,49 @@ of Racket's own implementation as possible. Racket code then becomes one
 more thing a Common Lisp program can call, as Scheme is today
 (docs/interop.md).
 
+## The REPL
+
+`bin/pseudoscheme --racket` with no file starts Racket's REPL as `racket`
+with no arguments does (strategy B only). src/racket/linklet/repl.lisp
+follows Racket CS's main.sps: print the banner (`Welcome to Racket v9.3
+[cs].`), `namespace-require` the init library `racket/init` (`racket`,
+`racket/enter` and `racket/help`, with `current-print` set to
+`pretty-print`), load `racket/interactive` (the user's init file, and
+xrepl if it is installed), then run `read-eval-print-loop` from
+collects/racket/repl.rkt: Racket's own, with Racket's `current-prompt-read`,
+`current-read-interaction`, `current-eval` and `current-print`. Errors
+print through Racket's handlers and return to the prompt; end of file
+leaves, writing a newline, as `racket` does.
+
+- **rktio.** The terminal comes from rktio, Racket's portable OS layer,
+  built from racket/src/rktio/ as a shared library:
+  `sh utils/racket/rktio.sh` (run by `setup.sh`) runs rktio's own
+  `configure --enable-standalone` and `make` into
+  build/external/rktio/. src/racket/native/rktio.lisp binds it with
+  CFFI, loading it on first use: `rktio_init`, `rktio_std_fd`,
+  `rktio_fd_is_terminal`, `rktio_poll_read_ready`, `rktio_read` and
+  `rktio_write`. `rktio_init` blocks SIGCHLD in the calling thread (a
+  signal thread reaps children once a process starts), which SBCL won't
+  run with, so the binding unblocks it again.
+- **Console ports.** In the REPL `current-input-port`,
+  `current-output-port` and `current-error-port` are ports on rktio's
+  std fds, as the io layer makes them: custom ports whose reads poll
+  (`rktio_poll_read_ready`, handing back an alarm event while nothing
+  is there, so other threads run) and read, and whose writes call
+  `rktio_write`. `terminal-port?` is `rktio_fd_is_terminal` of the
+  port's fd (for the console ports, and the host's streams on the same
+  descriptors); ports.lisp's stub said false.
+- **Line editor.** At a terminal (rktio's answer, stdin and stdout both,
+  and `TERM` not `dumb`) the REPL's line editor (src/repl/, docs/repl.md)
+  supplies the text: `current-prompt-read` asks it for a line, history
+  and completion (from `namespace-mapped-symbols`) included, and Racket's
+  reader finds the data in it, one at a time, so that `1 2` evaluates
+  both. Otherwise the default `current-prompt-read` runs on the console
+  input port. `,language racket` from another REPL runs the same loop.
+- **Not yet.** `racket -i FILE` (requiring the file first), `-e` before
+  a REPL, and the break key (Ctrl-C ends the line being edited, not a
+  running program); the other strategies.
+
 ## Summary
 
 **Our Chez mode plays the part of the Chez Scheme that Racket CS is
