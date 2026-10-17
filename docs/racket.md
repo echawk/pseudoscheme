@@ -1,7 +1,7 @@
 # Racket on Pseudoscheme: a `--racket` mode
 
 Status: **running, on strategy B** (October 2026).
-`pseudoscheme --racket=linklet prog.rkt` runs `#lang racket/base` and
+`pseudoscheme --racket prog.rkt` runs `#lang racket/base` and
 `#lang racket` programs on Racket's own expander. Strategy A, Racket
 CS's layers on the Chez mode (the plan this document describes), has
 its pieces in src/racket/cs/ but doesn't get past booting rumble yet; strategy C, its hybrid,
@@ -63,9 +63,8 @@ What's missing: a faster cold start (one run to fill the cache), the
 saved image with the expander instantiated
 (`PSEUDOSCHEME_RACKET_CORE=1`; Racket's threads crash in it for now),
 real places and futures, the thread and io layers themselves, and the
-crashes Racket's suite still finds. `--racket` with no strategy is
-strategy A, so it reports "not implemented yet"; use
-`--racket=linklet` (or `PSEUDOSCHEME_RACKET_STRATEGY=linklet`).
+crashes Racket's suite still finds. `--racket` is strategy B,
+`--racket=linklet`; `--racket=cs` (A) reports "not implemented yet".
 
 The goal: `pseudoscheme --racket prog.rkt` runs Racket programs with
 `racket/base` and the packages on the package server, by reusing as much

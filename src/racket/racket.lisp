@@ -50,8 +50,8 @@
 
 (defun select-strategy (&optional name)
   "The strategy NAME names (else PSEUDOSCHEME_RACKET_STRATEGY's, else
-cs), made current."
-  (let* ((name (or name (uiop:getenv "PSEUDOSCHEME_RACKET_STRATEGY") "cs"))
+linklet, the one that runs), made current."
+  (let* ((name (or name (uiop:getenv "PSEUDOSCHEME_RACKET_STRATEGY") "linklet"))
 	 (s (cdr (assoc name *strategies* :test #'string=))))
     (unless s
       (error "--racket=~A: the strategies are ~{~A~^, ~}" name (strategy-names)))

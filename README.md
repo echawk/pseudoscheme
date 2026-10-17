@@ -27,7 +27,7 @@ bin/pseudoscheme                    # R7RS REPL: ,help, ,language chez, ,q (docs
 bin/pseudoscheme --r6rs prog.sps a b
 bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
 bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
-bin/pseudoscheme --racket=linklet prog.rkt   # Racket, on Racket's own expander (docs/racket.md)
+bin/pseudoscheme --racket prog.rkt    # Racket, on Racket's own expander (docs/racket.md)
 bin/pseudoscheme --r4rs prog.scm     # or --ieee, --r3rs, --r2rs, --rrs: the older reports (docs/reports.md)
 bin/pseudoscheme -p '(exact-integer-sqrt 17)'
 bin/pseudoscheme --lisp               # a Lisp REPL with all of it, for SLY/SLIME (docs/emacs.md)
@@ -86,7 +86,7 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 | R4RS, IEEE, R3RS, R2RS, the Revised Report | psyntax | the reports' own examples: all 993 (docs/reports.md) |
 | Chez Scheme (`--chez`) | psyntax, Chez's top level | Chez's mats: about 17,500 clauses pass (docs/chez.md) |
 | Guile (`--guile`) | Guile's own psyntax, to Tree-IL | Guile's test suite: 42,702 pass (docs/guile.md) |
-| Racket (`--racket=linklet`) | Racket's own expander, as a linklet | `#lang racket/base` and `#lang racket` programs run; Racket's own suite is measured file by file (docs/racket.md) |
+| Racket (`--racket`) | Racket's own expander, as a linklet | `#lang racket/base` and `#lang racket` programs run; Racket's own suite is measured file by file (docs/racket.md) |
 
 Continuations are full and re-entrant, and delimited ones (prompts) are
 native too (docs/continuations.md);
@@ -134,7 +134,7 @@ The other Schemes' modes:
   over the Guile mode. Extensions and programs built against Guile's own
   headers run on it; LilyPond 2.24.4 typesets a small score on it, the
   same page as on Guile (tests/lilypond/).
-- **Racket** (`--racket=linklet`, `src/racket/`): Racket's expander,
+- **Racket** (`--racket`, `src/racket/`): Racket's expander,
   and its regexp layer, are extracted from Racket's source by Racket's
   own build recipe (`utils/racket/extract.sh`) and compiled as linklets
   to Lisp; `racket/base` and `racket` load from the collections in

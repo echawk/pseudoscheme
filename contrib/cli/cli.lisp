@@ -39,10 +39,10 @@
                    a Guile installation (docs/guile.md); FILE is loaded
                    in (guile-user), -e/-p evaluate there
   --racket[=STRATEGY]
-                   Racket (docs/racket.md; not working yet): STRATEGY is
-                   cs (Racket CS's own layers, the default), linklet (our
-                   linklet compiler) or hybrid; or set
-                   PSEUDOSCHEME_RACKET_STRATEGY
+                   Racket (docs/racket.md): FILE runs as racket runs a
+                   module.  STRATEGY is linklet (our linklet compiler,
+                   the default), cs (Racket CS's own layers; not working
+                   yet) or hybrid; or set PSEUDOSCHEME_RACKET_STRATEGY
   -e, --eval EXPR  evaluate EXPR (Scheme text); may be repeated
   -p, --print EXPR evaluate EXPR and write its value
   -L, --library-path DIR
