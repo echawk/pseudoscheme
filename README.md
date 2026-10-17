@@ -4,7 +4,11 @@ Pseudoscheme 3.0 is Jonathan Rees' Scheme-to-Common-Lisp translator and
 evaluator (versions up to 2.13 date from 1991-1994, targeting CMU CL,
 Symbolics, VAX Lisp and LispWorks), brought up to date: it runs R5RS, R6RS and R7RS Scheme
 on modern Common Lisp (developed on SBCL), as a library inside a Lisp
-image or as a standalone `pseudoscheme` command.
+image or as a standalone `pseudoscheme` command. It also runs other
+Schemes' own code: Chez Scheme programs (`--chez`), GNU Guile with its
+own boot-9 and modules (`--guile`), Racket through Racket's own expander
+(`--racket`), and C programs written against libguile, LilyPond among
+them, on a libguile of its own.
 
 Scheme is *compiled* to Lisp, not interpreted on top of it: R5RS, R6RS
 and R7RS source is expanded by psyntax (the R6RS `syntax-case` expander)
@@ -23,6 +27,7 @@ bin/pseudoscheme                    # R7RS REPL: ,help, ,language chez, ,q (docs
 bin/pseudoscheme --r6rs prog.sps a b
 bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
 bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
+bin/pseudoscheme --racket=linklet prog.rkt   # Racket, on Racket's own expander (docs/racket.md)
 bin/pseudoscheme --r4rs prog.scm     # or --ieee, --r3rs, --r2rs, --rrs: the older reports (docs/reports.md)
 bin/pseudoscheme -p '(exact-integer-sqrt 17)'
 bin/pseudoscheme --lisp               # a Lisp REPL with all of it, for SLY/SLIME (docs/emacs.md)
@@ -78,15 +83,22 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 | R6RS | psyntax | Racket's R6RS suite: all 8902; all 25 library test programs run |
 | R7RS-small | psyntax | chibi's R7RS suite: all 978 |
 | R5RS | psyntax | chibi's R5RS suite: all 189 |
+| R4RS, IEEE, R3RS, R2RS, the Revised Report | psyntax | the reports' own examples: all 993 (docs/reports.md) |
+| Chez Scheme (`--chez`) | psyntax, Chez's top level | Chez's mats: about 17,500 clauses pass (docs/chez.md) |
+| Guile (`--guile`) | Guile's own psyntax, to Tree-IL | Guile's test suite: 42,702 pass (docs/guile.md) |
+| Racket (`--racket=linklet`) | Racket's own expander, as a linklet | `#lang racket/base` and `#lang racket` programs run; Racket's own suite is measured file by file (docs/racket.md) |
 
 Continuations are full and re-entrant, and delimited ones (prompts) are
 native too (docs/continuations.md);
 `--continuations=escape` makes them escape-only, a little faster in code
 that calls unknown procedures in loops.
 
-Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at 1.37× Chez's
-time as a geometric mean with full continuations (Guile: 2.8×). See
-bench/RESULTS.md.
+Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at about 1.4×
+Chez's time as a geometric mean with full continuations (Guile: 2.8×).
+`bench/run.sh modes` runs the same programs in each mode, each its own
+column. R6RS mode is as fast as R7RS mode; Chez mode, at Chez's script
+top level, takes about 1.5× R7RS mode's time; Guile mode, about 1.3–1.6×
+on the call-heavy benchmarks. See bench/RESULTS.md and bench/README.md.
 
 Real-world libraries (`tests/run-library-corpus.lisp`): 228 of 387 Akku
 libraries and 91 of 130 snow-fort libraries load.
@@ -103,6 +115,31 @@ with all the integer/float accessors, fixnums, flonums, bitwise, enums,
 `(rnrs io ports)` with binary/textual/custom/transcoded ports, Unicode
 case mapping and normalization, sorting, ...). `ROADMAP.md` has the
 details, including what fails and why.
+
+The other Schemes' modes:
+- **Chez** (`--chez`, `src/chez/`): Chez scripts at Chez's top level, and
+  R6RS programs and libraries importing `(chezscheme)`, which has 1257
+  of Chez 10.4.1's 1715 names: engines, ftypes, the FFI, threads, Chez's
+  writer and its printer parameters, generic ports, `extend-syntax`.
+- **Guile** (`--guile`, `src/guile/`): Guile 3.0's own `boot-9.scm`,
+  psyntax and modules, loaded from a Guile installation and run on
+  libguile's primitives written in Lisp. User code is compiled from
+  Tree-IL to native code; Guile's `.go` files run on a VM written in
+  Lisp (docs/guile-vm.md). GOOPS, `(system foreign)`, Emacs Lisp
+  (`,language elisp`) and Guile's REPL work. In a Linux container
+  (`utils/container/`), Guix computes the same derivation for `hello`
+  as real Guix (tests/guix/).
+- **libguile** (`src/libguile/`, docs/libguile.md): a
+  `libguile-3.0.so.1` ABI-compatible with Guile 3.0.11, a thin C layer
+  over the Guile mode. Extensions and programs built against Guile's own
+  headers run on it; LilyPond 2.24.4 typesets a small score on it, the
+  same page as on Guile (tests/lilypond/).
+- **Racket** (`--racket=linklet`, `src/racket/`): Racket's expander,
+  and its regexp layer, are extracted from Racket's source by Racket's
+  own build recipe (`utils/racket/extract.sh`) and compiled as linklets
+  to Lisp; `racket/base` and `racket` load from the collections in
+  Racket's source tree, with Racket's primitives written in Lisp
+  (`src/racket/native/`). Compiled modules are cached.
 
 ## Repository layout
 
@@ -130,10 +167,17 @@ src/chez/            -- Chez Scheme: (chezscheme), its top level
                         (docs/chez.md)
 src/reports/         -- the older Revised Reports as languages (--r4rs,
                         --ieee, --r3rs, --r2rs, --rrs; docs/reports.md)
-src/guile/           -- Guile (--guile): libguile in Lisp, a Tree-IL
-                        compiler, Guile's own boot-9 and modules loaded
-                        from a Guile installation (docs/guile.md); and
-                        (guile), Guile's procedures for R6RS programs
+src/guile/           -- Guile (--guile): libguile's primitives in Lisp,
+                        a Tree-IL compiler, a VM for .go files, Guile's
+                        own boot-9 and modules loaded from a Guile
+                        installation (docs/guile.md); and (guile),
+                        Guile's procedures for R6RS programs
+src/libguile/        -- libguile-3.0.so.1, Guile's C API over the Guile
+                        mode (docs/libguile.md)
+src/racket/          -- Racket (--racket): the linklet compiler
+                        (linklet/), Racket's primitives (native/), the
+                        Chez-fork layer (cs/), the module cache
+                        (docs/racket.md)
 src/control.sls      -- (pseudoscheme control): delimited
                         continuations, as Guile has them
 src/compat/          -- (ikarus), for the Ikarus variants of Akku
@@ -149,6 +193,12 @@ vendor/psyntax/      -- Ghuloum & Dybvig's psyntax, patched, and the
                         image of it built on Pseudoscheme
 vendor/guile-test-suite/ -- GNU Guile 3.0.11's test suite, unmodified
                         (LGPL), run by make test-guile
+vendor/chez-mats/    -- Chez Scheme's mats, run by make test-chez
+utils/               -- setup and teardown of what the modes need from
+                        outside: Racket's source and its extracted
+                        layers (racket/), Chez (chez/), a Linux
+                        container with Guile, Guix and LilyPond
+                        (container/)
 contrib/cli/         -- the `pseudoscheme' command
 boot/                -- making the generated files from source, with
                         other Schemes (boot/README.md)
@@ -157,7 +207,8 @@ examples/            -- Scheme using Lisp, Lisp using Scheme, a mixed
 bench/               -- ecraven's r7rs-benchmarks (vendored), a runner,
                         results
 tests/               -- test runners and the suites they run (chibi's
-                        R5RS/R7RS, Racket's R6RS)
+                        R5RS/R7RS, Racket's R6RS), and each mode's:
+                        racket/, libguile/, lilypond/, guix/
 docs/                -- interop (the bridge), libraries (Akku and
                         snow), continuations, the REPL, Emacs (SLY and
                         SLIME), and racket, guile and chez (designs)
@@ -355,6 +406,21 @@ sh tests/run-program-tests.sh [bin/pseudoscheme [name ...]]   # needs Quicklisp
 python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 ```
 
+Each other Scheme's tests:
+
+```sh
+make test-chez [CHEZ_MATS="5_1 hash"]   # Chez's mats on --chez
+make test-guile [GUILE_TESTS="hash"]    # Guile's test suite on --guile (needs Guile 3.0's sources)
+sh tests/racket/run.sh linklet          # --racket: linklets, the expander, tests/racket/programs/
+sh tests/racket/run-suite.sh            # Racket's own test suite, file by file
+sh tests/libguile/run.sh                # programs built against libguile
+sh utils/container/run.sh test 'sh tests/lilypond/run.sh'   # LilyPond, in the container
+```
+
+The Racket tests need `sh utils/racket/setup.sh` (Racket's source, and
+`racket` of the same version for extracting its layers); the container
+needs podman (utils/container/README.md).
+
 `make test` runs the suites, `make test-escape` the standards' suites
 with escape-only continuations, `make test-cli` the command line's. GitHub Actions
 (`.github/workflows/ci.yml`) runs all of them, plus the bootstrap chain
@@ -386,14 +452,15 @@ The big ones; `ROADMAP.md` has the rest.
   REPL or in a program, and `(cl <package>)` libraries, are expanded
   and compiled again in every session, and so is whatever depends on
   them. Nothing cleans stale cache entries yet.
-- **No Racket yet.** docs/racket.md plans a `--racket` mode that runs
-  Racket's own expander on Pseudoscheme by compiling linklets.
-- **Chez mode is partial.** `--chez` runs Chez scripts and libraries,
-  with 1118 of `(chezscheme)`'s 1715 names; engines, annotations and
-  ftypes are missing (docs/chez.md, measured against the editor e).
-- **Guile mode.** `--guile` runs Guile's own boot-9 and modules (from
-  an installed Guile 3.0) on libguile's primitives written in Lisp;
-  41,993 of Guile's own tests pass, GOOPS, ports, arrays, `(system
-  foreign)` and locales included, and compiled modules are cached. Guile's
-  compiler and VM internals, sockets and Emacs Lisp are still to come
-  (docs/guile.md).
+- **Racket is partial.** `racket/base` and `racket` programs run, but
+  many of Racket's own test files still crash or fail, places and
+  futures are stand-ins, and a cold module cache takes minutes to fill
+  (docs/racket.md).
+- **Chez mode is partial.** 1257 of `(chezscheme)`'s 1715 names; the
+  writer doesn't honor `print-precision`, and forms that need Chez's
+  own expander (`top-level-program`, `import-only` and the like) are
+  missing (docs/chez.md).
+- **Guile mode.** Guile's compiler internals beyond Tree-IL, and many
+  of libguile's C functions (634 of 1,793 are stubs), are still to
+  come; Guile mode's code runs slower than R7RS mode's where top-level
+  procedures call each other (docs/guile.md, "Speed").
