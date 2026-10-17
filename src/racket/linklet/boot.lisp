@@ -26,15 +26,20 @@
 ;;;
 ;;; Instantiating the expander (loading its compiled code, running its
 ;;; 2,000 top-level forms) takes a second, most of what a `racket/base'
-;;; program's start-up costs.  So with PSEUDOSCHEME_RACKET_CORE=1, the
-;;; first --racket=linklet run saves an image of this program with the
-;;; expander instantiated, in the Racket cache (its generation,
-;;; cache.lisp), and each run after replaces itself with that image
-;;; (exec), given the same arguments.  The image is made by a run of this
-;;; program with PSEUDOSCHEME_RACKET_SAVE_CORE set to its path.  It is
-;;; opt-in because Racket's threads crash in it (tests/racket/programs/
-;;; threads*.rkt: a fault at the bottom of a new thread's stack, under the
-;;; ticker's interrupts), which runs without the image don't.  The expander
+;;; program's start-up costs.  So the first --racket=linklet run saves an
+;;; image of this program with the expander instantiated, in the Racket
+;;; cache (its generation, cache.lisp), and each run after replaces itself
+;;; with that image (exec), given the same arguments.  The image is made by
+;;; a run of this program with PSEUDOSCHEME_RACKET_SAVE_CORE set to its
+;;; path; PSEUDOSCHEME_RACKET_CORE=0 turns it off.  It goes by the program
+;;; file's date and size, and the images of other builds in the generation
+;;; (190 MB each) are deleted as one is made.  Racket's threads once
+;;; crashed in it, a fault at the bottom of a new thread's stack: the
+;;; image's thread stacks are the command line's 32 MB (LIMIT-THREAD-
+;;; STACKS, saved with the image), and the scheduler raised the size to
+;;; 64 MB, while SBCL gives a new thread the memory of a finished one
+;;; (the finalizer thread's) whatever the size now is (ps:LIMIT-THREAD-
+;;; STACK-SIZE only lowers it).  The expander
 ;;; is only instantiated, not booted: that, and the collection paths,
 ;;; are the run's own (EXPANDER-EVAL).
 
@@ -66,14 +71,16 @@ first the program's name).  Returns only if that fails."
 image, run it instead, making it first if need be."
   (unless (or (uiop:getenv "PSEUDOSCHEME_RACKET_SAVE_CORE")
 	      (uiop:getenv "PSEUDOSCHEME_RACKET_CORE_ACTIVE")
-	      ;; opt-in for now: Racket's threads crash in the saved image
-	      ;; (a fault in a new thread's stack under the ticker's interrupts)
-	      (not (member (uiop:getenv "PSEUDOSCHEME_RACKET_CORE") '("1" "yes" "on") :test #'equal))
+	      (member (uiop:getenv "PSEUDOSCHEME_RACKET_CORE") '("0" "no" "off") :test #'equal)
 	      (null sb-ext:*runtime-pathname*))
     (ignore-errors
      (let ((core (racket-core-path)))
        (when core
 	 (unless (probe-file core)
+	   ;; the finished images of other builds, not a run's partial one
+	   (dolist (old (directory (merge-pathnames (make-pathname :name :wild :type nil) core)))
+	     (when (and (uiop:string-prefix-p "core-" (pathname-name old)) (null (pathname-type old)))
+	       (ignore-errors (delete-file old))))
 	   (let ((temp (format nil "~A.~36R" (sb-ext:native-namestring core)
 			       (random (expt 36 8) (make-random-state t)))))
 	     (ensure-directories-exist core)

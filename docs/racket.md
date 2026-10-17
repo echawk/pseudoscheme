@@ -43,8 +43,15 @@ linklets to Lisp, with Racket's primitives written natively in Lisp.
   from collection links; `.zo` files are written and read, and each
   compiled linklet is cached as a fasl (src/racket/cache.lisp). With a
   warm cache, `#lang racket/base` hello starts in about 1.1 s and
-  `#lang racket` hello in about 3.4 s. A cold cache takes minutes, and
-  for now two or three runs to fill.
+  `#lang racket` hello in about 3.4 s (0.5 s for `racket/base` from the
+  saved image, below). A cold cache takes minutes (a minute for
+  `racket/base`), and one run fills it: a `.zo` carries its linklets'
+  cache keys, so the run that reads one finds the machine code the run
+  that wrote it compiled.
+- **Saved image.** The first run saves an executable of the program
+  with the expander instantiated, in the Racket cache (190 MB, kept
+  only for the current build of `bin/pseudoscheme`), and each run
+  after execs it; `PSEUDOSCHEME_RACKET_CORE=0` turns it off.
 - **Tests** (tests/racket/run.sh linklet): 6 hand-written linklet
   programs, 14 expressions through the expander, and 18 `#lang
   racket/base` programs in tests/racket/programs/, each checked
@@ -59,10 +66,9 @@ linklets to Lisp, with Racket's primitives written natively in Lisp.
   `rx.rktl`'s, cl-ppcre's differences from Racket's regexps, which
   the regexp layer replaces.
 
-What's missing: a faster cold start (one run to fill the cache), the
-saved image with the expander instantiated
-(`PSEUDOSCHEME_RACKET_CORE=1`; Racket's threads crash in it for now),
-real places and futures, the thread and io layers themselves, and the
+What's missing: a faster cold start (compiling the linklets with SBCL
+is most of it; a cheaper policy didn't help, and `(debug 0)` breaks
+procedure arities), real places and futures, the thread and io layers themselves, and the
 crashes Racket's suite still finds. `--racket` is strategy B,
 `--racket=linklet`; `--racket=cs` (A) reports "not implemented yet".
 

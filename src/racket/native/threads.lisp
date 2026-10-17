@@ -535,9 +535,7 @@ ready one.  True if it's complete."
     (setq *scheduler-started* t)
     (setf (rthread-lisp *main-thread*) sb-thread:*current-thread*)
     ;; the stacks of threads: the main one's is huge
-    (ignore-errors
-     (setf (sb-alien:extern-alien "thread_control_stack_size" sb-alien:unsigned-long)
-	   (* 64 1024 1024)))
+    (ps:limit-thread-stack-size (* 64 1024 1024))
     (pushnew 'exit-hook sb-ext:*exit-hooks*)
     (setq *ticker* (sb-thread:make-thread #'ticker-main :name "racket ticker"))))
 

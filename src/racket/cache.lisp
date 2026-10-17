@@ -147,18 +147,24 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 ;;; After the expander's header: a 4-byte length (little-endian), then the
 ;;; bundle as Racket data in UTF-8, (#%pseudoscheme-bundle (key . value)
 ;;; ...).  A linklet is (#%pseudoscheme-linklet name form), its form as
-;;; the expander gave it, decorrelated: reading it compiles it again,
-;;; which lowers it (fast) and finds its machine code in the fasl cache,
-;;; keyed by the same text.  Our values without a Racket syntax are
-;;; tagged lists: (#%pseudoscheme-void), (#%pseudoscheme-path "..."),
+;;; the expander gave it, decorrelated, and its cache key (a number):
+;;; reading it compiles it again, which lowers it (fast) and finds its
+;;; machine code in the fasl cache under that key.  (Hashing what is read
+;;; back wouldn't do: it isn't the form that was hashed, so the code
+;;; compiled as the .zo was written would be compiled again.)  Our
+;;; values without a Racket syntax are tagged lists: (#%pseudoscheme-void), (#%pseudoscheme-path "..."),
 ;;; (#%pseudoscheme-srcloc source line column position span), and
 ;;; (#%pseudoscheme-prefab key field ...) for a prefab struct (the
 ;;; expander's serialized syntax holds shifted-to-label-phase ones).
 
 (defun zo-encode (x)
   (cond ((compiled-linklet-p x)
-	 (list (rsym "#%pseudoscheme-linklet") (or (compiled-linklet-name x) ps:false)
-	       (zo-encode (correlated->datum (compiled-linklet-source-form x)))))
+	 ;; with its cache key, a digest of the linklet before this round
+	 ;; trip: what it was compiled under, so reading it finds that code
+	 (let ((key (compiled-linklet-source-key x)))
+	   (list* (rsym "#%pseudoscheme-linklet") (or (compiled-linklet-name x) ps:false)
+		  (zo-encode (correlated->datum (compiled-linklet-source-form x)))
+		  (and (integerp key) (list key)))))
 	((eq x *void*) (list (rsym "#%pseudoscheme-void")))
 	((eq x ps:eof-object) (list (rsym "#%pseudoscheme-eof")))
 	((rpath-p x) (list (rsym "#%pseudoscheme-path") (rpath-string x)))
@@ -191,7 +197,7 @@ there is one, else compiled now, into the cache if COMPILED has a key."
   (cond ((and (consp x) (symbolp (car x)))
 	 (let ((head (rname (car x))))
 	   (cond ((string= head "#%pseudoscheme-linklet")
-		  (compile-linklet (zo-decode (third x)) (zo-decode (second x))))
+		  (compile-linklet (zo-decode (third x)) (zo-decode (second x)) (fourth x)))
 		 ((string= head "#%pseudoscheme-void") *void*)
 		 ((string= head "#%pseudoscheme-eof") ps:eof-object)
 		 ((string= head "#%pseudoscheme-path") (make-rpath (second x)))

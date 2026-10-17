@@ -147,15 +147,16 @@ time units), and how many: PSEUDOSCHEME_RACKET_STATS prints them.")
 	    (/ (getf *stats* :lower) internal-time-units-per-second)
 	    (/ (getf *stats* :compile) internal-time-units-per-second))))
 
-(defun compile-linklet (form &optional name)
-  "compile-linklet: FORM (an S-expression or correlated) to a linklet."
+(defun compile-linklet (form &optional name key)
+  "compile-linklet: FORM (an S-expression or correlated) to a linklet.
+KEY, from a .zo, is the cache key it was compiled under."
   (incf (getf *stats* :linklets))
   (install-letrec-check)
   (timing (:lower)
     (let ((compiled (compile-linklet-form form :name name)))
       ;; its compiled code is cached, keyed by the linklet as given
       (unless (compiled-linklet-source-key compiled)
-	(setf (compiled-linklet-source-key compiled) (linklet-hash form)))
+	(setf (compiled-linklet-source-key compiled) (or key (linklet-hash form))))
       (setf (compiled-linklet-source-form compiled) form)
       compiled)))
 
