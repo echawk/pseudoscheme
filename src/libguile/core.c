@@ -48,6 +48,13 @@ psg_set_entry (psg_entry_t f)
   psg_entry_fn = f;
 }
 
+/* Lisp's profile (PSEUDOSCHEME_LIBGUILE_PROFILE) is printed at exit.  */
+void
+psg_at_exit (void (*f) (void))
+{
+  atexit (f);
+}
+
 /* ------------------------------------------------------------------ */
 /* Embedding.  When a C program linked against us (rather than Lisp
    loading us as an extension's libguile) makes its first call, there
@@ -339,6 +346,13 @@ psg_take_unreachable (void **out, size_t max)
   queue_length -= n;
   pthread_mutex_unlock (&queue_lock);
   return n;
+}
+
+/* Whether psg_take_unreachable has anything to do.  */
+int
+psg_reap_needed (void)
+{
+  return GC_should_invoke_finalizers () || queue_length;
 }
 
 /* Roots for C objects the Lisp side holds: a cell the collector

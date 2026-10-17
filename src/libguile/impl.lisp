@@ -24,9 +24,16 @@ arguments and result (=2).")
 	(t (format nil "<~(~A~)>" (type-of x)))))
 
 (defvar *call-count* 0 "The calls from C so far, when tracing.")
+(defvar *profile* nil
+  "Count and time each function C calls (PSEUDOSCHEME_LIBGUILE_PROFILE=1);
+the table is printed when the program exits.")
+(defvar *profile-counts*) (defvar *profile-times*) (defvar *profile-child* 0)
+(defvar *profile-refreshed*) (defvar *profile-absorbed*)
+(defvar *subr-stats* (vector 0 0 0) "Calls of C subrs from Scheme, and the entries they write and read, for the profile.")
 (defvar *trace-after* 0 "Trace at level 2 only from this call on (PSEUDOSCHEME_LIBGUILE_TRACE_AFTER).")
 (defvar *entered* nil "True inside a call from C that embedded Lisp made Guile code.")
 (defvar *impls* (make-array 0 :adjustable t) "Index -> function of the args SAP.")
+(defvar *reader-ids* (make-array 0) "Index -> true if the function only reads (READER-FUNCTION-P).")
 
 ;;; ------------------------------------------------------------------
 ;;; Arguments and results
@@ -82,7 +89,7 @@ arguments and result (=2).")
 
 (sb-alien:define-alien-callable psg-entry sb-alien:unsigned-long
     ((id sb-alien:unsigned-long) (args sb-sys:system-area-pointer))
-  (flet ((call ()
+  (labels ((call ()
 	   (when *trace-calls*
 	     (incf *call-count*)
 	     (format *error-output* "~&;; ~A~%" (api-name (aref *api* id)))
@@ -94,15 +101,61 @@ arguments and result (=2).")
 					 (error () w))))))
 	     (finish-output *error-output*))
 	   (crossing
-	     (with-bridge (reap))
-	     (sync-variables-to-lisp)
-	     (multiple-value-prog1 (funcall (the function (aref *impls* id)) args)
-	       (sync-variables-to-c)))))
+	     (when (c-call "psg_reap_needed" sb-alien:int) (with-bridge (reap)))
+	     ;; a function that only reads (*READER-FUNCTIONS*) runs no Lisp
+	     ;; that could see a variable C wrote, or change one C reads
+	     (if (aref *reader-ids* id)
+		 (funcall (the function (aref *impls* id)) args)
+		 (progn
+		   (sync-variables-to-lisp)
+		   (multiple-value-prog1 (funcall (the function (aref *impls* id)) args)
+		     (sync-variables-to-c))))))
+	 (profiled-call (id)
+	   ;; the time of each function itself: what it calls back into
+	   ;; (Scheme code, C subrs) is the callee's
+	   (let ((start (get-internal-real-time)) (outer *profile-child*)
+		 (refreshed *refreshed*) (absorbed *absorbed*))
+	     (setq *profile-child* 0)
+	     (multiple-value-prog1 (call)
+	       (let ((total (- (get-internal-real-time) start)))
+		 (incf (aref *profile-counts* id))
+		 (incf (aref *profile-refreshed* id) (- *refreshed* refreshed))
+		 (incf (aref *profile-absorbed* id) (- *absorbed* absorbed))
+		 (when (zerop (mod (incf *call-count*) 20000))
+		   (if *sprof* (when (>= *call-count* 140000) (psg-sprof-dump)) (psg-profile-dump)))
+		 (incf (aref *profile-times* id) (- total *profile-child*))
+		 (setq *profile-child* (+ outer total)))))))
     ;; A C program that embeds us makes the first call outside any
     ;; Guile code: errors become Guile exceptions from here
     (if (and *embedded* (not *entered*))
-	(let ((*entered* t)) (psg::with-guile-errors (call)))
-	(call))))
+	(let ((*entered* t)) (psg::with-guile-errors (if *profile* (profiled-call id) (call))))
+	(if *profile* (profiled-call id) (call)))))
+
+(defun psg-profile-dump ()
+  (when *profile*
+    (let ((rows (loop for id below (length *profile-counts*)
+		      when (plusp (aref *profile-counts* id))
+			collect (list (api-name (aref *api* id)) (aref *profile-counts* id) (aref *profile-times* id)
+				      (aref *profile-refreshed* id) (aref *profile-absorbed* id)))))
+      (format *error-output* "~&;; calls ~D, ~,2F s in the functions themselves (milliseconds, calls):~%"
+	      (reduce #'+ rows :key #'second) (/ (reduce #'+ rows :key #'third) internal-time-units-per-second))
+      (format *error-output* ";; ~D calls of C functions from Scheme, writing ~D entries and reading ~D~%"
+	      (svref *subr-stats* 0) (svref *subr-stats* 1) (svref *subr-stats* 2))
+      (format *error-output* ";; ms, calls, entries written to / read from mirrors (with the calls inside):~%")
+      (loop for (name n time written read) in (sort rows #'> :key #'third) repeat 30
+	    do (format *error-output* ";; ~8,1F ~8D ~9D ~9D  ~A~%"
+		       (/ (* 1000 time) internal-time-units-per-second) n written read name))
+      (finish-output *error-output*))))
+(defvar *sprof* nil "SBCL's statistical profiler runs (PSEUDOSCHEME_LIBGUILE_PROFILE=sprof).")
+(defun psg-sprof-dump ()
+  (let ((*standard-output* *error-output*))
+	(handler-case
+	    (progn (uiop:symbol-call "SB-SPROF" "STOP-PROFILING")
+		   (uiop:symbol-call "SB-SPROF" "REPORT" :type :flat :max 70 :sort-by :cumulative-samples))
+	  (error (c) (format t "~&;; sprof: ~A~%" c)))
+	(finish-output *error-output*)))
+(sb-alien:define-alien-callable psg-profile-dump-callback sb-alien:void ()
+  (if *sprof* (psg-sprof-dump) (psg-profile-dump)))
 
 (defvar *impl-definitions* '() "(name . function), from DEFIMPL.")
 
@@ -120,15 +173,64 @@ arguments converted to Lisp, returning the Lisp value to convert back."
     (setf (aref *impls* (api-index api)) (make-entry-function api function))))
 
 (defun make-entry-function (api function)
-  (let ((types (api-args api)) (return (api-return api)) (shallow (api-shallow api)))
+  (let ((types (api-args api)) (return (api-return api)) (shallow (api-shallow api))
+	(reader (reader-function-p api)))
     (lambda (sap)
       (let* ((args (let ((*deep* (not shallow)))
 		     (loop for type in types for i from 0
 			   collect (arg-value type (sb-sys:sap-ref-64 sap (* 8 i))))))
-	     (value (apply function args)))
+	     (value (progn (unless reader (lisp-ran)) (apply function args))))
 	;; back to C: Lisp may have changed what it returns
 	(incf *epoch*)
+	(unless reader (lisp-ran))
 	(result-word return value)))))
+
+;;; Functions that only read (docs/libguile.md, "Dirty tracking"): they
+;;; change no mirrored object, so nothing needs writing back to the
+;;; mirrors after them, and the next export of an object can be skipped
+;;; if no other Lisp code has run since the last one.  Anything not
+;;; listed is assumed to change its arguments.
+(defparameter *reader-procedures*
+  '(("length" . nil) ("list-ref" . nil) ("list-tail" . nil) ("list-head" . nil) ("list-copy" . nil)
+    ("assq" . nil) ("assv" . nil) ("assoc" . nil)
+    ("sloppy-assq" . nil) ("sloppy-assv" . nil) ("sloppy-assoc" . nil)
+    ("memq" . nil) ("memv" . nil) ("member" . nil)
+    ("hashq-ref" . 0) ("hashq-get-handle" . 0) ("hashq-set!" . 0) ("hashq-create-handle!" . 0)
+    ("hashv-ref" . 0) ("hashv-get-handle" . 0) ("hashv-set!" . 0) ("hashv-create-handle!" . 0)
+    ("vector-ref" . nil) ("vector-length" . nil) ("string-length" . 0) ("string-ref" . 0)
+    ("symbol->string" . 0) ("string->symbol" . 0) ("car" . 0) ("cdr" . 0) ("cons" . 0))
+  "Scheme procedures that only read their arguments, with how many levels
+below each argument they look (NIL: all through).")
+
+(defun reader-depth (name)
+  "For a Scheme procedure NAME that only reads its arguments: how many
+levels below them it looks (NIL: all through); second value true if NAME
+is such a procedure.  c[ad]+r looks one level for each letter after the
+first."
+  (let ((entry (assoc name *reader-procedures* :test #'string=)))
+    (cond (entry (values (cdr entry) t))
+	  ((and (<= 3 (length name) 6) (char= (char name 0) #\c) (char= (char name (1- (length name))) #\r)
+		(every (lambda (c) (find c "ad")) (subseq name 1 (1- (length name)))))
+	   (values (- (length name) 3) t))
+	  ;; predicates
+	  ((and (> (length name) 1) (char= (char name (1- (length name))) #\?))
+	   (values nil t))
+	  (t (values nil nil)))))
+
+(defparameter *reader-functions*
+  '("scm_i_new_smob" "scm_gc_register_collectable_memory" "scm_gc_unregister_collectable_memory"
+    "scm_gc_protect_object" "scm_gc_unprotect_object" "scm_c_string_length" "scm_c_vector_ref"
+    "scm_c_vector_length" "scm_ilength" "scm_cons2" "scm_c_make_hash_table" "scm_c_symbol_length"
+    "scm_c_vector_ref" "scm_from_locale_string" "scm_from_locale_symbol")
+  "Hand-written functions that change no mirrored object; so do those whose
+names start scm_from_, scm_to_ and scm_is_.")
+
+(defun reader-function-p (api)
+  (let ((name (api-name api)))
+    (or (api-shallow api)
+	(find name *reader-functions* :test #'string=)
+	(some (lambda (prefix) (eql 0 (search prefix name))) '("scm_from_" "scm_to_" "scm_is_"))
+	(and (eq (api-kind api) :scheme) (nth-value 1 (reader-depth (api-scheme api)))))))
 
 ;;; DEFS entries: the Scheme procedure of that name
 (defun guile-procedure (name)
@@ -148,24 +250,30 @@ arguments converted to Lisp, returning the Lisp value to convert back."
 (defun scheme-impl (api)
   (let ((procedure nil) (req (api-req api)) (opt (api-opt api)) (rest (api-rest api))
 	(name (api-scheme api)) (n (length (api-args api))))
+    (multiple-value-bind (depth reader) (reader-depth name)
+     (let ((depth (or depth most-positive-fixnum)))
     (lambda (sap)
       (let ((args (loop for i from 0 below n
 			collect (sb-sys:sap-ref-64 sap (* 8 i)))))
 	(unless procedure (setq procedure (guile-procedure name)))
+	(unless reader (lisp-ran))
 	;; optional arguments not given are SCM_UNDEFINED: they and those
 	;; after go
 	(let* ((given (loop for w in (subseq args 0 (+ req opt))
 			    for i from 0
 			    until (and (>= i req) (= w +undefined+))
-			    collect (import-scm w)))
+			    collect (let ((*import-depth* depth)) (import-scm w))))
 	       (rest-list (and rest (import-scm (car (last args))))))
 	  (let ((result (apply procedure (append given rest-list))))
 	    ;; back to C: what the procedure changed (reverse!, append!,
 	    ;; vector-fill!) is written to the mirrors C holds, which
 	    ;; the arguments' import this crossing had marked up to date
 	    (incf *epoch*)
+	    (unless reader (lisp-ran))
+	    ;; a reader's arguments needn't be written again unless Lisp
+	    ;; code has run since the last time (EXPORT-SCM checks)
 	    (dolist (a given) (when (mutable-p a) (export-scm a)))
-	    (export-scm result)))))))
+	    (export-scm result)))))))))
 
 (defun missing-impl (api)
   (lambda (sap)
@@ -174,7 +282,10 @@ arguments converted to Lisp, returning the Lisp value to convert back."
 	     "not implemented in this libguile (docs/libguile.md)" '())))
 
 (defun install-default-impls ()
-  (setf *impls* (make-array (fill-pointer *api*) :initial-element nil))
+  (setf *impls* (make-array (fill-pointer *api*) :initial-element nil)
+	*reader-ids* (make-array (fill-pointer *api*) :initial-element nil))
+  (loop for api across *api*
+	do (setf (aref *reader-ids* (api-index api)) (and (reader-function-p api) t)))
   (loop for api across *api*
 	do (setf (aref *impls* (api-index api))
 		 (case (api-kind api)
@@ -216,6 +327,24 @@ which a C program linked against our libguile starts at its first call
   (setq *embedded* t
 	*trace-calls* (let ((n (parse-integer (or (uiop:getenv "PSEUDOSCHEME_LIBGUILE_TRACE") "") :junk-allowed t)))
 			(and n (plusp n) n)))
+  (when (equal (uiop:getenv "PSEUDOSCHEME_LIBGUILE_PROFILE") "sprof")
+    (require :sb-sprof)
+    (setq *sprof* t *profile* t
+	  *profile-counts* (make-array (fill-pointer *api*) :initial-element 0)
+	  *profile-times* (make-array (fill-pointer *api*) :initial-element 0)
+	  *profile-refreshed* (make-array (fill-pointer *api*) :initial-element 0)
+	  *profile-absorbed* (make-array (fill-pointer *api*) :initial-element 0))
+    (c-call "psg_at_exit" sb-alien:void sb-sys:system-area-pointer
+	    (sb-alien:alien-sap (sb-alien:alien-callable-function 'psg-profile-dump-callback)))
+    (uiop:symbol-call "SB-SPROF" "START-PROFILING" :mode :cpu :sample-interval 0.002 :threads :all))
+  (when (equal (uiop:getenv "PSEUDOSCHEME_LIBGUILE_PROFILE") "1")
+    (setq *profile* t
+	  *profile-counts* (make-array (fill-pointer *api*) :initial-element 0)
+	  *profile-times* (make-array (fill-pointer *api*) :initial-element 0)
+	  *profile-refreshed* (make-array (fill-pointer *api*) :initial-element 0)
+	  *profile-absorbed* (make-array (fill-pointer *api*) :initial-element 0))
+    (c-call "psg_at_exit" sb-alien:void sb-sys:system-area-pointer
+	    (sb-alien:alien-sap (sb-alien:alien-callable-function 'psg-profile-dump-callback))))
   (setq *trace-after* (or (parse-integer (or (uiop:getenv "PSEUDOSCHEME_LIBGUILE_TRACE_AFTER") "") :junk-allowed t) 0))
   (psg::add-environment-load-path)
   (attach-library "libguile-3.0.so.1"))
@@ -282,14 +411,22 @@ non-local exit through C) are closed."
 		 (funcall (pg guile-error) (funcall (pg ssym) "wrong-number-of-args") name
 			  "Wrong number of arguments to ~A" (list name))))
 	     (incf *epoch*)
-	     (let* ((fixed (loop for i below (+ req opt)
+	     (lisp-ran)
+	     (let* ((refreshed *refreshed*)
+		    (fixed (loop for i below (+ req opt)
 				 collect (if args (export-scm (pop args)) +undefined+)))
 		    (words (if rest (append fixed (list (export-scm args))) fixed))
+		    (written (- *refreshed* refreshed))
 		    (result (with-pinned-words (words) (call-c fptr words))))
 	       (crossing
 		 ;; what C did to the arguments shows
-		 (dolist (w words) (unless (= w +undefined+) (import-scm w)))
-		 (import-scm result))))))
+		 (let ((absorbed *absorbed*))
+		   (dolist (w words) (unless (= w +undefined+) (import-scm w)))
+		   (prog1 (import-scm result)
+		     (when *profile*
+		       (incf (svref *subr-stats* 0))
+		       (incf (svref *subr-stats* 1) written)
+		       (incf (svref *subr-stats* 2) (- *absorbed* absorbed))))))))))
     (setf (gethash f (symbol-value (pg *procedure-properties*)))
 	  (list (cons (funcall (pg ssym) "name") (funcall (pg ssym) name))))
     f))

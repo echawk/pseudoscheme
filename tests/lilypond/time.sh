@@ -9,7 +9,9 @@
 # (PSEUDOSCHEME_GUILE_*) pass through.  With VERBOSE=1, ours also runs
 # once with LilyPond's --verbose, its lines timestamped (verbose.log in
 # $LOGS), to show where the start-up goes; with TRACE=1 as well, with
-# each call into our libguile listed (PSEUDOSCHEME_LIBGUILE_TRACE).
+# each call into our libguile listed (PSEUDOSCHEME_LIBGUILE_TRACE).  With
+# PROFILE=1, one more run prints the time spent in each libguile function
+# (PSEUDOSCHEME_LIBGUILE_PROFILE).
 cd "$(dirname "$0")/../.." || exit 1
 LOGS=${LOGS:-/logs}
 LILYPOND=/opt/lilypond/bin/lilypond
@@ -42,4 +44,8 @@ echo "ours --version: $(awk "BEGIN{print $t1 - $t0}") s"
 if [ -n "$VERBOSE" ]; then
   PSEUDOSCHEME_LIBGUILE_TRACE=${TRACE:-0} ours --verbose demo.ly 2>&1 | perl -MTime::HiRes=time -ne 'BEGIN{$t0=time} printf "%7.2f %s", time-$t0, $_' > verbose.log
   echo "verbose.log: $(wc -l < verbose.log) lines"
+fi
+if [ -n "$PROFILE" ]; then
+  SBCL_HOME=${SBCL_HOME:-/usr/local/lib/sbcl} PSEUDOSCHEME_LIBGUILE_PROFILE=${PROFILE_MODE:-1} ours demo.ly > profile.log 2>&1
+  grep -v '^\(Processing\|Parsing\|Interpreting\|Preprocessing\|Finding\|Fitting\|Drawing\|Converting\|Success\|Layout\)' profile.log | tail -n +1 | head -${PROFILE_LINES:-200}
 fi

@@ -732,7 +732,7 @@ flushed."
 (defimpl "scm_internal_hash_fold" (fptr closure init table)
   (scm "hash-fold"
        (lambda (key value result)
-	 (import-scm (c-funcall
+	 (import-scm (c-funcall-same-gen
 		      (sb-alien:sap-alien (address-sap fptr)
 					  (function sb-alien:unsigned-long sb-alien:unsigned-long
 						    sb-alien:unsigned-long sb-alien:unsigned-long

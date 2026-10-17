@@ -171,9 +171,12 @@ are **synchronized** when they cross between C and Lisp:
   differs from it is one C wrote, so only those are copied back, and
   what Lisp changed meanwhile isn't undone.
 - Synchronization goes all through a structure (a list's spine and
-  elements), once per crossing. Functions that only read their
-  arguments (`scm_car`, the conversions) go one level deep, so a C loop
-  over a list doesn't cost the list's length at each step.
+  elements), once per crossing, but it is limited in two ways
+  ("Dirty tracking" below): what Lisp must write to the mirrors is
+  skipped when no Lisp code has run since the last write, and a
+  function that reads only the top of a structure (`caar`, `hashq-set!`)
+  reads back only that much. A C loop over a list doesn't cost the
+  list's length at each step.
 
 The one departure from Guile: suppose C keeps an object in a global
 variable, changes it, and never passes it back. Lisp doesn't see the
@@ -200,6 +203,43 @@ and the Lisp that called C (tested on arm64 macOS and Linux). C's
 
 **Threads.** A thread is registered with the Boehm collector the first
 time it allocates from our heap. It is unregistered when it exits.
+
+### Dirty tracking
+
+Walking a whole structure at every call made a C loop over a list of n
+elements cost n squared: LilyPond's loop over a font's 638 glyphs
+(`scm_caar`, `scm_cdar`, `scm_hashq_set_x` per glyph) spent 3.9 s of a
+7.5 s run in it. Now:
+- **Lisp to C.** `*lisp-gen*` counts the times Lisp code that may have
+  changed a mirrored object has run: a function C calls that isn't
+  known to only read (`*reader-functions*`, `*reader-procedures*`:
+  predicates, `c[ad]+r`, `hashq-ref`/`-set!`, `assq`, the conversions)
+  advances it before and after, as does a Scheme call of a C procedure
+  and every call from Lisp into C (`c-funcall`). Each entry records the
+  generation of its last write, and a mirror written in the current
+  generation isn't written again. The variables, which every crossing
+  used to scan, are scanned for Lisp's changes only if it advanced, and
+  for C's only before and after functions that aren't readers.
+- **C to Lisp.** A reader of a bounded depth (`cdar` looks two levels
+  down, `hashq-set!` none) reads back only that many levels
+  (`*import-depth*`, `absorb-bounded`); the others go all through the
+  structure as before.
+- A reader doesn't write its arguments back after it runs (it can't
+  have changed them), but still passes them through `export-scm`, which
+  is free when nothing has changed.
+
+What this assumes: Lisp changes a mirrored object only while Lisp code
+runs, and that code is entered through the places above. Another Scheme
+thread changing a list while C holds it isn't seen either way (as
+before). A C loop that calls only readers is the fast path; one that
+calls anything else (`scm_call_n`, `scm_primitive_eval`) pays the walk
+the first time it passes each structure after that.
+
+`PSEUDOSCHEME_LIBGUILE_PROFILE=1` prints, at exit and every 20,000
+calls, each function's own time (what it calls into isn't counted), its
+calls, and the entries it wrote to and read from mirrors;
+`=sprof` runs SBCL's statistical profiler (`SBCL_HOME` must name its
+contrib). `PROFILE=1` in tests/lilypond/time.sh runs one score so.
 
 ## Embedding
 
@@ -242,7 +282,8 @@ What embedding needed beyond the extension case:
 - Scheme procedures that change their arguments (`reverse!`, `append!`)
   are written back to the mirrors C holds.
 
-Debugging: `PSEUDOSCHEME_LIBGUILE_TRACE=1` prints each libguile function
+Debugging: `PSEUDOSCHEME_LIBGUILE_PROFILE` (see "Dirty tracking"),
+`PSEUDOSCHEME_LIBGUILE_TRACE=1` prints each libguile function
 C calls; `=2` also their arguments, from the call number in
 `PSEUDOSCHEME_LIBGUILE_TRACE_AFTER` on.
 
@@ -255,8 +296,17 @@ pinned by sha256) against the real Guile 3.0.11 in /opt/lilypond.
 build/libguile, and compares ghostscript's rendering of the two PDFs.
 Status: the same page. Over 100,000 calls into libguile in the run,
 and all of LilyPond's Scheme (scm/*.scm, ly/*.ly) runs in Guile mode.
+Speed (arm64 container, warm module cache, a small score): about 3.7 s
+here against 1.0 s on real Guile; 7.5 s before dirty tracking. Opening
+the seven Emmentaler sizes went from 3.9 s to 0.5 s. What is left is
+Guile mode's own: compiling LilyPond's top-level Scheme forms
+(`scm_primitive_eval`, 1,100 calls, about 1.4 s, most of it SBCL's
+compiler), loading scm/*.scm (0.4 s) and cached module code (0.2 s);
+the bridge's share is now small. The first run, which fills the module
+cache, takes 40 to 60 s; the compiling of Guile's modules and
+LilyPond's files into the cache dominates it.
 Not tried yet: bigger scores, fonts and `\markup` text, MIDI, other
-backends; speed (the run takes several times as long as on real Guile).
+backends.
 
 ## What's next
 
@@ -270,6 +320,7 @@ backends; speed (the run takes several times as long as on real Guile).
    Then Guix's TLS (`guix download`, substitutes) runs on them.
 2. More of LilyPond: bigger inputs (the ly/ regression files), speed.
 3. Our own `libguile.h`.
-4. Cheaper synchronization: Lisp-side dirty tracking (Guile mode's
-   mutators note which mirrored objects they change), so that an
-   unchanged structure costs nothing to pass again.
+4. Finer dirty tracking: Guile mode's mutators noting which mirrored
+   objects they change, so that even after Lisp code has run only those
+   are written again (now one change anywhere rewrites every structure
+   passed next); and a way for C's writes to be found without scanning.

@@ -19,8 +19,10 @@
 ;;;; a word that differs from the snapshot is one C changed, and only
 ;;;; those are copied back: what Lisp changed meanwhile isn't undone.
 ;;;; Synchronization goes all through the structure (a list's spine and
-;;;; elements), once per crossing (*EPOCH*), except for the functions
-;;;; marked :shallow, which only read their arguments.  An object C keeps
+;;;; elements), once per crossing (*EPOCH*), except that a mirror isn't
+;;;; written again if no Lisp code has run since (*LISP-GEN*), and the
+;;;; functions that only read their arguments (:shallow, impl.lisp's
+;;;; READER-FUNCTION-P) read back a bounded depth (*IMPORT-DEPTH*).  An object C keeps
 ;;;; and changes without passing it back isn't seen by Lisp until it
 ;;;; next crosses; that is the bridge's one departure from Guile.
 ;;;;
@@ -55,6 +57,7 @@
 (declaim (inline address-sap))
 (defun address-sap (address) (sb-sys:int-sap address))
 
+(declaim (inline word))
 (defun word (address i) (sb-sys:sap-ref-64 (address-sap address) (* 8 i)))
 (defun (setf word) (value address i)
   (setf (sb-sys:sap-ref-64 (address-sap address) (* 8 i)) (ldb (byte 64 0) value)))
@@ -77,6 +80,8 @@
   object address
   (snapshot nil)			; the words (or bytes) last written
   (epoch -1)				; the crossing it was last synchronized in
+  (depth -1)				; how far (levels) it was then absorbed
+  (gen -1)				; the *LISP-GEN* its mirror was last refreshed in
   (dead nil)				; its mirror is gone (REAP)
   (pins 0))				; calls to C now holding it as an argument
 
@@ -88,10 +93,24 @@
 (defvar *c-objects* (make-hash-table :test 'eql :weakness :value)
   "Address -> the C-OBJECT for C's object there.")
 (defvar *epoch* 0 "Counts crossings between C and Lisp.")
-(defvar *variable-entries* '()
+(defvar *lisp-gen* 0
+  "Counts the times Lisp code that may have changed a mirrored object has
+run.  A mirror refreshed in the current generation is up to date with
+its Lisp object, so EXPORT-SCM needn't write it again: C calls that only
+read (docs/libguile.md, \"Dirty tracking\") don't advance it.")
+(defmacro lisp-ran () '(incf *lisp-gen*))
+(defvar *import-depth* most-positive-fixnum
+  "How many levels below an argument IMPORT-SCM brings up to date, for
+functions that read only the top of a structure (caar, hashq-set!).")
+(defvar *variable-entries* (make-array 256 :adjustable t :fill-pointer 0)
   "The entries of variables, which C reads and writes in place
 (SCM_VARIABLE_REF) between crossings: SYNC-VARIABLES-TO-C and
-SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
+SYNC-VARIABLES-TO-LISP bring them up to date at the crossings where
+Lisp code runs.")
+(defvar *variables-dead* nil "True if some entries of *VARIABLE-ENTRIES* are dead.")
+(defvar *refreshed* 0 "Entries written to their mirrors so far, for the profile.")
+(defvar *absorbed* 0 "Entries read back from their mirrors so far, for the profile.")
+(defvar *variables-gen* -1 "The *LISP-GEN* at the last SYNC-VARIABLES-TO-C.")
 (defvar *c-ports*)			; api.lisp
 
 (defmacro with-bridge (&body body)
@@ -105,7 +124,7 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 	  (hidden address 0) handle
 	  (hidden address 1) 1)		; exported: not unreachable yet
     (c-call "psg_watch" sb-alien:void sb-sys:system-area-pointer (address-sap address))
-    (when (typep object (pg gvariable)) (push e *variable-entries*))
+    (when (typep object (pg gvariable)) (vector-push-extend e *variable-entries*))
     e))
 
 (defun entry-at (address)
@@ -137,6 +156,7 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 		   (let ((e (aref *entries* handle)))
 		     (remhash (entry-object e) *mirrors*)
 		     (setf (entry-dead e) t)
+		     (when (typep (entry-object e) (pg gvariable)) (setq *variables-dead* t))
 		     (setf (aref *entries* handle) nil
 			   (hidden address 0) 0)
 		     (push handle *free-handles*))))))))))
@@ -234,7 +254,7 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 	(t (with-bridge
 	     (let ((e (gethash x *mirrors*)))
 	       (cond (e (setf (hidden (entry-address e) 1) (logior (hidden (entry-address e) 1) 1))
-			(when (and *deep* (/= (entry-epoch e) *epoch*))
+			(when (and *deep* (/= (entry-gen e) *lisp-gen*))
 			  (refresh e))
 			(entry-address e))
 		     (t (entry-address (make-mirror x))))))))))
@@ -291,7 +311,8 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 
 (defun refresh (e)
   "Write E's object's contents to its mirror (and on, through what it holds)."
-  (setf (entry-epoch e) *epoch*)
+  (setf (entry-epoch e) *epoch* (entry-depth e) most-positive-fixnum (entry-gen e) *lisp-gen*)
+  (incf *refreshed*)
   (let ((x (entry-object e)) (a (entry-address e)))
     (cond ((consp x)
 	   ;; along the spine without recursion
@@ -300,12 +321,13 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 		   (cdr (cdr x)))
 	       (setf (word a 0) car-bits)
 	       (cond ((and (consp cdr) (let ((next (gethash cdr *mirrors*)))
-					 (or (null next) (/= (entry-epoch next) *epoch*))))
+					 (or (null next) (/= (entry-gen next) *lisp-gen*))))
 		      (let ((next (or (gethash cdr *mirrors*) (new-entry cdr (alloc 16)))))
 			(setf (word a 1) (entry-address next)
 			      (entry-snapshot e) (vector car-bits (entry-address next)))
 			(setf e next x cdr a (entry-address next)
-			      (entry-epoch e) *epoch*)))
+			      (entry-epoch e) *epoch* (entry-depth e) most-positive-fixnum
+			      (entry-gen e) *lisp-gen*)))
 		     (t (let ((cdr-bits (export-scm cdr)))
 			  (setf (word a 1) cdr-bits
 				(entry-snapshot e) (vector car-bits cdr-bits)))
@@ -357,7 +379,8 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 	x
 	(with-bridge
 	  (let ((e (entry-at bits)))
-	    (cond (e (when (and (mutable-p (entry-object e)) (/= (entry-epoch e) *epoch*))
+	    (cond (e (when (and (mutable-p (entry-object e))
+				(or (/= (entry-epoch e) *epoch*) (> *import-depth* (entry-depth e))))
 		       (absorb e))
 		     (entry-object e))
 		  (t (import-c-object bits))))))))
@@ -379,9 +402,33 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 	  ((= (logand w0 #x7f) +tc7-string+) (static-string a))
 	  (t (c-object a)))))
 
+(defun absorb-bounded (e depth)
+  "ABSORB for a pair, a function that reads DEPTH levels below it: its
+two words, and its children's to DEPTH-1 levels."
+  (setf (entry-depth e) (if (= (entry-epoch e) *epoch*) (max depth (entry-depth e)) depth)
+	(entry-epoch e) *epoch*)
+  (let ((x (entry-object e)) (a (entry-address e)) (snapshot (entry-snapshot e)))
+    (let ((w0 (word a 0)) (w1 (word a 1)))
+      (if (= w0 (svref snapshot 0))
+	  (when (and (plusp depth) (mutable-p (car x))) (sync-child-bounded (car x) (1- depth)))
+	  (setf (car x) (let ((*deep* nil) (*import-depth* most-positive-fixnum)) (import-scm w0))
+		(svref snapshot 0) w0))
+      (if (= w1 (svref snapshot 1))
+	  (when (and (plusp depth) (mutable-p (cdr x))) (sync-child-bounded (cdr x) (1- depth)))
+	  (setf (cdr x) (let ((*deep* nil) (*import-depth* most-positive-fixnum)) (import-scm w1))
+		(svref snapshot 1) w1)))))
+
+(defun sync-child-bounded (x depth)
+  (let ((e (gethash x *mirrors*)))
+    (when (and e (entry-snapshot e) (or (/= (entry-epoch e) *epoch*) (> depth (entry-depth e))))
+      (if (consp x) (absorb-bounded e depth) (absorb e)))))
+
 (defun absorb (e)
   "Copy into E's object what C changed in its mirror since the snapshot."
-  (setf (entry-epoch e) *epoch*)
+  (when (and (consp (entry-object e)) (< *import-depth* most-positive-fixnum))
+    (return-from absorb (absorb-bounded e *import-depth*)))
+  (setf (entry-epoch e) *epoch* (entry-depth e) most-positive-fixnum)
+  (incf *absorbed*)
   (let ((x (entry-object e)) (a (entry-address e)) (snapshot (entry-snapshot e)))
     (cond ((consp x)
 	   (loop
@@ -393,7 +440,7 @@ SYNC-VARIABLES-TO-LISP bring them up to date at each one.")
 		      (let ((next (and (consp (cdr x)) *deep* (gethash (cdr x) *mirrors*))))
 			(if (and next (/= (entry-epoch next) *epoch*) (entry-snapshot next))
 			    (setf e next x (cdr x) a (entry-address next) snapshot (entry-snapshot e)
-				  (entry-epoch e) *epoch*)
+				  (entry-epoch e) *epoch* (entry-depth e) most-positive-fixnum)
 			    (return))))
 		     (t (setf (svref snapshot 1) w1
 			      (cdr x) (import-scm w1))
@@ -456,24 +503,36 @@ characters if its first word has #x400."
 ;;; unlike the other mutable objects they are brought up to date at each
 ;;; crossing, not just when they are passed.
 (defun sync-variables-to-c ()
-  "Write what Lisp changed in variables C holds to their mirrors."
-  (when *variable-entries*
+  "Write what Lisp changed in variables C holds to their mirrors.  Only
+Lisp code can have changed them, so nothing is done if none has run since."
+  (unless (= *variables-gen* *lisp-gen*)
+    (setq *variables-gen* *lisp-gen*)
     (with-bridge
-      (dolist (e *variable-entries*)
-	(unless (entry-dead e)
-	  (let ((snapshot (entry-snapshot e)))
-	    (when (and snapshot (not (eq (svref snapshot 1) (funcall (pg gvariable-value) (entry-object e)))))
-	      (refresh e))))))))
+      (let ((entries *variable-entries*))
+	(dotimes (i (length entries))
+	  (let ((e (aref entries i)))
+	    (unless (entry-dead e)
+	      (let ((snapshot (entry-snapshot e)))
+		(when (and snapshot (not (eq (svref snapshot 1) (funcall (pg gvariable-value) (entry-object e)))))
+		  (refresh e))))))))))
 
 (defun sync-variables-to-lisp ()
   "Copy into variables what C wrote in their mirrors."
-  (when *variable-entries*
+  (when (plusp (length *variable-entries*))
     (with-bridge
-      (setq *variable-entries* (delete-if #'entry-dead *variable-entries*))
-      (dolist (e *variable-entries*)
-	(let ((snapshot (entry-snapshot e)))
-	  (when (and snapshot (/= (word (entry-address e) 1) (svref snapshot 0)))
-	    (absorb e)))))))
+      (when *variables-dead*
+	(setq *variables-dead* nil)
+	(let ((entries *variable-entries*) (n 0))
+	  (dotimes (i (length entries))
+	    (unless (entry-dead (aref entries i))
+	      (setf (aref entries n) (aref entries i))
+	      (incf n)))
+	  (setf (fill-pointer entries) n)))
+      (let ((entries *variable-entries*))
+	(dotimes (i (length entries))
+	  (let* ((e (aref entries i)) (snapshot (entry-snapshot e)))
+	    (when (and snapshot (/= (word (entry-address e) 1) (svref snapshot 0)))
+	      (absorb e))))))))
 
 ;;; The mirrors of a call's arguments stay while the call runs: C may
 ;;; drop them, and the collector find them unreachable, before it returns
@@ -489,9 +548,18 @@ characters if its first word has #x400."
      (pin-words words 1)
      (unwind-protect (progn ,@body) (pin-words words -1))))
 
+(defmacro c-funcall-same-gen (&rest alien-funcall-arguments)
+  "C-FUNCALL, for a loop in which no Lisp code that changes mirrored
+objects runs between the calls (a fold over a table): objects the calls
+pass back and forth aren't written to their mirrors again each time."
+  `(progn (sync-variables-to-c)
+	  (multiple-value-prog1 (sb-alien:alien-funcall ,@alien-funcall-arguments)
+	    (sync-variables-to-lisp))))
+
 (defmacro c-funcall (&rest alien-funcall-arguments)
   "ALIEN-FUNCALL of C code that may read or write variables."
-  `(progn (sync-variables-to-c)
+  `(progn (lisp-ran)
+	  (sync-variables-to-c)
 	  (multiple-value-prog1 (sb-alien:alien-funcall ,@alien-funcall-arguments)
 	    (sync-variables-to-lisp))))
 
