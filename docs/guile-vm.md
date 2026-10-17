@@ -124,7 +124,11 @@ root).
     from source: srfi-1 (1,902 tests), srfi-9, 11, 19, 26, 31, 34, 35,
     37, 41, 43, 45, 60, 64, 67, 69, 171; ice-9 format, getopt-long,
     match, optargs, q, regex, vlist. `GUILE_VM_PRELOAD` in
-    tests/run-guile-test.lisp does this.
+    tests/run-guile-test.lisp does this. `PSEUDOSCHEME_GUILE_GO=all`
+    makes any program do it: each of Guile's own modules that has an
+    installed `.go` file loads from it, on the VM, rather than from its
+    source, natively (boot.lisp, `load-installed-compiled`). It isn't the
+    default, being slower (see docs/guile.md, "Native code or bytecode").
   - Bytecode from Guile's compiler running here runs on the VM:
     rtl.test and rtl-compilation.test pass.
 - **`compile`:** to `value`, how it runs is a setting,
@@ -255,7 +259,9 @@ Flonum arithmetic is IEEE's, as Guile's: overflow gives an infinity and
 
 ### Backends
 
-`PSEUDOSCHEME_GUILE_VM_BACKEND` chooses how bytecode runs:
+`PSEUDOSCHEME_GUILE_VM_BACKEND` chooses how bytecode runs. It and the
+two settings above are read when the program starts (bin/pseudoscheme,
+or our libguile's core), not when its image was built:
 
 - **`interpret`:** the interpreter alone, the reference.
 - **`jit`:** the default except on SBCL/arm64. Regions that run often

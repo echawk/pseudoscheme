@@ -592,7 +592,11 @@ r7rs-benchmarks, `bench/run.sh pseudoscheme-guile`):
   on) with a fixnum case inlined by a compiler macro, and a wrong type is
   Guile's error from the root procedure. Before this every `+` and `<` was a
   call of a rest-argument procedure, which made fib 20 times slower than it
-  need be.
+  need be. Out of line, the helpers do flonums (and a flonum with a fixnum)
+  with the host's arithmetic too, before the root procedure, which costs a
+  lookup by name and a list of the arguments: that made `fibfp` 20 times
+  faster (70 s to 3.4 s) and `mbrot` 7 (37 s to 5.2 s), both now faster
+  than in Guile 3.0.11.
 - **`map` and `for-each`** are boot-9's, in Scheme, checking the list for
   circularity as they go. A procedure and one or two proper lists of one
   length (so every error but not the common case) go to the host's
@@ -614,6 +618,83 @@ Guile's own passes, against what the native compiler does:
 | letrectify (declarative modules: a module's single, unassigned definitions are lexical within the compilation unit) | not done: each top-level form is compiled apart. A call of another procedure of a declarative module, already defined and unable to capture, needs no frame (`SAFE-SITE-P`) |
 | fix-letrec, contification | psyntax's letrec of lambdas is a `LABELS`, which SBCL compiles as local functions and loops |
 | closure conversion, type inference, unboxing (CPS) | SBCL's |
+
+#### Native code or bytecode
+
+Guile code can also be compiled by Guile's own compiler to bytecode and
+run on the VM (docs/guile-vm.md): a `.go` file, from the installed Guile
+or from `compile-file` here. Measured on arm64 (2026-10-17, a busy machine,
+so within 20% or so), the r7rs-benchmarks programs as `bench/run.sh
+pseudoscheme-guile` runs them, natively, against the same file compiled by
+`guild compile -O2` and loaded with `load-compiled`, run time only, in
+seconds:
+
+| | native | VM, `vop` | VM, `jit` | VM, `interpret` | Guile 3.0.11 |
+|---|---|---|---|---|---|
+| fib | 4.4 | 13.1 | | | 4.9 |
+| tak | 2.8 | 7.4 | 19.4 | 154 | 4.7 |
+| nqueens | 10.1 | 24.9 | | | 14.6 |
+| deriv | 6.7 | 22.2 | | | 9.4 |
+| destruc | 3.0 | 8.6 | | | 4.4 |
+| browse | 7.1 | 15.4 | | | 4.8 |
+| sum | 3.4 | 6.9 | | | 5.8 |
+| nboyer | 1.9 | 8.6 | | | 2.3 |
+| string | 1.0 | 1.9 | | | 0.6 |
+| earley | 1.6 | 7.3 | | | 4.8 |
+| lattice | 9.8 | 46.7 | | | 8.5 |
+| fibfp | 3.4 (70 before the flonum paths above) | 21.9 | | | 10.9 |
+| mbrot | 5.2 (37 before) | 35.2 | | | 22.1 |
+
+In another run of fib, a busier one, `jit` took 2.9 times as long as
+`vop`, and `interpret` over 11 times (killed at 300 s).
+
+Guile-idiomatic loops (milliseconds; the same file natively and as a `.go`):
+
+| | native | VM, `vop` | VM, `jit` | Guile 3.0.11 |
+|---|---|---|---|---|
+| closures (3M counters) | 97 | 281 | 911 | 95 |
+| records (3M SRFI 9 records) | 371 | 856 | 2,038 | 106 |
+| hash tables (1M `hash-set!`, `hash-ref`) | 431 | 709 | 892 | 872 |
+| strings (300k `string-append`, `string-split`, ...) | 312 | 520 | 638 | 152 |
+| `(ice-9 match)` (1M evaluations of a small expression) | 613 | 357 | 1,492 | 141 |
+| lists (SRFI 1 `iota`, `filter`, `fold`, `map`, `assv`) | 1,130 | 1,630 | 1,994 | 3,257 |
+
+Native code is 1.5 to 5 times faster than the fastest VM backend, except
+for `(ice-9 match)` (where Guile itself is 4 times faster than either:
+its compiler contifies the failure continuations `match` makes). In the
+VM's translated code (sb-sprof: 98% of fib's samples are in the region's
+function), every local is a slot of the stack vector, read and written in
+memory, a return goes through the region's dispatch on the IP, and a call
+to another image or to Lisp leaves the translation.
+
+Loading, with nothing to compile (19 modules, SRFI 1, 9, 19, 26, 41, 43,
+64, 69, `(ice-9 match)`, `format`, `regex`, `peg` and the rest):
+
+| | from the cache's fasls, native | from the installed `.go` files, on the VM (`PSEUDOSCHEME_GUILE_GO=all`) |
+|---|---|---|
+| all 19 | 57 ms | 400 to 530 ms |
+| `(srfi srfi-19)` alone | 19 ms | 454 ms |
+| the 19, GOOPS and `(web uri)` | 77 ms | 18 s, in a second run too (nothing of it is kept between processes) |
+
+About 350 ms of the VM's is two `guile` processes it asks for tables
+(the intrinsics, the directory of `.go` files), each forked from an 8 GB
+SBCL; there is one more for each symbol whose hash compiled code reads
+(a `case` on symbols), the first time. Compiling from source:
+the 21 modules with GOOPS and `(web uri)` take 16.5 s natively, cache off
+(21.7 s writing the cache); compiling `srfi-19.scm` to bytecode here, with
+Guile's compiler on the VM (`PSEUDOSCHEME_GUILE_COMPILER=vm`), didn't finish
+in 11 minutes, where `guild` takes 0.3 s.
+
+So native code with the fasl cache is the faster both to run and to load,
+and it is what LilyPond uses: its `scm/*.scm` load through
+`primitive-load-path`, so the cache holds them. LilyPond on a small score
+(tests/lilypond/time.sh, in the container, the cache filled) takes 8 to
+10 s, against 1 to 1.4 s on real Guile; the first run, filling the cache,
+about 55 s. Of a run of 7.8 s (`--verbose`, timestamped), loading
+`scm/*.scm` is 0.25 s; the font database 0.8 s; the `ly/*-init.ly` files
+1.3 s; interpreting the music 0.6 s; and opening the Emmentaler fonts 0.55 s
+for each of the seven sizes, 3.9 s, the most of it. None of that is the
+code's speed, native or bytecode.
 
 ### Emacs Lisp
 

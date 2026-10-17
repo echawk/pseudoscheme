@@ -422,13 +422,17 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 (defun our-modules-directory ()
   (asdf:system-relative-pathname :pseudoscheme "src/guile/modules/"))
 
+(declaim (ftype function vm-settings-from-environment)) ; vm-jit.lisp
+
 ;;; GUILE_LOAD_PATH and GUILE_LOAD_COMPILED_PATH, as libguile reads them
 ;;; when it starts: their directories (colon-separated) go before
 ;;; %load-path's and %load-compiled-path's.  %load-compiled-path also has
 ;;; the module cache's directory (cache.lisp), as Guile's has its ccache:
-;;; programs expect it not to be empty (Guix's (guix describe)).  Called
-;;; when a program starts, not when the image is built (contrib/cli/cli.lisp).
+;;; programs expect it not to be empty (Guix's (guix describe)).  The VM's
+;;; settings are read again too (vm-jit.lisp).  Called when a program
+;;; starts, not when the image is built (contrib/cli/cli.lisp).
 (defun add-environment-load-path ()
+  (vm-settings-from-environment)
   (let ((trace (uiop:getenv "PSEUDOSCHEME_GUILE_TRACE_THROWS")))
     ;; [backtrace][:KEY,...]: "1", "backtrace", "system-error",
     ;; "backtrace:system-error,wrong-type-arg"
@@ -685,12 +689,28 @@ loads from the installed Guile's .go files?"
 		     :test #'string=))
 	 name)))
 
+(defun go-modules ()
+  "Which of Guile's own modules load from the installed Guile's .go
+files, on the VM (PSEUDOSCHEME_GUILE_GO): :compiler, Guile's compiler
+when the :vm compiler runs it (the default); :all, any of them that has
+a .go file."
+  (if (member (uiop:getenv "PSEUDOSCHEME_GUILE_GO") '("all" "1") :test #'equal) :all :compiler))
+
+(defun module-file-name (name)
+  (if (and (> (length name) 4) (string= ".scm" name :start2 (- (length name) 4)))
+      (subseq name 0 (- (length name) 4))
+      name))
+
 (defun load-installed-compiled (name path)
-  "With the :vm compiler, load Guile's compiler module NAME from the
-installed Guile's .go file on the VM, if there is one and PATH (where the
+  "Load Guile's module NAME from the installed Guile's .go file on the
+VM, if GO-MODULES says it should, there is one, and PATH (where the
 source was found) is Guile's own, not one of src/guile/modules/'s
 replacements.  True if it did."
-  (let ((module (and (eq (guile-compiler) :vm) (compiler-module-file-p name))))
+  (let ((module (cond ((and *cache-ready*	; booted: boot-9 itself is ours
+			    (eq (go-modules) :all) (not (uiop:absolute-pathname-p name))
+			    (search (namestring *guile-source-directory*) (namestring path)))
+		       (module-file-name name))
+		      ((eq (guile-compiler) :vm) (compiler-module-file-p name)))))
     (when (and module (not (search "src/guile/modules/" (namestring path))))
       (let ((go (ignore-errors (funcall 'installed-go-file module))))
 	(when (and go (probe-file go))

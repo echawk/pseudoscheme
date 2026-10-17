@@ -1475,11 +1475,15 @@ thunk."
 ;;; ------------------------------------------------------------------
 ;;; More intrinsics
 
+;; GOOPS's C half's (goops.lisp), which (oop goops) itself defines
+;; class-of from: not the root's, which has none
+(defintrinsic "class-of" (x) (goops-class-of x))
+
 (macrolet ((by-root (&rest specs)
 	     `(progn
 		,@(loop for (name root args) in specs
 			collect `(defintrinsic ,name ,args (funcall (root-procedure ,root) ,@args))))))
-  (by-root ("string->number" "string->number" (s)) ("class-of" "class-of" (x))
+  (by-root ("string->number" "string->number" (s))
 	   ("logand" "logand" (a b)) ("logior" "logior" (a b)) ("logxor" "logxor" (a b))
 	   ("abs" "abs" (x)) ("sqrt" "sqrt" (x)) ("floor" "floor" (x)) ("ceiling" "ceiling" (x))
 	   ("sin" "sin" (x)) ("cos" "cos" (x)) ("tan" "tan" (x)) ("asin" "asin" (x))
@@ -1632,9 +1636,16 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
     (or (loop for dir in (if (listp dirs) dirs '())
 	      for path = (format nil "~A/~A.go" dir name)
 	      when (probe-file path) return path)
-	(let ((libdir (string-trim '(#\Newline) (uiop:run-program '("guile" "-c" "(display (car %load-compiled-path))")
-								  :output :string :ignore-error-status t))))
-	  (format nil "~A/~A.go" libdir name)))))
+	(format nil "~A/~A.go" (installed-ccache) name))))
+
+(defvar *installed-ccache* nil)
+
+(defun installed-ccache ()
+  "The installed Guile's directory of compiled modules, asked of it once."
+  (or *installed-ccache*
+      (setq *installed-ccache*
+	    (string-trim '(#\Newline) (uiop:run-program '("guile" "-c" "(display (car %load-compiled-path))")
+						       :output :string :ignore-error-status t)))))
 
 ;;; Symbol hashes.  Compiled code dispatches on symbols by their hash
 ;;; (`case' becomes a jump table on its low bits), so a symbol's hash

@@ -847,15 +847,20 @@ is (%guile-set! 'site value) or defines the same variable
 	psx::*safe-operator-hook* 'safe-operator-form-p
 	psx::*self-reference-hook* 'self-reference-form-p)
   (psx:defhost "%guile-ref" (site) (site-ref site))
+  ;; past the fixnums inlined (*GUILE-INLINE-PRIMITIVES*), flonums: the
+  ;; host's arithmetic is the root procedure's for them, without its
+  ;; lookup by name and its list of arguments.  Not 0 - 0.0, which is
+  ;; -0.0 in Guile (see "-" in runtime.lisp).
   (psx:defhost "%guile-sub2" (x y)
-    (if (and (typep x 'fixnum) (typep y 'fixnum))
-	(- x y)
-	(funcall (root-value "-") x y)))
+    (cond ((and (typep x 'fixnum) (typep y 'fixnum)) (- x y))
+	  ((and (typep x 'double-float) (typep y '(or double-float fixnum))) (- x y))
+	  ((and (typep x 'fixnum) (typep y 'double-float) (not (eql x 0))) (- x y))
+	  (t (funcall (root-value "-") x y))))
   (macrolet ((comparisons (&rest pairs)
 	       `(progn
 		  ,@(loop for (name test) in pairs
 			  collect `(psx:defhost ,(format nil "%guile-~A" name) (x y)
-				     (if (and (typep x 'fixnum) (typep y 'fixnum))
+				     (if (and (typep x '(or fixnum double-float)) (typep y '(or fixnum double-float)))
 					 (bool (,test x y))
 					 (funcall (root-value ,name) x y)))))))
     (comparisons ("<" <) (">" >) ("<=" <=) (">=" >=) ("=" =)))

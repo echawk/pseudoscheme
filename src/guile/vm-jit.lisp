@@ -48,11 +48,21 @@ SBCL's VOPs for it are there, arm64, else :jit):
   (setq *vm-backend* backend
 	*vm-jit* (not (eq backend :interpret))))
 
-(defvar *vm-jit-threshold*
-  (or (ignore-errors (parse-integer (uiop:getenv "PSEUDOSCHEME_GUILE_JIT_THRESHOLD"))) 20)
+(defun threshold-from-environment ()
+  (or (ignore-errors (parse-integer (uiop:getenv "PSEUDOSCHEME_GUILE_JIT_THRESHOLD"))) 20))
+
+(defvar *vm-jit-threshold* (threshold-from-environment)
   "How many times an instruction is jumped to before the region from it
 is translated (PSEUDOSCHEME_GUILE_JIT_THRESHOLD; 0 translates all code
 run, for testing).")
+
+(defun vm-settings-from-environment ()
+  "Read the VM's settings from the environment again: when a saved image
+(bin/pseudoscheme, pseudoscheme-guile.core) starts, whose variables
+hold the values of the environment it was built in."
+  (set-vm-backend (backend-from-environment))
+  (setq *vm-jit-threshold* (threshold-from-environment)
+	*installed-ccache* nil))
 
 (defvar *vm-jit-max* 2000
   "The most instructions in a region (SBCL compiles a function of no more
