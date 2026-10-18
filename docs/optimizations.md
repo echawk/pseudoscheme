@@ -315,6 +315,47 @@ What remains:
   aren't open-coded (`sort`, `hashtable-walk`), which use the
   frame-aware versions whenever the procedure passed might capture.
 
+## Plan (2026-10-18): a Chez-style optimizer between psyntax and the translator
+
+Chez runs cp0, cpletrec and cptypes on its core forms; we hand psyntax's
+core forms straight to the translator and rely on SBCL, which can't see
+through our generic calls. The user approved this list, in this order:
+
+1. **cp0: inlining, constant folding, copy propagation, dead code**
+   (idea 6, extended) on core forms, so every mode gains: R7RS and Chez
+   libraries, Racket linklets after lowering, Guile's Tree-IL. Library
+   definitions are immutable, so their small procedures can be inlined.
+   For Guile, running Guile's own `peval` on Tree-IL first is a cheap
+   step. *Started 2026-10-18.*
+2. **cptypes: type recovery** (idea 4): facts from predicate tests and
+   result types (`(pair? x)` → `car` unchecked; fixnum loop counters;
+   `fl` results are flonums), emitted as `truly-the`, typed bindings or
+   specialized primitives. *Started 2026-10-18, with 1.*
+3. **Unboxed flonums**: flonum-typed loop variables declared
+   `double-float`, so SBCL keeps them in registers (fibfp, mbrot,
+   nucleic, fft, ray box every intermediate).
+4. **Closed world**: in a `--compile` executable, and inside a library
+   body, top-level definitions are constant, so calls between them are
+   direct `labels` calls without capture frames; "may capture"
+   summaries across the program or library extend the self-call guard
+   (idea 9; src/continuations.lisp) to every known call. Outside those,
+   the same is the opt-in "declarative top level" (pending: a flag, an
+   environment variable or an importable declaration).
+5. **Escape analysis** (idea 5): `dynamic-extent` for closures and rest
+   lists that don't escape (a lambda passed to a known `for-each`,
+   `map`, `vector-for-each`; `apply`'s lists); closures with no free
+   variables lifted, so making one allocates nothing.
+6. **cpletrec**: `letrec`, named `let` and internal defines of lambdas
+   as `labels` everywhere, without letrec checks when the inits are
+   lambdas (Racket's linklet compiler does this already).
+7. **Representation**: records as one object (idea 2); boxes only for
+   assigned variables a closure captures.
+
+Where: 1, 2, 3, 5 and 6 are one new pass on core forms (after psyntax,
+before the translator); 4 is src/continuations.lisp; 7 is the record
+runtime (src/r6rs/). Each must keep every mode's conformance suites
+passing.
+
 ## Summary
 
 | # | idea | status | effect where it applies |
