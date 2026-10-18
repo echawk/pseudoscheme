@@ -14,9 +14,53 @@ There are no outside users, so nothing old is kept for compatibility:
 no package nicknames or system aliases, and no `PSEUDOSCHEME_*` variables
 read as a fallback.
 
-The rename is one mechanical commit, mostly `sed`, followed by
-regeneration and the full test run. This document lists everything
-it touches. The counts are from 2026-10-11, at commit 95dd7fd.
+The rename is one mechanical commit, made by `utils/rename/rename.sh`
+(section 0), followed by regeneration and the full test run. This
+document lists everything it touches. The counts in section 1 are from
+2026-10-11, at commit 95dd7fd; section 0 has 2026-10-17's.
+
+## 0. The scripts (utils/rename/)
+
+```sh
+sh utils/rename/rename.sh            # dry run: the files it would rewrite and move
+sh utils/rename/rename.sh --apply    # rewrite tracked text files, git mv the named ones
+sh utils/rename/check.sh             # what's left of the old name, for review
+sh utils/rename/out-of-repo.sh       # prints section 5's steps for the user; runs nothing
+```
+
+- `rename.sh --apply` refuses to run with uncommitted changes. It rewrites
+  only tracked text files (`git grep -lI`), skipping the paths in
+  `utils/rename/allowlist.txt` (Rees' original files and this
+  document), with section 4's perl rules, which also cover the newer
+  `PSR` (`PSEUDOSCHEME-RACKET`) prefix. It keeps "Pseudoscheme" before
+  "2.", "1." or "was " (history prose), then `git mv`s every file named
+  for the project and `src/*.pso` to `src/*.qso`.
+- Then: `check.sh`, the history prose by hand (README's opening
+  paragraph, section 3), section 2's Emacs and version items, the
+  out-of-repo steps, and section 6's tests.
+- **Trial run (2026-10-17, at e8a8b3f plus the scripts):** in a scratch
+  worktree, `--apply` rewrote 495 files and moved 40 (17 named, 23
+  `.pso`); `check.sh` left one line, a ROADMAP.md sentence of history
+  to review; the renamed tree builds `bin/quasischeme`, which runs
+  programs, and R7RS's suite passes on it, 978 of 978. Two rules were
+  found missing on the way and are in: files whose only mention is a
+  string designator (`(in-package "PS")`), and the bare `"pso"` file
+  type (src/core.lisp, the .asd, boot/check.lisp).
+- **Since 2026-10-11** the name also appears in:
+  - the packages `PSEUDOSCHEME-RACKET` (`PSR`) and
+    `PSEUDOSCHEME-LIBGUILE`;
+  - 35 `PSEUDOSCHEME_*` environment variables, among them the Racket
+    mode's (`RACKET_STRATEGY`, `RACKET_CORE`, `RACKET_REGEXP`, ...), the
+    libguile ones (`LIBGUILE_PROFILE`, `LIBGUILE_TRACE`, ...) and
+    `GUILE_GO`; `rename.sh` renames them all with the rest
+    (`git grep -ohI -E 'PSEUDOSCHEME_[A-Z_]+' | sort -u` lists them);
+  - the benchmarks' per-mode files (`Pseudoscheme{R6RS,R5RS,Chez,Guile,Racket}-*lude.scm`)
+    and the `bench` script's system names (`pseudoscheme-r6rs` and so on);
+  - the container's machine, image and volumes (`utils/container/config.sh`):
+    tear the container down with the old names *before* applying the
+    rename, and set it up again after (`out-of-repo.sh` says so).
+- The C side of libguile (`psg_*` functions in src/libguile/*.c) is
+  internal; the rules leave it, as nothing outside sees it.
 
 ## 1. Size
 

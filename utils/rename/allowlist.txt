@@ -1,0 +1,8 @@
+# Paths (git pathspecs) the rename leaves alone: Rees' original program
+# and history (docs/rename-quasischeme.md, section 3).  check.sh ignores
+# their remaining mentions of the old name.
+LICENSE
+src/pseudo.lisp
+src/jar-defrecord.scm
+docs/rename-quasischeme.md
+utils/rename
