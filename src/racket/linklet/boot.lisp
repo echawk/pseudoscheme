@@ -198,3 +198,82 @@ its main submodule if it has one)."
   (print-stats)
   ;; as racket's: an uncaught exception makes the exit status 1
   (when *uncaught* (finish-output) (uiop:quit 1)))
+
+;;; ------------------------------------------------------------------
+;;; Executables (contrib/cli: --racket --compile)
+
+(defun racket-eval-at-base (text)
+  "TEXT's forms evaluated by the expander as LINKLET-LOAD does its own, and
+the last one's values."
+  (let ((forms (read-racket-forms-from-string text))
+	(values (list *void*)))
+    (setq *uncaught* nil)
+    (unless *expander-instance*
+      (unless (instantiate-expander :stream nil)
+	(racket-error "racket" "the expander didn't instantiate")))
+    (with-racket-errors
+      (psx::call-with-continuation-base
+       (lambda ()
+	 (call-with-continuation-prompt
+	  (lambda ()
+	    (with-racket-errors
+	      (dolist (form forms)
+		(setq values (multiple-value-list (expander-eval form))))))
+	  *default-prompt-tag* nil))))
+    (when *uncaught* (finish-output) (uiop:quit 1))
+    (values-list values)))
+
+(defun read-racket-forms-from-string (text)
+  (with-input-from-string (in text)
+    (loop for form = (read-racket in) until (eq form *eof*) collect form)))
+
+(defun linklet-prepare-module (path)
+  "Make PATH's module ready to run from a saved image: declare it (which
+compiles it, and declares what it requires), and instantiate the modules
+of the collections that it, and the modules of its own that it requires,
+require, so that the program's start-up has only its own modules to run.
+Where the program is the module's own business (a module of the user's
+is not instantiated) and the collections are where the Racket's are
+(find-system-path 'collects-dir)."
+  ;; relative requires are resolved against the module's directory
+  (let ((cwd (funcall *current-directory*)))
+    (funcall *current-directory* (make-rpath (directory-namestring path)))
+    (unwind-protect (prepare-module-1 path)
+      (funcall *current-directory* cwd))))
+
+(defun prepare-module-1 (path)
+  (racket-eval-at-base
+   (format nil "
+(let-values ([(main) (list 'file ~S)]
+             [(collects) (path->string (path->complete-path (find-system-path 'collects-dir)))])
+  (letrec-values
+      ([(seen) (make-hash)]
+       [(under?) (lambda (p)
+                   (if (path? p)
+                       (let-values ([(s) (path->string p)])
+                         (if (>= (string-length s) (string-length collects))
+                             (string=? (substring s 0 (string-length collects)) collects)
+                             #f))
+                       #f))]
+       [(walk) (lambda (mod)
+                 (if (hash-ref seen mod #f)
+                     (void)
+                     (begin
+                       (hash-set! seen mod #t)
+                       (module-declared? mod #t)
+                       (for-each
+                        (lambda (phase+mpis)
+                          (if (eqv? (car phase+mpis) 0)
+                              (for-each
+                               (lambda (mpi)
+                                 (let-values ([(name) (resolved-module-path-name
+                                                       (module-path-index-resolve mpi #t))])
+                                   (if (path? name)
+                                       (if (under? name)
+                                           (dynamic-require name #f)
+                                           (walk name))
+                                       (void))))
+                               (cdr phase+mpis))
+                              (void)))
+                        (module->imports mod)))))])
+    (walk main)))" path)))

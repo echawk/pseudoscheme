@@ -29,6 +29,7 @@ bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
 bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
 bin/pseudoscheme --racket prog.rkt    # Racket, on Racket's own expander (docs/racket.md)
 bin/pseudoscheme --r4rs prog.scm     # or --ieee, --r3rs, --r2rs, --rrs: the older reports (docs/reports.md)
+bin/pseudoscheme --guile --compile prog.scm -o prog   # a standalone executable, in any mode (docs/executables.md)
 bin/pseudoscheme -p '(exact-integer-sqrt 17)'
 bin/pseudoscheme --lisp               # a Lisp REPL with all of it, for SLY/SLIME (docs/emacs.md)
 bin/pseudoscheme --help

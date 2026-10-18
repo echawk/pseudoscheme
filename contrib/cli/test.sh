@@ -119,6 +119,43 @@ ln -s "$(cd "$(dirname "$PS")" && pwd)/$(basename "$PS")" $tmp/ib/compile-r7rs
 printf '(import (scheme base) (scheme write) (my lib))\n(cond-expand (shout (display (twice 21))))\n' > $tmp/c.scm
 check "SRFI 138: compile-r7rs" "42" sh -c "$tmp/ib/compile-r7rs -A $tmp/lib -D shout -o $tmp/c $tmp/c.scm >/dev/null && $tmp/c"
 
+# --compile: an executable in each mode, run from another directory with
+# no source, no cache and no home directory; it takes its own arguments,
+# exits with the program's status, and reports errors as the run does
+mkdir -p $tmp/exe $tmp/exe/nowhere
+printf '(import (scheme base) (scheme write) (scheme process-context) (my lib))\n(write (cdr (command-line))) (display (twice 21)) (newline)\n(exit 3)\n' > $tmp/exe/p7.scm
+printf '#!r6rs\n(import (rnrs) (rnrs programs))\n(write (cdr (command-line))) (newline)\n(exit 4)\n' > $tmp/exe/p6.sps
+printf "(define (f n) (if (= n 0) 1 (* n (f (- n 1)))))\n(write (list (f 20) 'ABC)) (newline)\n(car 5)\n" > $tmp/exe/p5.scm
+printf '(import (chezscheme))\n(printf "~a ~a\\n" (cdr (command-line)) (fx+ 1 2))\n(exit 5)\n' > $tmp/exe/pc.ss
+printf '(use-modules (ice-9 format))\n(format #t "~a~%%" (cdr (program-arguments)))\n(exit 6)\n' > $tmp/exe/pg.scm
+printf '#lang racket/base\n(write (current-command-line-arguments)) (newline)\n(exit 7)\n' > $tmp/exe/pr.rkt
+exe_check() {  # exe_check NAME EXPECTED-OUTPUT EXPECTED-STATUS SOURCE MODE-FLAG...
+  name=$1; want=$2; wantcode=$3; src=$4; shift 4; n=$((n+1))
+  out=$tmp/exe/${src%.*}.out
+  if ! $PS "$@" -L $tmp/lib --compile $tmp/exe/$src -o $out >$tmp/exe/build.log 2>&1; then
+    fail=$((fail+1)); printf 'FAIL %s: did not build\n  %s\n' "$name" "$(tail -3 $tmp/exe/build.log)"; return
+  fi
+  mv $tmp/exe/$src $tmp/exe/$src.moved
+  got=$(cd $tmp/exe/nowhere && HOME=$tmp/exe/nowhere PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/exe/nowhere/cache $out a "b c" --help 2>&1); code=$?
+  mv $tmp/exe/$src.moved $tmp/exe/$src
+  if [ "$got" != "$want" ] || [ $code != $wantcode ]; then
+    fail=$((fail+1)); printf 'FAIL %s\n  expected: %s (status %s)\n  got:      %s (status %s)\n' "$name" "$want" "$wantcode" "$got" "$code"
+  fi
+}
+exe_check "--compile r7rs" '("a" "b c" "--help")42' 3 p7.scm
+exe_check "--compile r6rs" '("a" "b c" "--help")' 4 p6.sps --r6rs
+exe_check "--compile r5rs: error status" "(2432902008176640000 abc)
+Error: not a pair 5" 70 p5.scm --r5rs
+exe_check "--compile r3rs" "(2432902008176640000 abc)
+Error: not a pair 5" 70 p5.scm --r3rs
+exe_check "--compile chez" '(a b c --help) 3' 5 pc.ss --chez
+if $PS --guile -p '(+ 1 2)' >/dev/null 2>&1; then
+  exe_check "--compile guile" '(a b c --help)' 6 pg.scm --guile
+fi
+if $PS --racket -p '(+ 1 2)' >/dev/null 2>&1; then
+  exe_check "--compile racket" '#("a" "b c" "--help")' 7 pr.rkt --racket
+fi
+
 # --precompile DIR: its libraries compiled into the cache
 mkdir -p $tmp/cache
 check "--precompile" "1 of 1 compiled" sh -c "PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS --precompile $tmp/lib | grep -o '1 of 1 compiled'"

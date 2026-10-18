@@ -73,6 +73,13 @@
   --lisp           start the Lisp's own REPL instead, with all of
                    Pseudoscheme loaded: an inferior Lisp for SLIME or
                    SLY (contrib/emacs/pseudoscheme.el)
+  --compile FILE   instead of running FILE, make it an executable (named
+                   FILE without its extension, or by -o), in the mode
+                   given: the libraries and the program are compiled
+                   into it, and it takes its own arguments
+                   (docs/executables.md)
+  -o, --output OUT the executable's file name, for --compile
+  -D FEATURE       a cond-expand feature, for --compile
   --version        print the version and exit
   -V               print the version and more as SRFI 176's alist
   -h, --help       print this and exit
@@ -100,6 +107,8 @@ name first (see -l and --quicklisp; docs/interop.md).
 ")
 
 (defvar *standard* :r7rs)
+(defvar *compile-file* nil "--compile: the program to make an executable of.")
+(defvar *compile-output* nil "-o: the executable's file name.")
 (defvar *precompile-failed* nil "Did a library fail to precompile?")
 (defvar *script* nil "Running as one of SRFI 22's script interpreters?")
 
@@ -253,15 +262,225 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
     (and argv0
 	 (cdr (assoc (file-namestring argv0) *script-interpreters* :test #'string=)))))
 
-;;; SRFI 138: run as compile-r7rs (a link to this program), it compiles
-;;; an R7RS program to an executable, an image of this program with the
-;;; program's libraries installed -- expanded and compiled, not yet run --
-;;; and the program itself read, to be expanded and run when the
-;;; executable starts.  Libraries' bodies run then too, as they would
-;;; from source.
+;;; Executables: --compile FILE [-o OUT] (and SRFI 138's compile-r7rs, a
+;;; link to this program) makes an image of this program, as the
+;;; executable, with as much of FILE's work done as the mode allows, so
+;;; that it starts fast and needs neither the repository, the caches nor
+;;; this program:
+;;;
+;;;   R7RS, R6RS    the libraries FILE defines installed, expanded and
+;;;                 compiled, and the program itself expanded and compiled
+;;;                 (not run); the libraries it imports are invoked, in
+;;;                 order, when it starts
+;;;   R5RS and the older reports, Chez
+;;;                 FILE's forms expanded one by one at the mode's top
+;;;                 level and compiled, not run; the libraries they
+;;;                 import are invoked when it starts
+;;;   Guile         the program's modules loaded; its forms expanded and
+;;;                 compiled natively, those that define modules and
+;;;                 macros also run (as Guile's compile-file does)
+;;;   Racket        the expander instantiated, FILE's module declared (so
+;;;                 compiled) with the collection modules it requires
+;;;                 instantiated; the module runs when it starts
+;;;
+;;; Libraries' bodies and the program run when the executable starts,
+;;; as they would from source.
 
 (defvar *compiled-program* nil
-  "The program forms (import declarations first) a compiled executable runs.")
+  "What a compiled executable runs: a function of no arguments.")
+
+(defvar *recorded-top-level* nil
+  "While a program is compiled at a top level: the thunks of its forms, newest first.")
+(defvar *recorded-libraries* nil
+  "...and the names of the libraries its forms refer to, newest first.")
+
+(defun compile-thunk (form)
+  "FORM, a Lisp form as PSX::TRANSLATE-TOP-LEVEL makes them, compiled to a
+function of no arguments that runs it as HOST-EVAL would."
+  (let ((thunk
+	  (and (< (psx::tree-size form) psx::*interpret-limit*)
+	       (handler-case
+		   (handler-bind ((warning #'muffle-warning))
+		     (let ((*error-output* (make-broadcast-stream))
+			   (lambda `(lambda () ,form)))
+		       (if psx::*full-continuations*
+			   (psx::call-with-full-policy (lambda () (compile nil lambda)))
+			   (compile nil lambda))))
+		 (error () nil)))))
+    (or thunk
+	;; too big, or SBCL can't compile it: evaluated when it runs
+	(lambda () (handler-bind ((warning #'muffle-warning)) (psx::eval-compiled-or-interpreted form))))))
+
+(defun run-compiled-forms (thunks)
+  (dolist (thunk thunks)
+    (psx::run-top-level thunk)))
+
+(defun invoke-libraries (names)
+  (dolist (name names)
+    (funcall (psx:host-ref "psyntax:library-export-bindings") name)))
+
+(defun compile-program-forms (forms)
+  "FORMS, an R6RS top-level program (imports first), expanded and compiled;
+a function that invokes its libraries and runs it."
+  (let* ((expanded (funcall (psx:host-ref "psyntax:expand-r6rs-top-level") forms))
+	 (names (mapcar #'second (first expanded)))
+	 (thunks (mapcar #'compile-thunk (psx::translate-top-level (second expanded)))))
+    (lambda ()
+      (invoke-libraries names)
+      (run-compiled-forms thunks))))
+
+(defun import-set-library-name (set)
+  "The library name an import set (only (foo bar) x) is of, or NIL."
+  (loop while (and (consp set) (symbolp (car set))
+		   (member (ps:scheme-symbol-name (car set))
+			   '("only" "except" "prefix" "rename" "for" "library") :test #'string=))
+	do (setq set (cadr set)))
+  (and (consp set) (symbolp (car set))
+       ;; a trailing version reference isn't part of the name
+       (let ((name (loop for x in set while (symbolp x) collect x)))
+	 name)))
+
+(defun record-top-level (form)
+  "Stands for PSX:EVAL-TOP-LEVEL while a program is compiled: FORM is
+expanded (so what it defines is known to the forms after it), and its code
+compiled and kept, not run."
+  (let ((core (funcall (psx:host-ref "psyntax:expand-top-level") form))
+	(source (funcall (psx:host-ref "psyntax:interaction-source-name"))))
+    (pushnew source *recorded-libraries* :test #'equal)
+    (labels ((imports (f)
+	       (when (and (consp f) (symbolp (car f)))
+		 (cond ((string= (ps:scheme-symbol-name (car f)) "import")
+			(dolist (set (cdr f))
+			  (let ((name (import-set-library-name set)))
+			    (when name (pushnew name *recorded-libraries* :test #'equal)))))
+		       ((and (string= (ps:scheme-symbol-name (car f)) "begin") (listp (cdr f)))
+			(mapc #'imports (cdr f)))))))
+      (imports (if (ps::annotation-p form) (ps::annotation-stripped form) form)))
+    (dolist (lisp (let ((psx::*top-level-self-calls* t)) (psx::translate-top-level core)))
+      (push (compile-thunk lisp) *recorded-top-level*))
+    ps:unspecific))
+
+(defun compile-top-level-file (file)
+  "FILE loaded at the top level of *STANDARD*, but its forms only expanded
+and compiled; a function that runs them."
+  (let ((*recorded-top-level* '()) (*recorded-libraries* '()))
+    (sb-int:encapsulate 'psx:eval-top-level 'record
+			(lambda (function form) (declare (ignore function)) (record-top-level form)))
+    (unwind-protect (run-file file)
+      (sb-int:unencapsulate 'psx:eval-top-level 'record))
+    (let ((names (reverse *recorded-libraries*))
+	  (thunks (reverse *recorded-top-level*)))
+      (lambda ()
+	(invoke-libraries names)
+	(run-compiled-forms thunks)))))
+
+(defun compile-r7rs-program (file)
+  (let ((ps-r7rs::*include-directory* (make-pathname :name nil :type nil :defaults (truename file))))
+    (multiple-value-bind (libraries imports body)
+	(ps-r7rs::split-program (ps-r7rs::read-forms file))
+      (dolist (l libraries) (psx:eval-library (ps-r7rs::library-form l)))
+      (compile-program-forms
+       (cons (cons (ps:intern-scheme-symbol "import") (mapcar #'ps-r7rs::translate-import-set imports))
+	     body)))))
+
+(defun compile-r6rs-program (file)
+  (let ((forms (psx::read-file-forms file)))
+    (loop while (psl:keyword-head-p (car forms) "library")
+	  do (psx:eval-library (pop forms)))
+    (if forms
+	(compile-program-forms forms)
+	(lambda () ps:unspecific))))
+
+;;; Guile: the forms of FILE are expanded as Guile's compile-file does,
+;;; each after the ones before it; those that make modules and macros
+;;; (the expansion of the rest may depend on them) are also run
+
+(defparameter *guile-compile-time-heads*
+  '("define-module" "use-modules" "use-syntax" "define-syntax" "define-syntax-rule" "define-macro"
+    "define-inlinable" "eval-when" "import" "set-current-module" "define-record-type"
+    "define-syntax-parameter" "define-once")
+  "Heads of the forms a Guile program has run when it is compiled.")
+
+(defun compile-guile-program (file)
+  (psg:boot)
+  (let* ((text (uiop:read-file-string file))
+	 (name (namestring (truename file)))
+	 (module psg::*current-module*)
+	 (thunks '())
+	 (stream (make-string-input-stream text)))
+    (flet ((head-p (form)
+	     (and (consp form) (symbolp (car form)) (ps:scheme-symbol-p (car form))
+		  (member (ps:scheme-symbol-name (car form)) *guile-compile-time-heads* :test #'string=))))
+      (let ((psg::*current-load-file* name) (psg::*guile-fold-case* nil))
+	(loop for form = (psg::guile-read stream)
+	      until (eq form ps:eof-object)
+	      do (when (and (consp form) (not (gethash form psg::*source-properties*)))
+		   (setf (gethash form psg::*source-properties*)
+			 (list (cons (psg::ssym "filename") name) (cons (psg::ssym "line") 0)
+			       (cons (psg::ssym "column") 0))))
+		 (let* ((tree (cond ((psg::node-type form) form)
+				    ((eq (psg::current-transformer) #'psg::pre-expand) (psg::pre-expand form))
+				    (t (funcall (psg::current-transformer) form (psg::ssym "c")
+						(list (psg::ssym "compile") (psg::ssym "load"))))))
+			(lisp (psg::translate-top-level (psg::tree-il->core tree)))
+			(these (mapcar #'compile-thunk lisp)))
+		   (when (head-p form)
+		     (psg::call-with-guile-catch
+		      (lambda () (handler-bind ((warning #'muffle-warning))
+				   (run-compiled-forms these)))))
+		   (setq thunks (append (reverse these) thunks))))))
+    (setq thunks (nreverse thunks))
+    (setq psg::*current-module* module)
+    (lambda ()
+      (let ((psg::*current-load-file* name))
+	(psg::call-with-guile-catch (lambda () (run-compiled-forms thunks)))))))
+
+;;; Racket: see PSR::LINKLET-PREPARE-MODULE (src/racket/linklet/boot.lisp)
+
+(defun compile-racket-program (file)
+  (let ((path (namestring (truename file))))
+    (funcall 'psr::linklet-prepare-module path)
+    (lambda ()
+      (psr:load-file path))))
+
+(defun compile-program (file)
+  "FILE compiled in the mode of *STANDARD*: a function that runs it."
+  (ecase *standard*
+    (:r7rs (compile-r7rs-program file))
+    (:r6rs (compile-r6rs-program file))
+    ((:r5rs :r4rs :ieee :r3rs :r2rs :rrs :chez)
+     (pseudoscheme-api::ensure-psyntax)
+     (compile-top-level-file file))
+    (:guile (compile-guile-program file))
+    (:racket (compile-racket-program file))))
+
+(defun main-stack-size ()
+  "The size of the control stack the main thread has."
+  #+sbcl (- (sb-sys:sap-int (sb-vm::current-thread-offset-sap sb-vm::thread-control-stack-end-slot))
+	    (sb-sys:sap-int (sb-vm::current-thread-offset-sap sb-vm::thread-control-stack-start-slot)))
+  #-sbcl nil)
+
+(defun build-executable (file output)
+  "Make FILE, a program in the mode of *STANDARD*, the executable OUTPUT."
+  (unless (probe-file file) (die "no such file: ~A" file))
+  (pseudoscheme-api::ensure-psyntax)
+  (setq *compiled-program*
+	(handler-bind ((serious-condition #'report-and-exit))
+	  (compile-program file)))
+  ;; for include in the body, when it runs
+  (setf ps-r7rs::*include-directory*
+	(make-pathname :name nil :type nil :defaults (truename file)))
+  ;; The image keeps the thread stack size (UIOP saves the runtime's
+  ;; options), and so the main thread of the executable would have the
+  ;; size LIMIT-THREAD-STACKS gave the threads: the main one's own again
+  ;; (a start of the executable lowers the threads' once more).
+  #+sbcl
+  (let ((size (main-stack-size)))
+    (when (and size (plusp size))
+      (setf (sb-alien:extern-alien "thread_control_stack_size" sb-alien:unsigned) size)))
+  (setq uiop:*image-entry-point* #'run-compiled-program)
+  (uiop:dump-image (or output (namestring (make-pathname :type nil :defaults file)))
+		   :executable t))
 
 (defun compile-r7rs (args)
   (let ((output nil) (file nil))
@@ -282,24 +501,8 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
 		(t (setq file a))))))
     (unless file
       (die "usage: compile-r7rs [-I dir] [-A dir] [-D feature] [-o output] file"))
-    (unless (probe-file file) (die "no such file: ~A" file))
-    (pseudoscheme-api::ensure-psyntax)
-    (handler-bind ((serious-condition #'report-and-exit))
-      (let ((ps-r7rs::*include-directory*
-	      (make-pathname :name nil :type nil :defaults (truename file))))
-	(multiple-value-bind (libraries imports body)
-	    (ps-r7rs::split-program (ps-r7rs::read-forms file))
-	  (dolist (l libraries) (psx:eval-library (ps-r7rs::library-form l)))
-	  (let ((imports (mapcar #'ps-r7rs::translate-import-set imports)))
-	    ;; installs the libraries
-	    (apply (psx:host-ref "psyntax:environment") imports)
-	    (setq *compiled-program* (cons (cons (ps:intern-scheme-symbol "import") imports) body))))))
-    ;; for include in the body, when it runs
-    (setf ps-r7rs::*include-directory*
-	  (make-pathname :name nil :type nil :defaults (truename file)))
-    (setq uiop:*image-entry-point* #'run-compiled-program)
-    (uiop:dump-image (or output (namestring (make-pathname :type nil :defaults file)))
-		     :executable t)))
+    (setq *standard* :r7rs)
+    (build-executable file output)))
 
 (defun limit-thread-stacks ()
   "Threads' control stacks: PSEUDOSCHEME_THREAD_STACK_SIZE megabytes, or
@@ -308,14 +511,27 @@ proportion (ps:limit-thread-stack-size)."
   (let ((mb (or (ignore-errors (parse-integer (uiop:getenv "PSEUDOSCHEME_THREAD_STACK_SIZE"))) 32)))
     (ps:limit-thread-stack-size (* mb 1024 1024))))
 
+(defun set-program-arguments (argv0 args)
+  "What (command-line), Guile's (program-arguments) and Racket's
+current-command-line-arguments are."
+  (setf ps-r7rs:*command-line* (cons argv0 args)
+	psg:*program-arguments* (cons argv0 args))
+  (let ((parameter (and (boundp 'psr::*current-command-line-arguments*)
+			(symbol-value 'psr::*current-command-line-arguments*))))
+    (when parameter
+      (funcall parameter (coerce args 'simple-vector))))
+  ;; the saved image's current directory is the build's
+  (when (boundp 'psr::*current-directory*)
+    (funcall (symbol-value 'psr::*current-directory*)
+	     (funcall 'psr::make-rpath (namestring (uiop:getcwd))))))
+
 (defun run-compiled-program ()
   (ps:disable-float-traps)
   (limit-thread-stacks)
-  (setf ps-r7rs:*command-line*
-	(cons (car (uiop:raw-command-line-arguments)) (uiop:command-line-arguments)))
+  (set-program-arguments (car (uiop:raw-command-line-arguments)) (uiop:command-line-arguments))
   (handler-bind ((serious-condition
 		   (lambda (e) (if (interrupt-p e) (uiop:quit 130) (report-and-exit e)))))
-    (ps-r7rs::eval-forms *compiled-program*))
+    (funcall *compiled-program*))
   (finish-output)
   (uiop:quit 0))
 
@@ -408,6 +624,9 @@ list of (:eval text) / (:print text)."
 		((string= a "--precompile-srfi") (push (list :precompile nil) actions))
 		((string= a "--precompile") (push (list :precompile (value)) actions))
 		((string= a "--no-userinit") (setq *userinit* nil))
+		((string= a "--compile") (setq *compile-file* (value)))
+		((member a '("-o" "--output") :test #'string=) (setq *compile-output* (value)))
+		((string= a "-D") (push (value) psl:*scheme-features*))
 		((string= a "--continuations=full")
 		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t))
 		((string= a "--continuations=escape")
@@ -512,7 +731,7 @@ is reported, and the program runs anyway."
 				(file-namestring (car (uiop:raw-command-line-arguments)))))
 	      (t (setq *standard* standard *script* t)
 		 (values '() (car args) (cdr args) nil))))
-    (when *userinit* (load-user-init-file))
+    (when (and *userinit* (not *compile-file*)) (load-user-init-file))
     ;; Chez reads 2.a as a symbol, and #!r6rs is strict
     (when (eq *standard* :chez) (setq ps:*chez-reader* t))
     ;; With no program, SRFI 193's ("") as in Chez.  A script's name is
@@ -522,6 +741,10 @@ is reported, and the program runs anyway."
     (when file
       (setf ps-r7rs:*script-file*
             (namestring (merge-pathnames (uiop:parse-native-namestring file) (uiop:getcwd)))))
+    (let ((parameter (and (boundp 'psr::*current-command-line-arguments*)
+			  (symbol-value 'psr::*current-command-line-arguments*))))
+      (when (and parameter file)
+	(funcall parameter (coerce file-args 'simple-vector))))
     (when (member *standard* '(:r5rs :r4rs :ieee :r3rs :r2rs :rrs)) (setf ps:*fold-case* t))
     (when (eq *standard* :guile) (psg::add-environment-load-path))
     (handler-bind ((serious-condition
@@ -550,6 +773,9 @@ is reported, and the program runs anyway."
 		 (dolist (v values)
 		   (funcall ps:*scheme-write* v *standard-output*)
 		   (terpri))))))))
+      (when *compile-file*
+	(when file (die "--compile takes the program's name, not also ~A" file))
+	(build-executable *compile-file* *compile-output*))
       (when file
 	(unless (probe-file file) (die "no such file: ~A" file))
 	(if *script* (run-script file) (run-file file))))
