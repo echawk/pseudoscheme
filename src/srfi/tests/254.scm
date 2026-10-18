@@ -31,12 +31,12 @@
         acc
         (loop (+ i 1) (cons (let ((k (vector i))) (make-ephemeron k (list 'value k))) acc)))))
 (collect)
-(define broken (length (filter-broken ephemerons)))
 (define (filter-broken es)
   (let loop ((es es) (acc '()))
     (cond ((null? es) acc)
           ((ephemeron-broken? (car es)) (loop (cdr es) (cons (car es) acc)))
           (else (loop (cdr es) acc)))))
+(define broken (length (filter-broken ephemerons)))
 (test-assert "unreachable keys break their ephemerons" (> broken 100))
 (test-assert (let ((b (car (filter-broken ephemerons))))
                (and (not (ephemeron-key b)) (not (ephemeron-value b)))))
