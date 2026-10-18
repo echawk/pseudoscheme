@@ -23,7 +23,7 @@
 (define (sub1 n) (- n 1))
 (define call/1cc call/cc)
 (define gensym
-  (case-lambda (() (%chez:make-gensym "g")) ((name) (%chez:make-gensym name))))
+  (case-lambda (() (%chez:make-gensym "g" #t)) ((name) (%chez:make-gensym name))))
 (define getenv %get-environment-variable)
 (define system %chez:system)
 (define open-process-ports
@@ -189,10 +189,37 @@
 ;;; SRFI 19 compat layer is built on these).  CPU time is approximated by
 ;;; real time since start-up; there is no GC time.
 
-(define-record-type (time-type* make-time time?)
-  (fields (mutable type time-type set-time-type!)
-          (mutable nanosecond time-nanosecond set-time-nanosecond!)
-          (mutable second time-second set-time-second!)))
+(define-record-type (time-type* %make-time time?)
+  (fields (mutable type time-type %set-time-type!)
+          (mutable nanosecond time-nanosecond %set-time-nanosecond!)
+          (mutable second time-second %set-time-second!)))
+
+(define (check-time-type who t)
+  (unless (memq t '(time-duration time-monotonic time-process time-thread time-utc
+                    time-collector-cpu time-collector-real))
+    (assertion-violation who "invalid time type" t)))
+(define (check-time-nanosecond who n)
+  (unless (and (integer? n) (exact? n) (<= 0 n 999999999))
+    (assertion-violation who "invalid nanosecond" n)))
+(define (check-time-second who s)
+  (unless (and (integer? s) (exact? s)) (assertion-violation who "invalid second" s)))
+(define (make-time type ns s)
+  (check-time-type 'make-time type)
+  (check-time-nanosecond 'make-time ns)
+  (check-time-second 'make-time s)
+  (%make-time type ns s))
+(define (set-time-type! t type)
+  (unless (time? t) (assertion-violation 'set-time-type! "not a time record" t))
+  (check-time-type 'set-time-type! type)
+  (%set-time-type! t type))
+(define (set-time-nanosecond! t n)
+  (unless (time? t) (assertion-violation 'set-time-nanosecond! "not a time record" t))
+  (check-time-nanosecond 'set-time-nanosecond! n)
+  (%set-time-nanosecond! t n))
+(define (set-time-second! t s)
+  (unless (time? t) (assertion-violation 'set-time-second! "not a time record" t))
+  (check-time-second 'set-time-second! s)
+  (%set-time-second! t s))
 
 (define (seconds->time type s)
   (let* ((whole (exact (floor s)))
@@ -206,7 +233,7 @@
      (case type
        ((time-utc time-monotonic) (seconds->time type (%current-second)))
        ((time-process time-thread) (seconds->time type (/ (%current-jiffy) (%jiffies-per-second))))
-       ((time-collector-cpu time-collector-real) (make-time type 0 0))
+       ((time-collector-cpu time-collector-real time-duration) (make-time type 0 0))
        (else (assertion-violation 'current-time "unknown time type" type))))))
 
 (define (cpu-time) (exact (round (/ (* 1000 (%current-jiffy)) (%jiffies-per-second)))))
@@ -264,9 +291,31 @@
              (sstats-gc-count s) (secs (sstats-cpu s)) (secs (sstats-gc-cpu s))
              (secs (sstats-real s)) (secs (sstats-gc-real s)) (sstats-bytes s)))))
 
-(define-record-type (date-type* make-date date?)
+(define-record-type (date-type* %make-date date?)
   (fields nanosecond second minute hour day month year zone-offset)
   (nongenerative))
+(define (days-in-month month year)
+  (case month
+    ((1 3 5 7 8 10 12) 31)
+    ((4 6 9 11) 30)
+    (else (if (and (zero? (mod year 4)) (or (not (zero? (mod year 100))) (zero? (mod year 400)))) 29 28))))
+(define (check-date-offset who tz)
+  (unless (and (integer? tz) (exact? tz) (<= (- 86400) tz 86400))
+    (assertion-violation who "invalid time zone offset" tz)))
+(define make-date
+  (case-lambda
+    ((ns s m h d mo y) (make-date ns s m h d mo y (%chez:timezone-offset)))
+    ((ns s m h d mo y tz)
+     (let ((int? (lambda (x) (and (integer? x) (exact? x)))))
+       (unless (and (int? ns) (<= 0 ns 999999999)) (assertion-violation 'make-date "invalid nanosecond" ns))
+       (unless (and (int? s) (<= 0 s 61)) (assertion-violation 'make-date "invalid second" s))
+       (unless (and (int? m) (<= 0 m 59)) (assertion-violation 'make-date "invalid minute" m))
+       (unless (and (int? h) (<= 0 h 23)) (assertion-violation 'make-date "invalid hour" h))
+       (unless (int? y) (assertion-violation 'make-date "invalid year" y))
+       (unless (and (int? mo) (<= 1 mo 12)) (assertion-violation 'make-date "invalid month" mo))
+       (unless (and (int? d) (<= 1 d (days-in-month mo y))) (assertion-violation 'make-date "invalid day" d))
+       (check-date-offset 'make-date tz)
+       (%make-date ns s m h d mo y tz)))))
 (define (date-nanosecond d) (date-type*-nanosecond d))
 (define (date-second d) (date-type*-second d))
 (define (date-minute d) (date-type*-minute d))
@@ -296,6 +345,7 @@
 (define (time>=? a b) (>= (time->nanoseconds a) (time->nanoseconds b)))
 
 (define (date->time-utc d)
+  (unless (date? d) (assertion-violation 'date->time-utc "not a date record" d))
   ;; days from the civil date (Howard Hinnant's algorithm)
   (let* ((y (if (<= (date-month d) 2) (- (date-year d) 1) (date-year d)))
          (era (div y 400))
@@ -309,9 +359,20 @@
                   (date-zone-offset d)))))
 
 (define (date-week-day d)
-  (mod (+ 4 (div (time-second (date->time-utc d)) 86400)) 7))
+  (unless (date? d) (assertion-violation 'date-week-day "not a date record" d))
+  ;; of the date's own day, whatever its zone offset
+  (let* ((y (if (<= (date-month d) 2) (- (date-year d) 1) (date-year d)))
+         (era (div y 400))
+         (yoe (- y (* era 400)))
+         (m (date-month d))
+         (doy (+ (div (+ (* 153 (+ m (if (> m 2) -3 9))) 2) 5) (- (date-day d) 1)))
+         (doe (+ (* yoe 365) (div yoe 4) (- (div yoe 100)) doy))
+         (days (+ (* era 146097) doe -719468)))
+    (mod (+ 4 days) 7)))
 
 (define (time-utc->date t . offset)
+  (unless (time? t) (assertion-violation 'time-utc->date "not a time record" t))
+  (when (pair? offset) (check-date-offset 'time-utc->date (car offset)))
   ;; days-from-civil inverted (Howard Hinnant's algorithm)
   (let* ((off (if (pair? offset) (car offset) (%chez:timezone-offset)))
          (secs (+ (time-second t) off))
@@ -328,7 +389,43 @@
          (y (+ yoe (* era 400) (if (<= m 2) 1 0))))
     (make-date (time-nanosecond t) (mod rem 60) (mod (div rem 60) 60) (div rem 3600)
                d m y off)))
-(define (current-date . offset) (apply time-utc->date (current-time) offset))
+;; "Mon Mar 23 15:01:37 2015", as ctime shows a date
+(define (date-and-time . date)
+  (let* ((d (cond ((null? date) (current-date))
+                  ((and (null? (cdr date)) (date? (car date))) (car date))
+                  (else (assertion-violation 'date-and-time "not a date record" date))))
+         (pad (lambda (n) (if (< n 10) (string-append "0" (number->string n)) (number->string n)))))
+    (string-append
+     (vector-ref '#("Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat") (date-week-day d)) " "
+     (vector-ref '#("Jan" "Feb" "Mar" "Apr" "May" "Jun" "Jul" "Aug" "Sep" "Oct" "Nov" "Dec") (- (date-month d) 1)) " "
+     (let ((day (date-day d))) (if (< day 10) (string-append " " (number->string day)) (number->string day))) " "
+     (pad (date-hour d)) ":" (pad (date-minute d)) ":" (pad (date-second d)) " "
+     (number->string (date-year d)))))
+
+(record-writer (record-type-descriptor time-type*)
+  (lambda (t p wr)
+    (let* ((ns (+ (* (time-second t) 1000000000) (time-nanosecond t)))
+           (frac (number->string (mod (abs ns) 1000000000))))
+      (display "#<" p)
+      (display (time-type t) p)
+      (display " " p)
+      (when (< ns 0) (display "-" p))
+      (display (div (abs ns) 1000000000) p)
+      (display "." p)
+      (display (make-string (- 9 (string-length frac)) #\0) p)
+      (display frac p)
+      (display ">" p))))
+
+(record-writer (record-type-descriptor date-type*)
+  (lambda (d p wr)
+    (display "#<date " p)
+    (display (date-and-time d) p)
+    (display ">" p)))
+
+(define current-date
+  (case-lambda
+    (() (time-utc->date (current-time)))
+    ((offset) (check-date-offset 'current-date offset) (time-utc->date (current-time) offset))))
 
 ;; Stencil vectors, #5vs(a b)
 (define stencil-vector %chez:stencil-vector)

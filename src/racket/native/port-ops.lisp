@@ -51,11 +51,13 @@
 
 (defun need-in (who port)
   "PORT, which must be an input port, as one of ours."
+  (setq port (unwrap-in port))
   (unless (or (null port) (rinport-p port) (truthy (funcall (psx:host-ref "input-port?") port)))
     (contract-error who "input-port?" port))
   (in-port who port))
 
 (defun need-out (who port)
+  (setq port (unwrap-out port))
   (unless (or (null port) (routport-p port) (truthy (funcall (psx:host-ref "output-port?") port)))
     (contract-error who "output-port?" port))
   (output-port port who))
@@ -127,7 +129,9 @@
   (let ((who "make-output-port")
 	(count-lines (if (null count-lines) (void-procedure) count-lines)))
     (unless (evt-value-p evt) (contract-error who "evt?" evt))
-    (unless (or (routport-p write-out) (arity-includes-p write-out 5))
+    (setq write-out (unwrap-out write-out))
+    (unless (or (routport-p write-out) (and (streamp write-out) (output-stream-p write-out))
+		(arity-includes-p write-out 5))
       (contract-error who "(or/c output-port? (procedure-arity-includes/c 5))" write-out))
     (check-proc who close 0 "(procedure-arity-includes/c 0)")
     (unless (or (eq write-out-special ps:false) (routport-p write-out-special) (arity-includes-p write-out-special 3))
@@ -365,6 +369,7 @@ count, eof or a special); 0 for none yet."
 		 ps:true))))))
 
 (defnative "port-closed-evt" (p) ()
+  (setq p (unwrap-out (unwrap-in p)))
   (cond ((rinport-p p)
 	 (make-revt :peek (or (rinport-closed-sema p)
 			      (setf (rinport-closed-sema p) (make-rsemaphore (if (rinport-closed p) 1 0))))))
@@ -416,7 +421,7 @@ count, eof or a special); 0 for none yet."
     (check-range "write-bytes-avail-evt" start end (length bstr) "byte string" bstr)
     (cond ((and c (custom-out-get-write-evt c))
 	   (funcall (custom-out-get-write-evt c) (subseq bstr start end) 0 (- end start)))
-	  ((and c (not (routport-p (custom-out-write-out c))))
+	  ((and c (not (or (routport-p (custom-out-write-out c)) (streamp (custom-out-write-out c)))))
 	   (racket-error "write-bytes-avail-evt" "port does not support output events~%  port: ~A" (port-desc p)))
 	  (t (write-evt-for (lambda () (write-some-to "write-bytes-avail-evt" bstr p start end nil)))))))
 
@@ -450,12 +455,14 @@ count, eof or a special); 0 for none yet."
 	(racket-error "write-special-evt" "port does not support special values~%  port: ~A" (port-desc p)))))
 
 (defnative "port-writes-atomic?" (p) (:leaf t)
+  (setq p (unwrap-out p))
   (cond ((routport-p p)
 	 (let ((c (routport-custom p)))
 	   (bool (or (null c) (custom-out-get-write-evt c)))))
 	((truthy (funcall (psx:host-ref "output-port?") p)) ps:true)
 	(t (contract-error "port-writes-atomic?" "output-port?" p))))
 (defnative "port-writes-special?" (p) (:leaf t)
+  (setq p (unwrap-out p))
   (cond ((routport-p p)
 	 (let ((c (routport-custom p)))
 	   (bool (and c (custom-out-write-out-special c)))))

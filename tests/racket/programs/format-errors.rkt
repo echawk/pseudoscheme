@@ -1,0 +1,13 @@
+#lang racket/base
+(define (try th) (with-handlers ([exn? (lambda (e) (displayln (exn-message e)))]) (th)))
+(try (lambda () (format "hello" 1)))
+(try (lambda () (format "~a ~a" 1)))
+(try (lambda () (format "~a" 1 2 3)))
+(try (lambda () (format "~a")))
+(try (lambda () (printf "x~a" 1 2)))
+(try (lambda () (fprintf (current-output-port) "~s" )))
+(try (lambda () (format "~q" 1)))
+(try (lambda () (format "abc~")))
+(try (lambda () (format 'a)))
+(try (lambda () (error "foo ~a" 1)))
+(try (lambda () (displayln (format "~a ~s ~v ~~ ~n" "a" "b" "c"))))

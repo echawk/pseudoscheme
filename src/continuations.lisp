@@ -209,8 +209,11 @@ after runs however THUNK is left."
 	(funcall (cdr winder))))))
 
 (defun full-dynamic-wind (before thunk after)
-  (funcall before)
-  (winder-extent (cons before after) thunk))
+  ;; BEFORE in a frame: a continuation captured in it goes on to run
+  ;; THUNK, inside the winder, when re-entered
+  (call-with-frame before (lambda (&rest values)
+			    (declare (ignore values))
+			    (winder-extent (cons before after) thunk))))
 
 (defun full-call-with-values (producer consumer)
   (call-with-frame producer (lambda (&rest values) (apply consumer values))))

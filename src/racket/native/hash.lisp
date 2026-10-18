@@ -529,6 +529,27 @@ differ, at SHIFT."
   (declare (ignore bad-index-v))
   (let ((e (svref (entries h) i))) (cons (car e) (cdr e))))
 
+;;; The same for mutable and weak tables
+(macrolet ((def (kind)
+	     `(progn
+		(defnative ,(format nil "unsafe-~A-hash-iterate-first" kind) (h) (:instance "#%unsafe" :leaf t)
+		  (if (plusp (length (entries h))) 0 ps:false))
+		(defnative ,(format nil "unsafe-~A-hash-iterate-next" kind) (h i) (:instance "#%unsafe" :leaf t)
+		  (if (< (1+ i) (length (entries h))) (1+ i) ps:false))
+		(defnative ,(format nil "unsafe-~A-hash-iterate-key" kind) (h i &optional bad) (:instance "#%unsafe" :leaf t)
+		  (if (< -1 i (length (entries h))) (car (svref (entries h) i)) bad))
+		(defnative ,(format nil "unsafe-~A-hash-iterate-value" kind) (h i &optional bad) (:instance "#%unsafe" :leaf t)
+		  (if (< -1 i (length (entries h))) (cdr (svref (entries h) i)) bad))
+		(defnative ,(format nil "unsafe-~A-hash-iterate-key+value" kind) (h i &optional bad) (:instance "#%unsafe" :leaf t)
+		  (if (< -1 i (length (entries h)))
+		      (let ((e (svref (entries h) i))) (values (car e) (cdr e)))
+		      bad))
+		(defnative ,(format nil "unsafe-~A-hash-iterate-pair" kind) (h i &optional bad) (:instance "#%unsafe" :leaf t)
+		  (if (< -1 i (length (entries h)))
+		      (let ((e (svref (entries h) i))) (cons (car e) (cdr e)))
+		      bad)))))
+  (def "mutable") (def "weak"))
+
 ;;; ------------------------------------------------------------------
 ;;; current-inspector, a parameter (structs.lisp has what uses it; it
 ;;; is made here because make-parameter* comes with control.lisp)

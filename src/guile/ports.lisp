@@ -946,6 +946,7 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
   *unspecified*)
 
 (defun install-port-root-bindings ()
+  (install-posix-constants)
   (flet ((def (name value) (obarray-define (ssym name) value)))
     (def "%current-input-port-fluid" *current-input-port-fluid*)
     (def "%current-output-port-fluid" *current-output-port-fluid*)

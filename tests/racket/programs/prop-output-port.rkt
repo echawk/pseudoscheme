@@ -1,0 +1,17 @@
+#lang racket/base
+;; a struct with prop:output-port is an output port to the port operations
+(struct wrapped (out) #:property prop:output-port 0)
+(define o (open-output-string))
+(define w (wrapped o))
+(write-string "hello " w)
+(fprintf w "~a" 42)
+(write-bytes #"!" w)
+(displayln (list (output-port? w) (port-closed? w)))
+(displayln (get-output-string o))
+(parameterize ([current-output-port w])
+  (display "via current-output-port"))
+(displayln (get-output-string o))
+(close-output-port w)
+(displayln (port-closed? o))
+(with-handlers ([exn:fail:contract? (lambda (e) (displayln (exn-message e)))])
+  (current-output-port 8))

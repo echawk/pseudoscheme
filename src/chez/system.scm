@@ -66,7 +66,7 @@
 (define ($gc-cpu-time)
   (let* ((s (vector-ref (%chez:gc-statistics) 1))
          (sec (floor s)))
-    (make-time 'time-duration (floor (* (- s sec) 1000000000)) sec)))
+    (make-time 'time-duration (exact (floor (* (- s sec) 1000000000))) (exact sec))))
 (define ($generation x) 0)
 (define-syntax $active-threads
   (identifier-syntax (%chez:sys-active-threads)))

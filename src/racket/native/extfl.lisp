@@ -15,6 +15,11 @@
 (defstruct (extflonum (:constructor make-extflonum (str)) (:predicate extflonum-p))
   str)
 
+;; a literal in compiled code (the reader's 3.14t0) is dumped into a fasl
+(defmethod make-load-form ((x extflonum) &optional environment)
+  (declare (ignore environment))
+  `(make-extflonum ,(extflonum-str x)))
+
 (defun extflonum-string-p (s)
   "Whether S reads as an extflonum: a number's digits, then t or T and
 an exponent (1.0t0, +inf.t, #e1t2 isn't one: the reader said it was)."

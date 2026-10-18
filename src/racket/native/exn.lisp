@@ -155,6 +155,36 @@ sym), (error sym format v ...) or (error string v ...)."
 (defnative "error" (first &rest rest) ()
   (do-raise (make-exn "exn:fail" (error-message-from first rest))))
 
+(defun checked-format (who control args)
+  "CONTROL formatted with ARGS for WHO (format, printf, ...): Racket's
+checks of the pattern string and of the number of arguments first."
+  (unless (stringp control) (contract-error who "string?" control))
+  (let ((needed 0)
+	(shown (lambda ()
+		 (if args
+		     (format nil "; arguments were:~{ ~A~}" (mapcar #'error-value->string args))
+		     ""))))
+    (loop with i = 0 while (< i (length control))
+	  do (if (char/= (char control i) #\~)
+		 (incf i)
+		 (let ((d (and (< (1+ i) (length control)) (char control (1+ i)))))
+		   (when (and d (char= d #\.) (< (+ i 2) (length control))) (incf i) (setq d (char control (1+ i))))
+		   (cond ((null d)
+			  (racket-error who "ill-formed pattern string~%  explanation: cannot end in `~~`~A" (funcall shown)))
+			 ((find d "aAsSvVeEcCbBoOxX") (incf needed))
+			 ((find d "n%~") nil)
+			 ((member d '(#\Space #\Tab #\Newline #\Return #\Page))
+			  ;; ~ and whitespace: skips it, and the whitespace after
+			  (loop while (and (< (+ i 2) (length control)) (member (char control (+ i 2)) '(#\Space #\Tab #\Newline #\Return #\Page)))
+				do (incf i)))
+			 (t (racket-error who "ill-formed pattern string~%  explanation: tag `~~~A` not allowed~A"
+					  d (funcall shown))))
+		   (incf i 2))))
+    (unless (= needed (length args))
+      (racket-error who "format string requires ~D arguments, given ~D~A" needed (length args)
+		    (if args (funcall shown) "")))
+    (apply #'racket-format control args)))
+
 (defun racket-format (control &rest args)
   "Racket's format directives: ~a ~s ~v ~e ~% ~n ~~."
   (with-output-to-string (out)
@@ -174,6 +204,10 @@ sym), (error sym format v ...) or (error string v ...)."
 		       ((#\s) (print-value (pop args) out :write))
 		       ((#\e) (write-string (error-value->string (pop args)) out))
 		       ((#\v) (print-quoted (pop args) out))
+		       ((#\c) (write-char (pop args) out))
+		       ((#\b) (write (pop args) :stream out :base 2 :radix nil))
+		       ((#\o) (write (pop args) :stream out :base 8 :radix nil))
+		       ((#\x) (write-string (string-downcase (write-to-string (pop args) :base 16 :radix nil)) out))
 		       ((#\% #\n) (terpri out))
 		       (#\~ (write-char #\~ out))
 		       (t (write-char c out) (write-char d out)))

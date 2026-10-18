@@ -284,6 +284,8 @@
   "Whether X is an event."
   (typecase x
     ((or rsemaphore revt rthread rchannel rwill-executor custodian-box subprocess rinport routport) t)
+    ;; the host's own ports (those of racket/base's host layer)
+    ((and stream (not rstruct)) (or (input-stream-p x) (output-stream-p x)))
     (t (and (struct-instance-p x) (nth-value 1 (property-value x *prop-evt*))))))
 
 (defnative "evt?" (x) (:leaf t) (bool (evt-value-p x)))
@@ -804,6 +806,8 @@ thread is the root's)."
 	  (expand-guard (funcall (revt-target e) nack) who poll (cons sema groups) wraps)))
        (t (list (make-branch e wraps groups)))))
     (t (cond ((not (evt-value-p e)) (arg-error who "evt?" e))
+	     ((and (streamp e) (not (struct-instance-p e)) (input-stream-p e)) (expand-evt (host-adapter who e) who poll groups wraps))
+	     ((and (streamp e) (not (struct-instance-p e))) (list (make-branch (make-revt :thunk (lambda () e)) wraps groups)))
 	     ((struct-instance-p e)
 	      (let ((v (property-value e *prop-evt*)))
 		(cond ((evt-value-p v) (expand-evt v who poll groups wraps))

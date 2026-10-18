@@ -670,10 +670,13 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 
 (defvar *chez-gensym-counter* 0)
 
-(defprim "chez:make-gensym" (prefix)
-  ;; an uninterned symbol, named as Scheme names symbols (case inverted)
-  (make-symbol (ps:invert-case (format nil "~A~D" (if (symbolp prefix) (ps:scheme-symbol-name prefix) prefix)
-				       (incf *chez-gensym-counter*)))))
+(defprim "chez:make-gensym" (prefix &optional counted)
+  ;; an uninterned symbol, named as Scheme names symbols (case inverted);
+  ;; (gensym) is g0, g1, ..., (gensym "name") is name
+  (let ((name (if (symbolp prefix) (ps:scheme-symbol-name prefix) prefix)))
+    (make-symbol (ps:invert-case (if counted
+				     (format nil "~A~D" name (prog1 *chez-gensym-counter* (incf *chez-gensym-counter*)))
+				     name)))))
 (defprim "chez:uninterned-symbol?" (x) (bool (and (symbolp x) x (null (symbol-package x)))))
 (defprim "chez:string->uninterned-symbol" (s) (make-symbol (ps:invert-case s)))
 

@@ -192,26 +192,34 @@
 ;;; that take an optional port ask them (CURRENT-PORT); the host's own
 ;;; procedures don't.
 
-(defun make-port-parameter (variable name)
-  (let* ((data (make-parameter-data (list nil) nil (rsym name)))
+(defun make-port-parameter (variable name predicate)
+  "The parameter NAME, over the host variable VARIABLE; it holds only
+ports (PREDICATE, the name of the native that says which values are)."
+  (let* ((check (lambda (v)
+		  (unless (truthy (funcall (native-function (gethash predicate *natives*)) v))
+		    (contract-error name predicate v))
+		  v))
+	 (data (make-parameter-data (list nil) check (rsym name)))
 	 (p (lambda (&optional (new nil new-p))
 	      (if new-p
-		  (progn (setf (car (parameter-cell data)) new) *void*)
+		  (progn (setf (car (parameter-cell data)) (funcall check new)) *void*)
 		  (or (car (parameter-cell data)) (symbol-value variable))))))
     (setf (gethash p *parameters*) data)
     (define-primitive "#%kernel" name p)
     p))
 
-(defvar *current-output-port* (make-port-parameter '*standard-output* "current-output-port"))
-(defvar *current-input-port* (make-port-parameter '*standard-input* "current-input-port"))
-(defvar *current-error-port* (make-port-parameter '*error-output* "current-error-port"))
+(defvar *current-output-port* (make-port-parameter '*standard-output* "current-output-port" "output-port?"))
+(defvar *current-input-port* (make-port-parameter '*standard-input* "current-input-port" "input-port?"))
+(defvar *current-error-port* (make-port-parameter '*error-output* "current-error-port" "output-port?"))
 
 (defun current-port (which)
-  "The current :OUTPUT, :INPUT or :ERROR port."
-  (funcall (ecase which
-	     (:output *current-output-port*)
-	     (:input *current-input-port*)
-	     (:error *current-error-port*))))
+  "The current :OUTPUT, :INPUT or :ERROR port (the port itself, if the
+parameter holds a struct with prop:output-port or prop:input-port)."
+  (let ((p (funcall (ecase which
+		      (:output *current-output-port*)
+		      (:input *current-input-port*)
+		      (:error *current-error-port*)))))
+    (if (eq which :input) (unwrap-in p) (unwrap-out p))))
 
 ;;; ------------------------------------------------------------------
 ;;; Thread cells.  The cell holds its initial value (and whether it's

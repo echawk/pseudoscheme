@@ -178,7 +178,7 @@
     "locate-source" "locate-source-object-source" "current-locate-source-object-source"
     "open-source-file"
     "get-datum/annotations" "read-token" "compile-library-handler" "engine-block" "engine-return"
-    "date->time-utc" "date-week-day" "define-values" "abort-handler"
+    "date->time-utc" "date-week-day" "date-and-time" "define-values" "abort-handler"
     ;; system.scm
     "vector-copy!" "call-in-continuation" "procedure-known-single-valued?" "keep-live"
     "black-box" "assert-unreachable" "pariah" "memory-order-acquire" "memory-order-release"
@@ -299,7 +299,34 @@ calls with those are still open-coded."
   '(("vector-set!" 0 "vector") ("vector-fill!" 0 "vector") ("string-set!" 0 "string")
     ("string-fill!" 0 "string") ("bytevector-u8-set!" 0 "bytevector")
     ("bytevector-s8-set!" 0 "bytevector") ("bytevector-fill!" 0 "bytevector")
-    ("bytevector-copy!" 2 "bytevector") ("vector-sort!" 1 "vector"))
+    ("bytevector-copy!" 2 "bytevector") ("vector-sort!" 1 "vector")
+    ("bytevector-uint-set!" 0 "bytevector")
+    ("bytevector-sint-set!" 0 "bytevector")
+    ("bytevector-u16-set!" 0 "bytevector")
+    ("bytevector-s16-set!" 0 "bytevector")
+    ("bytevector-u16-native-set!" 0 "bytevector")
+    ("bytevector-s16-native-set!" 0 "bytevector")
+    ("bytevector-u24-set!" 0 "bytevector")
+    ("bytevector-s24-set!" 0 "bytevector")
+    ("bytevector-u32-set!" 0 "bytevector")
+    ("bytevector-s32-set!" 0 "bytevector")
+    ("bytevector-u32-native-set!" 0 "bytevector")
+    ("bytevector-s32-native-set!" 0 "bytevector")
+    ("bytevector-u40-set!" 0 "bytevector")
+    ("bytevector-s40-set!" 0 "bytevector")
+    ("bytevector-u48-set!" 0 "bytevector")
+    ("bytevector-s48-set!" 0 "bytevector")
+    ("bytevector-u56-set!" 0 "bytevector")
+    ("bytevector-s56-set!" 0 "bytevector")
+    ("bytevector-u64-set!" 0 "bytevector")
+    ("bytevector-s64-set!" 0 "bytevector")
+    ("bytevector-u64-native-set!" 0 "bytevector")
+    ("bytevector-s64-native-set!" 0 "bytevector")
+    ("bytevector-ieee-single-set!" 0 "bytevector")
+    ("bytevector-ieee-double-set!" 0 "bytevector")
+    ("bytevector-ieee-single-native-set!" 0 "bytevector")
+    ("bytevector-ieee-double-native-set!" 0 "bytevector")
+    ("bytevector-truncate!" 0 "bytevector"))
   "(name position kind): mutator NAME's argument at POSITION is a KIND.")
 
 (defparameter *chez-empty-constructors*
@@ -327,7 +354,9 @@ calls with those are still open-coded."
   (setq psx::*canonical-empty* 'ps-r6rs::empty-like)
   (pushnew (cons "base-rtd" ps-r6rs::*base-rtd*) ps:*sharp-bang-data* :test #'equal)
   (loop for (name position kind) in *chez-checked-mutators*
-	do (let ((old (psx:host-ref name)) (name name) (position position) (kind kind))
+	for old = (ignore-errors (psx:host-ref name))
+	when old
+	do (let ((old old) (name name) (position position) (kind kind))
 	     (chez-rename name (lambda (&rest args)
 				 (ps-r6rs::check-mutable-object name (nth position args) kind)
 				 (apply old args)))))
@@ -560,7 +589,16 @@ the top level already running, or the main one."
 (defun eval-top-level-forms (form)
   "Evaluate FORM; a (begin form ...) one form at a time, as Chez does at
 top level, so that each is expanded after the ones before it have run, and
-a library is invoked only when a form that runs references it."
+a library is invoked only when a form that runs references it.  A
+(top-level-program (import ...) body ...) is its forms in turn, and
+(import-only spec ...) an import."
+  (let ((stripped (if (ps::annotation-p form) (ps::annotation-stripped form) form)))
+    (cond ((and (head-is stripped "top-level-program") (listp (cdr stripped)))
+	   (return-from eval-top-level-forms
+	     (eval-top-level-forms (cons (ssym "begin") (cdr stripped)))))
+	  ((and (head-is stripped "import-only") (listp (cdr stripped)))
+	   (return-from eval-top-level-forms
+	     (psx:eval-top-level (cons (ssym "import") (cdr stripped)))))))
   (when (and (ps::annotation-p form) (head-is (ps::annotation-stripped form) "begin"))
     ;; an annotated begin: its annotated forms
     (let ((parts (ps::annotation-expression form)))

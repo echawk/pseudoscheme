@@ -1,0 +1,9 @@
+6
+1
+(#t #f)
+hello 42!
+hello 42!via current-output-port
+#t
+current-output-port: contract violation
+  expected: output-port?
+  given: 8

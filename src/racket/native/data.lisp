@@ -747,6 +747,17 @@ of the square roots of the first (or the ninth to sixteenth) primes."
 	       (setq h (mapcar (lambda (x y) (u32 (+ x y))) h (list a b c d e f g hh)))))
     (words->octets h (if (eq kind :224) 7 8))))
 
+(defun sha-source (b)
+  "B, or all the bytes of B if it is an input port."
+  (if (or (typep b 'octets) (not (truthy (funcall (native-function (gethash "input-port?" *natives*)) b))))
+      b
+      (let ((read-bytes (native-function (gethash "read-bytes" *natives*)))
+	    (chunks '()))
+	(loop for chunk = (funcall read-bytes 65536 b)
+	      until (eq chunk ps:eof-object)
+	      do (push chunk chunks))
+	(apply #'concatenate 'octets (nreverse chunks)))))
+
 (defun sha-input (who b start end)
   (unless (typep b 'octets)
     (racket-error who "contract violation~%  expected: (lambda (p) (or (bytes? p) (input-port? p)))~%  given: ~A" (written b)))
@@ -754,10 +765,13 @@ of the square roots of the first (or the ninth to sixteenth) primes."
 
 (defnatives "#%kernel"
   ("sha1-bytes" (b &optional start end)
+   (setq b (sha-source b))
    (multiple-value-bind (start end) (sha-input "sha1-bytes" b start end) (sha1-octets b start end)))
   ("sha224-bytes" (b &optional start end)
+   (setq b (sha-source b))
    (multiple-value-bind (start end) (sha-input "sha224-bytes" b start end) (sha256-octets b start end :224)))
   ("sha256-bytes" (b &optional start end)
+   (setq b (sha-source b))
    (multiple-value-bind (start end) (sha-input "sha256-bytes" b start end) (sha256-octets b start end :256))))
 
 ;;; ------------------------------------------------------------------

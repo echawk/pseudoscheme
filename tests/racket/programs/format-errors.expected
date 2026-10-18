@@ -1,0 +1,16 @@
+format: format string requires 0 arguments, given 1; arguments were: 1
+format: format string requires 2 arguments, given 1; arguments were: 1
+format: format string requires 1 arguments, given 3; arguments were: 1 2 3
+format: format string requires 1 arguments, given 0
+printf: format string requires 1 arguments, given 2; arguments were: 1 2
+fprintf: format string requires 1 arguments, given 0
+format: ill-formed pattern string
+  explanation: tag `~q` not allowed; arguments were: 1
+format: ill-formed pattern string
+  explanation: cannot end in `~`
+format: contract violation
+  expected: string?
+  given: 'a
+foo ~a 1
+a "b" "c" ~ 
+

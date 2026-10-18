@@ -779,6 +779,20 @@ bytevector mutators read-only bytevectors."
   (or (position (if (truthy b) 1 0) v :start start) ps:false))
 (defguile "bit-count" (b v) (count (if (truthy b) 1 0) v))
 (defguile "bit-position" (b v start) (or (position (if (truthy b) 1 0) v :start start) ps:false))
+(defun bit-selection (who kv v)
+  (declare (ignore who v))
+  "The indices KV (a bitvector's set bits, or a u32vector's elements) select."
+  (cond ((typep kv 'simple-bit-vector) (loop for i below (length kv) when (= 1 (sbit kv i)) collect i))
+	((typep kv '(simple-array (unsigned-byte 32) (*))) (coerce kv 'list))
+	(t (guile-error (ssym "wrong-type-arg") nil "Wrong type (expecting ~A): ~S" (list "bitvector or u32vector" kv)
+			(list kv)))))
+(defguile "bit-count*" (v kv b)
+  (let ((bit (if (truthy b) 1 0)))
+    (count-if (lambda (i) (= bit (sbit v i))) (bit-selection "bit-count*" kv v))))
+(defguile "bit-set*!" (v kv b)
+  (let ((bit (if (truthy b) 1 0)))
+    (dolist (i (bit-selection "bit-set*!" kv v)) (setf (sbit v i) bit)))
+  *unspecified*)
 (defguile "bit-invert!" (v) (bit-not v v) *unspecified*)
 
 ;;; ------------------------------------------------------------------
@@ -1447,16 +1461,6 @@ that name, if the host has one."
 (defguile "setuid" (id) (sb-posix:setuid id) *unspecified*)
 (defguile "setgid" (id) (sb-posix:setgid id) *unspecified*)
 (defguile "getpgrp" () (sb-posix:getpgrp))
-(defguile "getgroups" () (vector (sb-posix:getgid)))
-(defguile "getpw" (&optional user)
-  (let ((pw (cond ((null user) nil)
-		  ((integerp user) (sb-posix:getpwuid user))
-		  (t (sb-posix:getpwnam user)))))
-    (if pw
-	(vector (sb-posix:passwd-name pw) (sb-posix:passwd-passwd pw) (sb-posix:passwd-uid pw)
-		(sb-posix:passwd-gid pw) (sb-posix:passwd-gecos pw) (sb-posix:passwd-dir pw)
-		(sb-posix:passwd-shell pw))
-	ps:false)))
 (defguile "parse-path" (path &optional (tail '()))
   (if (and (stringp path) (plusp (length path)))
       (append (funcall (gethash "string-split" *guile-primitives*) path #\:) tail)
@@ -1482,33 +1486,6 @@ that name, if the host has one."
 (defguile "procedure" (x)
   (if (typep x 'applicable-struct) (svref (astruct-slots x) 0) (wrong-type "procedure" 1 x)))
 
-(defun strftime (format tm)
-  (let ((s (svref tm 0)) (m (svref tm 1)) (h (svref tm 2)) (d (svref tm 3))
-	(mo (svref tm 4)) (y (+ 1900 (svref tm 5))) (wd (svref tm 6)))
-    (with-output-to-string (out)
-      (loop with i = 0 while (< i (length format))
-	    do (let ((c (char format i)))
-		 (if (and (char= c #\%) (< (1+ i) (length format)))
-		     (let ((d2 (char format (1+ i))))
-		       (case d2
-			 (#\Y (format out "~D" y)) (#\y (format out "~2,'0D" (mod y 100)))
-			 (#\m (format out "~2,'0D" (1+ mo))) (#\d (format out "~2,'0D" d))
-			 (#\e (format out "~2D" d))
-			 (#\H (format out "~2,'0D" h)) (#\M (format out "~2,'0D" m))
-			 (#\S (format out "~2,'0D" s))
-			 (#\a (write-string (subseq (nth wd '("Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday")) 0 3) out))
-			 (#\A (write-string (nth wd '("Sunday" "Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday")) out))
-			 (#\b (write-string (subseq (nth mo '("January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December")) 0 3) out))
-			 (#\B (write-string (nth mo '("January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December")) out))
-			 (#\F (format out "~D-~2,'0D-~2,'0D" y (1+ mo) d))
-			 (#\T (format out "~2,'0D:~2,'0D:~2,'0D" h m s))
-			 (#\Z (write-string (svref tm 10) out))
-			 (#\z (let ((off (- (svref tm 9)))) (format out "~A~2,'0D~2,'0D" (if (minusp off) "-" "+") (floor (abs off) 3600) (mod (floor (abs off) 60) 60))))
-			 (#\% (write-char #\% out))
-			 (t (write-char c out) (write-char d2 out)))
-		       (incf i 2))
-		     (progn (write-char c out) (incf i))))))))
-(defguile "strftime" (format tm) (strftime format tm))
 (defguile "mktime" (v &optional zone)
   ;; the time, and the broken-down time normalized
   (cffi:with-foreign-object (tm :uint8 +tm-size+)
@@ -2176,3 +2153,451 @@ true (the predicate's value) if it matches."
     (fd-port fd (cond ((logtest flags sb-posix:o-rdwr) "rw")
 		      ((logtest flags sb-posix:o-wronly) "w")
 		      (t "r")))))
+
+;;; ------------------------------------------------------------------
+;;; More of Guile's POSIX: constants, ownership and process attributes,
+;;; resource limits, the passwd/group/network databases, select, and
+;;; strptime.  libc's, through CFFI; a failing call is a system-error.
+
+(defparameter *posix-constants*
+  ;; (name darwin linux): NIL where the platform has none
+  '(("EXIT_SUCCESS" 0 0) ("EXIT_FAILURE" 1 1)
+    ("F_OK" 0 0) ("R_OK" 4 4) ("W_OK" 2 2) ("X_OK" 1 1)
+    ("LOCK_SH" 1 1) ("LOCK_EX" 2 2) ("LOCK_NB" 4 4) ("LOCK_UN" 8 8)
+    ("PRIO_PROCESS" 0 0) ("PRIO_PGRP" 1 1) ("PRIO_USER" 2 2)
+    ("WAIT_ANY" -1 -1) ("WAIT_MYPGRP" 0 0)
+    ("PIPE_BUF" 512 4096) ("NSIG" 32 65) ("SIGSTKSZ" 131072 8192)
+    ("F_GETOWN" 5 9) ("F_SETOWN" 6 8)
+    ("O_ASYNC" #x40 #o20000) ("O_NDELAY" 4 #o4000) ("O_DIRECT" 0 #o40000) ("O_NOATIME" 0 #o1000000)
+    ("O_SHLOCK" #x10 0) ("O_EXLOCK" #x20 0)
+    ("O_IGNORE_CTTY" 0 0) ("O_NOLINK" 0 0) ("O_NOTRANS" 0 0)
+    ("AT_NO_AUTOMOUNT" 0 #x800)
+    ("SIGEMT" 7 nil) ("SIGINFO" 29 nil) ("SIGIOT" 6 6)
+    ("EDEADLK" 11 35) ("ENOLCK" 77 37) ("EILSEQ" 92 84) ("EOVERFLOW" 84 75)
+    ("ENOTSUP" 45 95) ("EOPNOTSUPP" 102 95) ("EADDRNOTAVAIL" 49 99) ("EAFNOSUPPORT" 47 97)
+    ("ECANCELED" 89 125) ("ECONNABORTED" 53 103) ("EDESTADDRREQ" 39 89) ("EDQUOT" 69 122)
+    ("EHOSTDOWN" 64 112) ("EIDRM" 90 43) ("EISCONN" 56 106) ("EMSGSIZE" 40 90)
+    ("EMULTIHOP" 95 72) ("ENETDOWN" 50 100) ("ENETRESET" 52 102) ("ENETUNREACH" 51 101)
+    ("ENOBUFS" 55 105) ("ENODATA" 96 61) ("ENOLINK" 97 67) ("ENOMSG" 91 42)
+    ("ENOPROTOOPT" 42 92) ("ENOSR" 98 63) ("ENOSTR" 99 60) ("ENOTBLK" 15 15)
+    ("ENOTRECOVERABLE" 104 131) ("EOWNERDEAD" 105 130) ("EPFNOSUPPORT" 46 96)
+    ("EPROTO" 100 71) ("EPROTONOSUPPORT" 43 93) ("EPROTOTYPE" 41 91) ("EREMOTE" 71 66)
+    ("ESHUTDOWN" 58 108) ("ESOCKTNOSUPPORT" 44 94) ("ESTALE" 70 116) ("ETIME" 101 62)
+    ("ETOOMANYREFS" 59 109) ("ETXTBSY" 26 26) ("EUSERS" 68 87) ("EBADMSG" 94 74)
+    ("EAUTH" 80 nil) ("EBADRPC" 72 nil) ("EFTYPE" 79 nil) ("ENEEDAUTH" 81 nil)
+    ("EPROCLIM" 67 nil) ("EPROCUNAVAIL" 76 nil) ("EPROGMISMATCH" 75 nil)
+    ("EPROGUNAVAIL" 74 nil) ("ERPCMISMATCH" 73 nil))
+  "Constants the platform's headers define that boot.lisp's list doesn't.")
+
+(defun install-posix-constants ()
+  (loop for (name darwin linux) in *posix-constants*
+	for value = #+darwin darwin #-darwin linux
+	when value do (obarray-define (ssym name) value)))
+
+(defmacro with-c-strings-list ((var strings) &body body)
+  "BODY with VAR a NULL-terminated char* array of STRINGS."
+  `(let* ((strings ,strings) (n (length strings)))
+     (cffi:with-foreign-object (,var :pointer (1+ n))
+       (let ((allocated (loop for s in strings for i from 0
+			      collect (let ((p (cffi:foreign-string-alloc s)))
+					(setf (cffi:mem-aref ,var :pointer i) p)
+					p))))
+	 (setf (cffi:mem-aref ,var :pointer n) (cffi:null-pointer))
+	 (unwind-protect (progn ,@body)
+	   (mapc #'cffi:foreign-string-free allocated))))))
+
+(defun c-errno () (sb-alien:extern-alien "errno" sb-alien:int))
+
+(defun check-c (who r)
+  (when (minusp r) (system-error who (c-errno)))
+  r)
+
+(defun path-or-port-fd (who object)
+  "OBJECT's descriptor if it is a port, else NIL (a path string)."
+  (cond ((stringp object) nil)
+	((gport-p object) (port-fdes object who))
+	(t (wrong-type who 1 object))))
+
+(defguile "chown" (object owner group)
+  (let ((fd (path-or-port-fd "chown" object)))
+    (check-c "chown" (if fd
+			 (cffi:foreign-funcall "fchown" :int fd :int owner :int group :int)
+			 (cffi:foreign-funcall "chown" :string object :int owner :int group :int))))
+  *unspecified*)
+
+(defguile "chown-at" (dir path owner group &optional (flags 0))
+  (unless (stringp path) (wrong-type "chown-at" 2 path))
+  (check-c "chown-at" (cffi:foreign-funcall "fchownat" :int (at-directory-fd "chown-at" dir) :string path
+						       :int owner :int group :int flags :int))
+  *unspecified*)
+
+(defguile "open-fdes-at" (dir path flags &optional (mode #o666))
+  (unless (stringp path) (wrong-type "open-fdes-at" 2 path))
+  (check-c "open-fdes-at"
+	   (cffi:foreign-funcall-varargs "openat" (:int (at-directory-fd "open-fdes-at" dir) :string path :int flags)
+					 :unsigned-int mode :int)))
+
+(defguile "chroot" (path)
+  (unless (stringp path) (wrong-type "chroot" 1 path))
+  (check-c "chroot" (cffi:foreign-funcall "chroot" :string path :int))
+  *unspecified*)
+
+(defguile "mknod" (path type perms dev)
+  (unless (stringp path) (wrong-type "mknod" 1 path))
+  (let ((kind (cond ((not (symbolp type)) (wrong-type "mknod" 2 type))
+		    (t (let ((name (ps:scheme-symbol-name type)))
+			 (cond ((string= name "regular") #o100000)
+			       ((string= name "directory") #o040000)
+			       ((string= name "symlink") #o120000)
+			       ((string= name "block-special") #o060000)
+			       ((string= name "char-special") #o020000)
+			       ((string= name "fifo") #o010000)
+			       ((string= name "socket") #o140000)
+			       (t (out-of-range "mknod" type))))))))
+    (check-c "mknod" (cffi:foreign-funcall "mknod" :string path :unsigned-int (logior kind perms) :int dev :int)))
+  *unspecified*)
+
+(defguile "crypt" (key salt)
+  (unless (stringp key) (wrong-type "crypt" 1 key))
+  (unless (stringp salt) (wrong-type "crypt" 2 salt))
+  (let ((r (cffi:foreign-funcall "crypt" :string key :string salt :pointer)))
+    (if (cffi:null-pointer-p r)
+	(system-error "crypt" (c-errno))
+	(cffi:foreign-string-to-lisp r))))
+
+(defguile "ctermid" () "/dev/tty")
+
+(defguile "getpass" (prompt)
+  (unless (stringp prompt) (wrong-type "getpass" 1 prompt))
+  (let ((r (cffi:foreign-funcall "getpass" :string prompt :pointer)))
+    (if (cffi:null-pointer-p r) ps:false (cffi:foreign-string-to-lisp r))))
+
+(defguile "nice" (increment)
+  (setf (sb-alien:extern-alien "errno" sb-alien:int) 0)
+  (let ((r (cffi:foreign-funcall "nice" :int increment :int)))
+    (when (and (= r -1) (/= 0 (c-errno))) (system-error "nice" (c-errno))))
+  *unspecified*)
+
+(defguile "getpriority" (which who)
+  (setf (sb-alien:extern-alien "errno" sb-alien:int) 0)
+  (let ((r (cffi:foreign-funcall "getpriority" :int which :int who :int)))
+    (when (and (= r -1) (/= 0 (c-errno))) (system-error "getpriority" (c-errno)))
+    r))
+
+(defguile "setpriority" (which who prio)
+  (check-c "setpriority" (cffi:foreign-funcall "setpriority" :int which :int who :int prio :int))
+  *unspecified*)
+
+(defun rlim-in (n)
+  (if (eq n ps:false) (1- (ash 1 63)) n))
+
+(defun rlim-out (n)
+  (if (or (= n (1- (ash 1 63))) (= n (1- (ash 1 64)))) ps:false n))
+
+(defguile "getrlimit" (resource)
+  (cffi:with-foreign-object (r :uint64 2)
+    (check-c "getrlimit" (cffi:foreign-funcall "getrlimit" :int resource :pointer r :int))
+    (values (rlim-out (cffi:mem-aref r :uint64 0)) (rlim-out (cffi:mem-aref r :uint64 1)))))
+
+(defguile "setrlimit" (resource soft hard)
+  (cffi:with-foreign-object (r :uint64 2)
+    (setf (cffi:mem-aref r :uint64 0) (rlim-in soft) (cffi:mem-aref r :uint64 1) (rlim-in hard))
+    (check-c "setrlimit" (cffi:foreign-funcall "setrlimit" :int resource :pointer r :int)))
+  *unspecified*)
+
+(defguile "getsid" (pid) (check-c "getsid" (cffi:foreign-funcall "getsid" :int pid :int)))
+(defguile "setsid" () (check-c "setsid" (cffi:foreign-funcall "setsid" :int :int)))
+(defguile "setpgid" (pid pgid)
+  (check-c "setpgid" (cffi:foreign-funcall "setpgid" :int pid :int pgid :int))
+  *unspecified*)
+(defguile "seteuid" (id)
+  (check-c "seteuid" (cffi:foreign-funcall "seteuid" :unsigned-int id :int))
+  *unspecified*)
+(defguile "setegid" (id)
+  (check-c "setegid" (cffi:foreign-funcall "setegid" :unsigned-int id :int))
+  *unspecified*)
+
+(defguile "getgroups" ()
+  (let ((n (check-c "getgroups" (cffi:foreign-funcall "getgroups" :int 0 :pointer (cffi:null-pointer) :int))))
+    (cffi:with-foreign-object (g :unsigned-int (max n 1))
+      (let ((n (check-c "getgroups" (cffi:foreign-funcall "getgroups" :int n :pointer g :int))))
+	(coerce (loop for i below n collect (cffi:mem-aref g :unsigned-int i)) 'simple-vector)))))
+
+(defguile "setgroups" (groups)
+  (unless (simple-vector-p groups) (wrong-type "setgroups" 1 groups))
+  (let ((n (length groups)))
+    (cffi:with-foreign-object (g :unsigned-int (max n 1))
+      (dotimes (i n) (setf (cffi:mem-aref g :unsigned-int i) (svref groups i)))
+      (check-c "setgroups" (cffi:foreign-funcall "setgroups" :int n :pointer g :int))))
+  *unspecified*)
+
+(defguile "sethostname" (name)
+  (unless (stringp name) (wrong-type "sethostname" 1 name))
+  (check-c "sethostname" (cffi:foreign-funcall "sethostname" :string name :int (length name) :int))
+  *unspecified*)
+
+(defguile "tcgetpgrp" (port)
+  (check-c "tcgetpgrp" (cffi:foreign-funcall "tcgetpgrp" :int (port-fdes port "tcgetpgrp") :int)))
+(defguile "tcsetpgrp" (port pgid)
+  (check-c "tcsetpgrp" (cffi:foreign-funcall "tcsetpgrp" :int (port-fdes port "tcsetpgrp") :int pgid :int))
+  *unspecified*)
+
+(defguile "pause" ()
+  (cffi:foreign-funcall "pause" :int))
+
+(defguile "execle" (program env &rest args)
+  (unless (stringp program) (wrong-type "execle" 1 program))
+  (flush-all-ports)
+  (with-c-strings-list (argv args)
+    (with-c-strings-list (envp (loop for tail = env then (cdr tail) while (consp tail) collect (car tail)))
+      (cffi:foreign-funcall "execve" :string program :pointer argv :pointer envp :int)
+      (system-error "execle" (c-errno)))))
+
+;;; The user, group and network databases: the entry procedures that walk
+;;; the file (getpw, getgr, gethost, ... with no argument; setpw, ... to
+;;; rewind or close), on libc's get*ent.
+
+(defun c-string-list (p)
+  "The strings of the NULL-terminated char* array at P."
+  (if (cffi:null-pointer-p p)
+      '()
+      (loop for i from 0
+	    for s = (cffi:mem-aref p :pointer i)
+	    until (cffi:null-pointer-p s)
+	    collect (cffi:foreign-string-to-lisp s))))
+
+(defun c-string-at (p offset)
+  (let ((s (cffi:mem-ref p :pointer offset)))
+    (if (cffi:null-pointer-p s) "" (cffi:foreign-string-to-lisp s))))
+
+(defun passwd-vector (pw)
+  (vector (c-string-at pw 0) (c-string-at pw 8) (cffi:mem-ref pw :unsigned-int 16) (cffi:mem-ref pw :unsigned-int 20)
+	  #+darwin (c-string-at pw 40) #-darwin (c-string-at pw 24)
+	  #+darwin (c-string-at pw 48) #-darwin (c-string-at pw 32)
+	  #+darwin (c-string-at pw 56) #-darwin (c-string-at pw 40)))
+
+(defun group-vector (gr)
+  (vector (c-string-at gr 0) (c-string-at gr 8) (cffi:mem-ref gr :unsigned-int 16)
+	  (c-string-list (cffi:mem-ref gr :pointer 24))))
+
+(defun database-entry (who pointer vector-function)
+  "The vector of the entry at POINTER; a missing entry is a system-error, as Guile's."
+  (if (cffi:null-pointer-p pointer)
+      (system-error who (c-errno))
+      (funcall vector-function pointer)))
+
+(defguile "getpw" (&optional user)
+  (let ((pw (cond ((or (null user) (eq user ps:false)) (cffi:foreign-funcall "getpwent" :pointer))
+		  ((integerp user) (cffi:foreign-funcall "getpwuid" :unsigned-int user :pointer))
+		  ((stringp user) (cffi:foreign-funcall "getpwnam" :string user :pointer))
+		  (t (wrong-type "getpw" 1 user)))))
+    (cond ((not (cffi:null-pointer-p pw)) (passwd-vector pw))
+	  ((or (null user) (eq user ps:false)) ps:false)
+	  (t (system-error "getpw" (c-errno))))))
+
+(defguile "setpw" (&optional arg)
+  (if (and arg (truthy arg))
+      (cffi:foreign-funcall "setpwent" :void)
+      (cffi:foreign-funcall "endpwent" :void))
+  *unspecified*)
+
+(defguile "getgr" (&optional group)
+  (let ((gr (cond ((or (null group) (eq group ps:false)) (cffi:foreign-funcall "getgrent" :pointer))
+		  ((integerp group) (cffi:foreign-funcall "getgrgid" :unsigned-int group :pointer))
+		  ((stringp group) (cffi:foreign-funcall "getgrnam" :string group :pointer))
+		  (t (wrong-type "getgr" 1 group)))))
+    (cond ((not (cffi:null-pointer-p gr)) (group-vector gr))
+	  ((or (null group) (eq group ps:false)) ps:false)
+	  (t (system-error "getgr" 0)))))
+
+(defguile "setgr" (&optional arg)
+  (if (and arg (truthy arg))
+      (cffi:foreign-funcall "setgrent" :void)
+      (cffi:foreign-funcall "endgrent" :void))
+  *unspecified*)
+
+(defun host-vector (h)
+  (let ((length (cffi:mem-ref h :int 20)) (addresses (cffi:mem-ref h :pointer 24)))
+    (vector (c-string-at h 0) (c-string-list (cffi:mem-ref h :pointer 8)) (cffi:mem-ref h :int 16) length
+	    (loop for i from 0
+		  for a = (cffi:mem-aref addresses :pointer i)
+		  until (cffi:null-pointer-p a)
+		  collect (loop with n = 0 for j below length
+				do (setf n (+ (* n 256) (cffi:mem-aref a :uint8 j)))
+				finally (return n))))))
+
+(defun net-vector (n)
+  (vector (c-string-at n 0) (c-string-list (cffi:mem-ref n :pointer 8)) (cffi:mem-ref n :int 16)
+	  (cffi:mem-ref n :unsigned-int 20)))
+
+(defun proto-vector (p)
+  (vector (c-string-at p 0) (c-string-list (cffi:mem-ref p :pointer 8)) (cffi:mem-ref p :int 16)))
+
+(defun serv-vector (s)
+  (let ((port (cffi:mem-ref s :int 16)))
+    (vector (c-string-at s 0) (c-string-list (cffi:mem-ref s :pointer 8))
+	    (+ (ash (logand port #xff) 8) (logand (ash port -8) #xff)) (c-string-at s 24))))
+
+(defmacro def-netdb (getter setter vector-function (&rest lookups) next end)
+  "GETTER with no argument is the next entry (#f at the end), else looks
+one up by the first matching LOOKUP, (type-test c-function arg-types...)."
+  `(progn
+     (defguile ,getter (&optional (key nil) (key2 nil))
+       (declare (ignorable key2))
+       (let ((entry (cond ((null key) (cffi:foreign-funcall ,next :pointer))
+			  ,@(loop for (test form) in lookups collect `(,test ,form))
+			  (t (wrong-type ,getter 1 key)))))
+	 (cond ((not (cffi:null-pointer-p entry)) (,vector-function entry))
+	       ((null key) ps:false)
+	       (t (guile-error (ssym "misc-error") ,getter "no such ~A" (list ,getter) ps:false)))))
+     (defguile ,setter (&optional arg)
+       (if (and arg (truthy arg))
+	   (cffi:foreign-funcall ,(format nil "set~A" (subseq next 3)) :int 1 :void)
+	   (cffi:foreign-funcall ,end :void))
+       *unspecified*)))
+
+(def-netdb "gethost" "sethost" host-vector
+  (((stringp key) (cffi:foreign-funcall "gethostbyname" :string key :pointer)))
+  "gethostent" "endhostent")
+(def-netdb "getnet" "setnet" net-vector
+  (((stringp key) (cffi:foreign-funcall "getnetbyname" :string key :pointer))
+   ((integerp key) (cffi:foreign-funcall "getnetbyaddr" :unsigned-int key :int 2 :pointer)))
+  "getnetent" "endnetent")
+(def-netdb "getproto" "setproto" proto-vector
+  (((stringp key) (cffi:foreign-funcall "getprotobyname" :string key :pointer))
+   ((integerp key) (cffi:foreign-funcall "getprotobynumber" :int key :pointer)))
+  "getprotoent" "endprotoent")
+
+(defguile "getserv" (&optional name proto)
+  (let ((entry (cond ((null name) (cffi:foreign-funcall "getservent" :pointer))
+		     ((not (stringp proto)) (wrong-type "getserv" 2 proto))
+		     ((stringp name) (cffi:foreign-funcall "getservbyname" :string name :string proto :pointer))
+		     ((integerp name)
+		      (cffi:foreign-funcall "getservbyport" :int (+ (ash (logand name #xff) 8) (logand (ash name -8) #xff))
+							    :string proto :pointer))
+		     (t (wrong-type "getserv" 1 name)))))
+    (cond ((not (cffi:null-pointer-p entry)) (serv-vector entry))
+	  ((null name) ps:false)
+	  (t (guile-error (ssym "misc-error") "getserv" "no such service ~A" (list name) ps:false)))))
+(defguile "setserv" (&optional arg)
+  (if (and arg (truthy arg))
+      (cffi:foreign-funcall "setservent" :int 1 :void)
+      (cffi:foreign-funcall "endservent" :void))
+  *unspecified*)
+
+(defguile "inet-netof" (address)
+  (cond ((< address #x80000000) (ash address -24))
+	((< address #xc0000000) (ash address -16))
+	(t (ash address -8))))
+(defguile "inet-lnaof" (address)
+  (cond ((< address #x80000000) (logand address #xffffff))
+	((< address #xc0000000) (logand address #xffff))
+	(t (logand address #xff))))
+(defguile "inet-makeaddr" (net host)
+  (cond ((< net 256) (logior (ash net 24) (logand host #xffffff)))
+	((< net 65536) (logior (ash net 16) (logand host #xffff)))
+	(t (logior (ash net 8) (logand host #xff)))))
+
+;;; strftime and strptime are libc's, on the broken-down time as a tm.
+
+(defun call-with-tm (v who function)
+  "FUNCTION on a struct tm holding the broken-down time V (zone included)."
+  (unless (and (simple-vector-p v) (= (length v) 11) (every #'integerp (subseq v 0 10)))
+    (wrong-type who 1 v))
+  (cffi:with-foreign-object (tm :uint8 +tm-size+)
+    (vector->tm v tm)
+    (let ((zone (and (stringp (svref v 10)) (cffi:foreign-string-alloc (svref v 10)))))
+      (setf (cffi:mem-ref tm :pointer 48) (or zone (cffi:null-pointer)))
+      (unwind-protect (funcall function tm)
+	(when zone (cffi:foreign-string-free zone))))))
+
+(defun libc-strftime (format tm)
+  (let ((octets (sb-ext:string-to-octets format :external-format :utf-8 :null-terminate t)))
+    (call-with-tm tm "strftime"
+      (lambda (ctm)
+	(cffi:with-foreign-object (fmt :uint8 (length octets))
+	  (dotimes (i (length octets)) (setf (cffi:mem-aref fmt :uint8 i) (aref octets i)))
+	  (loop for size = 256 then (* size 4)
+		do (cffi:with-foreign-object (buf :uint8 size)
+		     (let ((n (cffi:foreign-funcall "strftime" :pointer buf :unsigned-long size :pointer fmt
+							       :pointer ctm :unsigned-long)))
+		       ;; 0 is "too small", or an empty result
+		       (when (or (plusp n) (>= size 1048576) (= (length octets) 1))
+			 (let ((out (make-array n :element-type '(unsigned-byte 8))))
+			   (dotimes (i n) (setf (aref out i) (cffi:mem-aref buf :uint8 i)))
+			   (return (sb-ext:octets-to-string out :external-format :utf-8))))))))))))
+
+(defguile "strftime" (format tm)
+  (unless (stringp format) (wrong-type "strftime" 1 format))
+  (libc-strftime format tm))
+
+(defguile "strptime" (format string)
+  (unless (stringp format) (wrong-type "strptime" 1 format))
+  (unless (stringp string) (wrong-type "strptime" 2 string))
+  (let ((input (sb-ext:string-to-octets string :external-format :utf-8 :null-terminate t))
+	(fmt (sb-ext:string-to-octets format :external-format :utf-8 :null-terminate t)))
+    (cffi:with-foreign-objects ((tm :uint8 +tm-size+) (in :uint8 (length input)) (f :uint8 (length fmt)))
+      (dotimes (i +tm-size+) (setf (cffi:mem-aref tm :uint8 i) 0))
+      (setf (cffi:mem-aref tm :int 8) -1)
+      (dotimes (i (length input)) (setf (cffi:mem-aref in :uint8 i) (aref input i)))
+      (dotimes (i (length fmt)) (setf (cffi:mem-aref f :uint8 i) (aref fmt i)))
+      (let ((end (cffi:foreign-funcall "strptime" :pointer in :pointer f :pointer tm :pointer)))
+	(when (cffi:null-pointer-p end) (system-error "strptime" 22))
+	(let ((v (tm->vector tm)))
+	  ;; the zone is never reported
+	  (setf (svref v 10) ps:false)
+	  (cons v (length (sb-ext:octets-to-string input :external-format :utf-8
+							 :end (- (cffi:pointer-address end) (cffi:pointer-address in))))))))))
+
+;;; select, on poll(2): a port with input already buffered is ready.
+
+(defun select-items (who position list)
+  (cond ((listp list) list)
+	((simple-vector-p list) (coerce list 'list))
+	(t (wrong-type who position list))))
+
+(defguile "select" (reads writes excepts &optional secs usecs)
+  (let* ((reads (select-items "select" 1 reads)) (writes (select-items "select" 2 writes))
+	 (excepts (select-items "select" 3 excepts))
+	 (all (append (mapcar (lambda (x) (list x 1)) reads) (mapcar (lambda (x) (list x 4)) writes)
+		      (mapcar (lambda (x) (list x 2)) excepts)))
+	 (n (length all))
+	 (timeout (cond ((not (integerp secs)) -1)
+			(t (+ (* 1000 secs) (if (integerp usecs) (floor usecs 1000) 0)))))
+	 (ready '()))
+    (flet ((fd-of (x)
+	     (cond ((integerp x) x)
+		   ((gport-p x) (or (port-fd x) (wrong-type "select" 1 x)))
+		   ((streamp x) (port-fdes x "select"))
+		   (t (wrong-type "select" 1 x)))))
+      (dolist (item all) (fd-of (first item)))
+      ;; buffered input needs no wait
+      (loop for (x events) in all
+	    when (and (= events 1) (gport-p x) (trivial-gray-streams:stream-listen x)) do (push x ready))
+      (cffi:with-foreign-object (fds :uint8 (* 8 (max n 1)))
+	(loop for (x events) in all for i from 0
+	      do (setf (cffi:mem-ref fds :int (* 8 i)) (fd-of x)
+		       (cffi:mem-ref fds :short (+ (* 8 i) 4)) events
+		       (cffi:mem-ref fds :short (+ (* 8 i) 6)) 0))
+	(check-c "select" (cffi:foreign-funcall "poll" :pointer fds :unsigned-int n :int (if ready 0 timeout) :int))
+	(flet ((result (kind)
+		 (loop for (x events) in all for i from 0
+		       when (and (= events kind)
+				 (or (member x ready :test #'eq)
+				     (logtest (cffi:mem-ref fds :short (+ (* 8 i) 6))
+					      (logior kind (if (= kind 1) #x10 0) #x8)))) ; POLLHUP, POLLERR
+			 collect x)))
+	  (list (result 1) (result 4) (result 2)))))))
+
+;;; GC switches, print states: nothing to turn off here
+
+(defguile "gc-disable" () *unspecified*)
+(defguile "gc-enable" () *unspecified*)
+(defguile "gc-dump" () *unspecified*)
+(defguile "dynamic-unlink" (lib) (declare (ignore lib)) *unspecified*)
+(defguile "get-print-state" (port) (declare (ignore port)) ps:false)
+(defguile "port-with-print-state" (port &optional state) (declare (ignore state)) port)
+(defguile "has-shown-backtrace-hint?" () ps:false)
+(defguile "set-procedure-minimum-arity!" (proc required optional rest)
+  (declare (ignore required optional rest proc))
+  *unspecified*)

@@ -16,6 +16,8 @@
 ;;; ------------------------------------------------------------------
 ;;; Lists, pairs, vectors, strings, bytes
 
+(defvar *process-globals* (make-hash-table :test 'equal :synchronized t))
+
 (defnatives "#%unsafe"
   ("unsafe-list-ref" (l i) (nth i l))
   ("unsafe-list-tail" (l i) (nthcdr i l))
@@ -56,6 +58,15 @@
   ("unsafe-add-collect-callbacks" (&rest args) (declare (ignore args)) *void*)
   ("unsafe-remove-collect-callbacks" (&rest args) (declare (ignore args)) *void*)
   ("unsafe-add-global-finalizer" (&rest args) (declare (ignore args)) *void*)
+  ("unsafe-register-process-global" (key value)
+   ;; the previous value (or #f); a value of #f only looks KEY up
+   (let* ((k (map 'string #'code-char key))
+	  (old (gethash k *process-globals* ps:false)))
+     (when (and (not (eq value ps:false)) (eq old ps:false))
+       (setf (gethash k *process-globals*) value))
+     old))
+  ;; a poller: a prop:evt value whose event is never ready here (no fd polling)
+  ("unsafe-poller" (proc) (declare (ignore proc)) (lambda (self) (declare (ignore self)) (make-revt :never)))
   ("unsafe-assert-unreachable" () (racket-error "unsafe-assert-unreachable" "reached"))
   ("unsafe-make-struct-type-property/guard-calls-no-arguments" (name &optional (guard ps:false) (supers '()) &rest more)
    (declare (ignore more))
@@ -167,7 +178,13 @@
   ("unsafe-fx*/wraparound" (a b) (wrap-fixnum (* a b)))
   ("unsafe-fxlshift/wraparound" (a k) (wrap-fixnum (ash a k)))
   ("unsafe-fxrshift/logical" (n k) (ash (ldb (byte 61 0) n) (- k)))
-  ("unsafe-fxpopcount" (n) (logcount n))
+  ("unsafe-flbit-field" (x start end)
+   (let* ((d (fl x))
+	  (bits (logior (ash (ldb (byte 32 0) (sb-kernel:double-float-high-bits d)) 32)
+			(sb-kernel:double-float-low-bits d))))
+     (ldb (byte (- end start) start) bits)))
+  ("unsafe-fxpopcount" (n) (logcount n)) ("unsafe-fxpopcount32" (n) (logcount n))
+  ("unsafe-fxpopcount16" (n) (logcount n))
   ("unsafe-flvector-length" (v) (length v)) ("unsafe-flvector-ref" (v i) (aref v i))
   ("unsafe-flvector-set!" (v i x) (setf (aref v i) x) *void*)
   ("unsafe-fxvector-length" (v) (length (fxvector-items v)))

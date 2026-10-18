@@ -171,6 +171,11 @@ properties."
 					v)))))
   (same "unsafe-chaperone-vector" "unsafe-impersonate-vector"))
 
+(defnative "unsafe-impersonate-hash" (h &rest args) (:instance "#%unsafe")
+  (apply (native-function (gethash "impersonate-hash" *natives*)) h args))
+(defnative "unsafe-chaperone-hash" (h &rest args) (:instance "#%unsafe")
+  (apply (native-function (gethash "chaperone-hash" *natives*)) h args))
+
 ;;; ------------------------------------------------------------------
 ;;; Arities: a struct's incomplete arity (a keyword procedure that has
 ;;; required keywords) doesn't count unless the caller says it may

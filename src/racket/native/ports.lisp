@@ -539,8 +539,34 @@ at eof (or a special, and 1)."
 	  (setf (rinport-host p) port)
 	  (setf (gethash port *host-adapters*) p)))))
 
+(defun port-struct-target (x property)
+  "The port a struct instance X stands for through prop:input-port or
+prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL."
+  (multiple-value-bind (value found) (property-value x property)
+    (when found
+      (let ((target
+	      (if (integerp value)
+		  (let ((owner (loop for ty = (struct-of-type x) then (struct-type-parent ty)
+				     while (and (struct-type-parent ty)
+						(eql (property-value (struct-type-parent ty) property) value))
+				     finally (return ty))))
+		    (svref (struct-fields x) (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
+		  value)))
+	(and target (not (eq target ps:false)) target)))))
+
+(defun unwrap-port (x property)
+  "X, or the port it stands for if it is a struct with PROPERTY."
+  (loop repeat 100
+	while (and x (struct-instance-p x))
+	do (let ((target (port-struct-target x property)))
+	     (if target (setf x target) (return))))
+  x)
+
+(defun unwrap-in (x) (unwrap-port x *prop-input-port*))
+(defun unwrap-out (x) (unwrap-port x *prop-output-port*))
+
 (defun input-port (who port)
-  (let ((port (or port (current-port :input))))
+  (let ((port (unwrap-in (or port (current-port :input)))))
     (when (and (rinport-p port) (rinport-closed port))
       (racket-error who "input port is closed~%  input port: ~A" (port-desc port)))
     port))
@@ -654,6 +680,7 @@ at eof (or a special, and 1)."
 	  (values ps:false ps:false (1+ (out-position p))))))
 
 (defnative "port-count-lines!" (p) ()
+  (setq p (unwrap-out (unwrap-in p)))
   (cond ((rinport-p p)
 	 (unless (rinport-count-lines p)
 	   (setf (rinport-count-lines p) t)
@@ -666,8 +693,10 @@ at eof (or a special, and 1)."
 	     (when (and c (custom-out-count-lines c)) (funcall (custom-out-count-lines c)))))))
   *void*)
 (defnative "port-counts-lines?" (p) (:leaf t)
+  (setq p (unwrap-out (unwrap-in p)))
   (bool (cond ((rinport-p p) (rinport-count-lines p)) ((routport-p p) (routport-count-lines p)))))
 (defnative "port-next-location" (p) ()
+  (setq p (unwrap-out (unwrap-in p)))
   (cond ((rinport-p p) (inport-location p))
 	((routport-p p) (outport-location p))
 	(t (values ps:false ps:false ps:false))))
@@ -686,6 +715,7 @@ at eof (or a special, and 1)."
 	(t base)))
 
 (defnative "file-position" (p &optional (pos nil pos-p)) ()
+  (setq p (unwrap-out (unwrap-in p)))
   (cond ((and pos-p (rinport-p p))
 	 (setf (rinport-pos p) (if (eq pos ps:eof-object) (ip-end p) (- pos (rinport-base p))))
 	 *void*)
@@ -702,6 +732,7 @@ at eof (or a special, and 1)."
 	((routport-p p) (out-position p))
 	(t 0)))
 (defnative "file-position*" (p) ()
+  (setq p (unwrap-out (unwrap-in p)))
   (cond ((rinport-p p) (+ (rinport-base p) (rinport-pos p)))
 	((routport-p p) (out-position p))
 	(t ps:false)))
@@ -737,6 +768,9 @@ at eof (or a special, and 1)."
     (post-closed p)))
 
 (defnative "close-input-port" (p) ()
+  (setq p (unwrap-in p))
+  (unless (or (rinport-p p) (truthy (funcall (psx:host-ref "input-port?") p)))
+    (contract-error "close-input-port" "input-port?" p))
   (if (rinport-p p) (close-inport p) (funcall (psx:host-ref "close-input-port") p))
   *void*)
 
@@ -744,7 +778,7 @@ at eof (or a special, and 1)."
 ;;; Output
 
 (defun output-port (port &optional (who "write"))
-  (let ((p (or port (current-port :output))))
+  (let ((p (unwrap-out (or port (current-port :output)))))
     (when (and (routport-p p) (routport-closed p))
       (racket-error who "output port is closed~%  output port: ~A" (port-desc p)))
     p))
@@ -777,8 +811,12 @@ at eof (or a special, and 1)."
   (let* ((c (routport-custom p))
 	 (w (custom-out-write-out c))
 	 (n (- end start)))
-    (if (routport-p w)
-	(out-write-some w vec start end nonblock)
+    (cond
+      ((routport-p w) (out-write-some w vec start end nonblock))
+      ((streamp w)			; a host port to forward to
+       (host-write-bytes w vec start end)
+       n)
+      (t
 	(loop repeat 100000
 	      do (let ((r (funcall w (subseq vec start end) 0 n (bool nonblock) ps:false)))
 		   (cond ((integerp r)
@@ -797,7 +835,7 @@ at eof (or a special, and 1)."
 				(racket-error "sync" "would block forever (one thread)"))))
 			 (t (racket-error "user port write" "result is not (or/c exact-nonnegative-integer? #f evt?)~%  result: ~A"
 					  (written r)))))
-	      finally (racket-error "write" "would block forever (one thread)")))))
+	      finally (racket-error "write" "would block forever (one thread)"))))))
 
 (defun out-write-some (p vec start end nonblock)
   "Write some of VEC[START,END) to our output port P: how many bytes, or :block."
@@ -879,8 +917,10 @@ at eof (or a special, and 1)."
     (:file (finish-output (routport-stream p)))
     (:custom
      (let ((w (custom-out-write-out (routport-custom p))))
-       (if (routport-p w)
-	   (flush-outport w)
+       (cond
+	 ((routport-p w) (flush-outport w))
+	 ((streamp w) (funcall (psx:host-ref "flush-output-port") w))
+	 (t
 	   (loop repeat 100000
 		 do (let ((r (funcall w (make-octets 0) 0 0 ps:false ps:false)))
 		      (cond ((eql r 0) (return))
@@ -888,7 +928,7 @@ at eof (or a special, and 1)."
 					 (racket-error "sync" "would block forever (one thread)")))
 			    ((eq r ps:false))
 			    (t (racket-error "flush-output" "weird result"))))
-		 finally (racket-error "flush-output" "would block forever (one thread)")))))))
+		 finally (racket-error "flush-output" "would block forever (one thread)"))))))))
 
 (defnative "flush-output" (&optional port) ()
   (let ((p (output-port port "flush-output")))
@@ -908,6 +948,9 @@ at eof (or a special, and 1)."
     (post-closed p)))
 
 (defnative "close-output-port" (p) ()
+  (setq p (unwrap-out p))
+  (unless (or (routport-p p) (truthy (funcall (psx:host-ref "output-port?") p)))
+    (contract-error "close-output-port" "output-port?" p))
   (if (routport-p p) (close-outport p) (funcall (psx:host-ref "close-output-port") p))
   *void*)
 
@@ -915,14 +958,17 @@ at eof (or a special, and 1)."
 ;;; Ports in general
 
 (defnative "input-port?" (x) (:leaf t)
+  (setq x (unwrap-in x))
   (bool (or (rinport-p x) (truthy (funcall (psx:host-ref "input-port?") x)))))
 (defnative "output-port?" (x) (:leaf t)
+  (setq x (unwrap-out x))
   (bool (or (routport-p x) (truthy (funcall (psx:host-ref "output-port?") x)))))
 (defnative "port?" (x) (:leaf t)
+  (setq x (unwrap-out (unwrap-in x)))
   (bool (or (rinport-p x) (routport-p x) (truthy (funcall (psx:host-ref "port?") x)))))
 (defnative "port-closed?" (p) (:leaf t)
+  (setq p (unwrap-out (unwrap-in p)))
   (bool (cond ((rinport-p p) (rinport-closed p)) ((routport-p p) (routport-closed p)))))
 (defnative "file-stream-port?" (p) (:leaf t)
   (bool (or (and (rinport-p p) (rpath-p (rinport-name p)))
 	    (and (routport-p p) (eq (routport-kind p) :file)))))
-(defnative "terminal-port?" (p) (:leaf t) (declare (ignore p)) ps:false)

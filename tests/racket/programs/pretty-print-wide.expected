@@ -1,0 +1,29 @@
+'(node
+  4
+  (node
+   3
+   (node
+    2
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol))
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol)))
+   (node
+    2
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol))
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol))))
+  (node
+   3
+   (node
+    2
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol))
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol)))
+   (node
+    2
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol))
+    (node 1 (leaf "a string" 12345 symbol) (leaf "a string" 12345 symbol)))))
+(define (f x)
+  (let loop ((i 0) (acc '()))
+    (if (< i x) (loop (add1 i) (cons (* i i) acc)) (reverse acc))))
+'#(1
+   2
+   3
+   (a b c d e f g h i j k l m n o p))
