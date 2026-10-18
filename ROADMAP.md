@@ -16,9 +16,10 @@ The bar set for it, and where each part is:
 | Guile | **done in substance**: Guile 3.0's own boot-9, psyntax and modules; its test suite with 4 failures and 1 error left (docs/guile.md); `.go` files on a VM in Lisp; Guix computes the same `hello` derivation as real Guix; a libguile that LilyPond typesets on |
 | Chez | **done in substance**: 1257 of `(chezscheme)`'s 1715 names (the missing ones are mostly Chez's internals, docs/chez.md, "Not planned"); Chez's mats; Idris 2 bootstraps and compiles programs |
 | Emacs through SLY/Slynk and SLIME/Swank | **done** (docs/emacs.md) |
-| An LSP server | optional; not started |
+| An LSP server | moved after 1.0 (section 7) |
 
-So the requirements are met. What is left is checking, and the
+So the requirements are met, and `utils/rename/rename.sh` was tried
+again on 2026-10-18 (below). What is left is checking, and the
 mechanical rename itself:
 
 1. **A full test run on the current tree.** The optimizer's first pass
@@ -39,7 +40,6 @@ mechanical rename itself:
    (docs/racket.md's full run predates its regexp layer), and the
    benchmarks (bench/RESULTS.md predates the optimizer).
 3. **Decide what stays out of 1.0**, and say so in the README:
-   - the LSP server;
    - Guile's last 4 failures and 1 error, the VM instructions only
      libguile's generated code uses (docs/guile-vm.md, "Left"), and
      Guix building `hello` rather than only its derivation;
@@ -51,8 +51,10 @@ mechanical rename itself:
    tree, `utils/rename/check.sh`, the history prose by hand, the Emacs
    package, the version (3.0 to 1.0), regenerating the `.qso` files and
    psyntax's image, the full test run again, and the steps outside the
-   repository (`utils/rename/out-of-repo.sh`). A trial rename already
-   built and passed the R7RS suite (commit ca40144). One commit.
+   repository (`utils/rename/out-of-repo.sh`). One commit. A trial on
+   2026-10-18, at f21e07c in a scratch worktree, rewrote 500 files,
+   moved 42, left nothing for `check.sh`, built `bin/quasischeme`, and
+   passed the CLI tests (43 of 43) and R7RS's suite (978 of 978).
 
 ## Where things stand
 
@@ -67,7 +69,7 @@ mechanical rename itself:
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
 | `tests/run-continuation-tests.lisp` | 45/45 |
-| `make -C contrib/cli test` | 31/31 |
+| `make -C contrib/cli test` | 43/43 |
 | `make test-programs` (`tests/programs/`, needs Quicklisp) | 5 of 5 programs |
 | `make test-srfi` (`src/srfi/tests/`) | 122 of 122 test programs |
 | `make test-chez` (Chez's mats) | 16,391 clauses pass, 986 fail, 391 error (docs/chez.md, 2026-10-13) |
@@ -188,6 +190,8 @@ chibi's or Gauche's leniency, such as duplicate pattern variables in
   natives.
 
 ## 7. Directions queued
+
+- **An LSP server** for editors other than Emacs, after 1.0.
 
 - **Racket parallelism** on bordeaux-threads, lparallel or chanl, for
   futures and places; Racket threads are SBCL threads with a baton

@@ -43,7 +43,8 @@ fi
 git ls-files | grep -i pseudoscheme | while read -r f; do
   new=$(echo "$f" | sed 's/pseudoscheme/quasischeme/g; s/Pseudoscheme/Quasischeme/g')
   echo "git mv $f $new"
-  if [ $apply = yes ]; then git mv "$f" "$new"; fi
+  # a renamed directory (.claude/skills/run-pseudoscheme/) must exist first
+  if [ $apply = yes ]; then mkdir -p "$(dirname "$new")"; git mv "$f" "$new"; fi
 done
 git ls-files 'src/*.pso' | while read -r f; do
   echo "git mv $f ${f%.pso}.qso"

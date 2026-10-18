@@ -8,9 +8,10 @@ a different system. 1.0 means:
 - Guile and Chez;
 - all the SRFIs;
 - Emacs through SLY/Slynk (and SLIME/Swank);
-- possibly an LSP server for other editors.
 
-As of 2026-10-18 every requirement but the optional LSP server is met;
+An LSP server for other editors comes after 1.0 (ROADMAP.md, section 7).
+
+As of 2026-10-18 every requirement is met;
 ROADMAP.md, "Before the rename", lists what is left to check first.
 
 There are no outside users, so nothing old is kept for compatibility:
@@ -49,6 +50,15 @@ sh utils/rename/out-of-repo.sh       # prints section 5's steps for the user; ru
   found missing on the way and are in: files whose only mention is a
   string designator (`(in-package "PS")`), and the bare `"pso"` file
   type (src/core.lisp, the .asd, boot/check.lisp).
+- **Second trial (2026-10-18, at f21e07c):** `git mv` failed on
+  `.claude/skills/run-pseudoscheme/`, a directory named for the
+  project, so `rename.sh` now makes a moved file's directory first.
+  Then `--apply` rewrote 500 files and moved 42; `check.sh` reported
+  nothing; vendored code was untouched but for psyntax's notes of ours;
+  the tree built `bin/quasischeme`, whose `(features)` include
+  `quasischeme`, and passed the CLI tests (43 of 43) and R7RS's suite
+  (978 of 978). README's opening ("Quasischeme 3.0 is Jonathan Rees'
+  ...") still needs its history rewritten by hand.
 - **Since 2026-10-11** the name also appears in:
   - the packages `PSEUDOSCHEME-RACKET` (`PSR`) and
     `PSEUDOSCHEME-LIBGUILE`;

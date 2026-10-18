@@ -399,9 +399,9 @@ what's checked in. See boot/README.md.
 ## Tests
 
 ```sh
-sbcl --script tests/run-r5rs-tests.lisp [--classic | --continuations=escape]
+sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r5rs-tests.lisp [--classic | --continuations=escape]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-continuation-tests.lisp
-sbcl --script tests/run-r7rs-tests.lisp [-v] [--continuations=escape]
+sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r7rs-tests.lisp [-v] [--continuations=escape]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-r6rs-tests.lisp [-v] [--continuations=escape] [name ...]
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-library-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-syntax-case-tests.lisp
