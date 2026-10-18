@@ -212,11 +212,13 @@
 		:components ((:static-file "ikarus.scm")))
 	       (:file "psyntax" :depends-on ("r6rs"))
 	       (:file "continuations" :depends-on ("psyntax"))
-	       (:file "library-cache" :depends-on ("psyntax" "continuations"))
-	       (:file "compiled-files" :depends-on ("psyntax" "continuations"))
+	       (:file "cp0" :depends-on ("psyntax" "continuations"))
+	       (:file "cptypes" :depends-on ("cp0"))
+	       (:file "library-cache" :depends-on ("psyntax" "continuations" "cptypes"))
+	       (:file "compiled-files" :depends-on ("psyntax" "continuations" "cptypes"))
 	       (psyntax-image "psyntax-pseudoscheme"
 		:pathname "../vendor/psyntax/psyntax-pseudoscheme"
-		:depends-on ("r6rs" "chez" "compat" "psyntax" "continuations" "library-cache"))))
+		:depends-on ("r6rs" "chez" "compat" "psyntax" "continuations" "cptypes" "library-cache"))))
 
 ;;; The Common Lisp face: packages R5RS, R6RS and R7RS (EVAL, LOAD,
 ;;; REPL, EXPAND, USE-LIBRARY, ...), and the bridge between the

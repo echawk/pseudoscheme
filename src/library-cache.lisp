@@ -91,7 +91,11 @@ Pseudoscheme is built from (their names and dates)."
 ;;; signature of what it was built from.
 (defvar *build-signature* (compute-build-signature))
 
-(defun build-signature () *build-signature*)
+(defun build-signature ()
+  "*BUILD-SIGNATURE*, and the optimization level (src/cp0.lisp), which
+compiled code depends on too."
+  (let ((level (optimize-level)))
+    (if (= level 2) *build-signature* (format nil "~A-O~D" *build-signature* level))))
 
 (defun form-text (form)
   "FORM printed readably, or NIL if it can't be (it holds a Lisp

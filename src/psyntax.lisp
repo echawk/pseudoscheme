@@ -31,6 +31,9 @@
 
 (defun sym (string) (psl:scheme-symbol string))
 
+(defvar *optimize-off* nil
+  "True to skip OPTIMIZE-CORE (src/cp0.lisp): compiling psyntax's own image.")
+
 (defvar *host* nil
   "The program environment psyntax and the code it expands run in.")
 
@@ -226,7 +229,7 @@ the single one of its kind (src/chez/host.lisp).")
   "FORM with each (primitive x) replaced by a reference to x (see
 OPEN-PRIMITIVES-1), and its internal definitions made letrecs (see
 DEFINITIONS-AS-LETREC)."
-  (definitions-as-letrec (open-primitives-1 form)))
+  (optimize-core (definitions-as-letrec (open-primitives-1 form))))
 
 (defun open-primitives-1 (form)
   "FORM with each (primitive x) -- psyntax's reference to host global
@@ -751,10 +754,11 @@ that body, as (let () ...) is; or FORM if it has no such body."
   "OPEN-PRIMITIVES for a form evaluated at top level, whose definitions
 are hoisted if it's big."
   (let ((form (open-primitives-1 form)))
-    (definitions-as-letrec
-     (if (> (tree-size form) *letrec-definitions-limit*)
-	 (hoist-definitions form)
-	 (progn (setq *hoisted-procedures* '()) form)))))
+    (optimize-core
+     (definitions-as-letrec
+      (if (> (tree-size form) *letrec-definitions-limit*)
+	  (hoist-definitions form)
+	  (progn (setq *hoisted-procedures* '()) form))))))
 
 (defvar *full-continuations*)		; src/continuations.lisp
 
@@ -1106,6 +1110,7 @@ the command line and exits; DROP-LAST skips it.)"
   (install-adapter)
   (install-continuation-primitives)
   (install-inline-primitives)
+  (install-cptypes-primitives)
   *host*)
 
 ;;; Inline primitives.  A host primitive that isn't one of the
@@ -1223,8 +1228,9 @@ written with the real host package's name."
 		   (make-package *host-package-name* :use '("COMMON-LISP"))))
 	   (signature (host-signature))
 	   (code (handler-bind ((warning #'muffle-warning))
-		   (mapcar (lambda (form) (psl:tr "TRANSLATE" (open-primitives form) *host*))
-			   forms))))
+		   (let ((*optimize-off* t)) ; psyntax's own image: as it was
+		     (mapcar (lambda (form) (psl:tr "TRANSLATE" (open-primitives form) *host*))
+			     forms)))))
       (labels ((rename (x)
 		 (cond ((and (symbolp x) (eq (symbol-package x) from))
 			(intern (symbol-name x) to))
