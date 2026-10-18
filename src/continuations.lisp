@@ -1869,7 +1869,7 @@ its own, of the chunk's free variables."
 	 (*safe-procedures* nil)
 	 (*known-procedures* nil)
 	 (*downward-parameters* nil)
-	 (form (guard-self-calls form))
+	 (form (guard-top-level-self-calls (guard-self-calls form)))
 	 (*safe-procedures* (find-safe-procedures form))
 	 (*downward-parameters* (find-downward-parameters)))
     (find-safe-locations form)
@@ -1938,7 +1938,7 @@ procedure in *SAFE-FUNCTIONS*."
 ;;; that doesn't do that sees a difference.
 
 (defvar *self-reference-hook* nil
-  "NIL, or a function of a form (not a symbol) and a top-level definition
+  "NIL, or a function of a form (or an operator's variable) and a top-level definition
 (by one of *DEFINITION-OPERATORS*): :READS if the form reads the variable
 the definition defines, :ASSIGNS if it assigns or defines it, else NIL.")
 
@@ -1981,9 +1981,11 @@ as safe (%note-safe) as NOTE-SAFE-DEFINITIONS records a lambda."
 			((= (length keep) (length guarded)) new)
 			(t (walk form keep))))))))))
 
-(defun guard-definition (definition note)
+(defun guard-definition (definition note &optional dispatch-reference)
   "DEFINITION's value made W, F and M as above, if the defined lambda
-calls itself through its variable, with F passed to NOTE; else NIL."
+calls itself through its variable, with F passed to NOTE; else NIL.
+DISPATCH-REFERENCE, if given, is what W reads the variable with, in
+place of the reference the lambda makes."
   (let* ((value (fourth definition))
 	 (l (defined-lambda value))
 	 (formals (and l (cadr l)))
@@ -1998,7 +2000,7 @@ calls itself through its variable, with F passed to NOTE; else NIL."
 				     ;; the procedure assigns its own variable: not
 				     ;; guarded, the change being in its own extent
 				     (return-from guard-definition nil))
-				    ((and (consp (car e))
+				    ((and (or (consp (car e)) (scheme-symbol-p (car e)))
 					  (eq (funcall *self-reference-hook* (car e) definition) :reads)
 					  (listp (cdr e)) (= (length (cdr e)) (length formals)))
 				     (incf calls)
@@ -2016,7 +2018,7 @@ calls itself through its variable, with F passed to NOTE; else NIL."
 	(when (plusp calls)
 	  (multiple-value-bind (stripped name) (strip-procedure-name (caddr l))
 	    (declare (ignore stripped))
-	    (let* ((reference (find-self-reference (caddr l) definition))
+	    (let* ((reference (or dispatch-reference (find-self-reference (caddr l) definition)))
 		   (dispatch `(,(sym "if") (,(sym "eq?") ,reference ,w) (,f ,@formals) (,m ,@formals)))
 		   (letrec `(,(sym "letrec")
 			     ((,f (,(car l) ,formals ,body))
@@ -2035,10 +2037,85 @@ calls itself through its variable, with F passed to NOTE; else NIL."
   "The first operator form in E that reads DEFINITION's variable."
   (cond ((atom e) nil)
 	((quote-form-p e) nil)
-	((and (consp (car e)) (eq (funcall *self-reference-hook* (car e) definition) :reads)) (car e))
+	((and (or (consp (car e)) (scheme-symbol-p (car e)))
+	      (eq (funcall *self-reference-hook* (car e) definition) :reads))
+	 (car e))
 	(t (loop for x on e
 		 thereis (find-self-reference (car x) definition)
 		 while (listp (cdr x))))))
+
+;;; The same at psyntax's top level (a REPL's, Chez mode's, the R5RS and
+;;; earlier reports' programs), where a definition's variable is a
+;;; location (a gensym) that may be defined again, and psyntax evaluates
+;;; the defined lambda by itself (eval-core) before assigning it to the
+;;; location (set-symbol-value!).  The transformation doesn't see the
+;;; definition, so the variable is recognized as the one location the
+;;; lambda calls that has no value yet: a new definition's, unless the
+;;; lambda calls a procedure defined later.  Then W never finds the
+;;; location holding it and always runs M, as the lambda would have run;
+;;; and W reads the location only if it has a value (%BOUND-LOCATION-VALUE),
+;;; since the lambda may not have called it.  fib at Chez mode's top
+;;; level went from 9.0 to 3.0 s (R7RS mode: 2.9 s).
+
+(defvar *top-level-self-calls* nil
+  "True while psyntax evaluates top-level forms (EVAL-TOP-LEVEL, src/psyntax.lisp).")
+
+(defmacro %bound-location-value (name)
+  "The value of the location of NAME, a quoted Scheme symbol, or NIL if it
+has none."
+  (let ((l (location (if (quote-form-p name) (cadr name) name))))
+    `(locally (declare (special ,l))
+       (and (boundp ',l) ,l))))
+
+(defun unassigned-called-location (l)
+  "The one variable L, a lambda, calls whose location has no value, if
+it is free in L, not a primitive, and the only one; else NIL."
+  (let ((bound (lexical-variables l)) (found '()))
+    (labels ((walk (e)
+	       (cond ((atom e))
+		     ((quote-form-p e))
+		     (t (let ((op (car e)))
+			  (when (and (scheme-symbol-p op) (not (gethash op bound))
+				     (not (primitive-name op))
+				     (let ((loc (location op)))
+				       (not (or (boundp loc) (fboundp loc)))))
+			    (pushnew op found)))
+			(loop for x on e
+			      do (walk (car x))
+			      while (consp (cdr x)))))))
+      (walk (caddr l)))
+    (and found (null (cdr found)) (car found))))
+
+(defun guard-top-level-self-calls (form)
+  "FORM, a lambda psyntax evaluates at the top level, made W, F and M as
+GUARD-DEFINITION makes a definition's, where it calls itself (it seems)
+and F can't capture; else FORM."
+  (when (and *top-level-self-calls* (lambda-form-p form) (listp (cadr form))
+	     (every (lambda (v) (and (symbolp v) (search "%%shared-c" (symbol-name v) :test #'char-equal)))
+		    (cadr form))
+	     (lambda-form-p (caddr form)) (null (cdddr form)))
+    ;; a shared lambda's maker, (lambda (constant ...) lambda) (CANONICAL-LAMBDA)
+    (return-from guard-top-level-self-calls
+      (list (car form) (cadr form) (guard-top-level-self-calls (caddr form)))))
+  (let ((self (and *top-level-self-calls* (lambda-form-p form) (unassigned-called-location form))))
+    (if (null self)
+	form
+	(let* ((*self-reference-hook*
+		 (lambda (e definition)
+		   (declare (ignore definition))
+		   (cond ((eq e self) :reads)
+			 ((and (consp e) (or (keyword-p (car e) "SET!") (keyword-p (car e) "DEFINE"))
+			       (consp (cdr e)) (eq (cadr e) self))
+			  :assigns))))
+	       (f nil)
+	       (new (guard-definition (list nil nil nil form) (lambda (x) (setq f x))
+				      `(%bound-location-value (,(sym "quote") ,self))))
+	       ;; (%note-safe letrec)
+	       (value (and new (second (fourth new)))))
+	  (if (and value (gethash f (let ((*known-procedures* nil)) (find-safe-procedures value))))
+	      value
+	      form)))))
+
 
 (defparameter *cc-transform-limit* 175000
   "The largest top-level form, in conses after the transformation, that

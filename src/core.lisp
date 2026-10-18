@@ -21,17 +21,22 @@
 
 (declaim (inline truep true? scheme-symbol-p))
 
+;; FALSE's value as these are compiled into the code that uses them (they
+;; are inline), so a test is one comparison with a constant rather than a
+;; read of the special variable, with its check that it's bound.
+(defmacro false-value () '(load-time-value false t))
+
 ; Convert Scheme boolean to Lisp boolean.
 ;  E.g. (cl:if (truep foo) ...)
 
 (defun truep (scheme-test)
-  (not (eq scheme-test false)))
+  (not (eq scheme-test (false-value))))
 
 ; Convert Lisp boolean to Scheme boolean.
 ;  E.g. (cons (true? (cl:numberp x)) ...)
 ; This assumes that the argument is never the empty list.
 
-(defun true? (cl-test) (or cl-test false))
+(defun true? (cl-test) (or cl-test (false-value)))
 
 (defun scheme-symbol-p (x)
   (declare (optimize (safety 0)))	;compilers are stupid

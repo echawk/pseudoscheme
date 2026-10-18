@@ -19,7 +19,7 @@ Chez Scheme's time as a geometric mean, with full continuations, and at
 |---|---|---|
 | definitions as `letrec` | `definitions-as-letrec`, src/psyntax.lisp | A body's definitions (a program's or library's too) bound once to lambdas become one `labels`, so calls between them are direct calls, not `funcall`s through boxed variables. |
 | hoisting big bodies | `hoist-definitions`, src/psyntax.lisp | A top-level form too big for SBCL as one code object has its definitions hoisted into top-level ones, compiled one by one. |
-| inline boolean tests | `truep`, src/core.lisp | A Scheme `if` on a value that isn't already a Lisp boolean is an inline `eq` test, not a call. |
+| inline boolean tests | `truep`, src/core.lisp | A Scheme `if` on a value that isn't already a Lisp boolean is an inline `eq` test, not a call, against `#f` as a constant of the code (see idea 7). |
 | inline arithmetic | `def-arith`, src/numbers.lisp | Two-argument `+`, `-`, `*`, the comparisons, `quotient`, `remainder`, `modulo` and `zero?` have an inline fixnum (and flonum) case before the generic one. Inexact complex arithmetic has typed parts. |
 | open-coded primitives | src/builtin.scm | `car`, `vector-ref`, `string-ref` and the like become `(car (the cons x))`, `(svref (the simple-vector v) i)`: one type check, then the machine instruction. |
 | inline host primitives | `*inline-primitives*`, src/psyntax.lisp | Compiler macros for procedures defined in the runtime (the bytevector accessors, the two-argument string comparisons, R7RS record accessors on a record of exactly their type) that keep the common case inline and call the full procedure otherwise. |
@@ -228,7 +228,12 @@ much from run to run as between the two.
 ### 7. Boolean results (partly)
 
 `truep` is now an inline `eq` test, so a test whose value is a Scheme
-boolean costs a comparison. A procedure known to return a CL boolean,
+boolean costs a comparison. It and `true?` compare with `#f` as a
+constant of the code that uses them (`load-time-value`), not by reading
+the special variable `ps:false`, which on arm64 cost two dependent loads
+and a check that it's bound on every test (October 2026): `puzzle` went
+from 71 to 45 billion instructions, `triangl` from 37 to 27, `browse`
+5% fewer, `nqueens` and `matrix` 3-4%. A procedure known to return a CL boolean,
 `null`, `consp` or one that only ever returns `#t`/`#f`, could be used
 as a Lisp test directly. The gain is small since the test went inline;
 it matters in predicates called in tight loops.
@@ -283,6 +288,28 @@ October 2026).**
 - A REPL's or a script's top-level variables are left out: they can be
   defined again.
 
+**At psyntax's top level (Chez mode, R5RS and the earlier reports, the
+REPL; done, October 2026).**
+- There a definition's variable is a location that can be defined
+  again, so `(define (fib n) ... (fib (- n 1)) ...)` calls whatever the
+  location holds, and each such call was a site: Chez mode's `fib` ran
+  at 3x R7RS mode's time.
+- psyntax evaluates the defined lambda by itself (`eval-core`) before
+  it assigns the location, so the transformation doesn't see the
+  definition. While `eval-top-level` runs, a lambda that calls exactly
+  one location with no value yet (a new definition's own, unless it
+  calls a procedure defined later) is made W, F and M as Guile mode's
+  definitions are (`guard-top-level-self-calls`, src/continuations.lisp).
+  W reads the location only if it has a value: if the guess was wrong,
+  W never finds the location holding it, and runs M, the lambda as
+  written.
+- The same corner case as in Guile mode: a continuation captured in a
+  procedure the location was changed to during a call of F, by F's own
+  extent, can't be re-entered after that call returns (an error says
+  so).
+- Chez mode's `fib` went from 209 to 69 billion instructions (35 to 13
+  billion cycles), `tak` from 92 to 40; R5RS mode's the same.
+
 What remains:
 - procedures passed into the runtime's higher-order primitives that
   aren't open-coded (`sort`, `hashtable-walk`), which use the
@@ -300,7 +327,26 @@ What remains:
 | 6 | inlining small known procedures | partly (small `labels` functions) | calls to small helpers |
 | 7 | boolean results | partly | small |
 | 8 | faster compilation | not started | start-up and the REPL |
-| 9 | continuation frames | partly (across forms in Guile mode, across libraries) | the runtime's higher-order primitives |
+| 9 | continuation frames | partly (across forms in Guile mode, across libraries, self-calls at psyntax's top level) | the runtime's higher-order primitives |
 
 Ideas 1 and 2 are the cheapest and most certain; 3 and 4 are the
 largest and would be the core of a later major version.
+
+## Tried and not kept (October 2026)
+
+Measured by instructions retired and cycles (`/usr/bin/time -l` on
+macOS), which vary by well under 1% from run to run where wall-clock
+times on a loaded machine varied by 2x.
+- **One frame per call of a machine**, filled in by each site, in place
+  of a stack vector per site: SBCL's sampling profiler charged
+  `allocate-vector-on-stack` with a tenth of `lattice`, but the shared
+  frame's stores carry GC card marks, and in a microbenchmark a site
+  cost the same either way; `lattice` took 13% more instructions.
+- **`(debug 0)`**, or `(speed 2) (debug 0)`, for the translated code:
+  under 3% on `fib`, `tak` and `lattice` (full-continuation code already
+  has `insert-debug-catch` off), and backtraces lose frames.
+- **A smaller nursery** (`bytes-consed-between-gcs`, 429 MB with the
+  command line's 8 GB heap): 32-128 MB made `lattice` slower, by 3-75%
+  in cycles; the collections cost more than the cache misses saved.
+- **A site's body inline** when the binding stack isn't deep, rather than
+  in a `dynamic-extent` closure: about 0.5 ns of a site's 3-6 ns.

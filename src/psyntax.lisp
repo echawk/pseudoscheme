@@ -1454,9 +1454,12 @@ define-library forms (src/r7rs/front.lisp).")
   "Expand, install and (lazily) instantiate an R6RS (library ...) form."
   (funcall (entry "psyntax:library-expander") form))
 
+(defvar *top-level-self-calls*)		; src/continuations.lisp
+
 (defun eval-top-level (form)
   "Evaluate FORM at the REPL, in (pseudoscheme interaction)."
-  (funcall (entry "psyntax:eval-top-level") form))
+  (let ((*top-level-self-calls* t))
+    (funcall (entry "psyntax:eval-top-level") form)))
 
 (defun expand (form &optional (env (funcall (entry "psyntax:environment")
 					     (list (mapcar #'sym '("rnrs"))))))
