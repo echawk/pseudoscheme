@@ -696,6 +696,47 @@ about 55 s. Of a run of 7.8 s (`--verbose`, timestamped), loading
 for each of the seven sizes, 3.9 s, the most of it. None of that is the
 code's speed, native or bytecode.
 
+#### LilyPond's start-up (2026-10-18)
+
+Where a warm run's time went (tests/lilypond/time.sh in the container),
+and what changed:
+
+- **Top-level forms that make no procedure** are evaluated by SBCL's
+  interpreter, not compiled (`TRIVIAL-CORE-P`, boot.lisp): a call of a
+  global with quoted arguments, a quoted list, a `define` of a value. Of
+  the 1,170 forms LilyPond evaluates as it starts (from `ly/*.ly` and
+  `#(...)`), 945 are such, and SBCL's `compile` took 0.5 ms for the
+  smallest, 0.2 s for one list of 1,400 conses (the drum pitch table);
+  the interpreter takes microseconds. A form with a lambda (the 220 music
+  functions `define-music-function` makes) is still compiled, since its
+  procedures may run many times. This took a warm run from 3.5-4.2 s to
+  2.2-2.5 s (real Guile: 0.8 to 1.1 s). `*INTERPRET-TRIVIAL-FORMS*` turns
+  it off.
+- **The cold run** (the cache empty, 31 to 35 s here; the first measure of
+  this section, 46 s): of the 33 s, SBCL's `compile-file` of the 4,400
+  forms of Guile's and LilyPond's modules is about half (15 s; 60% of
+  that in the 166 forms of 2,000 conses or more, 56 ms each); evaluating
+  macro transformers as psyntax expands (2,600 of them, each compiled
+  again in the form's chunk) a seventh; expanding, loading the chunks and
+  the rest of the start-up the remainder. Not much is left to cut
+  without making the code slower: a cheaper SBCL policy for the cached
+  code (`compilation-speed 3`, `speed 0`, `debug 0`) saves 5%, and
+  without constraint propagation 6%, both measured as CPU time in a run
+  alone on the machine, and both cost the Guile modules' speed for ever
+  after. The chunks are small (1,800 of them under 30 conses take 1.5 s in
+  all): the per-chunk cost of `compile-file` is not it.
+- **A cache that doesn't last.** LilyPond sets `XDG_CACHE_HOME` to its
+  installation, so the cache is written there: in the container, to the
+  image's layer, which is gone after each `run.sh`, so every
+  measurement's first run was cold. tests/lilypond/ now keeps the cache in
+  `/root/.cache` (`COLD=1` empties it, to time filling it), and
+  `GUILE-CACHE-PARENT` (cache.lisp) falls back to `~/.cache/` when the
+  XDG directory can't be written, as LilyPond's installation can't be by
+  a user. The cache's key (the build signature) holds the dates of all
+  the files Pseudoscheme is built from, those of Chez mode among them
+  (Guile mode's library uses `(chezscheme)`), so an edit to any of them
+  makes the next run cold; a rebuild from unchanged files doesn't.
+
 ### Emacs Lisp
 
 Guile's elisp front end (`language/elisp/`) runs unmodified. It compiles

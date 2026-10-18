@@ -249,13 +249,52 @@ version (src/continuations.lisp)."
       (root-value "macroexpand")
       #'pre-expand))
 
+;;; A top-level form that makes no procedure runs once, straight through,
+;;; and SBCL's compiler takes some 0.5 ms for even a call of a global
+;;; (LilyPond evaluates a thousand such forms as it starts: quoted data,
+;;; and definitions from declarations-init.ly), and 0.2 s for a list of
+;;; 1,400 conses.  SBCL's interpreter runs it at once.  A form with a
+;;; lambda is compiled: its procedures may run many times.
+
+(defvar *interpret-trivial-forms* t
+  "True to evaluate a top-level form that makes no procedure with SBCL's
+interpreter rather than its compiler.")
+
+(defparameter *interpretable-heads*
+  '("QUOTE" "BEGIN" "IF" "SET!" "%GUILE-REF" "%GUILE-DEFINE!" "%GUILE-SET!"
+    "%GUILE-TRUE" "%GUILE-WITH-META")
+  "The names of the core forms that make no procedure.")
+
+(defun trivial-core-p (core)
+  "Whether core form CORE makes no procedure: its operators are
+constructs of *INTERPRETABLE-HEADS* or functions."
+  (labels ((ok (x)
+	     (cond ((atom x) t)
+		   ((and (symbolp (car x)) (string= (symbol-name (car x)) "QUOTE")) t)
+		   (t (and (let ((head (car x)))
+			     (cond ((consp head) (ok head))
+				   ((not (symbolp head)) nil)
+				   ((member (symbol-name head) *interpretable-heads* :test #'string=) t)
+				   (t (and (fboundp head) (not (macro-function head))
+					   (not (special-operator-p head))))))
+			   (every-ok (cdr x))))))
+	   (every-ok (l)
+	     (loop while (consp l) do (unless (ok (pop l)) (return-from every-ok nil)))
+	     t))
+    (ok core)))
+
 (defun eval-tree-il (tree)
   (let* ((*lexicals* (make-hash-table :test 'eq))
 	 (*compile-module* *current-module*)
-	 (core (compile-tree-il tree)))
-    (psx:host-eval (if (> (psx::tree-size core) psx::*letrec-definitions-limit*)
-		       (flatten-top-level-lets core)
-		       core))))
+	 (core (compile-tree-il tree))
+	 (core (if (> (psx::tree-size core) psx::*letrec-definitions-limit*)
+		   (flatten-top-level-lets core)
+		   core)))
+    ;; bound either way: what this form loads is its own
+    (let ((sb-ext:*evaluator-mode* (if (and *interpret-trivial-forms* (trivial-core-p core))
+				       :interpret
+				       :compile)))
+      (psx:host-eval core))))
 
 ;;; A big top-level form is compiled in pieces: src/psyntax.lisp hoists
 ;;; the definitions of a top-level letrec* (each procedure its own

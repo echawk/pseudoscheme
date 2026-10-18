@@ -25,15 +25,33 @@
   (and *guile-cache* *cache-ready*
        (not (member (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE") '("0" "no" "off") :test #'equalp))))
 
+(defun writable-directory-p (dir)
+  (ignore-errors
+   (ensure-directories-exist dir)
+   (let ((probe (merge-pathnames (format nil ".write-~36R" (random (expt 36 8) (make-random-state t))) dir)))
+     (with-open-file (out probe :direction :output :if-exists :supersede) (write-char #\x out))
+     (delete-file probe)
+     t)))
+
+(defvar *cache-parents* '() "(env . xdg) -> the cache's directory, for GUILE-CACHE-PARENT.")
+
+(defun guile-cache-parent ()
+  "Where the cache goes: PSEUDOSCHEME_GUILE_CACHE_DIRECTORY, else the XDG
+cache directory, else, if a program has pointed that at a directory it
+can't write (LilyPond's is its installation's), ~/.cache/."
+  (let* ((env (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE_DIRECTORY"))
+	 (xdg (uiop:xdg-cache-home "pseudoscheme" "guile/"))
+	 (key (cons env xdg)))
+    (cdr (or (assoc key *cache-parents* :test #'equal)
+	     (car (push (cons key (cond ((and env (plusp (length env))) (uiop:ensure-directory-pathname env))
+					((writable-directory-p xdg) xdg)
+					(t (merge-pathnames ".cache/pseudoscheme/guile/" (user-homedir-pathname)))))
+			*cache-parents*))))))
+
 (defun guile-cache-directory ()
   "This build's generation of the cache (psx::CACHE-GENERATION): the old
 ones are pruned."
-  (psx::cache-generation
-   (let ((dir (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE_DIRECTORY")))
-     (if (and dir (plusp (length dir)))
-	 (uiop:ensure-directory-pathname dir)
-	 (uiop:xdg-cache-home "pseudoscheme" "guile/")))
-   (psx::build-signature)))
+  (psx::cache-generation (guile-cache-parent) (psx::build-signature)))
 
 (defun cache-fasl (file)
   (let ((true (probe-file file)))
@@ -82,7 +100,8 @@ ones are pruned."
 (defun run-cached (thunk) (psx::run-top-level thunk))
 
 (defun eval-translated (forms)
-  (let ((values '()))
+  (let ((values '())
+	(sb-ext:*evaluator-mode* :compile))
     (dolist (f forms)
       (setq values (multiple-value-list
 		    (handler-bind ((warning #'muffle-warning))

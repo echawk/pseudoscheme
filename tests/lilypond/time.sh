@@ -5,7 +5,11 @@
 #   sh utils/container/run.sh lilypond-time 'sh tests/lilypond/time.sh'
 #
 # Each of ours is run RUNS times (default 2): the first may fill the
-# compiled-module cache, the others load from it.  Settings for ours
+# compiled-module cache, the others load from it.  LilyPond points
+# XDG_CACHE_HOME into its installation, which the container forgets
+# between runs, so the cache is in /root/.cache (PSEUDOSCHEME_GUILE_CACHE_DIRECTORY
+# if set): only a change to the sources makes the first run slow.  With
+# COLD=1 it starts empty, to time filling it.  Settings for ours
 # (PSEUDOSCHEME_GUILE_*) pass through.  With VERBOSE=1, ours also runs
 # once with LilyPond's --verbose, its lines timestamped (verbose.log in
 # $LOGS), to show where the start-up goes; with TRACE=1 as well, with
@@ -24,6 +28,10 @@ top=$PWD
 mkdir -p "$LOGS/time"
 cp tests/lilypond/demo.ly "$LOGS/time/"
 cd "$LOGS/time" || exit 1
+PSEUDOSCHEME_GUILE_CACHE_DIRECTORY=${PSEUDOSCHEME_GUILE_CACHE_DIRECTORY:-$HOME/.cache/pseudoscheme/lilypond-guile}
+PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=${PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY:-$HOME/.cache/pseudoscheme/lilypond-libraries}
+export PSEUDOSCHEME_GUILE_CACHE_DIRECTORY PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY
+[ -n "$COLD" ] && rm -rf "$PSEUDOSCHEME_GUILE_CACHE_DIRECTORY" "$PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY"
 now () { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
 ours () {
   LD_LIBRARY_PATH=$top/build/libguile PSEUDOSCHEME_GUILE_CORE=$top/build/libguile/pseudoscheme-guile.core \

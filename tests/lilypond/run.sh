@@ -8,7 +8,10 @@
 #   1. `reference`: on real Guile; it makes demo.pdf.
 #   2. `ours`: the same binary with LD_LIBRARY_PATH on our libguile
 #      (build/libguile), which starts Lisp on pseudoscheme-guile.core.
-# Each step's output is in $LOGS (/logs), as is how far ours got.
+# Each step's output is in $LOGS (/logs), as is how far ours got.  Ours
+# compiles Guile's and LilyPond's modules the first time (some 35 s) into
+# a cache in /root/.cache, as LilyPond's own XDG_CACHE_HOME is in its
+# installation, which the container forgets.
 cd "$(dirname "$0")/../.." || exit 1
 LOGS=${LOGS:-/logs}
 LILYPOND=/opt/lilypond/bin/lilypond
@@ -20,6 +23,9 @@ cp src/libguile/missing.lisp "$LOGS/"
 make -C src/libguile core BUILD="$PWD/build/libguile" > "$LOGS/core-build.log" 2>&1 \
   || { echo "core: build failed (core-build.log)"; exit 1; }
 
+PSEUDOSCHEME_GUILE_CACHE_DIRECTORY=${PSEUDOSCHEME_GUILE_CACHE_DIRECTORY:-$HOME/.cache/pseudoscheme/lilypond-guile}
+PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=${PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY:-$HOME/.cache/pseudoscheme/lilypond-libraries}
+export PSEUDOSCHEME_GUILE_CACHE_DIRECTORY PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY
 mkdir -p "$LOGS/reference" "$LOGS/ours"
 cp tests/lilypond/demo.ly "$LOGS/reference/" && cp tests/lilypond/demo.ly "$LOGS/ours/"
 
