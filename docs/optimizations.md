@@ -11,7 +11,9 @@ something unrecognizable.
 
 Where speed stands: ecraven's r7rs-benchmarks (bench/) run at 1.37×
 Chez Scheme's time as a geometric mean, with full continuations, and at
-1.30× escape-only (bench/RESULTS.md, ROADMAP section 2).
+1.30× escape-only (bench/RESULTS.md, ROADMAP section 1). Those runs
+predate the optimizer's first pass (cp0 and cptypes, 2026-10-18; "Plan",
+below), which hasn't been measured on them yet.
 
 ## What the translator does now
 
@@ -85,7 +87,7 @@ to an SBCL policy and switch the more aggressive transformations on.
 |---|---|---|
 | 0 | `(debug 2) (safety 3)` | debugging: full backtraces, every check |
 | 1 (default) | today's | safe, with every error Scheme requires |
-| 2 | `(speed 2) (debug 0)` | safe, fewer frames in backtraces (about 8% on the call-heavy benchmarks, ROADMAP section 2) |
+| 2 | `(speed 2) (debug 0)` | safe, fewer frames in backtraces (about 8% on the call-heavy benchmarks, ROADMAP section 1) |
 | 3 | `(speed 3) (safety 0)` | unsafe, as Chez's `optimize-level 3`: a wrong type is undefined behavior, not an error |
 
 How it could be chosen:
@@ -326,11 +328,16 @@ through our generic calls. The user approved this list, in this order:
    libraries, Racket linklets after lowering, Guile's Tree-IL. Library
    definitions are immutable, so their small procedures can be inlined.
    For Guile, running Guile's own `peval` on Tree-IL first is a cheap
-   step. *Started 2026-10-18.*
+   step. *First pass done 2026-10-18* (src/cp0.lisp): it runs on
+   every core form, whatever made it; `PSEUDOSCHEME_OPTIMIZE=0` turns
+   it off, `1` runs cp0 alone, `2` (the default) adds cptypes, and
+   `PSEUDOSCHEME_OPTIMIZE_TRACE=1` prints each form before and after.
+   The library cache's signature records a level other than 2.
 2. **cptypes: type recovery** (idea 4): facts from predicate tests and
    result types (`(pair? x)` → `car` unchecked; fixnum loop counters;
    `fl` results are flonums), emitted as `truly-the`, typed bindings or
-   specialized primitives. *Started 2026-10-18, with 1.*
+   specialized primitives. *First pass done 2026-10-18, with 1*
+   (src/cptypes.lisp).
 3. **Unboxed flonums**: flonum-typed loop variables declared
    `double-float`, so SBCL keeps them in registers (fibfp, mbrot,
    nucleic, fft, ray box every intermediate).
@@ -363,9 +370,9 @@ passing.
 | 1 | an optimization level | not started | 8% at level 2; more at 3 |
 | 2 | records as one object | not started | about halves record allocation and access |
 | 3 | cross-library knowledge | partly (per form) | inlining and fewer capture sites across libraries |
-| 4 | type inference into declarations | not started | fixnum and unboxed-flonum loops |
+| 4 | type inference into declarations | partly (cptypes, first pass) | fixnum and unboxed-flonum loops |
 | 5 | `dynamic-extent` | not started | rest lists and non-escaping closures |
-| 6 | inlining small known procedures | partly (small `labels` functions) | calls to small helpers |
+| 6 | inlining small known procedures | partly (small `labels` functions; cp0, first pass) | calls to small helpers |
 | 7 | boolean results | partly | small |
 | 8 | faster compilation | not started | start-up and the REPL |
 | 9 | continuation frames | partly (across forms in Guile mode, across libraries, self-calls at psyntax's top level) | the runtime's higher-order primitives |

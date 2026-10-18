@@ -4,6 +4,8 @@ October 2026, on an Apple M4 MacBook Air (4 performance and 6
 efficiency cores) running macOS. These are single runs of
 `r7rs-benchmarks` with its standard inputs. Times are in seconds, and
 the figure in parentheses is the ratio to Chez Scheme. Lower is better.
+These runs predate the optimizer's first pass (cp0 and cptypes,
+2026-10-18; docs/optimizations.md), which is on by default now.
 
 | implementation | version | geometric mean vs Chez | benchmarks completed |
 |---|---|---|---|
@@ -49,8 +51,9 @@ then `python3 bench/summarize.py`.
 
 ## A second pass, later in October 2026
 
-With the default full continuations, after the changes ROADMAP section
-2 lists under "Done in this pass": **1.37×** Chez's time as a geometric
+With the default full continuations, after the second speed pass (shared
+compiled lambdas, inline host primitives, typed complex arithmetic and
+the rest; git log for October 2026): **1.37×** Chez's time as a geometric
 mean, from 1.55×, and 1.30× escape-only, from 1.44×, with all 57
 benchmarks completing (single runs, the machine otherwise idle).
 Against the first run ("All benchmarks", its `full` column):

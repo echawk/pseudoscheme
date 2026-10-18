@@ -1,14 +1,67 @@
 # Roadmap
 
 Where things stand and what to do next, roughly in order. The numbers
-come from the runners in `tests/`; re-run them rather than trusting
-this file.
+come from the runners in `tests/` and the mode documents; re-run them
+rather than trusting this file. Updated 2026-10-18.
+
+## Before the rename: Quasischeme 1.0
+
+At 1.0 the project becomes Quasischeme (docs/rename-quasischeme.md).
+The bar set for it, and where each part is:
+
+| 1.0 requirement | state |
+|---|---|
+| Every Revised Report, R1RS to R7RS | **done**: R7RS, R6RS, R5RS suites pass in full; R4RS, IEEE, R3RS, R2RS and the Revised Report have modes of their own, with all 993 of the reports' examples passing (docs/reports.md) |
+| All the SRFIs | **done**: every final, unwithdrawn SRFI through 274 (209 of them), with 122 test programs (`make test-srfi`) |
+| Guile | **done in substance**: Guile 3.0's own boot-9, psyntax and modules; its test suite with 4 failures and 1 error left (docs/guile.md); `.go` files on a VM in Lisp; Guix computes the same `hello` derivation as real Guix; a libguile that LilyPond typesets on |
+| Chez | **done in substance**: 1257 of `(chezscheme)`'s 1715 names (the missing ones are mostly Chez's internals, docs/chez.md, "Not planned"); Chez's mats; Idris 2 bootstraps and compiles programs |
+| Emacs through SLY/Slynk and SLIME/Swank | **done** (docs/emacs.md) |
+| An LSP server | optional; not started |
+
+So the requirements are met. What is left is checking, and the
+mechanical rename itself:
+
+1. **A full test run on the current tree.** The optimizer's first pass
+   (cp0 and cptypes, src/cp0.lisp and src/cptypes.lisp, on by default
+   at level 2) landed on 2026-10-18 and changes the code every mode
+   compiles. Every number in this file and the mode documents predates
+   it. Run `make test`, `make test-escape`, `make test-cli`,
+   `make test-srfi`, `make test-programs`, `make test-chez`,
+   `make test-guile`, `sh tests/racket/run.sh linklet`,
+   `sh tests/libguile/run.sh`, LilyPond and Guix in the container
+   (tests/lilypond/, tests/guix/run.sh), and `make bootstrap-check`.
+   Anything the optimizer breaks is fixed, or the default level is
+   lowered (`PSEUDOSCHEME_OPTIMIZE=0|1|2`) until it is.
+2. **Refresh the numbers** in README.md, this file and the mode
+   documents from that run: the Chez mats (README.md says about 17,500
+   pass; docs/chez.md's table, from 2026-10-13, has 16,391), the Guile
+   suite (docs/guile.md has both 42,702 and 43,278), Racket's suite
+   (docs/racket.md's full run predates its regexp layer), and the
+   benchmarks (bench/RESULTS.md predates the optimizer).
+3. **Decide what stays out of 1.0**, and say so in the README:
+   - the LSP server;
+   - Guile's last 4 failures and 1 error, the VM instructions only
+     libguile's generated code uses (docs/guile-vm.md, "Left"), and
+     Guix building `hello` rather than only its derivation;
+   - Racket, which isn't a 1.0 requirement: `racket/base` and `racket`
+     run, Racket's own suite doesn't yet (section 6);
+   - the user's open directions (section 7).
+4. **The rename**, as docs/rename-quasischeme.md describes it:
+   `sh utils/rename/rename.sh` (a dry run), then `--apply` on a clean
+   tree, `utils/rename/check.sh`, the history prose by hand, the Emacs
+   package, the version (3.0 to 1.0), regenerating the `.qso` files and
+   psyntax's image, the full test run again, and the steps outside the
+   repository (`utils/rename/out-of-repo.sh`). A trial rename already
+   built and passed the R7RS suite (commit ca40144). One commit.
+
+## Where things stand
 
 | runner | result |
 |---|---|
 | `tests/run-r7rs-tests.lisp` (chibi's R7RS suite) | 978 of 978 (977 with `--continuations=escape`) |
 | `tests/run-r6rs-tests.lisp` (Racket's R6RS suite) | 8902 of 8902 (8900 escape-only); all 25 programs run to completion |
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 189 of 189 (188 escape-only; 183 of 188 with `--classic`) |
+| the older reports (docs/reports.md) | 993 of 993 examples |
 | `tests/run-interop-tests.lisp` | 116/116 |
 | `tests/run-library-tests.lisp` | 61/61 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
@@ -17,393 +70,138 @@ this file.
 | `make -C contrib/cli test` | 31/31 |
 | `make test-programs` (`tests/programs/`, needs Quicklisp) | 5 of 5 programs |
 | `make test-srfi` (`src/srfi/tests/`) | 122 of 122 test programs |
+| `make test-chez` (Chez's mats) | 16,391 clauses pass, 986 fail, 391 error (docs/chez.md, 2026-10-13) |
+| `make test-guile` (Guile's suite) | 43,278 pass, 4 fail, 1 error (docs/guile.md) |
+| `tests/racket/run.sh linklet` | 6 linklets, 14 expander expressions, 18 `#lang racket/base` programs |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
-| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.37× Chez's time, 1.30× escape-only (1.55× and 1.44× before the second pass; Guile 2.8×, Gauche 9.2×) |
-
-## Architecture now
+| `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.37× Chez's time, 1.30× escape-only (Guile 2.8×, Gauche 9.2×); before the optimizer |
 
 ```
- R5RS source     R6RS source     R7RS source (define-library -> library)
-        \             |              /
-         psyntax  (vendor/psyntax; library system, syntax-case,
-         |         syntax-rules, (cl <package>) libraries)
-         v
-   core Scheme --[src/continuations.lisp]--> translator (src/*.scm) ---> Common Lisp
+ R1RS..R7RS source   Chez source        Guile source             Racket source
+        \               |                    |                        |
+         psyntax  (vendor/psyntax)     Guile's psyntax          Racket's expander
+         |                             -> Tree-IL               -> linklets
+         v                                   |                        |
+   core Scheme <-----------------------------+------------------------+
          |
-   host globals: src/r6rs/, src/r7rs/, src/numbers.lisp, src/chez/, src/compat/,
-                 src/interop.lisp; SRFIs as Scheme in src/srfi/
+   cp0, cptypes (src/cp0.lisp, src/cptypes.lisp)
+         |
+   continuations (src/continuations.lisp) -> translator (src/*.scm) -> Common Lisp
 ```
 
-psyntax is the front end for every standard; R5RS runs at a top level
-whose bindings are `(pseudoscheme r5rs)`. The translator's native
-classifier and `syntax-rules` remain only as its own bootstrap
-expander (and `tests/run-r5rs-tests.lisp --classic`). The Lisp/Scheme
-bridge is described in docs/interop.md.
+The runtimes: src/r6rs/, src/r7rs/, src/numbers.lisp, src/chez/,
+src/guile/, src/racket/native/, src/compat/, src/interop.lisp; the SRFIs
+are Scheme in src/srfi/; libguile's C layer is src/libguile/.
 
-## 1. Conformance
+## 1. Speed
 
-Every test of the three suites passes. With `--continuations=escape`,
-the tests that re-enter continuations fail, as they must: R7RS's and
-R5RS's `dynamic-wind` re-entry tests, R6RS's in `base`, and R6RS's
-`guard` that re-raises in the dynamic environment of the `raise`.
+bench/RESULTS.md has the last runs and what made the difference;
+docs/optimizations.md has the ideas, their status and the optimizer's
+plan. Next:
 
-chibi's R7RS suite expected `(sqrt -1.0-0.0i)` to be `+i`; the
-imaginary part `-0.0` puts the argument just below the branch cut,
-where IEEE 754 / C99's `csqrt` gives `-i`, as do Chez, Guile, Racket
-and Chicken (Gauche and Chibi lose the sign of the zero). The test now
-expects `-i` (tests/chibi/r7rs-tests.scm, marked `PSEUDOSCHEME:`).
+- **Measure the optimizer** (`bench/run.sh`, and `bench/run.sh modes`)
+  against the last run, then its plan's later items: unboxed flonums,
+  a closed world for `--compile` executables and library bodies, escape
+  analysis, cpletrec, records as one object.
+- **The slowest benchmarks**, `ack`, `fibc`, `divrec`, `browse` (about
+  3.5×): what's left is SBCL's call and allocation costs.
+- **R6RS overrides of open-coded primitives** (`list-tail`,
+  `integer->char`, `assq`/`assv`, the character case procedures) are
+  calls; `*inline-primitives*` (src/psyntax.lisp) could keep the common
+  case inline.
+- **psyntax's identifier lookup** searches ribs linearly; hashed ribs,
+  as Ikarus and Chez have, would cut a third of a macro-heavy library's
+  expansion.
+- **Interpreting run-once code**: Guile mode interprets top-level forms
+  that make no procedure (`trivial-core-p`, src/guile/boot.lisp) rather
+  than compiling them; the same would help Racket module bodies, R7RS
+  and Chez top levels, and REPL input.
 
-## 2. Speed
+## 2. The library cache
 
-`bench/` vendors ecraven's r7rs-benchmarks. In the last run
-(bench/RESULTS.md, "A second pass") Pseudoscheme was 1.37× Chez's time
-as a geometric mean with full continuations, the default (Guile: 2.8×),
-1.30× escape-only, with all 57 benchmarks completing; it was 1.55× and
-1.44× before that pass. bench/RESULTS.md, "What made the difference", lists the
-changes that took it from 3.0×. What's left:
-
-- **`ack` (3.6×), `fibc` (3.6×), `divrec` (3.5×), `browse` (3.4×)**,
-  with full continuations, in the last run.
-  The translation is what one would write by hand (`labels` functions,
-  inline arithmetic); the rest is SBCL's call and allocation costs.
-  `(debug 0)` gains about 8%, not worth the backtraces.
-- **Records** are a struct and a vector of fields, two allocations
-  (`gcbench` 2.1×). One object per record (an SBCL instance of the
-  right length) would halve that.
-- **R6RS overrides of open-coded primitives**: the R6RS layer redefines
-  some procedures the translator would open-code (`list-tail`,
-  `integer->char` with its check, `assq`/`assv`, the character case
-  procedures), which makes them calls; `assv` and `for-each` are even
-  looked up at each call (`*closed-primitives*`). Each is deliberate,
-  but `*inline-primitives*` (src/psyntax.lisp) can now keep the common
-  case inline, as it does for the bytevector accessors and the
-  two-argument string comparisons.
-- **psyntax's identifier lookup**: `id->label` searches an
-  identifier's ribs linearly, and `free-identifier=?` (every
-  `syntax-case` literal) does it twice; that is a third of SRFI 148's
-  expansion. Hashed ribs, as Ikarus and Chez have, would fix it, in
-  vendor/psyntax.
-- **Done in this pass** (October 2026):
-  - *Shared compiled lambdas* (`canonical-lambda`, src/psyntax.lisp):
-    every macro transformer psyntax evaluates was compiled on its own,
-    and CPS-style macros make a new one at each step (SRFI 257's tests:
-    10,174 of them, 149 shapes, 8.8 s of SBCL compiling). Lambdas are
-    now compiled once per shape, with their constants as arguments.
-    SRFI 257's tests: 12.1 s to 3.6 s.
-  - *Thread stacks*: SBCL gives each thread a stack the size of the
-    main thread's, and making one takes time in proportion: 2.6 ms at
-    the command line's 256 MB. The command line now gives threads 32 MB
-    (`PSEUDOSCHEME_THREAD_STACK_SIZE`): 500 threads in 0.19 s instead of
-    1.29 s, SRFI 230's tests 6.9 s to 2.0 s.
-  - *Inline host primitives* (`*inline-primitives*`): compiler macros
-    on the host's `bytevector-u8-ref`, `-set!`, `bytevector-length` and
-    the two-argument `string=?`, `string<?` and so on.
-  - *UTF-8* in two passes (size, then fill) instead of through a string
-    stream or an adjustable vector: with the bytevector accessors,
-    `bv2string` 2.59 s to 0.81 s.
-  - *Inexact complex arithmetic*: the out-of-line case of `+`, `-` and
-    `*` does two `(complex double-float)` arguments with typed parts;
-    SBCL's generic operation boxed every intermediate (`mbrotZ` 11.9 s
-    to 3.4 s).
-  - *`quotient`, `remainder`, `modulo`, `zero?`* are inline for fixnums,
-    like `+`; they were CL's generic `TRUNCATE`, `REM`, `MOD` and
-    `ZEROP` (src/builtin.scm; `primes` 1.24 s to 0.99 s).
-  - *R6RS record predicates and accessors* test the exact type first,
-    inline.
-- **Big programs**: a top-level form bigger than
-  `psx::*inline-arithmetic-limit*` is compiled without inline
-  arithmetic, since SBCL compiles it as one code object; hoisting its
-  definitions makes that rare.
-- **Compiled libraries.** Done for libraries loaded from files
-  (src/library-cache.lisp). Importing a library spends about 90% of
-  its time in SBCL's `compile` of the translated code, and only about
-  10% in expansion, so the cache holds compiled fasls, under
-  `~/.cache/pseudoscheme/libraries/`. Importing five SRFIs takes
-  0.018 s from the cache instead of 0.39 s (0.50 s the first time,
-  which writes the cache).
-  - psyntax hooks (vendor/psyntax/README-pseudoscheme.md): a loader
-    tried before expanding a library from source, and a hook given
-    everything `install-library` needs once a library is expanded.
-  - Keyed by the library's form (after `include` and `cond-expand`),
-    a build signature (the Lisp, and the names and dates of
-    Pseudoscheme's source files) and the continuations mode. A
-    compiled library is installed only if each library it was expanded
-    against has the same id; otherwise it is expanded and compiled
-    again, so a changed dependency recompiles its dependents.
-  - The R7RS standard libraries are expanded at boot with gensyms named
-    the same every session (`with-boot-gensyms`), so their ids are
-    stable. Session gensyms carry a random part, and a saved image
-    (the command line's) gets a new prefix each time it starts.
-  - `PSEUDOSCHEME_LIBRARY_CACHE=0` turns it off;
-    `PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY` moves it.
-
-  Left to do:
-  - A library whose source holds something the Lisp printer can't print
-    readably (a NaN literal, as R6RS's `base` and `flonums` test
-    libraries do) isn't cached: the cache writes the translation as Lisp
-    source for `compile-file`.
-  - Libraries that aren't found through the library path aren't cached:
-    those defined at the REPL or in a program file, and `(cl
-    <package>)` libraries, whose expansions hold Lisp functions.
-    Libraries that depend on one aren't either.
-  - Nothing removes stale entries. A cleanup by age, or `pseudoscheme
-    --clear-cache`, would do.
-  - ASDF's `:r7rs-library`/`:r6rs-library` components (src/asdf.lisp)
-    are evaluated with `psx:eval-library` and aren't cached at all, nor
-    are libraries that depend on them; they could compile into the
-    system's own fasls. The SRFIs can be compiled into the cache ahead
-    of time (`make precompile-srfi`, `--precompile-srfi`, `--precompile
-    DIR`), but not into the command line's image.
-  - The build signature changes whenever any source file's date
-    changes, which is safe but coarse: every edit to Pseudoscheme
-    recompiles every cached library.
-  - Two processes writing the same entry is safe (write to a temporary
-    file, then rename), but there's no locking for cleanup.
+Compiled libraries are cached as fasls (src/library-cache.lisp). Left:
+- Libraries holding something the Lisp printer can't print readably (a
+  NaN literal) aren't cached.
+- Libraries not found through the library path (defined at the REPL or
+  in a program, `(cl <package>)` libraries), and their dependents, aren't
+  cached.
+- Nothing removes stale entries; `pseudoscheme --clear-cache` or a
+  cleanup by age would do.
+- ASDF's `:r7rs-library`/`:r6rs-library` components aren't cached.
+- The build signature changes with any source file's date, so every
+  edit recompiles every cached library.
 
 ## 3. Continuations
 
-Full, re-entrant continuations are the default, from generalized
-stack inspection (Pettyjohn et al., ICFP 2005); `--continuations=escape`
-(or `psx::*full-continuations*` false) makes them escape-only, a Lisp
-`catch`. docs/continuations.md shows the transformation's real output
-for each case, the analyses that keep most calls free of it, the frames
-the runtime pushes, measurements, and what's left.
+Full, re-entrant and delimited continuations are the default
+(docs/continuations.md). Next, from its "Further work": frame-aware
+versions of the Lisp primitives that call Scheme (the sorts, R6RS's
+folds, the bridge), which today push a barrier that re-entry can't
+cross; safety information across libraries; SRFIs 226 and 248 on the
+native continuation marks rather than on call/cc and dynamic-wind.
 
-- A procedure that makes a non-tail call that may capture becomes a
-  state machine; each such call pushes a stack-allocated frame, which a
-  capture copies and a re-entry rebuilds.
-- Most calls can't capture (calls to safe procedures, safe calls of
-  `map` and the like, escape-only `call/cc`) and compile as they would
-  escape-only.
-- `dynamic-wind`, exception handlers, `parameterize`, and the loops
-  written in Lisp (`map`, `vector-map`, ...) push frames of their own;
-  other Lisp code that calls Scheme procedures (the sorts, R6RS's folds,
-  the bridge) pushes a barrier, which makes re-entering through it an
-  error.
-- tests/run-continuation-tests.lisp: 45 of 45. Cost: 5.0% over
-  escape-only as a geometric mean of bench/ (7.7% before the October
-  2026 speed pass), 39 of 57 benchmarks within 5%, 1.4–1.8× on a few
-  closure-heavy programs. A site costs about 2.4 ns; a generator's
-  yield, two captures and re-entries, about 200 ns.
-- **Delimited continuations** on the same frames: a prompt is a frame
-  with a `catch`; `abort-to-prompt` copies the frames above it and
-  throws; calling the composable continuation rebuilds them on top of
-  the caller's stack. `(pseudoscheme control)` (src/control.sls) has
-  Guile's interface: `call-with-prompt`, `abort-to-prompt`, `%`,
-  `shift`/`reset`, `call/ec`. docs/continuations.md, "Delimited
-  continuations".
-- Built on it: SRFI 158's coroutine generators, SRFI 226 (the sample
-  implementation, prompts and marks included), SRFI 248, and R6RS
-  `guard`'s re-raise in the `raise`'s dynamic environment.
+## 4. The Lisp bridge
 
-Next (docs/continuations.md, "Further work"): frame-aware versions of
-the barriers' primitives; safety information across libraries;
-continuation marks on the same frames as prompts (SRFIs 226 and 248
-are still written on call/cc and dynamic-wind, src/srfi/).
-
-**R5RS** runs on psyntax (`ps-r7rs::eval-at-r5rs-repl`, a top level whose
-bindings are `(pseudoscheme r5rs)`), so it gets full continuations too;
-the classic translator remains for the translator's own bootstrap and
-`tests/run-r5rs-tests.lisp --classic` (183 of 188).
-
-## 4. The Lisp bridge, next
-
-What exists is in docs/interop.md:
-- from Scheme: `(cl <package>)` libraries (functions, variables, macros
-  and special operators compiled as Lisp, symbols), autoloading,
-  `#:keywords`, and `(pseudoscheme lisp)`;
-- from Lisp: `r7rs:import` with import sets, Scheme macros as Lisp
-  macros, `r7rs:define`, `r7rs:define-library` and `use-library`;
-- ASDF components.
-
-Next:
-
-- ~~**Scheme-syntax CLOS**~~: done, `(pseudoscheme clos)`
-  (docs/interop.md 3.7).
-- **Assignment across the boundary**: inside a Lisp macro call a Scheme
-  variable is read-only (it's passed by value), and so is a Lisp
-  variable inside a Scheme macro's arguments.
-- ~~**Fasl-safe expansions**~~: done. Under `compile-file`, a Scheme
-  macro's expansion in Lisp code is the Scheme `lambda`, expanded again
-  when the fasl loads (docs/interop.md 4.2); ASDF library components
-  compile into the system's fasls (docs/interop.md 5).
-- **A package/system map** for the cases where they differ (package
-  `BT`, system `bordeaux-threads`), so that `(cl bt)` autoloads.
-- **Predicate overrides** per import, for functions like Ironclad's
-  `verify-signature` whose names don't say they're predicates.
-- **An Akku/snow helper** for Lisp: find a project's `.akku/lib` (the
-  command line's `--akku` does) or install snow packages from Lisp.
-  docs/libraries.md describes the manual way.
-- **Bridge issues found while writing SRFIs 18, 106, 126 and 170:**
-  - `lisp-funcall` of a raw function (from `lisp-function`) passes
-    `#f` to it unconverted, contrary to docs/interop.md: `to-lisp`
-    wraps the function and `scheme-facing` unwraps it again through
-    `*originals*`.
-  - A Lisp function treated as a predicate keeps only its first value
-    (`mkstemp`, say).
-  - A Lisp condition reaching a Scheme handler is a plain
-    `&assertion` (`foreign-condition`, src/r6rs/conditions.lisp);
-    passed back to Lisp it is the original again (`(cl:typep e ...)`
-    works), but Scheme code can't ask its type without Lisp.
-  - `#f` returned through a Lisp macro's body comes back as `()`.
-  - A `(cl ...)` export that is both a function and a type
-    (`cl:character`) is the function outside Lisp macro calls;
-    `lisp-symbol` gets the type.
-  - Inside a `lisp` form, `pkg::sym` isn't read as a Lisp symbol.
-- **Thread safety**: psyntax's state is global and unlocked: the
-  library table, the gensym counter, the interaction environment and
-  the parameters the front end sets. Two steps would fix it:
-  - ~~first, one recursive lock around everything that expands or
-    installs libraries~~: done (`*expander-lock*`, src/psyntax.lisp;
-    psyntax's `expansion-lock-hook`), with `eval-core` letting go of it
-    while expanded code runs;
-  - `parameterize` assigns the parameter's one global value for the
-    extent of its body (`parameterize*`, src/r7rs/rts.lisp), unless the
-    thread has a table of its own values (`*thread-parameters*`, which
-    Chez's `fork-thread` gives the threads it makes); otherwise threads
-    see each other's bindings. It should bind a special variable
-    instead, which SRFI 18's `make-thread` would capture so that new
-    threads inherit the current bindings. Only the port parameters are
-    per-thread today;
-  - later, per-thread state where it matters (the interaction library,
-    `*include-directory*`), so that threads can expand at the same
-    time.
+What exists is in docs/interop.md. Next:
+- Assignment across the boundary (a Scheme variable is read-only inside
+  a Lisp macro call, and the reverse).
+- A package/system map (`(cl bt)` autoloading `bordeaux-threads`), and
+  predicate overrides per import.
+- An Akku/snow helper for Lisp.
+- The small issues found writing SRFIs 18, 106, 126 and 170:
+  `lisp-funcall` of a raw function passes `#f` unconverted; a predicate
+  keeps only its first value; a Lisp condition is a plain `&assertion`
+  to Scheme; `#f` through a Lisp macro's body comes back as `()`; a
+  `(cl ...)` export that is both a function and a type; `pkg::sym`
+  inside a `lisp` form.
+- **Thread safety**: one lock around the expander is done
+  (`*expander-lock*`). Left: `parameterize` binding a special variable,
+  inherited by new threads, instead of assigning the global value
+  (only the port parameters and Chez's `fork-thread` threads are
+  per-thread today); then per-thread expander state, so threads can
+  expand at the same time.
 
 ## 5. Real-world libraries
 
-From the corpus runs (`tests/run-library-corpus.lisp` over Akku and
-snow-fort trees):
+From `tests/run-library-corpus.lisp`: xitomatl loads 123 of 127
+libraries; left are `(xitomatl profiler ...)` (a `let-syntax`-bound
+`define` that doesn't take effect) and `(xitomatl R6RS-lexer)` (an
+`identifier-append` identifier not found). Some libraries rely on
+chibi's or Gauche's leniency, such as duplicate pattern variables in
+`syntax-rules`, and aren't counted as bugs.
 
-- xitomatl: 123 of its 127 libraries load, with the `(ikarus)` library
-  (src/compat/ikarus.scm), `get-mode`/`chmod`/`file-change-time` and a
-  real `machine-type` in `(chezscheme)` (chez-srfi derives `posix` from
-  it), `%xx` escapes in file names, `(define x)` and definitions in
-  `with-syntax` bodies. Left: `(xitomatl profiler ...)` (chez-srfi's
-  SRFI 19 hides definitions with a `let-syntax`-bound `define`, which
-  doesn't take effect) and `(xitomatl R6RS-lexer)` (an identifier made
-  with `identifier-append` isn't found).
-- Chez's `meta-cond`/`meta` would let some chez-srfi variants load (15).
-- Some libraries depend on chibi- or Gauche-specific leniency, such as
-  duplicate pattern variables in `syntax-rules`, and are not counted as
-  bugs here.
+## 6. The other Schemes' modes
 
-## 6. Portability
+- **Chez** (docs/chez.md): what's left is the missing procedures that
+  aren't Chez's internals, and the mats that still fail; busy work.
+- **Guile** (docs/guile.md, docs/guile-vm.md): the suite's last
+  failures; the VM instructions only libguile's generated code uses;
+  `,trace` through natively compiled code; Guix building `hello` in the
+  container.
+- **libguile** (docs/libguile.md, "What's next"): the 137 functions
+  guile-gnutls, guile-ssh and guile-avahi import (ports first), so that
+  Guix's TLS runs; bigger LilyPond inputs; our own `libguile.h`.
+- **Racket** (docs/racket.md): `--racket` is strategy B, our linklet
+  compiler; `--racket=cs` (strategy A) reports "not implemented yet".
+  Next: Racket's own suite file by file, a faster cold start, real
+  places and futures, and Racket's thread and io layers in place of our
+  natives.
 
-Developed and tested on SBCL. Implementation-specific facilities go
-through portability libraries: float-features (infinities, NaN, float
-traps, IEEE bit access), cl-unicode (case mapping, normalization,
-general categories), trivial-gray-streams (binary, custom and
-transcoded ports), trivial-cltl2 (lexical environments for Scheme
-macros in Lisp), trivial-garbage (weak tables, finalizers) and
-bordeaux-threads (SRFI 18; timeouts in the R6RS test runner); SRFI 106
-uses usocket and SRFI 170 osicat when they're installed. What is left per implementation, with fallbacks:
+## 7. Directions queued
 
-- `disable-float-traps` (float-features only masks traps around a body)
-  and listing the process environment (`get-environment-variables`).
-- The standard binary ports: `sb-sys:make-fd-stream` on SBCL,
-  `/dev/fd/N` elsewhere.
-- The CLI: finding SBCL's contribs, and recognizing an interactive
-  interrupt.
-- `string-titlecase` finds word boundaries with a simple rule rather
-  than full Unicode word breaking.
-
-## 7. Racket (`--racket`)
-
-Three strategies, kept separate and selectable with
-`--racket=cs|linklet|hybrid`. docs/racket.md and
-docs/racket-linklet-compiler.md have the design and the status.
-- **B, `--racket=linklet`: runs `#lang racket/base` programs.**
-  - Our linklet compiler compiles Racket's expander, which comes from
-    the raw linklet in Racket BC's `startup.inc`, so no Racket is
-    needed.
-  - Lisp stands in for Racket's runtime: structs, control, exceptions,
-    hashes, ports, paths, the printer, and regexps on CL-PPCRE.
-  - `racket/base` loads from the pinned source's collects, and compiled
-    linklets are cached as fasls.
-  - Next: `.zo` files, so racket/base isn't expanded on every start
-    (about 18 s now); then the rest of `#%kernel`, measured by
-    tests/racket/coverage.lisp.
-- **A, `--racket=cs`, and C, `--racket=hybrid`: milestone 0.**
-  - The inventory finds 70 Chez internals rumble uses that `--chez`
-    lacks.
-  - 63 of them are in upstream Chez 10, so they belong in the Chez mode
-    itself (`--chez` stays faithful to upstream). The rest go in
-    src/racket/cs/.
-- **Racket's sources** come from a shallow clone of a pinned release,
-  made by `utils/racket/setup.sh`, never vendored. Upstream Chez's
-  source, used only for the inventory, comes from `utils/chez/setup.sh`.
-
-## 8. Guile (`--guile`), and Guix
-
-docs/guile.md has the investigation and plan. The approach is the same
-as Racket's: implement the layer Guile's own Scheme code runs on, then
-run that code unchanged. libguile is about 1,100 C primitives; boot-9
-(the module system) and psyntax-pp, both Scheme, sit on top, and psyntax
-expands to Tree-IL.
-
-- **Done**: `--guile` runs Guile 3.0's own `boot-9.scm`, psyntax and
-  modules, unmodified and loaded from a Guile installation. They run on
-  libguile's primitives in Lisp, with a Tree-IL compiler to core Scheme
-  and C extensions as Lisp `load-extension` init functions (src/guile/).
-  Guile's own test suite is vendored (`make test-guile`): 41,993 tests
-  pass (5,982 on the first run). GOOPS is Guile's own on a C half in
-  Lisp; ports are Guile's (binary and textual, any encoding); the writer
-  is libguile's; arrays, locales, popen; compiled modules are cached as
-  fasls. Prompts (section 3) are what its exceptions are built
-  on. `(system foreign)` is on CFFI, through the FFI layer Chez's FFI
-  uses too (src/ffi.lisp, system `pseudoscheme/cffi`). Guile's elisp compiler runs the basics.
-- **Left:** the VM's continuations, frames and stacks (Guile's
-  bytecode runs on a VM in Lisp, docs/guile-vm.md); sockets; source positions; exact error keys in the long tail;
-  Emacs Lisp's `boot.el` and its tests.
-- **Guix**, the long-term test: `(guix records)`, G-expressions, the
-  store protocol to a real `guix-daemon`, and the FFI libraries
-  (guile-gcrypt, guile-git, guile-sqlite3, guile-zlib). Milestone: the
-  same derivation as `guix build -d hello`. **Reached** (October 2026,
-  in the Linux container, tests/guix/run.sh): `guix build -d
-  --no-grafts -e '(@ (gnu packages base) hello)'` on `--guile`, with full
-  continuations, gives
-  `/gnu/store/qzh7rvz609rm845xxf3jsasxzgbp208x-hello-2.12.2.drv`, the same
-  as real Guix. Cold, it loads and compiles 525 of Guix's modules in 41
-  minutes, in a heap of about 3 GB. Next: building hello itself (the
-  `hello` step).
-- **Depends on:** the compiled-library cache (section 2; Guix is
-  hundreds of modules), thread safety (section 4), and the CFFI
-  experience of the bridge and of Chez's FFI.
-- **First step now:** the "error=1" files of Guile's suite
-  (docs/guile.md, "Where it stands").
-
-## 9. Chez Scheme (`--chez`)
-
-`pseudoscheme --chez` (or `scheme-script`) runs Chez programs: Chez's
-top level, `(chezscheme)` with 1118 of Chez 10.4.1's 1715 names, and
-library files whose library a macro makes. The code is in src/chez/;
-docs/chez.md describes how each problem was solved, measured against
-[e](https://github.com/paveluv/e), an editor written in Chez:
-33 of its 63 test scripts pass.
-
-- **Done**: the top level (a `begin` evaluated form by form, as Chez
-  does), `meta define`, top-level `library` forms from macros, a body's
-  `import` of libraries, Chez's extensions to R6RS procedures
-  (`dynamic-wind`'s critical flag, file options, one-argument `eval`),
-  threads with per-thread parameters, recursive mutexes and conditions,
-  the FFI on CFFI, fd ports with nonblocking reads, `format` on CL's,
-  `Exception in ...` messages, the reader's `#&`, `#vfx`, `#N(...)`,
-  `#%`, `#!eof`, and about 300 procedures (lists, numbers, paths,
-  hashtables, time, boxes, fxvectors, system).
-- **Next**: engines and timer interrupts (a tick check at procedure
-  entry in `--chez` code, with the existing frames to capture);
-  annotations (`get-datum/annotations`); ftypes; `r6rs:` variants;
-  `define-record`/`record-case`; the printer's parameters.
-
-## 10. Smaller items
-
-- Bootstrapping without an existing Pseudoscheme is done (boot/README.md):
-  the `.pso` files come from any of seven Schemes, and psyntax's image
-  from a seed built by Chez Scheme or, through boot/stage0/, by any R5RS
-  Scheme (Chibi, Scheme 48, Gauche). Every seed ends in the same image,
-  byte for byte; `make bootstrap-check` checks Chez's and Chibi's, CI
-  Chez's and Scheme 48's.
-  Left: an s7 adapter for the `.pso` step (untested), and stage0
-  adapters for more hosts (CHICKEN, Guile) if wanted.
-- ASDF's one-second timestamps can leave a stale fasl after `.pso`
-  regeneration. Clear the fasl cache (README, "Bootstrap artifacts").
+- **Racket parallelism** on bordeaux-threads, lparallel or chanl, for
+  futures and places; Racket threads are SBCL threads with a baton
+  today (src/racket/native/threads.lisp).
+- **Opt-in optimizations**: a declarative top level (direct calls
+  between top-level procedures), chosen by a flag, an environment
+  variable or an importable declaration, as C compilers' flags are,
+  since it changes what redefinition does.
+- **Portability** beyond SBCL: implementation-specific code goes
+  through portability libraries (float-features, cl-unicode,
+  trivial-gray-streams, trivial-cltl2, trivial-garbage,
+  bordeaux-threads); left per implementation are `disable-float-traps`,
+  listing the environment, the standard binary ports, and the CLI's
+  contribs and interrupts.
+- **Bootstrapping** from other Schemes is done (boot/README.md); left
+  are an s7 adapter for the `.pso` step and stage0 adapters for more
+  hosts, if wanted.

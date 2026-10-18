@@ -10,6 +10,9 @@ a different system. 1.0 means:
 - Emacs through SLY/Slynk (and SLIME/Swank);
 - possibly an LSP server for other editors.
 
+As of 2026-10-18 every requirement but the optional LSP server is met;
+ROADMAP.md, "Before the rename", lists what is left to check first.
+
 There are no outside users, so nothing old is kept for compatibility:
 no package nicknames or system aliases, and no `PSEUDOSCHEME_*` variables
 read as a fallback.
@@ -138,11 +141,20 @@ anything in Quicklisp or ocicl that we load. Search `~/quicklisp`,
 
 ### Environment variables
 
-Rename all twelve variables from `PSEUDOSCHEME_*` to `QUASISCHEME_*`:
+Rename every variable from `PSEUDOSCHEME_*` to `QUASISCHEME_*` (36 on
+2026-10-18; `git grep -ohI 'PSEUDOSCHEME_[A-Z0-9_]*' | sort -u` lists
+them):
 
-- `LIBRARY_PATH`, `LIBRARY_CACHE`, `LIBRARY_CACHE_DIRECTORY`;
-- `THREAD_STACK_SIZE`;
-- `GUILE_COMPILER`, `GUILE_VM_BACKEND`, `GUILE_JIT`, `GUILE_JIT_THRESHOLD`, `GUILE_COMPILE_VALUE`, `GUILE_CACHE`, `GUILE_CACHE_DIRECTORY`;
+- `LIBRARY_PATH`, `LIBRARY_CACHE`, `LIBRARY_CACHE_DIRECTORY`,
+  `THREAD_STACK_SIZE`, `HEAP`, `OPTIMIZE`, `OPTIMIZE_TRACE`,
+  `SYMBOL_SWEEP`, `LIBSBCL`;
+- `GUILE_*`: `COMPILER`, `VM_BACKEND`, `JIT`, `JIT_THRESHOLD`,
+  `COMPILE_VALUE`, `CACHE`, `CACHE_DIRECTORY`, `CORE`, `GO`,
+  `TRACE_THROWS`;
+- `LIBGUILE`, `LIBGUILE_PROFILE`, `LIBGUILE_TRACE`, `LIBGUILE_TRACE_AFTER`;
+- `RACKET_*`: `STRATEGY`, `CORE`, `CORE_ACTIVE`, `SAVE_CORE`, `REGEXP`,
+  `ZO`, `SOURCE`, `STAGE`, `STATS`, `BACKTRACE`, `TRACE_STRUCT`; and
+  `RKTIO_DIRECTORY`;
 - the `PSEUDOSCHEME_SURELY_UNSET_VARIABLE` test.
 
 The bench script's `PSEUDOSCHEME=` variable becomes `QUASISCHEME=`.

@@ -89,13 +89,20 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 | Guile (`--guile`) | Guile's own psyntax, to Tree-IL | Guile's test suite: 42,702 pass (docs/guile.md) |
 | Racket (`--racket`) | Racket's own expander, as a linklet | `#lang racket/base` and `#lang racket` programs run; Racket's own suite is measured file by file (docs/racket.md) |
 
+Core forms from every front end pass through an optimizer before the
+translator: cp0 (inlining, constant folding, copy propagation) and
+cptypes (type recovery), after Chez's (src/cp0.lisp, src/cptypes.lisp,
+docs/optimizations.md). `PSEUDOSCHEME_OPTIMIZE=0` turns it off, `1`
+runs cp0 only; `2`, both, is the default.
+
 Continuations are full and re-entrant, and delimited ones (prompts) are
 native too (docs/continuations.md);
 `--continuations=escape` makes them escape-only, a little faster in code
 that calls unknown procedures in loops.
 
-Speed (`bench/`, ecraven's r7rs-benchmarks): all 57 run, at about 1.4×
-Chez's time as a geometric mean with full continuations (Guile: 2.8×).
+Speed (`bench/`, ecraven's r7rs-benchmarks, measured before the
+optimizer): all 57 run, at about 1.4× Chez's time as a geometric mean
+with full continuations (Guile: 2.8×).
 `bench/run.sh modes` runs the same programs in each mode, each its own
 column. R6RS mode is as fast as R7RS mode; Chez mode, at Chez's script
 top level, takes about 1.5× R7RS mode's time; Guile mode, about 1.3–1.6×
@@ -402,7 +409,7 @@ sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-libr
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-interop-tests.lisp
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-srfi-system-tests.lisp
 make -C contrib/cli test
-make test-srfi                           # src/srfi/tests/, 121 programs
+make test-srfi                           # src/srfi/tests/, 122 programs
 sh tests/run-program-tests.sh [bin/pseudoscheme [name ...]]   # needs Quicklisp
 python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 ```
@@ -441,7 +448,8 @@ suites.
 
 ## Known gaps
 
-The big ones; `ROADMAP.md` has the rest.
+The big ones; `ROADMAP.md` has the rest, and what is left before the
+rename to Quasischeme 1.0 (docs/rename-quasischeme.md).
 
 - **Continuations through Lisp code.** A continuation captured in a
   Scheme procedure that Lisp code called (through the bridge, or a Lisp
@@ -457,10 +465,10 @@ The big ones; `ROADMAP.md` has the rest.
   many of Racket's own test files still crash or fail, places and
   futures are stand-ins, and a cold module cache takes minutes to fill
   (docs/racket.md).
-- **Chez mode is partial.** 1257 of `(chezscheme)`'s 1715 names; the
-  writer doesn't honor `print-precision`, and forms that need Chez's
-  own expander (`top-level-program`, `import-only` and the like) are
-  missing (docs/chez.md).
+- **Chez mode is partial.** 1257 of `(chezscheme)`'s 1715 names, the
+  missing ones mostly Chez's internals (the inspector, `$` system
+  procedures, compiler knobs); the writer accepts `print-precision`
+  but doesn't consult it (docs/chez.md).
 - **Guile mode.** Guile's compiler internals beyond Tree-IL, and many
   of libguile's C functions (634 of 1,793 are stubs), are still to
   come; Guile mode's code runs slower than R7RS mode's where top-level
