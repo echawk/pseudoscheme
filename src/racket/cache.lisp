@@ -116,6 +116,12 @@ beside it and return NIL."
 			    (declare (ignorable out))))
 	   nil)))
 
+(defun compile-into-cache-p ()
+  "Whether a linklet not in the cache is compiled into it: not when
+QUASISCHEME_EVALUATOR=interpret (src/psyntax.lisp, *EVALUATOR*), which
+runs it in SBCL's interpreter instead (sb-fasteval, if SBCL has it)."
+  (not (eq (qsx::evaluator) :interpret)))
+
 (defun whole-function (compiled)
   "The instantiation function of COMPILED, not split: from its fasl if
 there is one, else compiled now, into the cache if COMPILED has a key."
@@ -123,7 +129,7 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 	 (key (linklet-key compiled))
 	 (fasl (and key (linklet-fasl key))))
     (or (and fasl (car (ignore-errors (load-split-fasl fasl 1))))
-	(and fasl
+	(and fasl (compile-into-cache-p)
 	     (write-fasl-or-mark fasl (list form))
 	     (car (ignore-errors (load-split-fasl fasl 1))))
 	(qsx:host-eval form))))
@@ -136,7 +142,7 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 	 (key (linklet-key compiled))
 	 (fasl (and key (linklet-fasl key))))
     (or (and fasl (ignore-errors (load-split-fasl fasl n)))
-	(and fasl
+	(and fasl (compile-into-cache-p)
 	     (write-fasl-or-mark fasl (cddr form))
 	     (ignore-errors (load-split-fasl fasl n)))
 	(mapcar #'qsx:host-eval (cddr form)))))

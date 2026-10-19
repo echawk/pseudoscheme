@@ -83,10 +83,12 @@ bench/RESULTS.md has the last runs and what made the difference;
 docs/optimizations.md has the ideas, their status and the optimizer's
 plan. Next:
 
-- **Measure the optimizer** (`bench/run.sh`, and `bench/run.sh modes`)
-  against the last run, then its plan's later items: unboxed flonums,
-  a closed world for `--compile` executables and library bodies, escape
-  analysis, cpletrec, records as one object.
+- **The optimizer's plan, next items** (docs/optimizations.md, "Plan"):
+  unboxed flonums, a closed world for `--compile` executables and
+  library bodies, cpletrec, records as one object. cp0, cptypes and
+  cpdx (escape analysis, 2026-10-19) run on every mode's core forms
+  (`QUASISCHEME_OPTIMIZE_STATS=1` shows it); cpdx is neutral on
+  bench/.
 - **The slowest benchmarks**, `ack`, `fibc`, `divrec`, `browse` (about
   3.5×): what's left is SBCL's call and allocation costs.
 - **R6RS overrides of open-coded primitives** (`list-tail`,
@@ -96,10 +98,13 @@ plan. Next:
 - **psyntax's identifier lookup** searches ribs linearly; hashed ribs,
   as Ikarus and Chez have, would cut a third of a macro-heavy library's
   expansion.
-- **Interpreting run-once code**: Guile mode interprets top-level forms
-  that make no procedure (`trivial-core-p`, src/guile/boot.lisp) rather
-  than compiling them; the same would help Racket module bodies, R7RS
-  and Chez top levels, and REPL input.
+- **Interpreting run-once code**: `QUASISCHEME_EVALUATOR=auto|interpret`
+  (docs/optimizations.md, "Interpreting instead of compiling") does it
+  for every mode, with sb-eval or, in an SBCL built with it,
+  sb-fasteval. Measured: Guile's module loading without the cache 2.7x
+  faster interpreted; Racket's cold start 3x slower (its expander is the
+  hot path). Left: a finer `auto` that interprets a module body but
+  compiles the procedures it defines.
 
 ## 2. The library cache
 

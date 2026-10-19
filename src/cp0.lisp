@@ -22,7 +22,8 @@
 ;;;;  - drops code whose value isn't used and that has no effect, and the
 ;;;;    bindings nothing refers to.
 ;;;;
-;;;; Then CPTYPES (src/cptypes.lisp) recovers types.
+;;;; Then CPTYPES (src/cptypes.lisp) recovers types, and CPDX
+;;;; (src/cpdx.lisp) finds what can be allocated on the stack.
 ;;;;
 ;;;; Soundness.  Only lexical variables are known, and only within one
 ;;;; core form: top-level variables (a REPL's, Chez mode's, Guile's
@@ -38,7 +39,7 @@
 ;;;; lambda, so no init can run before a variable it calls is defined.
 ;;;;
 ;;;; QUASISCHEME_OPTIMIZE=0 turns the pass off, =1 runs cp0 only, and
-;;;; anything else (the default) runs cp0 and cptypes.  The level is part
+;;;; anything else (the default) runs cp0, cptypes and cpdx.  The level is part
 ;;;; of BUILD-SIGNATURE, so compiled-library caches don't mix levels.
 
 (in-package "QUASISCHEME-PSYNTAX")
@@ -63,9 +64,24 @@
   "True to print each form before and after optimization (for debugging;
 QUASISCHEME_OPTIMIZE_TRACE=1).")
 
-(defvar *cp0-stats* (list 0 0 0 0 nil)
-  "Forms optimized, forms given up on, calls inlined, calls folded, and
-the reasons for giving up.")
+(defvar *cp0-stats* (list 0 0 0 0 nil 0 0)
+  "Forms optimized, forms given up on, calls inlined, calls folded, the
+reasons for giving up, and cpdx's closures and rest lists put on the
+stack (src/cpdx.lisp).")
+
+(defun report-optimizer-stats ()
+  "With QUASISCHEME_OPTIMIZE_STATS=1, print *CP0-STATS* on exit: whether,
+and how much, the optimizer ran in a mode."
+  (when (equal (uiop:getenv "QUASISCHEME_OPTIMIZE_STATS") "1")
+    (destructuring-bind (ok bailed inlined folded reasons dx-closures dx-rests) *cp0-stats*
+      (format *error-output* "~&;; optimizer: ~D forms optimized, ~D given up on~@[ (~{~A~^; ~})~]; ~D calls inlined, ~D folded; ~D closures and ~D rest lists on the stack~%"
+	      ok bailed (subseq reasons 0 (min 5 (length reasons))) inlined folded dx-closures dx-rests))))
+
+(defun reset-optimizer-stats ()
+  (setq *cp0-stats* (list 0 0 0 0 nil 0 0)))
+
+#+sbcl (pushnew 'report-optimizer-stats sb-ext:*exit-hooks*)
+#+sbcl (pushnew 'reset-optimizer-stats sb-ext:*init-hooks*)   ; a saved image's own count
 
 ;;; ------------------------------------------------------------------
 ;;; Core syntax
@@ -677,7 +693,7 @@ pass doesn't know."
 				     (setq out new)
 				     (unless changed (return))))
 			  (when (>= level 2)
-			    (setq out (cptypes out)))
+			    (setq out (cpdx (cptypes out))))
 			  (incf (first *cp0-stats*))
 			  (list :ok out))))))
 	    (when (or *cp0-trace* (uiop:getenv "QUASISCHEME_OPTIMIZE_TRACE"))

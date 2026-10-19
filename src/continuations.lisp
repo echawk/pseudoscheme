@@ -1211,6 +1211,9 @@ safe procedures can't capture.")
 procedure's variable, a primitive that calls no procedure, or a lambda
 whose body can't capture."
   (cond ((lambda-form-p e) (not (may-capture-p (caddr e))))
+	;; cpdx's mark on a lambda (src/cpdx.lisp)
+	((and (consp e) (consp (cdr e)) (equal (primitive-name (car e)) "%cp-dx"))
+	 (safe-procedure-p (cadr e)))
 	((and *safe-procedures* (symbolp e) (gethash e *safe-procedures*)) t)
 	((safe-location-p e) t)
 	((safe-operator-p e) t)

@@ -214,11 +214,12 @@
 	       (:file "continuations" :depends-on ("psyntax"))
 	       (:file "cp0" :depends-on ("psyntax" "continuations"))
 	       (:file "cptypes" :depends-on ("cp0"))
-	       (:file "library-cache" :depends-on ("psyntax" "continuations" "cptypes"))
-	       (:file "compiled-files" :depends-on ("psyntax" "continuations" "cptypes"))
+	       (:file "cpdx" :depends-on ("cp0" "cptypes"))
+	       (:file "library-cache" :depends-on ("psyntax" "continuations" "cptypes" "cpdx"))
+	       (:file "compiled-files" :depends-on ("psyntax" "continuations" "cptypes" "cpdx"))
 	       (psyntax-image "psyntax-quasischeme"
 		:pathname "../vendor/psyntax/psyntax-quasischeme"
-		:depends-on ("r6rs" "chez" "compat" "psyntax" "continuations" "cptypes" "library-cache"))))
+		:depends-on ("r6rs" "chez" "compat" "psyntax" "continuations" "cptypes" "cpdx" "library-cache"))))
 
 ;;; The Common Lisp face: packages R5RS, R6RS and R7RS (EVAL, LOAD,
 ;;; REPL, EXPAND, USE-LIBRARY, ...), and the bridge between the

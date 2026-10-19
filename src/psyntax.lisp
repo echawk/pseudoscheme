@@ -881,13 +881,47 @@ its register allocation needs more than a 16 GB heap (a body of
 thousands of definitions that can't be hoisted, say), so a form is
 evaluated by SBCL's interpreter.")
 
+(defvar *evaluator* nil
+  "How top-level forms are evaluated, from QUASISCHEME_EVALUATOR, read
+once per process: :COMPILE (the default) compiles every form with SBCL;
+:AUTO interprets a form that makes no closure, which runs once, so that
+compiling it costs more than it saves; :INTERPRET interprets every form.
+SBCL's interpreter is sb-eval, or, in an SBCL built with
+--with-sb-fasteval, sb-fasteval, which is several times faster.")
+
+#+sbcl (pushnew (lambda () (setq *evaluator* nil)) sb-ext:*init-hooks*)
+
+(defun evaluator ()
+  (or *evaluator*
+      (setq *evaluator*
+	    (let ((v (uiop:getenv "QUASISCHEME_EVALUATOR")))
+	      (cond ((equal v "interpret") :interpret)
+		    ((equal v "auto") :auto)
+		    (t :compile))))))
+
+(defun run-once-form-p (form)
+  "Whether Lisp FORM makes no closure, so that whatever it does runs once:
+it has no LAMBDA, FUNCTION, FLET, LABELS or the like."
+  (labels ((walk (x)
+	     (cond ((symbolp x)
+		    (not (member x '(lambda function flet labels macrolet sb-int:named-lambda))))
+		   ((atom x) t)
+		   ((eq (car x) 'quote) t)
+		   (t (loop for y on x
+			    always (and (walk (car y)) (or (listp (cdr y)) (walk (cdr y)))))))))
+    (walk form)))
+
 (defun eval-compiled-or-interpreted (form)
   "EVAL FORM, or, if SBCL's compiler fails on it (a procedure too big for
 one code object, past arm64's branch and constant reach), evaluate it
 with SBCL's interpreter: nothing of it has run when compiling fails.  A
-form bigger than *INTERPRET-LIMIT* is interpreted."
+form bigger than *INTERPRET-LIMIT* is interpreted, and so is one
+*EVALUATOR* says to interpret."
   #+sbcl
-  (when (> (tree-size form) *interpret-limit*)
+  (when (or (> (tree-size form) *interpret-limit*)
+	    (case (evaluator)
+	      (:interpret t)
+	      (:auto (run-once-form-p form))))
     (return-from eval-compiled-or-interpreted
       (let ((sb-ext:*evaluator-mode* :interpret))
 	(eval form))))
@@ -942,7 +976,7 @@ TOP-LEVEL begin's forms are compiled one by one: its biggest counts."
 		  (tree-size form))))
     (if (> size *inline-arithmetic-limit*)
 	`(locally (declare (notinline qs:scheme+ qs:scheme- qs:scheme*)) ,lisp)
-	(inline-small-labels lisp))))
+	(inline-small-labels (stack-allocate-marked lisp)))))
 
 ;;; Small known procedures inline (docs/optimizations.md, idea 6).  SBCL
 ;;; inlines a LABELS function only if it's called once; declared INLINE,
@@ -1111,6 +1145,7 @@ the command line and exits; DROP-LAST skips it.)"
   (install-continuation-primitives)
   (install-inline-primitives)
   (install-cptypes-primitives)
+  (install-cpdx-primitives)
   *host*)
 
 ;;; Inline primitives.  A host primitive that isn't one of the

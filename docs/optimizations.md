@@ -186,7 +186,7 @@ boxed one. In the vector loop above, `acc` starts as `0.0` but the
 vector's elements are unknown, so nothing can be declared without
 type-checking `(vector-ref v i)`.
 
-### 5. `dynamic-extent` (not started)
+### 5. `dynamic-extent` (partly done, October 2026: cpdx)
 
 Rest-argument lists that don't escape, and closures passed to
 `for-each`, `map`, `vector-for-each` and the like that the procedure
@@ -198,6 +198,30 @@ stack.
 (define (sum . xs) (apply + xs))
 (define (print-all l port) (for-each (lambda (x) (write x port)) l))
 ```
+
+Done (src/cpdx.lisp, the third pass of OPTIMIZE-CORE, so every mode's
+core forms get it): a lambda passed to a primitive that only calls it
+during the call (`map`, `for-each`, `vector-for-each`, `filter`,
+`call-with-values`, ...) is declared `dynamic-extent` when neither its
+body nor the call's other arguments can capture a continuation; a rest
+list is when the lambda's body can't capture and only reads the list
+(`car`, `null?`, `length`, `cdr` read in turn). Not yet: a rest list
+passed on to a loop or to `apply` (as in `sum` above: `apply`'s
+procedure may keep its rest list), and procedures defined in Scheme
+rather than as host primitives (Guile mode's `map` is boot-9's).
+Why "can't capture": a continuation captured while the object is live
+copies frames that refer to it, and re-entered after the call returned
+they would refer to a stack that is gone. A first version that checked
+only the lambda crashed four SRFI tests: in `(map (lambda (p) ...)
+(permutations ...))` the closure, made before the other argument ran,
+was live across that capturing call.
+
+Effect: none measurable on bench/ (geometric mean within run-to-run
+noise; few of its loops pass closures to `map`); 2-3% on a loop that
+does nothing but call `map` with a closure, since SBCL's nursery
+allocation is already cheap. `QUASISCHEME_CPDX=0` turns it off,
+`closures` or `rest` keeps one kind; `QUASISCHEME_OPTIMIZE_STATS=1`
+prints, at exit, how many forms each pass handled and what cpdx marked.
 
 `xs` and the closure over `port` are each heap-allocated today.
 
@@ -351,7 +375,10 @@ through our generic calls. The user approved this list, in this order:
 5. **Escape analysis** (idea 5): `dynamic-extent` for closures and rest
    lists that don't escape (a lambda passed to a known `for-each`,
    `map`, `vector-for-each`; `apply`'s lists); closures with no free
-   variables lifted, so making one allocates nothing.
+   variables lifted, so making one allocates nothing. *First pass done
+   2026-10-19* (src/cpdx.lisp; idea 5 above): closures passed to
+   primitives, and rest lists only read. SBCL already makes a lambda
+   with no free variables once, so lifting isn't needed.
 6. **cpletrec**: `letrec`, named `let` and internal defines of lambdas
    as `labels` everywhere, without letrec checks when the inits are
    lambdas (Racket's linklet compiler does this already).
@@ -363,6 +390,46 @@ before the translator); 4 is src/continuations.lisp; 7 is the record
 runtime (src/r6rs/). Each must keep every mode's conformance suites
 passing.
 
+## Interpreting instead of compiling (October 2026)
+
+Much of what a mode evaluates runs once: a module's top-level forms, a
+linklet's body, a REPL's input. Compiling it with SBCL costs more than
+running it. `QUASISCHEME_EVALUATOR` (src/psyntax.lisp, `*EVALUATOR*`)
+chooses, for every mode's top-level forms:
+
+- `compile` (the default): SBCL compiles every form, as before (Guile
+  mode still interprets forms that make no procedure, `trivial-core-p`);
+- `auto`: a translated form that makes no closure (no `lambda`,
+  `function`, `flet`, `labels`) is interpreted;
+- `interpret`: every form is interpreted, and Racket mode doesn't
+  compile linklets into its cache (it still loads the ones there).
+
+SBCL's interpreter is sb-eval, or sb-fasteval in an SBCL built with
+`sh make.sh --fancy --with-sb-fasteval --without-sb-eval` (Homebrew's
+isn't); `:interpret` is whichever the image has, so nothing else
+changes. Measured 2026-10-19 on SBCL 2.6.9, stock and built with
+sb-fasteval, each building its own `bin/quasischeme`:
+
+| run | stock (sb-eval) | sb-fasteval |
+|---|---|---|
+| Guile, five library modules, `QUASISCHEME_GUILE_CACHE=0`: compile | 2.0 s | 1.8 s |
+| ... `auto` | 2.1 s | 1.8 s |
+| ... `interpret` | 0.75 s | 0.78 s |
+| Racket, `#lang racket/base` hello, cold cache: compile | 71 s | 70 s |
+| ... `interpret` | over 900 s (stopped) | 212 s |
+| Racket or Guile hello, warm cache, any setting | 2 s / under 1 s | the same |
+
+So: interpreting pays where code runs once and little of it is called
+afterwards (loading a Guile module without the cache, 2.7x faster with
+either interpreter); it doesn't where the code is the hot path, as
+Racket's expander is during a cold start: compiled, it expands
+`racket/base` in 70 s; under sb-fasteval, which is about 4x faster than
+sb-eval here, it takes 212 s. Interpreted procedures stay interpreted,
+so `interpret` is for short scripts and one-off loads, not programs
+that compute. `auto` gains nothing measurable in these runs: Guile mode
+already interprets its run-once forms, and Racket's and the psyntax
+modes' cold time is in compiling procedures, which `auto` compiles too.
+
 ## Summary
 
 | # | idea | status | effect where it applies |
@@ -371,7 +438,7 @@ passing.
 | 2 | records as one object | not started | about halves record allocation and access |
 | 3 | cross-library knowledge | partly (per form) | inlining and fewer capture sites across libraries |
 | 4 | type inference into declarations | partly (cptypes, first pass) | fixnum and unboxed-flonum loops |
-| 5 | `dynamic-extent` | not started | rest lists and non-escaping closures |
+| 5 | `dynamic-extent` | partly (cpdx: closures passed to primitives, rest lists only read) | rest lists and non-escaping closures |
 | 6 | inlining small known procedures | partly (small `labels` functions; cp0, first pass) | calls to small helpers |
 | 7 | boolean results | partly | small |
 | 8 | faster compilation | not started | start-up and the REPL |
