@@ -1057,7 +1057,7 @@ every field's value, its ancestors' first."
       (unless (= (length args) n)
 	(qs:scheme-error "~A: incorrect number of arguments ~D (expected ~D)" name (length args) n))
       (loop for type in types for x in args do (check-field-value name type x))
-      (%make-record rtd (coerce args 'simple-vector)))))
+      (%make-record rtd args))))
 
 (defprim "chez:record-constructor" (rtd) (rtd-record-constructor rtd))
 
@@ -1074,7 +1074,7 @@ every field's value, its ancestors' first."
   (unless (= (length extras) (rtd-count base))
     (qs:scheme-error "$make-record-type: ~D extra field values for ~D fields" (length extras) (rtd-count base)))
   (setf (record-rtd rtd) base
-	(record-values rtd) (coerce extras 'simple-vector)
+	(rtd-extras rtd) (coerce extras (quote simple-vector))
 	(rtd-sealed rtd) (truthy sealed)
 	(rtd-opaque rtd) (or (truthy opaque) (rtd-opaque rtd)))
   qs:unspecific)
@@ -1090,15 +1090,15 @@ every field's value, its ancestors' first."
 (defun offset-index (who x offset)
   (unless (record-p x) (qs:scheme-error "~A: ~S is not a record" who x))
   (let ((i (and (integerp offset) (1- (floor offset 8)))))
-    (unless (and i (< -1 i (length (record-values x))))
+    (unless (and i (< -1 i (record-field-count x)))
       (qs:scheme-error "~A: invalid offset ~S for ~S" who offset x))
     i))
 
 (defprim "chez:object-ref" (x offset)
-  (svref (record-values x) (offset-index "$object-ref" x offset)))
+  (record-field x (offset-index "$object-ref" x offset)))
 
 (defprim "chez:object-set!" (x offset value)
-  (setf (svref (record-values x) (offset-index "$object-set!" x offset)) value)
+  (setf (record-field x (offset-index "$object-set!" x offset)) value)
   qs:unspecific)
 
 (defprim "chez:record-type-of" (x)
@@ -1120,7 +1120,7 @@ the field, (mutable-p name type)."
     (lambda (r)
       (unless (record-of-type-p r rtd)
 	(qs:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
-      (svref (record-values r) i))))
+      (record-field r i))))
 
 (defprim "chez:csv7-record-field-mutator" (rtd field)
   (multiple-value-bind (i f) (field-position "record-field-mutator" rtd field)
@@ -1130,7 +1130,7 @@ the field, (mutable-p name type)."
       (unless (record-of-type-p r rtd)
 	(qs:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
       (check-field-value (scheme-name (rtd-name rtd)) (third f) x)
-      (setf (svref (record-values r) i) x)
+      (setf (record-field r i) x)
       qs:unspecific)))
 
 (defprim "chez:csv7-record-field-accessible?" (rtd field)
@@ -1804,10 +1804,12 @@ reaches it goes to the invoker.")
 
 (defprim "chez:sys-record-cas!" (x i old new)
   (unless (record-p x) (qs:scheme-error "$record-cas!: ~S is not a record" x))
-  (let ((fields (record-values x)))
-    (unless (and (typep i 'fixnum) (< -1 i (length fields)))
-      (qs:scheme-error "$record-cas!: invalid index ~S for ~S" i x))
-    (bool (eq (sb-ext:compare-and-swap (svref fields i) old new) old))))
+  (unless (and (typep i 'fixnum) (< -1 i (record-field-count x)))
+    (qs:scheme-error "$record-cas!: invalid index ~S for ~S" i x))
+  (bool (eq (if (rtd-p x)
+		(sb-ext:compare-and-swap (svref (rtd-extras x) i) old new)
+		(sb-ext:compare-and-swap (sb-kernel:%instance-ref x (+ (record-field-start) i)) old new))
+	    old)))
 
 (defprim "chez:sys-sealed-record?" (x rtd)
   (check-rtd "$sealed-record?" rtd)

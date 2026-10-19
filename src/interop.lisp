@@ -511,8 +511,8 @@ that identifier's symbol."
 	(let ((message (qs-r6rs::component-of c "&message"))
 	      (irritants (qs-r6rs::component-of c "&irritants")))
 	  (when (and message irritants
-		     (equal (svref (qs-r6rs::record-values message) 0) "unbound identifier"))
-	    (let ((form (first (svref (qs-r6rs::record-values irritants) 0))))
+		     (equal (qs-r6rs::record-field message 0) "unbound identifier"))
+	    (let ((form (first (qs-r6rs::record-field irritants 0))))
 	      (and (consp form) (symbolp (car form)) (car form)))))))))
 
 (defun scheme-bound-p (symbol environment)

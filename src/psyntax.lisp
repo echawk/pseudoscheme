@@ -976,7 +976,7 @@ TOP-LEVEL begin's forms are compiled one by one: its biggest counts."
 		  (tree-size form))))
     (if (> size *inline-arithmetic-limit*)
 	`(locally (declare (notinline qs:scheme+ qs:scheme- qs:scheme*)) ,lisp)
-	(inline-small-labels (stack-allocate-marked lisp)))))
+	(inline-small-labels (declare-loop-types (stack-allocate-marked lisp))))))
 
 ;;; Small known procedures inline (docs/optimizations.md, idea 6).  SBCL
 ;;; inlines a LABELS function only if it's called once; declared INLINE,
@@ -1205,11 +1205,11 @@ the command line and exits; DROP-LAST skips it.)"
     ;; record of exactly the type: a subtype's, or an error, by the call
     ("r7rs:record-ref" (x rtd i who)
      (if (and (qs-r6rs::record-p x) (eq (qs-r6rs::record-rtd x) rtd))
-	 (svref (qs-r6rs::record-values x) i)
+	 (qs-r6rs::record-field x i)
 	 :call))
     ("r7rs:record-set!" (x rtd i value who)
      (if (and (qs-r6rs::record-p x) (eq (qs-r6rs::record-rtd x) rtd))
-	 (progn (setf (svref (qs-r6rs::record-values x) i) value) qs:unspecific)
+	 (progn (setf (qs-r6rs::record-field x i) value) qs:unspecific)
 	 :call))
     ("r7rs:record?" (x rtd)
      (if (and (qs-r6rs::record-p x) (eq (qs-r6rs::record-rtd x) rtd)) t :call))
@@ -1233,7 +1233,25 @@ calling the primitive itself.")
 			     `(let ,(mapcar #'list vars args)
 				,(sublis (acons :call `(funcall #',global ,@vars)
 						(mapcar #'cons params vars))
-					 body))))))))))
+					 body)))))))))
+  ;; R7RS define-record-type's constructor, (r7rs:make-record rtd (vector
+  ;; x ...)): the record made at once, without the vector
+  (let ((global (location (sym "r7rs:make-record"))))
+    (setf (compiler-macro-function global)
+	  (lambda (form env)
+	    (declare (ignore env))
+	    (let ((args (cdr form)))
+	      (if (and (not (eq (car form) 'funcall)) (= (length args) 2)
+		       (consp (second args)) (eq (car (second args)) 'vector))
+		  (let* ((fields (cdr (second args)))
+			 (rtd (gensym "RTD"))
+			 (vars (loop repeat (length fields) collect (gensym "F")))
+			 (r (gensym "R")))
+		    `(let* ((,rtd ,(first args)) ,@(mapcar #'list vars fields)
+			    (,r (qs-r6rs::allocate-record ,rtd ,(length fields))))
+		       ,@(loop for v in vars for i from 0 collect `(qs-r6rs::init-record-field ,r ,i ,v))
+		       ,r))
+		  form))))))
 
 (defun host-signature ()
   "What compiled code depends on in a host: which primitives are R5RS's

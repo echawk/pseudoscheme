@@ -681,6 +681,8 @@ pass doesn't know."
 	(let ((*vi* (make-hash-table :test 'eq)))
 	  (let ((result
 		  (catch 'cp-bail
+		    (unless (equal (uiop:getenv "QUASISCHEME_CPLETREC") "0")
+		      (setq form (cpletrec form)))
 		    (analyze form)
 		    (if (not (unique-binders-p))
 			(cp-bail "names not unique")

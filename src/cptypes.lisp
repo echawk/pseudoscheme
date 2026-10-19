@@ -313,7 +313,9 @@ procedure's (from *PTYPES*) and else unknown."
 	 (loop for v in (cadr op) for (type) in types-and-args
 	       unless (assigned-p v) do (setf (gethash v *vtypes*) type))
 	 (multiple-value-bind (type body) (with-facts (facts) (ty-sequence (cddr op)))
-	   (values type (cons (list* (car op) (cadr op) body) (mapcar #'second types-and-args))))))
+	   (values type (cons (list* (car op) (cadr op) body)
+			      (mapcar (lambda (ta) (if *emitting* (emit-expression-type (second ta) (first ta)) (second ta)))
+				      types-and-args))))))
       (t
        (let* ((types-and-args (mapcar (lambda (a) (multiple-value-list (ty a))) args))
 	      (types (mapcar #'first types-and-args))
@@ -327,7 +329,7 @@ procedure's (from *PTYPES*) and else unknown."
 	 (when name
 	   (setq *after-facts* (append (call-facts name args) *after-facts*)))
 	 (values (if name (primitive-result-type name types) +all+)
-		 (cond ((and *emitting* name) (cons op2 (emit-argument-types name args2)))
+		 (cond ((and *emitting* name) (cons op2 (emit-argument-types name args2 types)))
 		       ((and *emitting* (symbolp op) (gethash op *known*))
 			(cons op2 (emit-call-types (gethash op *known*) args2)))
 		       (t (cons op2 args2)))))))))
@@ -349,17 +351,30 @@ procedure's (from *PTYPES*) and else unknown."
 
 (defvar *emit-count*)
 
-(defun emit-argument-types (name args)
+(defun emit-argument-types (name args types)
   (if (member name *typed-operations* :test #'string=)
-      (mapcar (lambda (a)
+      (mapcar (lambda (a type)
 		(let ((narrowed (and (typed-variable-p a) (nth-value 1 (gethash a *facts*))
 				     (emitted-type (gethash a *facts*)))))
 		  (if (and narrowed (not (equal narrowed (emitted-type (base-type a)))))
 		      (progn (incf *emit-count*)
 			     (list (sym (concatenate 'string "%cp-assume-" narrowed)) a))
-		      a)))
-	      args)
+		      (emit-expression-type a type))))
+	      args types)
       args))
+
+(defun emit-expression-type (e type)
+  "E, an expression (not a variable or constant) of TYPE, wrapped to tell
+SBCL its type if that's a flonum or a fixnum: the result of a generic
+operation (+, *, inexact, ...) that cptypes found is one, given to
+another, or bound by a let (docs/optimizations.md, \"Plan\", item 3)."
+  (let ((name (emitted-type type)))
+    (if (and (member name '("flonum" "fixnum") :test #'equal)
+	     (consp e) (not (constant-p e)) (not (marker-wrapper-p e))
+	     (not (cp-lambda-p e)) (symbolp (car e)) (not (cp-keyword (car e))))
+	(progn (incf *emit-count*)
+	       (list (sym (concatenate 'string "%cp-assume-" name)) e))
+	e)))
 
 (defun emit-call-types (lambda args)
   "ARGS of a call of known procedure LAMBDA, each one that's a parameter of
@@ -641,3 +656,89 @@ of an emitted type."
 			     `(,op ,type ,(second form))
 			     form))))))
     (register-primitive-names names)))
+
+;;; ------------------------------------------------------------------
+;;; Unboxed loop variables (docs/optimizations.md, "Plan", item 3)
+;;;
+;;; The translator makes a loop (a named let, a procedure calling itself
+;;; in tail position) a PROG whose variables are assigned at each
+;;; iteration.  They are of type T, so a flonum in one is boxed at every
+;;; assignment.  In the translated Lisp, a PROG variable every assignment
+;;; of which is of one type -- a literal, a value cptypes marked
+;;; (%cp-assume-flonum x), or what a primitive of that result type
+;;; returns (fl+, fx+, vector-length, ...) -- is declared so, and starts
+;;; out as a value of the type instead of NIL; then SBCL keeps a flonum
+;;; one in a register.
+
+(defparameter *flonum-result-primitives*
+  '("fl+" "fl-" "fl*" "fl/" "flabs" "flmax" "flmin" "flfloor" "flceiling" "flround"
+    "fltruncate" "fixnum->flonum" "%cp-assume-flonum" "%cp-the-flonum"))
+
+(defparameter *fixnum-result-primitives*
+  '("length" "vector-length" "string-length" "bytevector-length" "char->integer"
+    "fx+" "fx-" "fx*" "fxquotient" "fxremainder" "fxmodulo" "fxand" "fxior" "fxxor" "fxnot"
+    "fxabs" "fxmax" "fxmin" "fxdiv" "fxmod" "fxarithmetic-shift" "fxarithmetic-shift-left"
+    "fxarithmetic-shift-right" "bytevector-u8-ref" "%cp-assume-fixnum" "%cp-the-fixnum"))
+
+(defun lisp-expression-type (x)
+  "DOUBLE-FLOAT or FIXNUM if Lisp expression X, translated Scheme, is
+known to return one, else NIL."
+  (cond ((typep x 'double-float) 'double-float)
+	((typep x 'fixnum) 'fixnum)
+	((atom x) nil)
+	((eq (car x) 'quote) (lisp-expression-type-of-datum (cadr x)))
+	((and (member (car x) '(the #+sbcl sb-ext:truly-the)) (consp (cdr x)))
+	 (case (cadr x) (double-float 'double-float) (fixnum 'fixnum)))
+	((eq (car x) 'if)
+	 (let ((a (lisp-expression-type (caddr x))) (b (lisp-expression-type (cadddr x))))
+	   (and (eq a b) a)))
+	((and (symbolp (car x)) (symbol-package (car x)))
+	 (let ((name (symbol-name (car x))))
+	   (cond ((member name *flonum-result-primitives* :test #'string-equal) 'double-float)
+		 ((member name *fixnum-result-primitives* :test #'string-equal) 'fixnum))))))
+
+(defun lisp-expression-type-of-datum (d)
+  (cond ((typep d 'double-float) 'double-float)
+	((typep d 'fixnum) 'fixnum)))
+
+(defun declare-loop-types (lisp)
+  "LISP with the PROG variables of a known type declared so (see above)."
+  (labels ((assignments (body v)
+	     ;; the values assigned to V in BODY, or :ANY if it's assigned
+	     ;; some way not seen here
+	     (let ((values '()))
+	       (labels ((scan (x)
+			  (cond ((atom x))
+				((eq (car x) 'quote))
+				((member (car x) '(setq psetq))
+				 (loop for (place value) on (cdr x) by #'cddr
+				       do (when (eq place v) (push value values))
+					  (scan value)))
+				((and (member (car x) '(setf multiple-value-setq)) (tree-mentions-p (cadr x) v))
+				 (return-from assignments :any))
+				(t (loop for y on x while (consp y) do (scan (car y)))))))
+		 (scan body))
+	       values))
+	   (walk (x)
+	     (cond ((atom x) x)
+		   ((eq (car x) 'quote) x)
+		   ((and (eq (car x) 'prog) (consp (cdr x)) (listp (cadr x))
+			 (every #'symbolp (cadr x)))
+		    (let* ((body (mapcar #'walk (cddr x)))
+			   (typed (loop for v in (cadr x)
+					for vals = (assignments body v)
+					for type = (and (listp vals) vals
+							(let ((ts (mapcar #'lisp-expression-type vals)))
+							  (and (first ts) (every (lambda (u) (eq u (first ts))) ts) (first ts))))
+					when type collect (cons v type))))
+		      (if typed
+			  `(prog ,(mapcar (lambda (v)
+					    (let ((ty (cdr (assoc v typed))))
+					      (case ty (double-float `(,v 0d0)) (fixnum `(,v 0)) (t v))))
+					  (cadr x))
+			     (declare ,@(mapcar (lambda (p) `(type ,(cdr p) ,(car p))) typed))
+			     ,@body)
+			  `(prog ,(cadr x) ,@body))))
+		   (t (let ((a (walk (car x))) (d (walk (cdr x))))
+			(if (and (eq a (car x)) (eq d (cdr x))) x (cons a d)))))))
+    (walk lisp)))

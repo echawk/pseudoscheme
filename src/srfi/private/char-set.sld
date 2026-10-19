@@ -108,13 +108,17 @@
     (define (rv-xor a b) (rv-merge a b (lambda (x y) (not (eq? x y)))))
     (define (rv-complement a) (rv-difference universe a))
 
-    ;; Sort a list of integers (merge sort).
+    ;; Sort a list of integers (merge sort).  The merge is a loop: the
+    ;; lists can be all of Unicode, a million deep as a recursion.
     (define (sort-ints l)
       (define (merge a b)
-        (cond ((null? a) b)
-              ((null? b) a)
-              ((<= (car a) (car b)) (cons (car a) (merge (cdr a) b)))
-              (else (cons (car b) (merge a (cdr b))))))
+        (let loop ((a a) (b b) (out '()))
+          (cond ((null? a) (append-reverse out b))
+                ((null? b) (append-reverse out a))
+                ((<= (car a) (car b)) (loop (cdr a) b (cons (car a) out)))
+                (else (loop a (cdr b) (cons (car b) out))))))
+      (define (append-reverse rev tail)
+        (if (null? rev) tail (append-reverse (cdr rev) (cons (car rev) tail))))
       (define (split l a b)
         (if (null? l) (values a b) (split (cdr l) b (cons (car l) a))))
       (if (or (null? l) (null? (cdr l)))

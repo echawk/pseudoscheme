@@ -4,15 +4,26 @@
 ;;;; library report chapter 6.  (rnrs records syntactic (6)) is psyntax's
 ;;;; DEFINE-RECORD-TYPE, which expands into calls to these.
 ;;;;
-;;;; A record is an instance of RECORD: its type descriptor and a simple
-;;;; vector holding all of its fields, the parent type's first.
+;;;; A record is one object: on SBCL, an instance of RECORD (its type
+;;;; descriptor) longer than RECORD's own slots, the fields, the parent
+;;;; type's first, in the instance after them (docs/optimizations.md,
+;;;; idea 2: before, the fields were a second object, a simple vector).
+;;;; Elsewhere a RECORD holds a simple vector of the fields.  RECORD-FIELD
+;;;; and (SETF RECORD-FIELD) reach a field by index.  A record type
+;;;; descriptor is a record too, whose own fields (Chez mode's, of types
+;;;; descending from #!base-rtd) are set after it is made, so it keeps
+;;;; them in a vector, RTD-EXTRAS.
 
 (in-package "QUASISCHEME-R6RS")
 
 ;;; Defined in conditions.lisp; records signal violations through it.
 (declaim (ftype function r6rs-assertion-violation))
 
-(defstruct (record (:constructor %make-record (rtd values)))
+#+sbcl
+(defstruct (record (:constructor nil) (:copier nil))
+  rtd)
+#-sbcl
+(defstruct (record (:constructor %%make-record (rtd values)))
   rtd values)
 
 ;;; A record type descriptor is itself a record, as in Chez Scheme: of
@@ -21,14 +32,72 @@
 ;;; $make-record-type, src/chez/host.lisp).
 (defvar *base-rtd*)
 
-(defstruct (rtd (:include record (rtd *base-rtd*) (values #()))
+(defstruct (rtd (:include record (rtd *base-rtd*) #-sbcl (values #()))
 		(:constructor %make-rtd))
+  (extras #())			; its own fields, if its type descends from *BASE-RTD*
   name parent uid sealed opaque
   fields			; simple-vector of (mutable-p . name), own fields only
   (count 0))			; number of fields including inherited ones
 
 (defstruct (rcd (:constructor %make-rcd (rtd parent protocol)))
   rtd parent protocol)
+
+;;; Fields
+
+#+sbcl
+(defmacro record-field-start ()
+  "The index of a record's first field in the instance: after RECORD's
+slots."
+  (sb-kernel:dd-length (sb-kernel:find-defstruct-description 'record)))
+
+#+sbcl (defvar *record-layout* (sb-kernel:find-layout 'record))
+
+(declaim (inline allocate-record record-field (setf record-field) record-field-count))
+
+(defun allocate-record (rtd n)
+  "A record of type RTD with N fields, each 0 until set."
+  #+sbcl (let ((r (sb-kernel:%make-instance (+ (record-field-start) n))))
+	   (setf (sb-kernel:%instance-layout r) *record-layout*
+		 (record-rtd r) rtd)
+	   r)
+  #-sbcl (%%make-record rtd (make-array n :initial-element 0)))
+
+(defun record-field (r i)
+  #+sbcl (if (rtd-p r) (svref (rtd-extras r) i) (sb-kernel:%instance-ref r (+ (record-field-start) i)))
+  #-sbcl (if (rtd-p r) (svref (rtd-extras r) i) (svref (record-values r) i)))
+
+(defun (setf record-field) (value r i)
+  #+sbcl (if (rtd-p r)
+	     (setf (svref (rtd-extras r) i) value)
+	     (setf (sb-kernel:%instance-ref r (+ (record-field-start) i)) value))
+  #-sbcl (if (rtd-p r)
+	     (setf (svref (rtd-extras r) i) value)
+	     (setf (svref (record-values r) i) value)))
+
+(defun record-field-count (r)
+  (cond ((rtd-p r) (length (rtd-extras r)))
+	#+sbcl (t (- (sb-kernel:%instance-length r) (record-field-start)))
+	#-sbcl (t (length (record-values r)))))
+
+(defmacro init-record-field (r i value)
+  "Set field I of R, a record ALLOCATE-RECORD just made (not a type
+descriptor)."
+  #+sbcl `(setf (sb-kernel:%instance-ref ,r (+ (record-field-start) ,i)) ,value)
+  #-sbcl `(setf (record-field ,r ,i) ,value))
+
+(defun %make-record (rtd values)
+  "A record of type RTD whose fields are VALUES, a sequence."
+  (let ((r (allocate-record rtd (length values))))
+    (if (listp values)
+	(loop for x in values for i from 0 do (setf (record-field r i) x))
+	(loop for x across values for i from 0 do (setf (record-field r i) x)))
+    r))
+
+#+sbcl
+(defun record-values (r)
+  "A new simple vector of R's fields."
+  (let ((v (make-array (record-field-count r))))
+    (dotimes (i (length v) v) (setf (svref v i) (record-field r i)))))
 
 (defun scheme-name (x) (if (symbolp x) (qs:scheme-symbol-name x) x))
 
@@ -106,9 +175,12 @@
 (defmethod make-load-form ((r record) &optional environment)
   (declare (ignore environment))
   ;; The fields are set apart from creating the record, which may be
-  ;; among them; copied, since a constant's are not to be modified.
-  (values `(%make-record (nongenerative-rtd ',(uid-or-lose (record-rtd r) r)) nil)
-	  `(setf (record-values ,r) (copy-seq ',(record-values r)))))
+  ;; among them.
+  (values `(allocate-record (nongenerative-rtd ',(uid-or-lose (record-rtd r) r)) ,(record-field-count r))
+	  `(fill-record ,r ',(record-values r))))
+
+(defun fill-record (r values)
+  (loop for x across values for i from 0 do (setf (record-field r i) x)))
 
 (defun revive-record (uid values)
   (%make-record (nongenerative-rtd uid) values))
@@ -154,7 +226,7 @@ type FINAL whose fields after RCD's type's are TAIL."
     (if (null (rtd-parent rtd))
 	(lambda (&rest own)
 	  (funcall check own)
-	  (%make-record final (coerce (append own tail) 'simple-vector)))
+	  (%make-record final (append own tail)))
 	(let ((parent-rcd (parent-rcd-of rcd)))
 	  (lambda (&rest parent-args)
 	    (lambda (&rest own)
@@ -199,12 +271,12 @@ type FINAL whose fields after RCD's type's are TAIL."
 (defprim "r7rs:record-ref" (x rtd i who)
   (unless (record-of-type-p x rtd)
     (r6rs-assertion-violation who "not a record of the right type" x))
-  (svref (record-values x) i))
+  (record-field x i))
 
 (defprim "r7rs:record-set!" (x rtd i value who)
   (unless (record-of-type-p x rtd)
     (r6rs-assertion-violation who "not a record of the right type" x))
-  (setf (svref (record-values x) i) value)
+  (setf (record-field x i) value)
   qs:unspecific)
 
 (defprim "r7rs:record?" (x rtd) (bool (record-of-type-p x rtd)))
@@ -218,7 +290,7 @@ type FINAL whose fields after RCD's type's are TAIL."
     (lambda (x)
       (unless (record-of-type-p x rtd)
 	(r6rs-assertion-violation name "not a record of the right type" x))
-      (svref (record-values x) i))))
+      (record-field x i))))
 
 (defprim "record-mutator" (rtd k)
   (check-rtd "record-mutator" rtd)
@@ -230,7 +302,7 @@ type FINAL whose fields after RCD's type's are TAIL."
     (lambda (x v)
       (unless (record-of-type-p x rtd)
 	(r6rs-assertion-violation (cdr field) "not a record of the right type" x))
-      (setf (svref (record-values x) i) v)
+      (setf (record-field x i) v)
       qs:unspecific)))
 
 ;;; 6.4 Inspection

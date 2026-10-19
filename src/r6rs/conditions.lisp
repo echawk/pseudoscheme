@@ -267,11 +267,11 @@ function (#f is a symbol) or as a type error expecting a function."
 	  (irritants (component-of c "&irritants"))
 	  (syntax (component-of c "&syntax")))
       (format stream "~:[~;~:*~A: ~]~A~{ ~S~}~@[~%  in form: ~S~]~%  [~{~A~^ ~}]"
-	      (and who (let ((w (svref (record-values who) 0)))
+	      (and who (let ((w (record-field who 0)))
 			 (if (symbolp w) (qs:scheme-symbol-name w) w)))
-	      (if message (svref (record-values message) 0) "")
-	      (if irritants (svref (record-values irritants) 0) '())
-	      (and syntax (svref (record-values syntax) 0))
+	      (if message (record-field message 0) "")
+	      (if irritants (record-field irritants 0) '())
+	      (and syntax (record-field syntax 0))
 	      (mapcar (lambda (s) (qs:scheme-symbol-name (rtd-name (record-rtd s)))) (components c))))
     t))
 
@@ -295,10 +295,10 @@ function (#f is a symbol) or as a type error expecting a function."
 
 (defprim "error-object-message" (x)
   (let ((s (component-of x "&message")))
-    (if s (svref (record-values s) 0) "")))
+    (if s (record-field s 0) "")))
 (defprim "error-object-irritants" (x)
   (let ((s (component-of x "&irritants")))
-    (if s (svref (record-values s) 0) '())))
+    (if s (record-field s 0) '())))
 (defprim "file-error?" (x) (bool (and (component-of x "&i/o-filename") t)))
 (defprim "read-error?" (x)
   (bool (and (or (component-of x "&lexical") (component-of x "&i/o-read")) t)))

@@ -737,7 +737,7 @@ where they differ from their source directories.")
   "Uncaught condition E as Chez's top level reports it: \"Exception in
 car: ...\", \"Exception occurred with non-condition value 42\"."
   (flet ((component (c type) (qs-r6rs::component-of c type))
-	 (value (s) (svref (qs-r6rs::record-values s) 0))
+	 (value (s) (qs-r6rs::record-field s 0))
 	 (written (x) (with-output-to-string (s) (funcall qs:*scheme-write* x s))))
     (if (typep e 'qs-r7rs::uncaught-raise)
 	(let ((c (qs-r7rs::uncaught-payload e)))

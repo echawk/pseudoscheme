@@ -290,7 +290,7 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
   "What a compiled executable runs: a function of no arguments.")
 
 (defvar *recorded-top-level* nil
-  "While a program is compiled at a top level: the thunks of its forms, newest first.")
+  "While a program is compiled at a top level: the core forms of its forms, newest first.")
 (defvar *recorded-libraries* nil
   "...and the names of the libraries its forms refer to, newest first.")
 
@@ -356,9 +356,13 @@ compiled and kept, not run."
 		       ((and (string= (qs:scheme-symbol-name (car f)) "begin") (listp (cdr f)))
 			(mapc #'imports (cdr f)))))))
       (imports (if (qs::annotation-p form) (qs::annotation-stripped form) form)))
-    (dolist (lisp (let ((qsx::*top-level-self-calls* t)) (qsx::translate-top-level core)))
-      (push (compile-thunk lisp) *recorded-top-level*))
+    (push core *recorded-top-level*)
     qs:unspecific))
+
+(defun closed-world-p ()
+  "Whether a compiled program's top level is a closed world
+(QSX::CLOSE-TOP-LEVEL): unless QUASISCHEME_CLOSED_WORLD=0."
+  (not (equal (uiop:getenv "QUASISCHEME_CLOSED_WORLD") "0")))
 
 (defun compile-top-level-file (file)
   "FILE loaded at the top level of *STANDARD*, but its forms only expanded
@@ -368,8 +372,12 @@ and compiled; a function that runs them."
 			(lambda (function form) (declare (ignore function)) (record-top-level form)))
     (unwind-protect (run-file file)
       (sb-int:unencapsulate 'qsx:eval-top-level 'record))
-    (let ((names (reverse *recorded-libraries*))
-	  (thunks (reverse *recorded-top-level*)))
+    (let* ((names (reverse *recorded-libraries*))
+	   (cores (reverse *recorded-top-level*))
+	   (cores (if (closed-world-p) (qsx::close-top-level cores) cores))
+	   (thunks (let ((qsx::*top-level-self-calls* t))
+		     (loop for core in cores
+			   append (mapcar #'compile-thunk (qsx::translate-top-level core))))))
       (lambda ()
 	(invoke-libraries names)
 	(run-compiled-forms thunks)))))
