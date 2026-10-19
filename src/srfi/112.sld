@@ -1,4 +1,4 @@
-;;; SRFI 112: environment inquiry.  Written for Pseudoscheme: the SRFI's
+;;; SRFI 112: environment inquiry.  Written for Quasischeme: the SRFI's
 ;;; implementation is a sketch for an imaginary Scheme, and its
 ;;; procedures correspond to Common Lisp's, so here they are those
 ;;; functions of the host Lisp (software-type, software-version,
@@ -12,7 +12,7 @@
                   cl:))
   (begin
     (define (string-or-false x) (if (string? x) x #f))
-    (define (implementation-name) "pseudoscheme")
+    (define (implementation-name) "quasischeme")
     (define (implementation-version) "3.0")
     (define (cpu-architecture) (string-or-false (cl:machine-type)))
     (define (machine-name) (string-or-false (cl:machine-instance)))

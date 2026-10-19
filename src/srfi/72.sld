@@ -1,4 +1,4 @@
-;;; SRFI 72: Hygienic macros.  Written for Pseudoscheme, approximately,
+;;; SRFI 72: Hygienic macros.  Written for Quasischeme, approximately,
 ;;; on psyntax's syntax-case (the SRFI's reference implementation is an
 ;;; expander of its own).  What differs:
 ;;;

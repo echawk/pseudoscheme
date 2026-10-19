@@ -8,7 +8,7 @@
 ;;; ms-dos on Windows), getenv, slib:warn, slib:error and the load
 ;;; pathname.  Differences:
 ;;;
-;;;   - implementation-vicinity is Pseudoscheme's source directory (the
+;;;   - implementation-vicinity is Quasischeme's source directory (the
 ;;;     ASDF system's), not the template's /usr/local/src/scheme/; #f
 ;;;     if ASDF doesn't know the system.
 ;;;   - *load-pathname*, which program-vicinity reads, is the pathname
@@ -19,7 +19,7 @@
 ;;;     /usr/local/lib/slib/, as in the reference code.
 (define-library (srfi 59)
   (export program-vicinity library-vicinity
-          (rename pseudoscheme-implementation-vicinity implementation-vicinity)
+          (rename quasischeme-implementation-vicinity implementation-vicinity)
           user-vicinity home-vicinity in-vicinity sub-vicinity
           make-vicinity pathname->vicinity vicinity:suffix?)
   (import (scheme base)
@@ -30,7 +30,7 @@
   (begin
     (define-syntax *load-pathname*
       (identifier-syntax (current-load-pathname)))
-    (define (pseudoscheme-implementation-vicinity)
+    (define (quasischeme-implementation-vicinity)
       (guard (e (#t #f))
-        (cl:namestring (asdf:system-source-directory "pseudoscheme")))))
+        (cl:namestring (asdf:system-source-directory "quasischeme")))))
   (include-ci "reference/srfi-59/vicinity.scm"))

@@ -1,14 +1,14 @@
-;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-REPL -*-
+;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-REPL -*-
 
 ;;;; Guile's language for the REPL: Guile's own REPL, (system repl repl),
 ;;;; with its meta-commands (,describe ,apropos ,time ,bt ,language
-;;;; ...), run on Pseudoscheme's Guile.  At a terminal it reads through
+;;;; ...), run on Quasischeme's Guile.  At a terminal it reads through
 ;;;; the line editor, as Guile's (ice-9 readline) would: its current
 ;;;; input port is filled by READ-INPUT, and its repl-reader tells that
-;;;; the prompt.  Guile's ,mode moves to another of Pseudoscheme's
+;;;; the prompt.  Guile's ,mode moves to another of Quasischeme's
 ;;;; languages, as ,language does in theirs.
 
-(in-package "PSEUDOSCHEME-REPL")
+(in-package "QUASISCHEME-REPL")
 
 (defvar *guile-prompt* "scheme@(guile-user)> "
   "The prompt Guile's REPL last asked for.")
@@ -24,12 +24,12 @@ and the modules it uses that begin with it, and the meta-commands.")
      ((@ (system repl repl) %inhibit-welcome-message) #t)
      (module-set! the-root-module 'repl-reader
        (lambda* (prompt #:optional (reader (fluid-ref current-reader)))
-         (%pseudoscheme-set-prompt! (if (string? prompt) prompt (prompt)))
+         (%quasischeme-set-prompt! (if (string? prompt) prompt (prompt)))
          ((or reader read) (current-input-port))))
-     (define-meta-command ((mode pseudoscheme) repl #:optional name)
+     (define-meta-command ((mode quasischeme) repl #:optional name)
        \"mode [NAME]
-Show Pseudoscheme's languages, or switch to one (r7rs, r6rs, chez, ...).\"
-       (%pseudoscheme-mode (if name (symbol->string name) \"\")))
+Show Quasischeme's languages, or switch to one (r7rs, r6rs, chez, ...).\"
+       (%quasischeme-mode (if name (symbol->string name) \"\")))
      ;; compiling each input natively takes SBCL a good part of a second
      (repl-default-option-set! 'interp #t)
      (define-meta-command ((disassemble compile) repl (form))
@@ -39,14 +39,14 @@ of a procedure compiled to Lisp.\"
        (let ((obj (repl-eval repl (repl-parse repl form))))
          (if (false-if-exception (and ((@ (system vm program) program?) obj) ((@ (system vm program) program-code) obj)))
              ((@ (system vm disassembler) disassemble-program) obj)
-             (%pseudoscheme-lisp-disassemble obj))))
+             (%quasischeme-lisp-disassemble obj))))
      (define-meta-command ((x compile) repl (form))
        \"x EXP
 Disassemble a compiled procedure (,disassemble).\"
        (let ((obj (repl-eval repl (repl-parse repl form))))
          (if (false-if-exception (and ((@ (system vm program) program?) obj) ((@ (system vm program) program-code) obj)))
              ((@ (system vm disassembler) disassemble-program) obj)
-             (%pseudoscheme-lisp-disassemble obj))))
+             (%quasischeme-lisp-disassemble obj))))
      (define-meta-command ((describe help) repl (form))
        \"describe OBJ
 Show OBJ's documentation, or what it is: a procedure's arguments, a value's type.\"
@@ -103,7 +103,7 @@ form imports are there for the rest): the reader hook, ,mode, and the completer.
 
 (defun install-guile-hooks ()
   (unless *guile-hooks-installed*
-    (psg::obarray-define (psg::ssym "%pseudoscheme-set-prompt!")
+    (qsg::obarray-define (qsg::ssym "%quasischeme-set-prompt!")
 			 (lambda (prompt)
 			   ;; "" is a meta-command's reading its arguments: keep
 			   ;; the prompt, should the editor need to show one
@@ -111,14 +111,14 @@ form imports are there for the rest): the reader hook, ,mode, and the completer.
 			   ;; without the editor, Guile's prompt as Guile shows it
 			   (unless (or *interactive* (equal prompt ""))
 			     (write-string prompt) (finish-output))
-			   psg::*unspecified*))
-    (psg::obarray-define (psg::ssym "%pseudoscheme-lisp-disassemble")
+			   qsg::*unspecified*))
+    (qsg::obarray-define (qsg::ssym "%quasischeme-lisp-disassemble")
 			 (lambda (f)
 			   (if (functionp f)
 			       (disassemble f)
 			       (format t "Not a procedure: ~A~%" f))
-			   psg::*unspecified*))
-    (psg::obarray-define (psg::ssym "%pseudoscheme-mode")
+			   qsg::*unspecified*))
+    (qsg::obarray-define (qsg::ssym "%quasischeme-mode")
 			 (lambda (name)
 			   (if (string= name "")
 			       (dolist (l *languages*)
@@ -128,8 +128,8 @@ form imports are there for the rest): the reader hook, ,mode, and the completer.
 				 (if l
 				     (throw 'switch l)
 				     (format t "No language ~A; ,mode lists them.~%" name))))
-			   psg::*unspecified*))
-    (setq *guile-completer* (psg:eval-string *guile-setup*)
+			   qsg::*unspecified*))
+    (setq *guile-completer* (qsg:eval-string *guile-setup*)
 	  *guile-hooks-installed* t)))
 
 (defun guile-completions (prefix)
@@ -156,8 +156,8 @@ ending in a newline, or NIL at end of file."
 (defun editor-port ()
   "A Guile input port whose characters come from the line editor."
   (let ((pending (make-array 0 :element-type '(unsigned-byte 8))))
-    (psg::make-port
-     :kind "pseudoscheme-repl" :input t :output nil :encoding "UTF-8"
+    (qsg::make-port
+     :kind "quasischeme-repl" :input t :output nil :encoding "UTF-8"
      :buffering :none
      :read (lambda (buf start count)
 	     (when (zerop (length pending))
@@ -174,33 +174,33 @@ ending in a newline, or NIL at end of file."
 (defun run-guile-repl ()
   "Guile's REPL, until it quits (NIL) or ,mode switches language (which
 is returned)."
-  (psg:boot)
+  (qsg:boot)
   (install-guile-hooks)
   (catch 'switch
     (handler-case
 	(let ((*standard-input* (if *interactive* (editor-port) *standard-input*)))
-	  (psg:eval-string "((@ (system repl repl) start-repl))"))
+	  (qsg:eval-string "((@ (system repl repl) start-repl))"))
       (error (e)
-	(say ";; Guile's REPL stopped: ~A" (psg:error-text e))))
+	(say ";; Guile's REPL stopped: ~A" (qsg:error-text e))))
     nil))
 
 ;;; Evaluating Guile without its REPL: for the editor interface
 ;;; (ide.lisp), which sends text to evaluate rather than running a REPL.
 
 (defun guile-ready ()
-  (psg:boot)
+  (qsg:boot)
   (install-guile-hooks))
 
 (defun guile-read-forms (text)
   (guile-ready)
   (with-input-from-string (in text)
-    (loop for form = (psg:guile-read in)
-	  until (eq form ps:eof-object)
+    (loop for form = (qsg:guile-read in)
+	  until (eq form qs:eof-object)
 	  collect form)))
 
 (defun guile-eval (form)
   (guile-ready)
-  (psg::call-with-guile-catch (lambda () (psg::primitive-eval form))))
+  (qsg::call-with-guile-catch (lambda () (qsg::primitive-eval form))))
 
 (defvar *guile-expander* nil)
 
@@ -208,7 +208,7 @@ is returned)."
   (guile-ready)
   (funcall (or *guile-expander*
 	       (setq *guile-expander*
-		     (psg:eval-string
+		     (qsg:eval-string
 		      "(lambda (x) ((@ (language tree-il) tree-il->scheme) (macroexpand x)))")))
 	   form))
 
@@ -218,9 +218,9 @@ is returned)."
   :run #'run-guile-repl
   :read-forms #'guile-read-forms
   :eval #'guile-eval
-  :write (lambda (value stream) (psg::guile-write value stream))
+  :write (lambda (value stream) (qsg::guile-write value stream))
   :names (lambda () (guile-ready) (guile-completions ""))
   :expand #'guile-expand
-  :error-text #'psg:error-text
-  :load (lambda (path) (guile-ready) (psg:load-file path))
-  :unspecified-p (lambda (v) (eq v psg::*unspecified*)))
+  :error-text #'qsg:error-text
+  :load (lambda (path) (guile-ready) (qsg:load-file path))
+  :unspecified-p (lambda (v) (eq v qsg::*unspecified*)))

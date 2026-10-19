@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; Host procedures behind Chez Scheme's ftypes (src/chez/ftype.scm,
 ;;;; src/chez/ftype-helpers.sls): integers and floats read and written at
@@ -10,7 +10,7 @@
 ;;;; with respect to each other (one mutex), as sb-ext:compare-and-swap
 ;;;; doesn't take an address.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defvar *ftype-lock* (sb-thread:make-mutex :name "ftypes")
   "What makes the lock procedures' reads and writes of memory atomic.")
@@ -58,18 +58,18 @@ first if BIG."
 		  (sb-kernel:double-float-low-bits d))))))
 
 (defprim "chez:ftype-read-uint" (base offset n big)
-  (ftype-read-uint base offset n (ps:truep big)))
+  (ftype-read-uint base offset n (qs:truep big)))
 
 (defprim "chez:ftype-write-uint!" (base offset n big value)
-  (ftype-write-uint base offset n (ps:truep big) value)
-  ps:unspecific)
+  (ftype-write-uint base offset n (qs:truep big) value)
+  qs:unspecific)
 
 (defprim "chez:ftype-read-float" (base offset n big)
-  (ftype-float-from-bits (ftype-read-uint base offset n (ps:truep big)) n))
+  (ftype-float-from-bits (ftype-read-uint base offset n (qs:truep big)) n))
 
 (defprim "chez:ftype-write-float!" (base offset n big value)
-  (ftype-write-uint base offset n (ps:truep big) (ftype-float-to-bits value n))
-  ps:unspecific)
+  (ftype-write-uint base offset n (qs:truep big) (ftype-float-to-bits value n))
+  qs:unspecific)
 
 ;;; The lock procedures work on integers in the machine's byte order
 
@@ -93,13 +93,13 @@ first if BIG."
 		  (ftype-write-uint base offset n nil 1)
 		  t))
 	do (sb-thread:thread-yield))
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; The address of a bytevector's data: where it is now, as the collector
 ;;; may move it
 
 (defprim "chez:ftype-object-address" (object)
   (unless (typep object '(simple-array (unsigned-byte 8) (*)))
-    (ps:scheme-error "ftype-pointer-address: a pointer into ~S has no address" object))
+    (qs:scheme-error "ftype-pointer-address: a pointer into ~S has no address" object))
   (sb-sys:with-pinned-objects (object)
     (sb-sys:sap-int (sb-sys:vector-sap object))))

@@ -1,5 +1,5 @@
 ;;; Part of SRFI 166 (see ../166.sld): chibi-scheme's lib/srfi/166/color.sld,
-;;; with the changes described there, marked PSEUDOSCHEME.
+;;; with the changes described there, marked QUASISCHEME.
 
 (define-library (srfi 166 color)
   (import (scheme base) (srfi 130) (srfi 166 base))

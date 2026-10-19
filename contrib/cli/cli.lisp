@@ -1,8 +1,8 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-CLI -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-CLI -*-
 
-;;;; pseudoscheme: a Scheme you can run from the shell
+;;;; quasischeme: a Scheme you can run from the shell
 ;;;;
-;;;;   pseudoscheme [option ...] [file [argument ...]]
+;;;;   quasischeme [option ...] [file [argument ...]]
 ;;;;
 ;;;; With a file, runs it as a program (and exits with its EXIT status,
 ;;;; or 0); with no file and no -e/-p, starts a REPL.  See USAGE below.
@@ -12,18 +12,18 @@
 ;;;; the R6RS and R7RS libraries -- is loaded and initialized when the
 ;;;; image is built, so startup is immediate.
 
-(defpackage "PSEUDOSCHEME-CLI"
+(defpackage "QUASISCHEME-CLI"
   (:use "COMMON-LISP")
   (:export "MAIN"))
 
-(in-package "PSEUDOSCHEME-CLI")
+(in-package "QUASISCHEME-CLI")
 
 (defparameter *version*
-  ;; "3.0", from the translator's "Pseudoscheme 3.0" (src/version.scm)
+  ;; "1.0", from the translator's "Quasischeme 1.0" (src/version.scm)
   (let ((v (uiop:symbol-call "SCHEME-TRANSLATOR" "TRANSLATOR-VERSION")))
     (subseq v (1+ (position #\Space v :from-end t)))))
 
-(defparameter *usage* "Usage: pseudoscheme [option ...] [file [argument ...]]
+(defparameter *usage* "Usage: quasischeme [option ...] [file [argument ...]]
 
   --r7rs           R7RS-small (the default)
   --r6rs           R6RS, expanded by psyntax
@@ -42,7 +42,7 @@
                    Racket (docs/racket.md): FILE runs as racket runs a
                    module.  STRATEGY is linklet (our linklet compiler,
                    the default), cs (Racket CS's own layers; not working
-                   yet) or hybrid; or set PSEUDOSCHEME_RACKET_STRATEGY
+                   yet) or hybrid; or set QUASISCHEME_RACKET_STRATEGY
   -e, --eval EXPR  evaluate EXPR (Scheme text); may be repeated
   -p, --print EXPR evaluate EXPR and write its value
   -L, --library-path DIR
@@ -64,15 +64,15 @@
                    --continuations=full, makes them re-entrant
   --precompile-srfi
                    expand and compile every bundled SRFI library into
-                   the library cache (~/.cache/pseudoscheme/libraries),
+                   the library cache (~/.cache/quasischeme/libraries),
                    for the continuation mode given before it, so that
                    later programs load them compiled
   --precompile DIR likewise for the libraries (.sld files) under DIR
   -i, --interactive
                    start a REPL after running the file or expressions
   --lisp           start the Lisp's own REPL instead, with all of
-                   Pseudoscheme loaded: an inferior Lisp for SLIME or
-                   SLY (contrib/emacs/pseudoscheme.el)
+                   Quasischeme loaded: an inferior Lisp for SLIME or
+                   SLY (contrib/emacs/quasischeme.el)
   --compile FILE   instead of running FILE, make it an executable (named
                    FILE without its extension, or by -o), in the mode
                    given: the libraries and the program are compiled
@@ -85,8 +85,8 @@
   -h, --help       print this and exit
   --               end of options: the next argument is the file
 
-PSEUDOSCHEME_LIBRARY_PATH, a list of directories separated by colons,
-is searched before the -L directories.  PSEUDOSCHEME_THREAD_STACK_SIZE
+QUASISCHEME_LIBRARY_PATH, a list of directories separated by colons,
+is searched before the -L directories.  QUASISCHEME_THREAD_STACK_SIZE
 is the control stack of each thread a program makes, in megabytes
 (default 32; the main thread's is 256).
 
@@ -101,7 +101,7 @@ after them is run; for R5RS the file is loaded.  (command-line) is
 In the REPL, ,help lists the commands and ,q quits.
 
 Scheme code can use Common Lisp packages as libraries:
-  (import (prefix (cl common-lisp) cl:) (pseudoscheme lisp))
+  (import (prefix (cl common-lisp) cl:) (quasischeme lisp))
 A (cl <package>) whose package isn't loaded loads the system of that
 name first (see -l and --quicklisp; docs/interop.md).
 ")
@@ -116,20 +116,20 @@ name first (see -l and --quicklisp; docs/interop.md).
   "-e and -p: TEXT's forms, one by one, as at the REPL (so an import or a
 definition holds for the next -e too); the last one's values."
   (ecase *standard*
-    (:r7rs (pseudoscheme-api::r7rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
-    (:r6rs (pseudoscheme-api::r6rs-repl-eval (pseudoscheme-api:read-scheme-forms text)))
+    (:r7rs (quasischeme-api::r7rs-repl-eval (quasischeme-api:read-scheme-forms text)))
+    (:r6rs (quasischeme-api::r6rs-repl-eval (quasischeme-api:read-scheme-forms text)))
     (:r5rs (r5rs:eval text))
     ((:r4rs :ieee :r3rs :r2rs :rrs)
-     (pseudoscheme-api::ensure-psyntax)
-     (let ((values (list ps:unspecific)) (ps:*fold-case* t))
-       (dolist (form (pseudoscheme-api:read-scheme-forms text) (values-list values))
-	 (setq values (multiple-value-list (ps-r7rs::eval-at-report-top-level *standard* form))))))
-    (:guile (psg:eval-string text))
-    (:racket (psr:eval-string text))
-    (:chez (pseudoscheme-api::ensure-psyntax)
-	   (let ((values (list ps:unspecific)))
-	     (dolist (form (pseudoscheme-api:read-scheme-forms text) (values-list values))
-	       (setq values (multiple-value-list (ps-r7rs::eval-at-chez-top-level form))))))))
+     (quasischeme-api::ensure-psyntax)
+     (let ((values (list qs:unspecific)) (qs:*fold-case* t))
+       (dolist (form (quasischeme-api:read-scheme-forms text) (values-list values))
+	 (setq values (multiple-value-list (qs-r7rs::eval-at-report-top-level *standard* form))))))
+    (:guile (qsg:eval-string text))
+    (:racket (qsr:eval-string text))
+    (:chez (quasischeme-api::ensure-psyntax)
+	   (let ((values (list qs:unspecific)))
+	     (dolist (form (quasischeme-api:read-scheme-forms text) (values-list values))
+	       (setq values (multiple-value-list (qs-r7rs::eval-at-chez-top-level form))))))))
 
 (defun run-file (path)
   (ecase *standard*
@@ -137,23 +137,23 @@ definition holds for the next -e too); the last one's values."
     (:r6rs (r6rs:load path))
     (:r5rs (r5rs:load path))
     ((:r4rs :ieee :r3rs :r2rs :rrs)
-     (pseudoscheme-api::ensure-psyntax)
-     (ps-r7rs::load-file-at-report-top-level *standard* path))
-    (:guile (psg:load-file path))
-    (:racket (psr:load-file path))
-    (:chez (pseudoscheme-api::ensure-psyntax)
-	   (ps-r7rs::load-file-at-chez-top-level path))))
+     (quasischeme-api::ensure-psyntax)
+     (qs-r7rs::load-file-at-report-top-level *standard* path))
+    (:guile (qsg:load-file path))
+    (:racket (qsr:load-file path))
+    (:chez (quasischeme-api::ensure-psyntax)
+	   (qs-r7rs::load-file-at-chez-top-level path))))
 
 (defun program-with-main (forms args)
   "FORMS, an R6RS or R7RS program after any libraries, with (main ARGS)
 after its body, and what that needs imported, under a prefix."
-  (let* ((libraries (loop while (or (psl:keyword-head-p (car forms) "library")
-				    (psl:keyword-head-p (car forms) "define-library"))
+  (let* ((libraries (loop while (or (qsl:keyword-head-p (car forms) "library")
+				    (qsl:keyword-head-p (car forms) "define-library"))
 			  collect (pop forms)))
-	 (s (lambda (name) (ps:intern-scheme-symbol name)))
+	 (s (lambda (name) (qs:intern-scheme-symbol name)))
 	 (q (funcall s "%srfi-22:quote")))
-    (unless (psl:keyword-head-p (car forms) "import")
-      (die "~A: not a program" (car ps-r7rs:*command-line*)))
+    (unless (qsl:keyword-head-p (car forms) "import")
+      (die "~A: not a program" (car qs-r7rs:*command-line*)))
     (append libraries
 	    (list (append (car forms)
 			  (list (list (funcall s "prefix")
@@ -172,26 +172,26 @@ skipped when FILE is read."
     (run-file file)
     (finish-output)
     (uiop:quit 0))
-  (let* ((args (copy-list ps-r7rs:*command-line*))
+  (let* ((args (copy-list qs-r7rs:*command-line*))
 	 (status
 	   (ecase *standard*
 	     (:r5rs (r5rs:load file)
-		    (r5rs:eval (format nil "(main '~A)" (pseudoscheme-api:write-to-string args))))
+		    (r5rs:eval (format nil "(main '~A)" (quasischeme-api:write-to-string args))))
 	     ((:r4rs :ieee :r3rs :r2rs :rrs)
 	      (run-file file)
-	      (evaluate-string (format nil "(main '~A)" (pseudoscheme-api:write-to-string args))))
-	     (:r7rs (pseudoscheme-api::ensure-psyntax)
-		    (let ((ps-r7rs::*include-directory*
+	      (evaluate-string (format nil "(main '~A)" (quasischeme-api:write-to-string args))))
+	     (:r7rs (quasischeme-api::ensure-psyntax)
+		    (let ((qs-r7rs::*include-directory*
 			    (make-pathname :name nil :type nil :defaults (pathname file))))
-		      (ps-r7rs::eval-forms (program-with-main (ps-r7rs::read-forms file) args))))
-	     (:r6rs (pseudoscheme-api::ensure-psyntax)
-		    (psx:eval-forms (program-with-main (psx::read-file-forms file) args))))))
+		      (qs-r7rs::eval-forms (program-with-main (qs-r7rs::read-forms file) args))))
+	     (:r6rs (quasischeme-api::ensure-psyntax)
+		    (qsx:eval-forms (program-with-main (qsx::read-file-forms file) args))))))
     (finish-output)
     (if (and (integerp status) (<= 0 status 255))
 	(uiop:quit status)
 	(progn
-	  (format *error-output* "~&pseudoscheme: main returned ~A, not an exit status~%"
-		  (pseudoscheme-api:write-to-string status))
+	  (format *error-output* "~&quasischeme: main returned ~A, not an exit status~%"
+		  (quasischeme-api:write-to-string status))
 	  (finish-output *error-output*)
 	  (uiop:quit 70)))))
 
@@ -249,7 +249,7 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
 		 (format *error-output* "~A~%" "10.2.0") (uiop:quit 0))
 		((member a '("-h" "--help") :test #'string=)
 		 (format t "usage: ~A [option ...] [file ...] | --script FILE ARG ... | --program FILE ARG ...~%~
-                            (Pseudoscheme's Chez mode: docs/chez.md)~%"
+                            (Quasischeme's Chez mode: docs/chez.md)~%"
 			 (file-namestring (car (uiop:raw-command-line-arguments))))
 		 (uiop:quit 0))
 		((and (> (length a) 1) (char= (char a 0) #\-))
@@ -295,36 +295,36 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
   "...and the names of the libraries its forms refer to, newest first.")
 
 (defun compile-thunk (form)
-  "FORM, a Lisp form as PSX::TRANSLATE-TOP-LEVEL makes them, compiled to a
+  "FORM, a Lisp form as QSX::TRANSLATE-TOP-LEVEL makes them, compiled to a
 function of no arguments that runs it as HOST-EVAL would."
   (let ((thunk
-	  (and (< (psx::tree-size form) psx::*interpret-limit*)
+	  (and (< (qsx::tree-size form) qsx::*interpret-limit*)
 	       (handler-case
 		   (handler-bind ((warning #'muffle-warning))
 		     (let ((*error-output* (make-broadcast-stream))
 			   (lambda `(lambda () ,form)))
-		       (if psx::*full-continuations*
-			   (psx::call-with-full-policy (lambda () (compile nil lambda)))
+		       (if qsx::*full-continuations*
+			   (qsx::call-with-full-policy (lambda () (compile nil lambda)))
 			   (compile nil lambda))))
 		 (error () nil)))))
     (or thunk
 	;; too big, or SBCL can't compile it: evaluated when it runs
-	(lambda () (handler-bind ((warning #'muffle-warning)) (psx::eval-compiled-or-interpreted form))))))
+	(lambda () (handler-bind ((warning #'muffle-warning)) (qsx::eval-compiled-or-interpreted form))))))
 
 (defun run-compiled-forms (thunks)
   (dolist (thunk thunks)
-    (psx::run-top-level thunk)))
+    (qsx::run-top-level thunk)))
 
 (defun invoke-libraries (names)
   (dolist (name names)
-    (funcall (psx:host-ref "psyntax:library-export-bindings") name)))
+    (funcall (qsx:host-ref "psyntax:library-export-bindings") name)))
 
 (defun compile-program-forms (forms)
   "FORMS, an R6RS top-level program (imports first), expanded and compiled;
 a function that invokes its libraries and runs it."
-  (let* ((expanded (funcall (psx:host-ref "psyntax:expand-r6rs-top-level") forms))
+  (let* ((expanded (funcall (qsx:host-ref "psyntax:expand-r6rs-top-level") forms))
 	 (names (mapcar #'second (first expanded)))
-	 (thunks (mapcar #'compile-thunk (psx::translate-top-level (second expanded)))))
+	 (thunks (mapcar #'compile-thunk (qsx::translate-top-level (second expanded)))))
     (lambda ()
       (invoke-libraries names)
       (run-compiled-forms thunks))))
@@ -332,7 +332,7 @@ a function that invokes its libraries and runs it."
 (defun import-set-library-name (set)
   "The library name an import set (only (foo bar) x) is of, or NIL."
   (loop while (and (consp set) (symbolp (car set))
-		   (member (ps:scheme-symbol-name (car set))
+		   (member (qs:scheme-symbol-name (car set))
 			   '("only" "except" "prefix" "rename" "for" "library") :test #'string=))
 	do (setq set (cadr set)))
   (and (consp set) (symbolp (car set))
@@ -341,33 +341,33 @@ a function that invokes its libraries and runs it."
 	 name)))
 
 (defun record-top-level (form)
-  "Stands for PSX:EVAL-TOP-LEVEL while a program is compiled: FORM is
+  "Stands for QSX:EVAL-TOP-LEVEL while a program is compiled: FORM is
 expanded (so what it defines is known to the forms after it), and its code
 compiled and kept, not run."
-  (let ((core (funcall (psx:host-ref "psyntax:expand-top-level") form))
-	(source (funcall (psx:host-ref "psyntax:interaction-source-name"))))
+  (let ((core (funcall (qsx:host-ref "psyntax:expand-top-level") form))
+	(source (funcall (qsx:host-ref "psyntax:interaction-source-name"))))
     (pushnew source *recorded-libraries* :test #'equal)
     (labels ((imports (f)
 	       (when (and (consp f) (symbolp (car f)))
-		 (cond ((string= (ps:scheme-symbol-name (car f)) "import")
+		 (cond ((string= (qs:scheme-symbol-name (car f)) "import")
 			(dolist (set (cdr f))
 			  (let ((name (import-set-library-name set)))
 			    (when name (pushnew name *recorded-libraries* :test #'equal)))))
-		       ((and (string= (ps:scheme-symbol-name (car f)) "begin") (listp (cdr f)))
+		       ((and (string= (qs:scheme-symbol-name (car f)) "begin") (listp (cdr f)))
 			(mapc #'imports (cdr f)))))))
-      (imports (if (ps::annotation-p form) (ps::annotation-stripped form) form)))
-    (dolist (lisp (let ((psx::*top-level-self-calls* t)) (psx::translate-top-level core)))
+      (imports (if (qs::annotation-p form) (qs::annotation-stripped form) form)))
+    (dolist (lisp (let ((qsx::*top-level-self-calls* t)) (qsx::translate-top-level core)))
       (push (compile-thunk lisp) *recorded-top-level*))
-    ps:unspecific))
+    qs:unspecific))
 
 (defun compile-top-level-file (file)
   "FILE loaded at the top level of *STANDARD*, but its forms only expanded
 and compiled; a function that runs them."
   (let ((*recorded-top-level* '()) (*recorded-libraries* '()))
-    (sb-int:encapsulate 'psx:eval-top-level 'record
+    (sb-int:encapsulate 'qsx:eval-top-level 'record
 			(lambda (function form) (declare (ignore function)) (record-top-level form)))
     (unwind-protect (run-file file)
-      (sb-int:unencapsulate 'psx:eval-top-level 'record))
+      (sb-int:unencapsulate 'qsx:eval-top-level 'record))
     (let ((names (reverse *recorded-libraries*))
 	  (thunks (reverse *recorded-top-level*)))
       (lambda ()
@@ -375,21 +375,21 @@ and compiled; a function that runs them."
 	(run-compiled-forms thunks)))))
 
 (defun compile-r7rs-program (file)
-  (let ((ps-r7rs::*include-directory* (make-pathname :name nil :type nil :defaults (truename file))))
+  (let ((qs-r7rs::*include-directory* (make-pathname :name nil :type nil :defaults (truename file))))
     (multiple-value-bind (libraries imports body)
-	(ps-r7rs::split-program (ps-r7rs::read-forms file))
-      (dolist (l libraries) (psx:eval-library (ps-r7rs::library-form l)))
+	(qs-r7rs::split-program (qs-r7rs::read-forms file))
+      (dolist (l libraries) (qsx:eval-library (qs-r7rs::library-form l)))
       (compile-program-forms
-       (cons (cons (ps:intern-scheme-symbol "import") (mapcar #'ps-r7rs::translate-import-set imports))
+       (cons (cons (qs:intern-scheme-symbol "import") (mapcar #'qs-r7rs::translate-import-set imports))
 	     body)))))
 
 (defun compile-r6rs-program (file)
-  (let ((forms (psx::read-file-forms file)))
-    (loop while (psl:keyword-head-p (car forms) "library")
-	  do (psx:eval-library (pop forms)))
+  (let ((forms (qsx::read-file-forms file)))
+    (loop while (qsl:keyword-head-p (car forms) "library")
+	  do (qsx:eval-library (pop forms)))
     (if forms
 	(compile-program-forms forms)
-	(lambda () ps:unspecific))))
+	(lambda () qs:unspecific))))
 
 ;;; Guile: the forms of FILE are expanded as Guile's compile-file does,
 ;;; each after the ones before it; those that make modules and macros
@@ -402,46 +402,46 @@ and compiled; a function that runs them."
   "Heads of the forms a Guile program has run when it is compiled.")
 
 (defun compile-guile-program (file)
-  (psg:boot)
+  (qsg:boot)
   (let* ((text (uiop:read-file-string file))
 	 (name (namestring (truename file)))
-	 (module psg::*current-module*)
+	 (module qsg::*current-module*)
 	 (thunks '())
 	 (stream (make-string-input-stream text)))
     (flet ((head-p (form)
-	     (and (consp form) (symbolp (car form)) (ps:scheme-symbol-p (car form))
-		  (member (ps:scheme-symbol-name (car form)) *guile-compile-time-heads* :test #'string=))))
-      (let ((psg::*current-load-file* name) (psg::*guile-fold-case* nil))
-	(loop for form = (psg::guile-read stream)
-	      until (eq form ps:eof-object)
-	      do (when (and (consp form) (not (gethash form psg::*source-properties*)))
-		   (setf (gethash form psg::*source-properties*)
-			 (list (cons (psg::ssym "filename") name) (cons (psg::ssym "line") 0)
-			       (cons (psg::ssym "column") 0))))
-		 (let* ((tree (cond ((psg::node-type form) form)
-				    ((eq (psg::current-transformer) #'psg::pre-expand) (psg::pre-expand form))
-				    (t (funcall (psg::current-transformer) form (psg::ssym "c")
-						(list (psg::ssym "compile") (psg::ssym "load"))))))
-			(lisp (psg::translate-top-level (psg::tree-il->core tree)))
+	     (and (consp form) (symbolp (car form)) (qs:scheme-symbol-p (car form))
+		  (member (qs:scheme-symbol-name (car form)) *guile-compile-time-heads* :test #'string=))))
+      (let ((qsg::*current-load-file* name) (qsg::*guile-fold-case* nil))
+	(loop for form = (qsg::guile-read stream)
+	      until (eq form qs:eof-object)
+	      do (when (and (consp form) (not (gethash form qsg::*source-properties*)))
+		   (setf (gethash form qsg::*source-properties*)
+			 (list (cons (qsg::ssym "filename") name) (cons (qsg::ssym "line") 0)
+			       (cons (qsg::ssym "column") 0))))
+		 (let* ((tree (cond ((qsg::node-type form) form)
+				    ((eq (qsg::current-transformer) #'qsg::pre-expand) (qsg::pre-expand form))
+				    (t (funcall (qsg::current-transformer) form (qsg::ssym "c")
+						(list (qsg::ssym "compile") (qsg::ssym "load"))))))
+			(lisp (qsg::translate-top-level (qsg::tree-il->core tree)))
 			(these (mapcar #'compile-thunk lisp)))
 		   (when (head-p form)
-		     (psg::call-with-guile-catch
+		     (qsg::call-with-guile-catch
 		      (lambda () (handler-bind ((warning #'muffle-warning))
 				   (run-compiled-forms these)))))
 		   (setq thunks (append (reverse these) thunks))))))
     (setq thunks (nreverse thunks))
-    (setq psg::*current-module* module)
+    (setq qsg::*current-module* module)
     (lambda ()
-      (let ((psg::*current-load-file* name))
-	(psg::call-with-guile-catch (lambda () (run-compiled-forms thunks)))))))
+      (let ((qsg::*current-load-file* name))
+	(qsg::call-with-guile-catch (lambda () (run-compiled-forms thunks)))))))
 
-;;; Racket: see PSR::LINKLET-PREPARE-MODULE (src/racket/linklet/boot.lisp)
+;;; Racket: see QSR::LINKLET-PREPARE-MODULE (src/racket/linklet/boot.lisp)
 
 (defun compile-racket-program (file)
   (let ((path (namestring (truename file))))
-    (funcall 'psr::linklet-prepare-module path)
+    (funcall 'qsr::linklet-prepare-module path)
     (lambda ()
-      (psr:load-file path))))
+      (qsr:load-file path))))
 
 (defun compile-program (file)
   "FILE compiled in the mode of *STANDARD*: a function that runs it."
@@ -449,7 +449,7 @@ and compiled; a function that runs them."
     (:r7rs (compile-r7rs-program file))
     (:r6rs (compile-r6rs-program file))
     ((:r5rs :r4rs :ieee :r3rs :r2rs :rrs :chez)
-     (pseudoscheme-api::ensure-psyntax)
+     (quasischeme-api::ensure-psyntax)
      (compile-top-level-file file))
     (:guile (compile-guile-program file))
     (:racket (compile-racket-program file))))
@@ -463,12 +463,12 @@ and compiled; a function that runs them."
 (defun build-executable (file output)
   "Make FILE, a program in the mode of *STANDARD*, the executable OUTPUT."
   (unless (probe-file file) (die "no such file: ~A" file))
-  (pseudoscheme-api::ensure-psyntax)
+  (quasischeme-api::ensure-psyntax)
   (setq *compiled-program*
 	(handler-bind ((serious-condition #'report-and-exit))
 	  (compile-program file)))
   ;; for include in the body, when it runs
-  (setf ps-r7rs::*include-directory*
+  (setf qs-r7rs::*include-directory*
 	(make-pathname :name nil :type nil :defaults (truename file)))
   ;; The image keeps the thread stack size (UIOP saves the runtime's
   ;; options), and so the main thread of the executable would have the
@@ -488,12 +488,12 @@ and compiled; a function that runs them."
       (let ((a (pop args)))
 	(flet ((value () (or (pop args) (die "~A needs an argument" a))))
 	  (cond ((string= a "-I")
-		 (setf psx:*library-path*
+		 (setf qsx:*library-path*
 		       (cons (namestring (uiop:ensure-directory-pathname
 					  (uiop:parse-native-namestring (value))))
-			     psx:*library-path*)))
+			     qsx:*library-path*)))
 		((string= a "-A") (add-library-path (value)))
-		((string= a "-D") (push (value) psl:*scheme-features*))
+		((string= a "-D") (push (value) qsl:*scheme-features*))
 		((string= a "-o") (setq output (value)))
 		((string= a "-V") (print-version-alist) (uiop:quit 0))
 		((or file (and (plusp (length a)) (char= (char a 0) #\-)))
@@ -505,28 +505,28 @@ and compiled; a function that runs them."
     (build-executable file output)))
 
 (defun limit-thread-stacks ()
-  "Threads' control stacks: PSEUDOSCHEME_THREAD_STACK_SIZE megabytes, or
+  "Threads' control stacks: QUASISCHEME_THREAD_STACK_SIZE megabytes, or
 32 (the main thread's is 256), since making a thread takes time in
-proportion (ps:limit-thread-stack-size)."
-  (let ((mb (or (ignore-errors (parse-integer (uiop:getenv "PSEUDOSCHEME_THREAD_STACK_SIZE"))) 32)))
-    (ps:limit-thread-stack-size (* mb 1024 1024))))
+proportion (qs:limit-thread-stack-size)."
+  (let ((mb (or (ignore-errors (parse-integer (uiop:getenv "QUASISCHEME_THREAD_STACK_SIZE"))) 32)))
+    (qs:limit-thread-stack-size (* mb 1024 1024))))
 
 (defun set-program-arguments (argv0 args)
   "What (command-line), Guile's (program-arguments) and Racket's
 current-command-line-arguments are."
-  (setf ps-r7rs:*command-line* (cons argv0 args)
-	psg:*program-arguments* (cons argv0 args))
-  (let ((parameter (and (boundp 'psr::*current-command-line-arguments*)
-			(symbol-value 'psr::*current-command-line-arguments*))))
+  (setf qs-r7rs:*command-line* (cons argv0 args)
+	qsg:*program-arguments* (cons argv0 args))
+  (let ((parameter (and (boundp 'qsr::*current-command-line-arguments*)
+			(symbol-value 'qsr::*current-command-line-arguments*))))
     (when parameter
       (funcall parameter (coerce args 'simple-vector))))
   ;; the saved image's current directory is the build's
-  (when (boundp 'psr::*current-directory*)
-    (funcall (symbol-value 'psr::*current-directory*)
-	     (funcall 'psr::make-rpath (namestring (uiop:getcwd))))))
+  (when (boundp 'qsr::*current-directory*)
+    (funcall (symbol-value 'qsr::*current-directory*)
+	     (funcall 'qsr::make-rpath (namestring (uiop:getcwd))))))
 
 (defun run-compiled-program ()
-  (ps:disable-float-traps)
+  (qs:disable-float-traps)
   (limit-thread-stacks)
   (set-program-arguments (car (uiop:raw-command-line-arguments)) (uiop:command-line-arguments))
   (handler-bind ((serious-condition
@@ -549,38 +549,38 @@ start as an inferior Lisp and load Swank or Slynk into."
 (defun repl ()
   "The REPL, in the language of *STANDARD* (src/repl/): ,language moves
 to the others, ,help lists the commands."
-  (setq pseudoscheme-repl:*quiet* *chez-quiet*)
+  (setq quasischeme-repl:*quiet* *chez-quiet*)
   (if (eq *standard* :racket)
       ;; Racket's own REPL, as `racket' runs it: its banner, its prompt
-      (let ((status (pseudoscheme-repl::racket-repl-main)))
+      (let ((status (quasischeme-repl::racket-repl-main)))
 	(finish-output)
 	(uiop:quit status))
-      (pseudoscheme-repl:run-repl
+      (quasischeme-repl:run-repl
        *standard*
        :banner (and (not *chez-quiet*)
-		    (format nil "Pseudoscheme ~A (~(~A~)) on ~A ~A" *version* *standard*
+		    (format nil "Quasischeme ~A (~(~A~)) on ~A ~A" *version* *standard*
 			    (lisp-implementation-type) (lisp-implementation-version))))))
 
 (defun print-version-alist ()
   "SRFI 176's version output: one property to a line.  If the output goes
-away (pseudoscheme -V | head -1), exit quietly, with failure, as SRFI 176
+away (quasischeme -V | head -1), exit quietly, with failure, as SRFI 176
 asks when not all of it was written."
   (handler-case
       (progn
-	(dolist (property (ps-r7rs:version-alist))
-	  (funcall ps:*scheme-write* property *standard-output*)
+	(dolist (property (qs-r7rs:version-alist))
+	  (funcall qs:*scheme-write* property *standard-output*)
 	  (terpri))
 	(finish-output))
     (stream-error () (uiop:quit 1 nil))))
 
 (defun die (control &rest args)
-  (format *error-output* "~&pseudoscheme: ~?~%" control args)
+  (format *error-output* "~&quasischeme: ~?~%" control args)
   (finish-output *error-output*)
   (uiop:quit 64))
 
 (defun add-library-path (dir)
   (let ((dir (namestring (uiop:ensure-directory-pathname (uiop:parse-native-namestring dir)))))
-    (setf psx:*library-path* (append psx:*library-path* (list dir)))))
+    (setf qsx:*library-path* (append qsx:*library-path* (list dir)))))
 
 (defun akku-library-directory ()
   "The .akku/lib of the Akku project the current directory is in."
@@ -612,7 +612,7 @@ list of (:eval text) / (:print text)."
 		((string= a "--guile") (setq *standard* :guile))
 		((or (string= a "--racket") (uiop:string-prefix-p "--racket=" a))
 		 (setq *standard* :racket)
-		 (handler-case (psr:select-strategy (and (find #\= a) (subseq a (1+ (position #\= a)))))
+		 (handler-case (qsr:select-strategy (and (find #\= a) (subseq a (1+ (position #\= a)))))
 		   (error (e) (die "~A" e))))
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
 		((member a '("-p" "--print") :test #'string=) (push (list :print (value)) actions))
@@ -626,17 +626,17 @@ list of (:eval text) / (:print text)."
 		((string= a "--no-userinit") (setq *userinit* nil))
 		((string= a "--compile") (setq *compile-file* (value)))
 		((member a '("-o" "--output") :test #'string=) (setq *compile-output* (value)))
-		((string= a "-D") (push (value) psl:*scheme-features*))
+		((string= a "-D") (push (value) qsl:*scheme-features*))
 		((string= a "--continuations=full")
-		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) t))
+		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "QUASISCHEME-PSYNTAX")) t))
 		((string= a "--continuations=escape")
-		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) nil))
+		 (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "QUASISCHEME-PSYNTAX")) nil))
 		((member a '("-i" "--interactive") :test #'string=) (setq interactive t))
 		((string= a "--lisp") (setq *lisp-repl* t))
 		((member a '("-h" "--help") :test #'string=)
 		 (write-string *usage*) (uiop:quit 0))
 		((string= a "--version")
-		 (format t "Pseudoscheme ~A~%" *version*) (uiop:quit 0))
+		 (format t "Quasischeme ~A~%" *version*) (uiop:quit 0))
 		((string= a "-V")
 		 (print-version-alist) (uiop:quit 0))
 		((and (> (length a) 1) (char= (char a 0) #\-))
@@ -678,7 +678,7 @@ is reported, and the program runs anyway."
 	  (let ((*package* (find-package "CL-USER")))
 	    (load file))
 	(error (e)
-	  (format *error-output* "~&pseudoscheme: error loading ~A: ~A~%"
+	  (format *error-output* "~&quasischeme: error loading ~A: ~A~%"
 		  (namestring file) e)
 	  (finish-output *error-output*))))))
 
@@ -692,15 +692,15 @@ is reported, and the program runs anyway."
   ;; (to the process's stderr: E may be signalled where *ERROR-OUTPUT*
   ;; is bound to silence a compiler's notes)
   ;; Guile's (exit n), not caught: the program's exit status
-  (let ((status (and (eq *standard* :guile) (psg::quit-status e))))
+  (let ((status (and (eq *standard* :guile) (qsg::quit-status e))))
     (when status
       (finish-output)
       (uiop:quit status)))
   (case *standard*
-    (:chez (format *error-output* "~&~A~%" (ps-r7rs::chez-error-text e)))
-    (:guile (format *error-output* "~&~A" (psg:error-text e)))
+    (:chez (format *error-output* "~&~A~%" (qs-r7rs::chez-error-text e)))
+    (:guile (format *error-output* "~&~A" (qsg:error-text e)))
     (t
-      (format *error-output* "~&Error: ~A~%" (pseudoscheme-api:error-message e))))
+      (format *error-output* "~&Error: ~A~%" (quasischeme-api:error-message e))))
   (finish-output *error-output*)
   (uiop:quit (if (eq *standard* :guile) 1 70)))
 
@@ -711,10 +711,10 @@ is reported, and the program runs anyway."
   #-(or sbcl ccl) (progn condition nil))
 
 (defun main ()
-  (ps:disable-float-traps)
+  (qs:disable-float-traps)
   (limit-thread-stacks)
   (find-sbcl-contribs)
-  (dolist (dir (uiop:split-string (or (uiop:getenv "PSEUDOSCHEME_LIBRARY_PATH") "") :separator ":"))
+  (dolist (dir (uiop:split-string (or (uiop:getenv "QUASISCHEME_LIBRARY_PATH") "") :separator ":"))
     (when (plusp (length dir)) (add-library-path dir)))
   (when (equal (file-namestring (car (uiop:raw-command-line-arguments))) "compile-r7rs")
     (compile-r7rs (uiop:command-line-arguments)))
@@ -733,20 +733,20 @@ is reported, and the program runs anyway."
 		 (values '() (car args) (cdr args) nil))))
     (when (and *userinit* (not *compile-file*)) (load-user-init-file))
     ;; Chez reads 2.a as a symbol, and #!r6rs is strict
-    (when (eq *standard* :chez) (setq ps:*chez-reader* t))
+    (when (eq *standard* :chez) (setq qs:*chez-reader* t))
     ;; With no program, SRFI 193's ("") as in Chez.  A script's name is
     ;; made absolute before it runs, in case it changes directory.
-    (setf ps-r7rs:*command-line* (cons (or file "") file-args)
-	  psg:*program-arguments* (if file (cons file file-args) (list "pseudoscheme")))
+    (setf qs-r7rs:*command-line* (cons (or file "") file-args)
+	  qsg:*program-arguments* (if file (cons file file-args) (list "quasischeme")))
     (when file
-      (setf ps-r7rs:*script-file*
+      (setf qs-r7rs:*script-file*
             (namestring (merge-pathnames (uiop:parse-native-namestring file) (uiop:getcwd)))))
-    (let ((parameter (and (boundp 'psr::*current-command-line-arguments*)
-			  (symbol-value 'psr::*current-command-line-arguments*))))
+    (let ((parameter (and (boundp 'qsr::*current-command-line-arguments*)
+			  (symbol-value 'qsr::*current-command-line-arguments*))))
       (when (and parameter file)
 	(funcall parameter (coerce file-args 'simple-vector))))
-    (when (member *standard* '(:r5rs :r4rs :ieee :r3rs :r2rs :rrs)) (setf ps:*fold-case* t))
-    (when (eq *standard* :guile) (psg::add-environment-load-path))
+    (when (member *standard* '(:r5rs :r4rs :ieee :r3rs :r2rs :rrs)) (setf qs:*fold-case* t))
+    (when (eq *standard* :guile) (qsg::add-environment-load-path))
     (handler-bind ((serious-condition
 		     (lambda (e)
 		       (if (interrupt-p e)
@@ -755,23 +755,23 @@ is reported, and the program runs anyway."
       (dolist (action actions)
 	(destructuring-bind (kind text) action
 	  (case kind
-	    (:lisp-system (pseudoscheme-interop:load-lisp-system text))
+	    (:lisp-system (quasischeme-interop:load-lisp-system text))
 	    (:quicklisp (load-quicklisp))
 	    (:load (unless (probe-file text) (die "no such file: ~A" text))
 		   (run-file text))
 	    (:precompile
 	     (multiple-value-bind (ok failed)
 		 (if text
-		     (pseudoscheme-api:precompile-libraries
+		     (quasischeme-api:precompile-libraries
 		      :directory (uiop:ensure-directory-pathname (uiop:parse-native-namestring text)))
-		     (pseudoscheme-api:precompile-libraries))
+		     (quasischeme-api:precompile-libraries))
 	       (declare (ignore ok))
 	       (when (plusp failed) (setq *precompile-failed* t))))
 	    (t
 	     (let ((values (multiple-value-list (evaluate-string text))))
 	       (when (eq kind :print)
 		 (dolist (v values)
-		   (funcall ps:*scheme-write* v *standard-output*)
+		   (funcall qs:*scheme-write* v *standard-output*)
 		   (terpri))))))))
       (when *compile-file*
 	(when file (die "--compile takes the program's name, not also ~A" file))
@@ -788,13 +788,13 @@ is reported, and the program runs anyway."
 
 ;;; Initialize everything now, at build time, so it's in the saved image:
 ;;; Guile's boot-9 too, if a Guile installation is there to load it from.
-(pseudoscheme-interop:boot)
+(quasischeme-interop:boot)
 ;;; and (chezscheme) invoked: a program importing it would otherwise run
 ;;; its body, seconds of it, every time
-(funcall (psx:host-ref "psyntax:library-export-bindings") (list (ps:intern-scheme-symbol "chezscheme")))
-(handler-case (progn (psg:boot)
+(funcall (qsx:host-ref "psyntax:library-export-bindings") (list (qs:intern-scheme-symbol "chezscheme")))
+(handler-case (progn (qsg:boot)
 		     ;; and Guile's REPL, (system repl repl), set up for the line
 		     ;; editor: loading it in a new build (its cache being stale)
 		     ;; would take a minute before the first prompt
-		     (pseudoscheme-repl::install-guile-hooks))
+		     (quasischeme-repl::install-guile-hooks))
   (error (e) (format *error-output* "~&;; Guile not booted into the image: ~A~%" e)))

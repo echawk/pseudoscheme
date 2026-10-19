@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-PSYNTAX -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-PSYNTAX -*-
 
 ;;;; Compiled libraries: a cache of expanded, compiled library files
 ;;;;
@@ -26,16 +26,16 @@
 ;;;; session whose id is neither (a REPL definition, say) has dependents
 ;;;; that can't be cached, so they aren't written.
 
-(in-package "PSEUDOSCHEME-PSYNTAX")
+(in-package "QUASISCHEME-PSYNTAX")
 
 (defvar *library-cache* t
   "True to load and write compiled libraries, unless the environment
-variable PSEUDOSCHEME_LIBRARY_CACHE is 0, no or off.")
+variable QUASISCHEME_LIBRARY_CACHE is 0, no or off.")
 
 (defvar *library-cache-directory* nil
   "Where compiled libraries are written; if NIL, the directory named by
-the environment variable PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY, else
-pseudoscheme/libraries/ in the XDG cache directory (~/.cache).")
+the environment variable QUASISCHEME_LIBRARY_CACHE_DIRECTORY, else
+quasischeme/libraries/ in the XDG cache directory (~/.cache).")
 
 ;;; The environment is consulted when the cache is used, not when this
 ;;; file is loaded: a saved image (the command line's) reads it at run
@@ -43,14 +43,14 @@ pseudoscheme/libraries/ in the XDG cache directory (~/.cache).")
 
 (defun library-cache-p ()
   (and *library-cache*
-       (not (member (uiop:getenv "PSEUDOSCHEME_LIBRARY_CACHE") '("0" "no" "off")
+       (not (member (uiop:getenv "QUASISCHEME_LIBRARY_CACHE") '("0" "no" "off")
 		    :test #'equalp))))
 
 (defun library-cache-directory ()
   (or *library-cache-directory*
-      (let ((dir (uiop:getenv "PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY")))
+      (let ((dir (uiop:getenv "QUASISCHEME_LIBRARY_CACHE_DIRECTORY")))
 	(and dir (plusp (length dir)) (uiop:ensure-directory-pathname dir)))
-      (uiop:xdg-cache-home "pseudoscheme" "libraries/")))
+      (uiop:xdg-cache-home "quasischeme" "libraries/")))
 
 (defvar *pending-libraries* '()
   "(name key text form) for each library being looked for: LOCATE-LIBRARY
@@ -74,15 +74,15 @@ written to the cache once it has been expanded.")
 
 (defun compute-build-signature ()
   "A digest of what compiled code depends on: the Lisp, and the files
-Pseudoscheme is built from (their names and dates)."
-  (let ((root (asdf:system-source-directory :pseudoscheme)))
+Quasischeme is built from (their names and dates)."
+  (let ((root (asdf:system-source-directory :quasischeme)))
     (format nil "~36R"
 	    (fnv-1a
 	     (with-output-to-string (s)
 	       (format s "~A ~A~%" (lisp-implementation-type) (lisp-implementation-version))
-	       (dolist (pattern '("src/*.lisp" "src/*.pso" "src/*.sls" "src/r6rs/*.lisp" "src/r7rs/*.*"
+	       (dolist (pattern '("src/*.lisp" "src/*.qso" "src/*.sls" "src/r6rs/*.lisp" "src/r7rs/*.*"
 				  "src/compat/*.*" "src/chez/*.*" "src/guile/*.*" "src/interop/*.*"
-				  "vendor/psyntax/psyntax-pseudoscheme.pp"))
+				  "vendor/psyntax/psyntax-quasischeme.pp"))
 		 (dolist (file (sort (mapcar #'namestring (directory (merge-pathnames pattern root)))
 				     #'string<))
 		   (format s "~A ~A~%" file (file-write-date file)))))))))
@@ -113,7 +113,7 @@ object, such as the (cl <package>) bridge's functions)."
 						  (if *full-continuations* "full" "escape"))))))
 
 ;;; Generations.  Every key holds the build signature, so each rebuild
-;;; of Pseudoscheme from changed sources made a new set of compiled files
+;;; of Quasischeme from changed sources made a new set of compiled files
 ;;; and orphaned the old, and the caches only grew (to gigabytes).  Each
 ;;; cache now keeps a signature's files in a directory of their own, and
 ;;; the first use in a process removes all but the most recently used
@@ -228,10 +228,10 @@ true if they all were installed."
   "psyntax's LIBRARY-LOADER: install library NAME from the cache and
 return #t, or return #f for psyntax to expand it from source."
   (let ((form (and (library-cache-p) (locate-library name))))
-    (when (or (null form) (eq form ps:false))
-      (return-from load-compiled-library ps:false))
+    (when (or (null form) (eq form qs:false))
+      (return-from load-compiled-library qs:false))
     (let ((text (form-text form)))
-      (unless text (return-from load-compiled-library ps:false))
+      (unless text (return-from load-compiled-library qs:false))
       (let* ((key (library-key text))
 	     (fasl (library-fasl key)))
 	(push (list name key text form) *pending-libraries*)
@@ -250,7 +250,7 @@ return #t, or return #f for psyntax to expand it from source."
 			 id name version imp* vis* inv* subst env visit invoke t)
 		(setf *pending-libraries* (remove name *pending-libraries* :key #'car :test #'equal))
 		t)
-	      ps:false))))))
+	      qs:false))))))
 
 (defun dependencies-current-p (install-arguments)
   "Whether each library a compiled library was expanded against is
@@ -295,7 +295,7 @@ expanded against is the same from session to session."
 		(setf (gethash id *cached-ids*) t)
 		(setq compiled (list* text (append data (list (eval visit) (eval invoke))))))
 	    (apply (entry "psyntax:install-library") (append (cdr compiled) (list t)))))))
-    ps:unspecific))
+    qs:unspecific))
 
 (defun definitions (visit-code)
   "VISIT-CODE, a sequence of global assignments of macro transformers,
@@ -337,7 +337,7 @@ that hold procedures that can't capture (see FIND-SAFE-LOCATIONS)."
 		  (let ((*package* (find-package "SCHEME"))
 			(*print-circle* t)
 			(*print-readably* t))
-		    (format out ";;; ~A, compiled by Pseudoscheme.~%" (second data))
+		    (format out ";;; ~A, compiled by Quasischeme.~%" (second data))
 		    (print `(in-package "SCHEME") out)
 		    (print code out))))
 	      (handler-bind ((warning #'muffle-warning))
@@ -374,11 +374,11 @@ library a macro makes, as Chez allows).")
 (defun load-library (name)
   "psyntax's LIBRARY-LOADER: the cache, then *LIBRARY-LOADERS*."
   (let ((loaded (load-compiled-library name)))
-    (prog1 (if (and loaded (not (eq loaded ps:false)))
+    (prog1 (if (and loaded (not (eq loaded qs:false)))
 	       loaded
 	       (or (some (lambda (loader) (funcall loader name)) *library-loaders*)
-		   ps:false))
-      (ps::maybe-sweep-symbols))))
+		   qs:false))
+      (qs::maybe-sweep-symbols))))
 
 (defun install-library-cache-hooks ()
   "Point psyntax's library loader and expansion hook here (in an image

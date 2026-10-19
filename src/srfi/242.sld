@@ -9,7 +9,7 @@
 ;;;   parse|primitive)  ->  (srfi private srfi-242-...), e.g.
 ;;;   (srfi private srfi-242-cfg-parse);
 ;;;   (srfi :213), (srfi :213 define-property)  ->  (srfi private
-;;;   srfi-242-define-property), written for Pseudoscheme.
+;;;   srfi-242-define-property), written for Quasischeme.
 ;;;
 ;;; The implementation needs SRFI 213's identifier properties (Chez's
 ;;; define-property, and transformers that return a procedure to be

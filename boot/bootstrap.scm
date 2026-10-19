@@ -1,5 +1,5 @@
-;;; boot/bootstrap.scm -- regenerate Pseudoscheme's .pso files in a
-;;; Scheme that isn't Pseudoscheme.
+;;; boot/bootstrap.scm -- regenerate Quasischeme's .qso files in a
+;;; Scheme that isn't Quasischeme.
 ;;;
 ;;; Loaded by a host adapter (boot/hosts/<name>.scm) after base.scm,
 ;;; reader.scm, printer.scm and runtime.scm, with the repository root as
@@ -7,9 +7,9 @@
 ;;; then has it translate the run-time system and itself, the way
 ;;; src/bootit.scm does under Common Lisp, writing to boot/build/out/:
 ;;;
-;;;   closed.pso                 the open-coded built-ins, as functions
-;;;   read.pso write.pso         the Scheme reader and printer
-;;;   <translator.files>.pso     the translator
+;;;   closed.qso                 the open-coded built-ins, as functions
+;;;   read.qso write.qso         the Scheme reader and printer
+;;;   <translator.files>.qso     the translator
 ;;;   spack.lisp                 the translator's DEFPACKAGEs
 
 (define boot:src-dir "src/")
@@ -49,14 +49,14 @@
 
 (define (boot:translate-file name env)
   (boot:eval `(really-translate-file ,(boot:src name "scm")
-				     ,(boot:out name "pso")
+				     ,(boot:out name "qso")
 				     ,env)))
 
 (define (boot:run)
   (boot:load-translator)
   ;; The run-time system (cf. TRANSLATE-RUN-TIME in bootit.scm)
   (boot:eval `(write-closed-definitions revised^4-scheme-structure
-					,(boot:out "closed" "pso")))
+					,(boot:out "closed" "qso")))
   (for-each (lambda (name) (boot:translate-file name 'revised^4-scheme-env))
 	    '("read" "write"))
   ;; The translator (cf. TRANSLATE-TRANSLATOR)

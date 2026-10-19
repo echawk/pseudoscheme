@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; #%foreign, natively: C types, pointers, memory, calling C and being
 ;;;; called, libraries, errno.  It follows rumble's foreign.ss (Racket
@@ -37,7 +37,7 @@
 ;;;; escape from one by unwinding.  _scheme values cross C as handles
 ;;;; (integers) of a table.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defmacro defforeign (name lambda-list (&key leaf) &body body)
   `(defnative ,name ,lambda-list (:instance "#%foreign" :leaf ,leaf) ,@body))
@@ -64,7 +64,7 @@
 (defun fixnum-p (x) (typep x '(signed-byte 61)))
 (defun exact-nonneg-p (x) (and (integerp x) (>= x 0)))
 (defun symbol-named-p (x name) (and (racket-symbol-p x) (string= (rname x) name)))
-(defun false-p (x) (eq x ps:false))
+(defun false-p (x) (eq x qs:false))
 (defun octets-p (x) (typep x 'octets))
 
 (defun bad-ctype-value (first second value)
@@ -114,11 +114,11 @@ there in places)."
 (defmacro cp-keeper (x) `(cp-field ,x 3))
 (defmacro cp-origin (x) `(cp-field ,x 4))
 
-(defun make-cp (base offset &optional (tags ps:false) keeper origin)
+(defun make-cp (base offset &optional (tags qs:false) keeper origin)
   (make-rstruct *cpointer-type* (vector base offset tags keeper origin)))
 
 (defun cp-null-p (m) (and (null (cp-base m)) (zerop (cp-offset m))))
-(defun fptr->cptr (m) (if (cp-null-p m) ps:false m))
+(defun fptr->cptr (m) (if (cp-null-p m) qs:false m))
 
 (defun octet-length (base)
   (if (octets-p base) (length base) (* 8 (length base))))
@@ -178,7 +178,7 @@ the collector next runs)."
 	  most-positive-fixnum))
 
 (defun make-foreign-struct-type (name parent fields &optional (props '()))
-  (values (make-struct-type* (rsym name) (or parent ps:false) fields 0 ps:false props)))
+  (values (make-struct-type* (rsym name) (or parent qs:false) fields 0 qs:false props)))
 
 (setq *cpointer-type*
       (make-foreign-struct-type
@@ -190,19 +190,19 @@ the collector next runs)."
 (setq *callback-type* (make-foreign-struct-type "callback" *cpointer-type* 1))
 
 (defun make-ffi-obj (address lib name)
-  (make-rstruct *ffi-obj-type* (vector nil address ps:false nil nil lib name)))
+  (make-rstruct *ffi-obj-type* (vector nil address qs:false nil nil lib name)))
 
 (defun make-callback (address code)
-  (make-rstruct *callback-type* (vector nil address ps:false nil nil code)))
+  (make-rstruct *callback-type* (vector nil address qs:false nil nil code)))
 
 (defun do-ptr-add (p n save-tags)
   (cond ((cp-p p)
-	 (make-cp (cp-base p) (+ (cp-offset p) n) (if save-tags (cp-tags p) ps:false)
+	 (make-cp (cp-base p) (+ (cp-offset p) n) (if save-tags (cp-tags p) qs:false)
 		  (cp-keeper p) (or (cp-origin p) (cp-offset p))))
-	((octets-p p) (make-cp p n ps:false nil 0))
-	((false-p p) (make-cp nil n ps:false nil 0))
+	((octets-p p) (make-cp p n qs:false nil 0))
+	((false-p p) (make-cp nil n qs:false nil 0))
 	(t (let ((q (extract-cp p)))
-	     (do-ptr-add (or q ps:false) n save-tags)))))
+	     (do-ptr-add (or q qs:false) n save-tags)))))
 
 ;;; Memory access, with the vector pinned
 
@@ -248,7 +248,7 @@ the collector next runs)."
   (call-with-cp-sap "ptr-ref" m offset (rep-size rep)
     (lambda (sap)
       (ecase rep
-	(:boolean (if (zerop (sb-sys:sap-ref-32 sap 0)) ps:false ps:true))
+	(:boolean (if (zerop (sb-sys:sap-ref-32 sap 0)) qs:false qs:true))
 	(:integer-8 (sb-sys:signed-sap-ref-8 sap 0))
 	(:unsigned-8 (sb-sys:sap-ref-8 sap 0))
 	(:integer-16 (sb-sys:signed-sap-ref-16 sap 0))
@@ -392,7 +392,7 @@ the collector next runs)."
 (defun octets-cp (octets) (make-cp octets 0))
 
 (defctype *_bytes* "_bytes" :ftype-pointer "bytes" :nonatomic t
-  :c->s (lambda (m) (or (nul-octets m 1) ps:false))
+  :c->s (lambda (m) (or (nul-octets m 1) qs:false))
   :s->c (lambda (for-whom x)
 	  (cond ((false-p x) (make-cp nil 0))
 		((octets-p x) (octets-cp x))
@@ -404,7 +404,7 @@ the collector next runs)."
 (defctype *_string/utf-16* "_string/utf-16" :ftype-pointer "string/utf-16" :nonatomic t
   :c->s (lambda (m)
 	  (let ((o (nul-octets m 2)))
-	    (if o (sb-ext:octets-to-string o :external-format :utf-16le) ps:false)))
+	    (if o (sb-ext:octets-to-string o :external-format :utf-16le) qs:false)))
   :s->c (lambda (for-whom x)
 	  (cond ((false-p x) (make-cp nil 0))
 		((stringp x) (octets-cp (encode-with-nul x :utf-16le)))
@@ -412,7 +412,7 @@ the collector next runs)."
 (defctype *_string/ucs-4* "_string/ucs-4" :ftype-pointer "string/ucs-4" :nonatomic t
   :c->s (lambda (m)
 	  (let ((o (nul-octets m 4)))
-	    (if o (sb-ext:octets-to-string o :external-format :utf-32le) ps:false)))
+	    (if o (sb-ext:octets-to-string o :external-format :utf-32le) qs:false)))
   :s->c (lambda (for-whom x)
 	  (cond ((false-p x) (make-cp nil 0))
 		((stringp x) (octets-cp (encode-with-nul x :utf-32le)))
@@ -420,7 +420,7 @@ the collector next runs)."
 (defctype *_symbol* "_symbol" :ftype-pointer "string" :nonatomic t
   :c->s (lambda (m)
 	  (let ((o (nul-octets m 1)))
-	    (unless o (arg-error "utf8->string" "bytes?" ps:false))
+	    (unless o (arg-error "utf8->string" "bytes?" qs:false))
 	    (rsym (utf8 o))))
   :s->c (lambda (for-whom x)
 	  (if (racket-symbol-p x)
@@ -449,8 +449,8 @@ the collector next runs)."
 	 (set (fct-set type))
 	 (new (copy-fctype type)))
     (setf (fct-basetype new) type
-	  (fct-c->scheme new) (or c->r ps:false)
-	  (fct-scheme->c new) (or r->c ps:false)
+	  (fct-c->scheme new) (or c->r qs:false)
+	  (fct-scheme->c new) (or r->c qs:false)
 	  (fct-c->s new) (if c->r (lambda (p) (funcall c->r (funcall c->s p))) c->s)
 	  (fct-s->c new) (if r->c (lambda (who v) (funcall s->c who (funcall r->c v))) s->c)
 	  (fct-ref new) (if c->r (lambda (p offset) (funcall c->r (funcall ref p offset))) ref)
@@ -514,7 +514,7 @@ the collector next runs)."
 	  (copy-memory for-whom (cptr->fptr for-whom dest) offset (cptr->fptr for-whom s) 0 size))
    :size size :alignment alignment :malloc-mode malloc-mode))
 
-(defforeign "make-cstruct-type" (types &optional (abi ps:false) (alignment ps:false) (malloc-mode nil mode-p))
+(defforeign "make-cstruct-type" (types &optional (abi qs:false) (alignment qs:false) (malloc-mode nil mode-p))
     (:leaf t)
   (declare (ignore abi))
   (unless (and (listp types) (every #'fctype-p types))
@@ -541,7 +541,7 @@ the collector next runs)."
   (let ((size (* count (fct-sizeof type))))
     (unless (fixnum-p size)
       (arguments-error "make-array-type" "arithmetic overflow for overlarge array type" "size" size))
-    (let ((c (make-compound :array (vector type count) size (fct-alignof type) ps:false)))
+    (let ((c (make-compound :array (vector type count) size (fct-alignof type) qs:false)))
       (setf (fct-members c) (list type))
       c)))
 
@@ -601,7 +601,7 @@ the collector next runs)."
 
 (defforeign "cpointer-tag" (p) (:leaf t)
   (cond ((cp-p p) (cp-tags p))
-	((cpointer-p p) (let ((q (extract-cp p))) (if q (cp-tags q) ps:false)))
+	((cpointer-p p) (let ((q (extract-cp p))) (if q (cp-tags q) qs:false)))
 	(t (arg-error "cpointer-tag" "cpointer?" p))))
 
 (defforeign "set-cpointer-tag!" (p tag) (:leaf t)
@@ -781,20 +781,20 @@ the collector next runs)."
 (defun ctype-malloc-mode (c) (if (fct-nonatomic c) "nonatomic" "atomic"))
 
 (defun malloc-interior (size zero)
-  (let* ((address (psffi:allocate size))
+  (let* ((address (qsffi:allocate size))
 	 (keeper (list address)))
     (when zero
       (cffi:foreign-funcall "memset" :pointer (sb-sys:int-sap address) :int 0
 			    :unsigned-long size :pointer))
-    (sb-ext:finalize keeper (lambda () (psffi:free address)) :dont-save t)
-    (make-cp nil address ps:false keeper)))
+    (sb-ext:finalize keeper (lambda () (qsffi:free address)) :dont-save t)
+    (make-cp nil address qs:false keeper)))
 
 (defun normalized-malloc (size mode)
   (unless (and (fixnum-p size) (< size (expt 2 40)))
     (raise-exn "exn:fail:out-of-memory"
 	       (format nil "malloc: out of memory~%  allocation size: ~D" size)))
-  (cond ((eql size 0) ps:false)
-	((string= mode "raw") (make-cp nil (psffi:allocate size)))
+  (cond ((eql size 0) qs:false)
+	((string= mode "raw") (make-cp nil (qsffi:allocate size)))
 	((member mode '("atomic" "nonatomic" "zeroed-atomic") :test #'string=)
 	 (make-cp (make-octets size) 0))
 	((member mode '("atomic-interior" "interior") :test #'string=) (malloc-interior size nil))
@@ -833,12 +833,12 @@ the collector next runs)."
 (defforeign "free" (p) (:leaf t)
   (let ((m (cptr->fptr "cpointer-accessor" p)))
     (when (cp-gcable-p m) (racket-error "free" "cannot free GCable memory"))
-    (psffi:free (cp-address m))
+    (qsffi:free (cp-address m))
     *void*))
-(defforeign "ffi2-free" (m) (:leaf t) (psffi:free (cp-address m)) *void*)
+(defforeign "ffi2-free" (m) (:leaf t) (qsffi:free (cp-address m)) *void*)
 
 (defforeign "malloc-immobile-cell" (v) (:leaf t)
-  (let* ((address (psffi:allocate 8))
+  (let* ((address (qsffi:allocate 8))
 	 (handle (scheme-handle v)))
     (setf (gethash handle *cells*) v)
     (setf (sb-sys:sap-ref-64 (sb-sys:int-sap address) 0) handle)
@@ -848,7 +848,7 @@ the collector next runs)."
   (let* ((m (cptr->fptr "free-immobile-cell" b))
 	 (handle (call-with-cp-sap "free-immobile-cell" m 0 8 (lambda (sap) (sb-sys:sap-ref-64 sap 0)))))
     (remhash handle *cells*)
-    (unless (cp-base m) (psffi:free (cp-address m)))
+    (unless (cp-base m) (qsffi:free (cp-address m)))
     *void*))
 
 (defforeign "end-stubborn-change" (p) (:leaf t) (declare (ignore p)) (unsupported "end-stubborn-change"))
@@ -924,7 +924,7 @@ the collector next runs)."
 (defforeign "lookup-errno" (sym) (:leaf t)
   (unless (racket-symbol-p sym) (arg-error "lookup-errno" "symbol?" sym))
   (let ((entry (assoc (rname sym) #+darwin *macos-errnos* #-darwin *linux-errnos* :test #'string=)))
-    (if entry (cdr entry) ps:false)))
+    (if entry (cdr entry) qs:false)))
 
 ;;; ------------------------------------------------------------------
 ;;; Libraries
@@ -942,14 +942,14 @@ the collector next runs)."
 	     (format nil "~A: ~A~@[~%  system error: ~A~]" who message system-error)))
 
 ;; the fourth argument, as rumble's ffi-lib* takes: who is asking
-(defforeign "ffi-lib" (name &optional (fail-as-false ps:false) (as-global ps:false) who) (:leaf t)
+(defforeign "ffi-lib" (name &optional (fail-as-false qs:false) (as-global qs:false) who) (:leaf t)
   (declare (ignore who))
   (let ((path (if (false-p name) nil (path-or-string "ffi-lib" name))))
     (multiple-value-bind (handle err)
-	(psffi:dlopen path (logior psffi:+rtld-now+
-				   (if (truthy as-global) psffi:+rtld-global+ psffi:+rtld-local+)))
+	(qsffi:dlopen path (logior qsffi:+rtld-now+
+				   (if (truthy as-global) qsffi:+rtld-global+ qsffi:+rtld-local+)))
       (cond (handle (make-flib handle (if (stringp name) (immutable-copy name) name)))
-	    ((truthy fail-as-false) ps:false)
+	    ((truthy fail-as-false) qs:false)
 	    (t (raise-dll-error "ffi-lib"
 				(format nil "could not load foreign library~%  path: ~A"
 					(or path "[all opened]"))
@@ -968,7 +968,7 @@ the collector next runs)."
   "The address of NAME in LIB, or an exception."
   (unless (octets-p name) (arg-error who "bytes?" name))
   (unless (flib-p lib) (arg-error who "ffi-lib?" lib))
-  (multiple-value-bind (address err) (psffi:dlsym (flib-handle lib) (utf8 name))
+  (multiple-value-bind (address err) (qsffi:dlsym (flib-handle lib) (utf8 name))
     (or address
 	(raise-dll-error who
 			 (format nil "could not find export from foreign library~%  name: ~A~%  library: ~A"
@@ -1022,7 +1022,7 @@ the collector next runs)."
 
 (defun c-result (rep raw)
   (case rep
-    (:boolean (if (zerop raw) ps:false ps:true))
+    (:boolean (if (zerop raw) qs:false qs:true))
     (:scheme-object (handle-object raw))
     (:void *void*)
     (t raw)))
@@ -1033,7 +1033,7 @@ the collector next runs)."
   (let ((key (list address in-sigs out-sig errno)))
     (or (gethash key *call-cache*)
 	(setf (gethash key *call-cache*)
-	      (psffi:foreign-function address in-sigs out-sig :errno errno)))))
+	      (qsffi:foreign-function address in-sigs out-sig :errno errno)))))
 
 (defun check-ffi (who in-types out-type abi varargs-after)
   (unless (and (listp in-types) (every #'fctype-p in-types))
@@ -1065,7 +1065,7 @@ there."
 	 (errno (truthy save-errno)))
     (lambda (to-wrap)
       (let* ((proc-p (cptr->fptr "ffi-call" to-wrap))
-	     (name (if (ffi-obj-p proc-p) (rsym (utf8 (cp-field proc-p 6))) ps:false))
+	     (name (if (ffi-obj-p proc-p) (rsym (utf8 (cp-field proc-p 6))) qs:false))
 	     (f (lambda (&rest args)
 		  (unless (= (length args) n)
 		    (racket-arity-error (if (false-p name) "proc" (rname name)) (length args) n))
@@ -1081,17 +1081,17 @@ there."
 	(unless (false-p name) (setf (gethash f *renamed-procedures*) name))
 	(with-arity-mask (ash 1 n) f)))))
 
-(defforeign "ffi-call" (p in-types out-type &optional (abi ps:false) (save-errno ps:false)
-			  (orig-place ps:false) (lock-name ps:false) (blocking ps:false)
-			  (varargs-after ps:false) (exns ps:false)) ()
+(defforeign "ffi-call" (p in-types out-type &optional (abi qs:false) (save-errno qs:false)
+			  (orig-place qs:false) (lock-name qs:false) (blocking qs:false)
+			  (varargs-after qs:false) (exns qs:false)) ()
   (declare (ignore orig-place blocking exns))
   (check-cp "ffi-call" p)
   (check-ffi-call "ffi-call" in-types out-type abi varargs-after save-errno lock-name)
   (funcall (make-caller in-types out-type save-errno) p))
 
-(defforeign "ffi-call-maker" (in-types out-type &optional (abi ps:false) (save-errno ps:false)
-				(orig-place ps:false) (lock-name ps:false) (blocking ps:false)
-				(varargs-after ps:false) (exns ps:false) (core ps:false)) (:leaf t)
+(defforeign "ffi-call-maker" (in-types out-type &optional (abi qs:false) (save-errno qs:false)
+				(orig-place qs:false) (lock-name qs:false) (blocking qs:false)
+				(varargs-after qs:false) (exns qs:false) (core qs:false)) (:leaf t)
   (declare (ignore orig-place blocking exns core))
   (check-ffi-call "ffi-call-maker" in-types out-type abi varargs-after save-errno lock-name)
   (make-caller in-types out-type save-errno))
@@ -1099,7 +1099,7 @@ there."
 (defforeign "ffi-maybe-call-and-callback-core"
     (must? abi varargs-after blocking? async-apply? save-errno out &rest ins) (:leaf t)
   (declare (ignore must?))
-  (values ps:false ins out abi varargs-after blocking? async-apply? save-errno))
+  (values qs:false ins out abi varargs-after blocking? async-apply? save-errno))
 
 (defun check-ffi-callback (who in-types out-type abi varargs-after async-apply)
   (check-ffi who in-types out-type abi varargs-after)
@@ -1120,18 +1120,18 @@ there."
 				    collect (funcall (fct-c->s ct) (c-result rep raw))))
 			(v (apply proc args)))
 		   (c-arg out-rep (funcall (fct-s->c out-type) callback v)))))
-	     (address (psffi:foreign-callback wrapper in-sigs out-sig)))
+	     (address (qsffi:foreign-callback wrapper in-sigs out-sig)))
 	(make-callback address wrapper)))))
 
-(defforeign "ffi-callback" (proc in-types out-type &optional (abi ps:false) (atomic? ps:false)
-			      (async-apply ps:false) (varargs-after ps:false)) (:leaf t)
+(defforeign "ffi-callback" (proc in-types out-type &optional (abi qs:false) (atomic? qs:false)
+			      (async-apply qs:false) (varargs-after qs:false)) (:leaf t)
   (declare (ignore atomic?))
   (unless (functionp proc) (arg-error "ffi-callback" "procedure?" proc))
   (check-ffi-callback "ffi-callback" in-types out-type abi varargs-after async-apply)
   (funcall (make-callback-maker in-types out-type) proc))
 
-(defforeign "ffi-callback-maker" (in-types out-type &optional (abi ps:false) (atomic? ps:false)
-				    (async-apply ps:false) (varargs-after ps:false) (core ps:false))
+(defforeign "ffi-callback-maker" (in-types out-type &optional (abi qs:false) (atomic? qs:false)
+				    (async-apply qs:false) (varargs-after qs:false) (core qs:false))
     (:leaf t)
   (declare (ignore atomic? core))
   (check-ffi-callback "ffi-callback-maker" in-types out-type abi varargs-after async-apply)

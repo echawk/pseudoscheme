@@ -2,7 +2,7 @@
 ;;; (reference/srfi-257/srfi-257-test.scm), with (scheme
 ;;; process-context) added to its imports, its test-end replaced by the
 ;;; exit below, and one test changed: it compared two boxes with equal?,
-;;; which SRFI 111 leaves implementation-dependent (Pseudoscheme's boxes
+;;; which SRFI 111 leaves implementation-dependent (Quasischeme's boxes
 ;;; are records, equal? only if eqv?), so it compares their contents.
 ;;; The rest is unchanged.  The rx sublibrary's tests
 ;;; are not run, as (srfi 257 rx) is not provided.

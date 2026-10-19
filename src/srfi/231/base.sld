@@ -10,7 +10,7 @@
   (import (scheme base)
           (scheme list)
           (scheme vector)
-          (only (rnrs base) assert))  ; PSEUDOSCHEME: was (chibi assert)
+          (only (rnrs base) assert))  ; QUASISCHEME: was (chibi assert)
   (export
    ;; Miscellaneous Functions
    vector-iota

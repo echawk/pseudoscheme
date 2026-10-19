@@ -33,13 +33,13 @@
 	  %case-lambda-box %case-lambda-box-ref)
   (import (except (rnrs (6)) call-with-current-continuation)
 	  (srfi private srfi-226-make-ephemeron-eq-hashtable)
-	  (only (pseudoscheme lisp) lisp-eval-string))
+	  (only (quasischeme lisp) lisp-eval-string))
 
-  ;; PSEUDOSCHEME: was eq?; but each call/cc here makes a procedure, so
+  ;; QUASISCHEME: was eq?; but each call/cc here makes a procedure, so
   ;; two of the same continuation (in tail position) are compared by
   ;; what they capture (src/continuations.lisp)
   (define %continuation=?
-    (lisp-eval-string "(lambda (a b) (if (pseudoscheme-psyntax::continuation= a b) t ps:false))"))
+    (lisp-eval-string "(lambda (a b) (if (quasischeme-psyntax::continuation= a b) t qs:false))"))
 
   (define procedure-locations
     (let ([locations (make-ephemeron-eq-hashtable)])

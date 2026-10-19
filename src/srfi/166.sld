@@ -7,14 +7,14 @@
 ;;; (srfi 166 unicode) and (srfi 166 color), are in 166/.  This file is
 ;;; chibi's 166.sld, unmodified but for this comment.
 ;;;
-;;; Changes, in 166/*.sld only, marked PSEUDOSCHEME: include paths point
+;;; Changes, in 166/*.sld only, marked QUASISCHEME: include paths point
 ;;; into ../reference/srfi-166/; (chibi show shared) is
 ;;; (srfi private srfi-166-shared), a copy of chibi's
 ;;; lib/chibi/show/shared.sld (reference/srfi-166/shared.sld) under that
 ;;; name; and columnar's let-optionals*, from (chibi optional) in chibi,
 ;;; is the portable definition base.sld already uses on other hosts.
 ;;; SRFI 165 (the environment monad the formatters are built on) is
-;;; Pseudoscheme's own (srfi 165).
+;;; Quasischeme's own (srfi 165).
 ;;;
 ;;; Limitations: written uses the host's write for strings, which
 ;;; writes a newline as itself rather than \n; and numbers formatted

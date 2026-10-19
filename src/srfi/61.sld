@@ -1,5 +1,5 @@
 ;;; SRFI 61: cond with guards, (test guard => receiver).  Written for
-;;; Pseudoscheme.
+;;; Quasischeme.
 (define-library (srfi 61)
   (export cond)
   (import (except (scheme base) cond) (prefix (only (scheme base) cond) r7:))

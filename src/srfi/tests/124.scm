@@ -2,7 +2,7 @@
 ;;; breaks an ephemeron whose key is unreachable, even when the datum
 ;;; refers to the key.
 (import (scheme base) (scheme process-context) (srfi 64) (srfi 124)
-        (pseudoscheme lisp))
+        (quasischeme lisp))
 
 (test-begin "srfi-124")
 

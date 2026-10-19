@@ -1,4 +1,4 @@
-;;; SRFI 26: cut, cute.  Written for Pseudoscheme, after the SRFI's
+;;; SRFI 26: cut, cute.  Written for Quasischeme, after the SRFI's
 ;;; reference implementation.
 (define-library (srfi 26)
   (export cut cute <> <...>)

@@ -131,7 +131,7 @@ scm_list_to_string, set-car! scm_set_car_x, pair? scm_pair_p."
     (format t ";;;; reference manual: don't edit.  libguile's C functions that are~%")
     (format t ";;;; Scheme procedures (table.lisp, DEFS): the C name, the procedure,~%")
     (format t ";;;; its required and optional arguments, and whether it has a rest list.~%~%")
-    (format t "(in-package \"PSEUDOSCHEME-LIBGUILE\")~%~%")
+    (format t "(in-package \"QUASISCHEME-LIBGUILE\")~%~%")
     (dolist (e (sort entries #'string< :key #'car))
       (destructuring-bind (c name req opt rest) e
 	(format t "(defs ~S ~S ~D ~D ~:[nil~;t~])~%" c name req opt rest)))

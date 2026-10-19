@@ -3,9 +3,9 @@
 ;;; itself an R7RS library; this file is a copy of it.  MIT licence
 ;;; (below, and in reference/srfi-215/LICENSE).
 ;;;
-;;; One change, marked PSEUDOSCHEME: the SRFI sets current-log-fields and
+;;; One change, marked QUASISCHEME: the SRFI sets current-log-fields and
 ;;; current-log-callback by calling them with an argument, which
-;;; Pseudoscheme's parameter objects don't accept; so each is wrapped
+;;; Quasischeme's parameter objects don't accept; so each is wrapped
 ;;; with settable-parameter from (srfi private srfi-215-parameter),
 ;;; which makes a procedure that can be called with an argument to set
 ;;; the value, and that parameterize still accepts.
@@ -46,7 +46,7 @@
   (import
     (scheme base)
     (scheme write)
-    (srfi private srfi-215-parameter))  ; PSEUDOSCHEME: added
+    (srfi private srfi-215-parameter))  ; QUASISCHEME: added
   (begin
 
 ;; This queue code is based on public domain code from SLIB,
@@ -112,14 +112,14 @@
                          (f (cddr fields))))))))))
 
 (define current-log-fields
-  (settable-parameter                   ; PSEUDOSCHEME: added
+  (settable-parameter                   ; QUASISCHEME: added
   (make-parameter '()
                   (lambda (plist)
                     (field-list->alist plist)
                     plist))))
 
 (define current-log-callback
-  (settable-parameter                   ; PSEUDOSCHEME: added
+  (settable-parameter                   ; QUASISCHEME: added
   (let ((num-pending-logs 0)
         (pending-logs (make-queue)))
     (make-parameter (lambda (log-entry)

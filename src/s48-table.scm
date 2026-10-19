@@ -1,5 +1,5 @@
 
-; Scheme 48's table package, replicated for Pseudoscheme.
+; Scheme 48's table package, replicated for Quasischeme.
 ; Somewhat redundant with p-utils.scm.
 
 (define (make-table) (cl:make-hash-table))

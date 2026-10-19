@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's equal? and equal-hash-code, natively, and the hash tables'
 ;;;; equal?-based test (hash.lisp's RACKET-EQUAL).
@@ -12,7 +12,7 @@
 ;;;; Racket's does); a chaperoned box or hash table is compared through
 ;;;; its chaperone, a chaperoned struct by its fields underneath.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defvar *prop-equal+hash* (%make-struct-type-property (rsym "prop:equal+hash") nil '()))
 (define-primitive "#%kernel" "prop:equal+hash" *prop-equal+hash*)

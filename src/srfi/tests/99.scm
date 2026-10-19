@@ -7,7 +7,7 @@
         (prefix (srfi 99 records syntactic) s:))
 
 ;; Syntactic layer.  The tests' other definitions are internal ones,
-;; because Pseudoscheme compiles many top-level calls slowly (see
+;; because Quasischeme compiles many top-level calls slowly (see
 ;; ../57.sld).
 (define-record-type point #t #t (x) (y))
 

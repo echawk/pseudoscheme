@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Chaperones and impersonators of data, natively (Racket CS's
 ;;;; rumble/impersonator.ss, hash.ss and box.ss), and the primitives of
@@ -19,7 +19,7 @@
 ;;;; the rest are the host's (*host-shared*), which open-codes them and
 ;;;; so can't see a wrapper.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Boxes
@@ -116,7 +116,7 @@ properties."
     (check-redirect who set-proc 3 "set-proc")
     (check-redirect who remove-proc 2 "remove-proc")
     (check-redirect who key-proc 2 "key-proc")
-    (let ((clear-proc ps:false))
+    (let ((clear-proc qs:false))
       (when (and more (not (impersonator-property-p (car more))))
 	(setq clear-proc (pop more))
 	(when (truthy clear-proc) (check-redirect who clear-proc 1 "clear-proc"))
@@ -192,7 +192,7 @@ properties."
   (unless (functionp f) (arg-error who "procedure?" f))
   (or (ignore-errors (arity-mask f)) -1))
 
-(defnative "procedure-arity-includes?" (f k &optional (incomplete-ok? ps:false)) (:leaf t)
+(defnative "procedure-arity-includes?" (f k &optional (incomplete-ok? qs:false)) (:leaf t)
   (let ((mask (procedure-mask "procedure-arity-includes?" f)))
     (unless (and (integerp k) (>= k 0)) (arg-error "procedure-arity-includes?" "exact-nonnegative-integer?" k))
     (bool (and (or (truthy incomplete-ok?) (not (incomplete-arity-p f)))

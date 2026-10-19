@@ -1,6 +1,6 @@
 ;;; A log-analysis pipeline in Scheme on five Common Lisp libraries.
 ;;;
-;;;   bin/pseudoscheme --quicklisp tests/programs/log-report.scm
+;;;   bin/quasischeme --quicklisp tests/programs/log-report.scm
 ;;;
 ;;; An access log is parsed with CL-PPCRE (its register-groups-bind
 ;;; macro, with Scheme code in its body), timestamps with local-time
@@ -13,7 +13,7 @@
 
 (import (scheme base) (scheme inexact) (scheme process-context)
         (srfi 1) (only (srfi 13) string-prefix?) (srfi 64) (only (srfi 132) list-sort)
-        (pseudoscheme lisp)
+        (quasischeme lisp)
         (prefix (cl common-lisp) cl:)
         (prefix (cl cl-ppcre) re:)
         (prefix (cl local-time) lt:)

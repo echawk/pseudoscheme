@@ -3,8 +3,8 @@
 Each program here is a non-trivial use of the bridge (docs/interop.md),
 using Common Lisp libraries from Quicklisp and C libraries through CFFI,
 and checks its own results. `make test-programs` builds
-`bin/pseudoscheme` and runs them all; `sh tests/run-program-tests.sh
-bin/pseudoscheme kanren.lisp` runs some. Quicklisp must be installed
+`bin/quasischeme` and runs them all; `sh tests/run-program-tests.sh
+bin/quasischeme kanren.lisp` runs some. Quicklisp must be installed
 (`~/quicklisp/setup.lisp`); it fetches missing libraries the first time.
 
 | program | what it does | libraries |
@@ -17,7 +17,7 @@ bin/pseudoscheme kanren.lisp` runs some. Quicklisp must be installed
 
 The `.scm` programs run on the command line, with `lib/` on the library
 path. The `.lisp` programs run in SBCL and load `harness.lisp`, which
-loads Quicklisp and Pseudoscheme and reports like SRFI 64.
+loads Quicklisp and Quasischeme and reports like SRFI 64.
 
 Behavior at the boundary that the programs show:
 - A Lisp function that answers false with `NIL`, but whose name doesn't

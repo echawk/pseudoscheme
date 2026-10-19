@@ -10,7 +10,7 @@ matchers. They're distributed through two package managers:
 - **[snow-fort](https://snow-fort.org)**: R7RS. Packages are installed
   with `snow-chibi`, the client that comes with chibi-scheme.
 
-Pseudoscheme can load what either one installs. This guide shows how,
+Quasischeme can load what either one installs. This guide shows how,
 from the command line and from Lisp. It's written for Common Lisp
 programmers who haven't used either tool.
 
@@ -37,7 +37,7 @@ There are two notations:
 ```
 
 A program imports the libraries it uses:
-`(import (scheme base) (demo greet))`. Pseudoscheme expands both kinds
+`(import (scheme base) (demo greet))`. Quasischeme expands both kinds
 with the same expander, so R6RS and R7RS libraries can import each
 other.
 
@@ -54,29 +54,29 @@ package manager's job is to put files in such a directory.
 | qlot or ocicl (per project, with a lock file) | Akku (`Akku.manifest`, `Akku.lock`) |
 | `asdf:*central-registry*` | the library path (`-L`, `r7rs:add-library-directory`) |
 
-## 2. How Pseudoscheme finds a library
+## 2. How Quasischeme finds a library
 
 A library `(foo bar)` is looked for in every directory of the search
 path, in order:
 
 1. the directories you add: `-L DIR` on the command line (repeatable),
-   `--akku`, `PSEUDOSCHEME_LIBRARY_PATH` (directories separated by
+   `--akku`, `QUASISCHEME_LIBRARY_PATH` (directories separated by
    colons; command line only, searched before the `-L` ones), or
    `r7rs:add-library-directory` from Lisp. All of these put
-   directories on `psx:*library-path*`, which starts as `("./")`;
-2. then the libraries that ship with Pseudoscheme: the SRFIs in
+   directories on `qsx:*library-path*`, which starts as `("./")`;
+2. then the libraries that ship with Quasischeme: the SRFIs in
    `src/srfi/`. `(scheme ...)`, `(rnrs ...)`, `(chezscheme)` and
    `(ikarus)` are built in.
 
 Within a directory, `(foo bar)` is `foo/bar.sls`, `foo/bar.ss`,
 `foo/bar.sld` or `foo/bar.scm`. Implementation-specific variants are
 also tried, as Akku lays them out. The order is:
-- `foo/bar.pseudoscheme.sls`;
+- `foo/bar.quasischeme.sls`;
 - the generic files above;
 - `foo/bar.chezscheme.sls`, then `foo/bar.ikarus.sls`.
 
 So when a package has no portable version of a file, Chez Scheme's is
-used, on top of Pseudoscheme's `(chezscheme)` compatibility library.
+used, on top of Quasischeme's `(chezscheme)` compatibility library.
 
 File names are escaped the way Akku writes them:
 - `(srfi :1)` may be `srfi/%3a1.sls`, `srfi/:1.sls` or `srfi/1.sld`;
@@ -90,15 +90,15 @@ the same library.
 Build the command-line program:
 
 ```sh
-make -C contrib/cli           # writes bin/pseudoscheme
+make -C contrib/cli           # writes bin/quasischeme
 ```
 
 The examples below put `bin/` on `PATH`. From Lisp you need Quicklisp,
-which fetches Pseudoscheme's own dependencies (float-features,
+which fetches Quasischeme's own dependencies (float-features,
 cl-unicode, trivial-gray-streams, trivial-garbage, trivial-cltl2):
 
 ```lisp
-(push #p"/path/to/pseudoscheme/" asdf:*central-registry*)
+(push #p"/path/to/quasischeme/" asdf:*central-registry*)
 (ql:quickload :r7rs)
 ```
 
@@ -134,7 +134,7 @@ The flags matter:
   snow-chibi installs system-wide, into chibi's own directories, and
   asks for `sudo`.
 - **`--impls=generic`** writes the libraries straight into `DIR`:
-  `DIR/macduffie/json.sld`, which is the layout Pseudoscheme searches.
+  `DIR/macduffie/json.sld`, which is the layout Quasischeme searches.
   Without it, snow-chibi installs for each Scheme it finds on your
   machine.
 - **`--always-yes`** answers yes to its prompts, including installing
@@ -155,13 +155,13 @@ for the shell: `'(macduffie json)'`.
 ```
 
 ```sh
-pseudoscheme -L snow json-demo.scm
+quasischeme -L snow json-demo.scm
 # (1 #<Record <srfi-hash-table>>)
 # "foo_bar"
 ```
 
 To avoid passing `-L` every time, export
-`PSEUDOSCHEME_LIBRARY_PATH=$PWD/snow`.
+`QUASISCHEME_LIBRARY_PATH=$PWD/snow`.
 
 ## 5. Akku
 
@@ -227,7 +227,7 @@ it works from anywhere inside the project.
 ```
 
 ```sh
-pseudoscheme --r6rs --akku demo.sps 1 2 3
+quasischeme --r6rs --akku demo.sps 1 2 3
 # ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 # 6
 ```
@@ -238,7 +238,7 @@ pseudoscheme --r6rs --akku demo.sps 1 2 3
 
 Akku also mirrors snow-fort, so R7RS packages can be installed with
 `akku install` too. Akku's `.akku/env` and `.akku/bin/activate` scripts
-set environment variables for other Schemes; Pseudoscheme doesn't need
+set environment variables for other Schemes; Quasischeme doesn't need
 them.
 
 ## 6. From Lisp
@@ -290,7 +290,7 @@ that loads first:
 
 ```lisp
 (defsystem "my-app"
-  :defsystem-depends-on ("pseudoscheme/asdf")
+  :defsystem-depends-on ("quasischeme/asdf")
   :components ((:file "paths")                         ; adds .akku/lib, below
                (:r7rs-library "scheme/my-app/util"     ; scheme/my-app/util.sld
                 :depends-on ("paths"))
@@ -308,9 +308,9 @@ See `examples/mixed-system/`.
 
 **"cannot find library (foo bar)".** Check that the file is where §2
 says it should be, under one of the directories on the path. From Lisp,
-`psx:*library-path*` shows the list.
+`qsx:*library-path*` shows the list.
 
-**Your SRFIs replaced Pseudoscheme's, or didn't.** The search tries
+**Your SRFIs replaced Quasischeme's, or didn't.** The search tries
 each spelling of a file name in every directory before the next
 spelling. Installing a snow package often installs SRFIs it depends on,
 such as `snow/srfi/1.sld`; that has the same file name as the bundled
@@ -331,8 +331,8 @@ example:
 ```
 
 **Implementation-specific libraries.** A package that has only
-`foo.guile.sls` or `foo.racket.sls` won't load. Pseudoscheme uses
-`.pseudoscheme`, generic, Chez and Ikarus variants only. `(chezscheme)` and `(ikarus)`
+`foo.guile.sls` or `foo.racket.sls` won't load. Quasischeme uses
+`.quasischeme`, generic, Chez and Ikarus variants only. `(chezscheme)` and `(ikarus)`
 cover what portable libraries commonly need from those systems: file
 system access, `format`, `printf`, boxes, time and dates. They don't
 cover FFIs or engines.
@@ -346,7 +346,7 @@ can be re-entered.
 
 **Compiling.** A library loaded from one of these trees is compiled the
 first time it is imported and cached (README, "Loading real
-libraries"). `pseudoscheme --precompile DIR` compiles the `.sld`
+libraries"). `quasischeme --precompile DIR` compiles the `.sld`
 libraries under `DIR` ahead of time; it doesn't read Akku's `.sls`
 files.
 

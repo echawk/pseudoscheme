@@ -1,6 +1,6 @@
 # stage0: psyntax on any R5RS Scheme
 
-psyntax, Pseudoscheme's expander, is written as R6RS libraries that use
+psyntax, Quasischeme's expander, is written as R6RS libraries that use
 `syntax-case`, so its first image has to come from a Scheme that can run
 those sources. `boot/psyntax.sh` gets one from Chez Scheme, which has
 R6RS natively. stage0 gets one from any R5RS Scheme instead (with SRFI 6
@@ -19,7 +19,7 @@ or by hand, in a directory holding psyntax's sources (`psyntax/*.ss` and
 `boot/stage0/` as `stage0/`:
 
 ```sh
-chibi-scheme stage0/hosts/chibi.scm                 # writes psyntax-pseudoscheme.pp
+chibi-scheme stage0/hosts/chibi.scm                 # writes psyntax-quasischeme.pp
 scheme48 -h 0 < stage0/hosts/scheme48.scm
 gosh stage0/hosts/gauche.scm
 ```
@@ -36,7 +36,7 @@ that the build script imports (`config`, `compat`, `internal`,
 `builders`, `library-manager`, `expander`) and the build script,
 expands them into plain Scheme, and evaluates the result in the host.
 psyntax is then running in the host, and its build script expands
-psyntax's sources, writing `psyntax-pseudoscheme.pp`: the seed.
+psyntax's sources, writing `psyntax-quasischeme.pp`: the seed.
 
 - **Libraries are flattened.** Each library's definitions become
   top-level definitions named `library:name`, and references are
@@ -70,7 +70,7 @@ table and two file operations, loads `stage0.scm` and calls
 
 ## Why the seed doesn't matter
 
-Pseudoscheme rebuilds psyntax from the seed, then from its own result,
+Quasischeme rebuilds psyntax from the seed, then from its own result,
 until the image reproduces itself, and names the image's gensyms in
 order of appearance. So nothing of the seed survives into the result:
 the seeds from Chez, Chibi, Scheme 48 and Gauche all end in the same

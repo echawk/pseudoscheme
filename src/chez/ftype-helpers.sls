@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; (pseudoscheme chez ftype-helpers): Chez Scheme's ftypes
+;;;; (quasischeme chez ftype-helpers): Chez Scheme's ftypes
 ;;;; (src/chez/ftype.scm) -- the descriptors of ftypes, their layouts, the
 ;;;; code the accessors expand into and the procedures that code calls.  A
 ;;;; library of its own, which (chezscheme) imports (src/chez/chez.lisp),
@@ -25,7 +25,7 @@
 ;;;; the stable address of a bytevector (ftype-pointer-address of a pointer
 ;;;; into one is its address now).
 
-(library (pseudoscheme chez ftype-helpers)
+(library (quasischeme chez ftype-helpers)
   (export ft-cps ft-define-start ft-define-finish ft-expand ft-sizeof-expand
           ft-make-pointer ft-pointer-of? ft-make-sop ft-check-fptr
           ft-base ft-base-off ft-any-base ft-make-ref
@@ -36,7 +36,7 @@
           ft-unlock!
           ft-pointer? ft-pointer-address ft-pointer-null? ft-pointer=?
           ft-pointer-ftype ft-pointer->sexpr ft-sop? ft-sop-object ft-sop-offset)
-  (import (rnrs) (rnrs mutable-pairs) (rnrs r5rs) (prefix (pseudoscheme chez host) %))
+  (import (rnrs) (rnrs mutable-pairs) (rnrs r5rs) (prefix (quasischeme chez host) %))
 
   ;; the identifier whose context the expansions' code is in: this library's
   (define ft-ctx-id #'here)

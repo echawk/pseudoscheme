@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-LIBGUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-LIBGUILE -*-
 
 ;;;; libguile's functions, as a table (docs/libguile.md).
 ;;;;
@@ -35,13 +35,13 @@
 ;;;; (its SCM arguments are only read here, so they are synchronized
 ;;;; one level deep, not all through: bridge.lisp).
 
-(defpackage "PSEUDOSCHEME-LIBGUILE"
+(defpackage "QUASISCHEME-LIBGUILE"
   (:use "COMMON-LISP")
   (:export "*API*" "API-NAME" "API-RETURN" "API-ARGS" "API-KIND" "API-SCHEME"
 	   "API-REQ" "API-OPT" "API-REST" "API-NORETURN" "API-SHALLOW"
 	   "API-INDEX" "FIND-API"))
 
-(in-package "PSEUDOSCHEME-LIBGUILE")
+(in-package "QUASISCHEME-LIBGUILE")
 
 (defstruct (api (:constructor make-api (name return args kind &key scheme req opt rest
 						noreturn shallow)))

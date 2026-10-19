@@ -113,7 +113,7 @@
   (define-transformer-env! env
     (delay (make-program-env
 	    (string->symbol
-	     (string-append (ps-lisp:symbol-name (program-env-id env))
+	     (string-append (qs-lisp:symbol-name (program-env-id env))
 			    "[FOR-SYNTAX]"))
 	    (list revised^4-scheme-structure)))))
 
@@ -133,7 +133,7 @@
 		   (let ((ppackage (program-env-package env)))
 		     (map (lambda (name)
 			    (intern-renaming-perhaps
-		                 (ps-lisp:symbol-name name)
+		                 (qs-lisp:symbol-name name)
 				 ppackage))
 			  (interface-names sig))))))))
 

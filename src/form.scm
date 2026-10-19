@@ -160,7 +160,7 @@
     (cond ((pair? pat)
 	   `(lambda ,(cdr pat) ,@(cddr form)))
 	  ((null? (cddr form))
-	   'ps:unspecific)		;(define foo)
+	   'qs:unspecific)		;(define foo)
 	  (else
 	   (caddr form)))))
 

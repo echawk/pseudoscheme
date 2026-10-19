@@ -1,21 +1,21 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Compiled files: the Guile mode's .go files.  The first time a file is
 ;;;; loaded, each of its forms is expanded, translated to Lisp, evaluated
 ;;;; and kept; once the whole file has loaded, the kept Lisp forms are
 ;;;; compiled with COMPILE-FILE into a fasl under the cache directory
-;;;; (~/.cache/pseudoscheme/guile/).  Loading the file again loads the
+;;;; (~/.cache/quasischeme/guile/).  Loading the file again loads the
 ;;;; fasl: nothing is read, expanded or compiled.  This is what Guile
 ;;;; does with its compiled .go files, and as there, a form is compiled
 ;;;; with the macros the forms before it defined.
 ;;;;
-;;;; A fasl is keyed by the file's name and date, the Pseudoscheme it was
-;;;; compiled by (psx::build-signature) and the continuation mode.  The
+;;;; A fasl is keyed by the file's name and date, the Quasischeme it was
+;;;; compiled by (qsx::build-signature) and the continuation mode.  The
 ;;;; literals in compiled code -- modules, syntax objects, sites, photons --
 ;;;; have load forms here; a file whose code holds anything else isn't
-;;;; cached.  PSEUDOSCHEME_GUILE_CACHE=0 turns the cache off.
+;;;; cached.  QUASISCHEME_GUILE_CACHE=0 turns the cache off.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defvar *guile-cache* t "True to load and write compiled files.")
 (defvar *cache-ready* nil "Set once Guile has booted: boot-9 itself isn't cached.")
@@ -23,7 +23,7 @@
 
 (defun guile-cache-p ()
   (and *guile-cache* *cache-ready*
-       (not (member (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE") '("0" "no" "off") :test #'equalp))))
+       (not (member (uiop:getenv "QUASISCHEME_GUILE_CACHE") '("0" "no" "off") :test #'equalp))))
 
 (defun writable-directory-p (dir)
   (ignore-errors
@@ -36,30 +36,30 @@
 (defvar *cache-parents* '() "(env . xdg) -> the cache's directory, for GUILE-CACHE-PARENT.")
 
 (defun guile-cache-parent ()
-  "Where the cache goes: PSEUDOSCHEME_GUILE_CACHE_DIRECTORY, else the XDG
+  "Where the cache goes: QUASISCHEME_GUILE_CACHE_DIRECTORY, else the XDG
 cache directory, else, if a program has pointed that at a directory it
 can't write (LilyPond's is its installation's), ~/.cache/."
-  (let* ((env (uiop:getenv "PSEUDOSCHEME_GUILE_CACHE_DIRECTORY"))
-	 (xdg (uiop:xdg-cache-home "pseudoscheme" "guile/"))
+  (let* ((env (uiop:getenv "QUASISCHEME_GUILE_CACHE_DIRECTORY"))
+	 (xdg (uiop:xdg-cache-home "quasischeme" "guile/"))
 	 (key (cons env xdg)))
     (cdr (or (assoc key *cache-parents* :test #'equal)
 	     (car (push (cons key (cond ((and env (plusp (length env))) (uiop:ensure-directory-pathname env))
 					((writable-directory-p xdg) xdg)
-					(t (merge-pathnames ".cache/pseudoscheme/guile/" (user-homedir-pathname)))))
+					(t (merge-pathnames ".cache/quasischeme/guile/" (user-homedir-pathname)))))
 			*cache-parents*))))))
 
 (defun guile-cache-directory ()
-  "This build's generation of the cache (psx::CACHE-GENERATION): the old
+  "This build's generation of the cache (qsx::CACHE-GENERATION): the old
 ones are pruned."
-  (psx::cache-generation (guile-cache-parent) (psx::build-signature)))
+  (qsx::cache-generation (guile-cache-parent) (qsx::build-signature)))
 
 (defun cache-fasl (file)
   (let ((true (probe-file file)))
     (and true
 	 (merge-pathnames
 	  (format nil "~36R.fasl"
-		  (psx::fnv-1a (format nil "~A ~A ~A ~A" (namestring true) (file-write-date true)
-				       (psx::build-signature) psx::*full-continuations*)))
+		  (qsx::fnv-1a (format nil "~A ~A ~A ~A" (namestring true) (file-write-date true)
+				       (qsx::build-signature) qsx::*full-continuations*)))
 	  (guile-cache-directory)))))
 
 ;;; ------------------------------------------------------------------
@@ -75,10 +75,10 @@ ones are pruned."
   ;; an anonymous one's name is a gensym (" g123"), new in each session
   (let ((name (and (module-p* s) (module-slot s +module-name+))))
     (if (and (consp name) (every #'symbolp name)
-	     (notany (lambda (part) (let ((n (ps:scheme-symbol-name part))) (and (plusp (length n)) (char= (char n 0) #\Space))))
+	     (notany (lambda (part) (let ((n (qs:scheme-symbol-name part))) (and (plusp (length n)) (char= (char n 0) #\Space))))
 		     name)
 	     (eq s (ignore-errors
-		    (funcall (root-value "resolve-module") name ps:false ps:false :ensure ps:false))))
+		    (funcall (root-value "resolve-module") name qs:false qs:false :ensure qs:false))))
 	`(cached-module ',name)
 	(error "~S can't be in a compiled Guile file" s))))
 
@@ -89,15 +89,15 @@ ones are pruned."
   (declare (ignore environment))
   `(make-site ',(site-module s) ',(site-name s) ',(site-public s) ',(site-kind s)))
 
-(psx::register-named-photon "nil" *elisp-nil*)
-(psx::register-named-photon "unbound" +unbound+)
+(qsx::register-named-photon "nil" *elisp-nil*)
+(qsx::register-named-photon "unbound" +unbound+)
 
 ;;; ------------------------------------------------------------------
 ;;; Evaluating a file's forms, keeping their code
 
-(defun translate-top-level (core) (psx::translate-top-level core))
+(defun translate-top-level (core) (qsx::translate-top-level core))
 
-(defun run-cached (thunk) (psx::run-top-level thunk))
+(defun run-cached (thunk) (qsx::run-top-level thunk))
 
 (defun eval-translated (forms)
   (let ((values '())
@@ -105,17 +105,17 @@ ones are pruned."
     (dolist (f forms)
       (setq values (multiple-value-list
 		    (handler-bind ((warning #'muffle-warning))
-		      (if psx::*full-continuations*
-			  (psx::call-with-full-policy
-			   (lambda () (psx::call-with-continuation-base (lambda () (psx::eval-compiled-or-interpreted f)))))
-			  (psx::eval-compiled-or-interpreted f))))))
+		      (if qsx::*full-continuations*
+			  (qsx::call-with-full-policy
+			   (lambda () (qsx::call-with-continuation-base (lambda () (qsx::eval-compiled-or-interpreted f)))))
+			  (qsx::eval-compiled-or-interpreted f))))))
     (values-list values)))
 
 (defun tree-il->core (tree)
   (let* ((*lexicals* (make-hash-table :test 'eq))
 	 (*compile-module* *current-module*)
 	 (core (compile-tree-il tree)))
-    (if (> (psx::tree-size core) psx::*letrec-definitions-limit*)
+    (if (> (qsx::tree-size core) qsx::*letrec-definitions-limit*)
 	(flatten-top-level-lets core)
 	core)))
 
@@ -149,7 +149,7 @@ ones are pruned."
 (defun compile-chunk (forms cache)
   "FORMS compiled into a chunk fasl of CACHE: its path, or NIL if they
 can't be."
-  (when (> (reduce #'+ forms :key #'psx::tree-size) *cache-size-limit*)
+  (when (> (reduce #'+ forms :key #'qsx::tree-size) *cache-size-limit*)
     (return-from compile-chunk nil))
   (let* ((n (incf (incremental-cache-count cache)))
 	 (dir (chunk-directory cache))
@@ -160,7 +160,7 @@ can't be."
 	  (with-open-file (out lisp :direction :output :if-exists :supersede)
 	    (format out "(cl:in-package \"SCHEME\")~%")
 	    (dotimes (i (length forms))
-	      (format out "(pseudoscheme-guile::~A ~D)~%"
+	      (format out "(quasischeme-guile::~A ~D)~%"
 		      (if (= i (1- (length forms))) "cached-last-form" "cached-form") i)))
 	  (let ((*cache-forms* (coerce forms 'simple-vector)))
 	    (declare (special *cache-forms*))	; defined below
@@ -170,7 +170,7 @@ can't be."
 		      (*error-output* (make-broadcast-stream))
 		      (*standard-output* (make-broadcast-stream)))
 		  (multiple-value-bind (output warnings-p failure-p)
-		      (psx::call-with-full-policy (lambda () (compile-cache-file lisp fasl :collect nil)))
+		      (qsx::call-with-full-policy (lambda () (compile-cache-file lisp fasl :collect nil)))
 		    (declare (ignore warnings-p))
 		    (when (or failure-p (null output)) (error "compiling failed")))))))
 	  (ignore-errors (delete-file lisp))
@@ -215,7 +215,7 @@ and the chunks gone."
 				    :defaults fasl)))
 	   (with-open-file (out temp :direction :output :element-type '(unsigned-byte 8) :if-exists :supersede)
 	     (dolist (chunk (reverse (incremental-cache-fasls cache)))
-	       (write-sequence (psx::read-file-bytes chunk) out)))
+	       (write-sequence (qsx::read-file-bytes chunk) out)))
 	   (uiop:rename-file-overwriting-target temp fasl)
 	   (when *trace-cache* (format *trace-output* "~&;; cached ~A~%" (incremental-cache-source cache)))))
     (when (incremental-cache-dir cache)
@@ -237,7 +237,7 @@ COMPILE-FILE of more (Guix's (guix build syscalls), 2M) can exhaust an
 doesn't.  A bigger file is compiled each time it is loaded.")
 
 (defun write-cached-file (fasl source forms)
-  (when (> (reduce #'+ forms :key #'psx::tree-size) *cache-size-limit*)
+  (when (> (reduce #'+ forms :key #'qsx::tree-size) *cache-size-limit*)
     (when *trace-cache* (format *trace-output* "~&;; not cached ~A: too big~%" source))
     (return-from write-cached-file nil))
   (let* ((temp (format nil "~A-~36R" (pathname-name fasl) (random (expt 36 8) (make-random-state t))))
@@ -248,9 +248,9 @@ doesn't.  A bigger file is compiled each time it is loaded.")
 	     (progn
 	       (ensure-directories-exist lisp)
 	       (with-open-file (out lisp :direction :output :if-exists :supersede)
-		 (format out ";;; ~A, compiled by Pseudoscheme's Guile mode~%" source)
+		 (format out ";;; ~A, compiled by Quasischeme's Guile mode~%" source)
 		 (format out "(cl:in-package \"SCHEME\")~%")
-		 (dotimes (i (length forms)) (format out "(pseudoscheme-guile::cached-form ~D)~%" i)))
+		 (dotimes (i (length forms)) (format out "(quasischeme-guile::cached-form ~D)~%" i)))
 	       (let ((*cache-forms* (coerce forms 'simple-vector)))
 		 (handler-bind ((warning #'muffle-warning))
 		   (with-standard-io-syntax
@@ -258,7 +258,7 @@ doesn't.  A bigger file is compiled each time it is loaded.")
 			   (*error-output* (make-broadcast-stream))
 			   (*standard-output* (make-broadcast-stream)))
 		       (multiple-value-bind (output warnings-p failure-p)
-			   (psx::call-with-full-policy
+			   (qsx::call-with-full-policy
 			    (lambda () (compile-cache-file lisp temp-fasl)))
 			 (declare (ignore warnings-p))
 			 (when (or failure-p (null output))
@@ -275,7 +275,7 @@ doesn't.  A bigger file is compiled each time it is loaded.")
 (defun compile-cache-file (lisp fasl &key (collect t))
   "COMPILE-FILE's values for LISP.  A form whose code is too big for SBCL
 (a branch past its reach, on arm64) is compiled again with
-PSX::*COMPACT-FRAMES*.  COLLECT: a full GC after (not for one form's
+QSX::*COMPACT-FRAMES*.  COLLECT: a full GC after (not for one form's
 chunk: a full GC per form makes loading Guix's package modules take
 hours)."
   (flet ((try ()
@@ -290,7 +290,7 @@ hours)."
     (multiple-value-bind (output warnings-p failure-p) (try)
       (if (and output (not failure-p))
 	  (values output warnings-p failure-p)
-	  (let ((psx::*compact-frames* t)) (try))))))
+	  (let ((qsx::*compact-frames* t)) (try))))))
 
 (defun load-cached (filename)
   "Load FILENAME's fasl if there is one: true if so."

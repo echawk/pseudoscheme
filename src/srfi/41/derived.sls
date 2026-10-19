@@ -12,7 +12,7 @@
 ; CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
 ; THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-(library (srfi :41 derived)  ; PSEUDOSCHEME: renamed from (streams derived)
+(library (srfi :41 derived)  ; QUASISCHEME: renamed from (streams derived)
 ;
 
   (export define-stream list->stream port->stream stream stream->list
@@ -22,7 +22,7 @@
           stream-of stream-range stream-ref stream-reverse stream-scan stream-take
           stream-take-while stream-unfold stream-unfolds stream-zip)
 
-  (import (rnrs) (srfi :41 primitive))  ; PSEUDOSCHEME: renamed
+  (import (rnrs) (srfi :41 primitive))  ; QUASISCHEME: renamed
 
   (define-syntax define-stream
     (syntax-rules ()

@@ -4,7 +4,7 @@
 ;;; library form is the shipped srfi/135.sld with its include path
 ;;; changed and the kernel chosen: of the three sample kernels this uses
 ;;; kernel0 (135/kernel0.sld), which represents texts by Scheme strings,
-;;; since Pseudoscheme's strings hold any Unicode character and
+;;; since Quasischeme's strings hold any Unicode character and
 ;;; string-ref is O(1).  (srfi 135 texts), in 135/texts.sld, is the
 ;;; same library under its other name.
 

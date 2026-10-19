@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Stacks and frames: make-stack, and what (system vm frame) is built on
 ;;;;
@@ -21,7 +21,7 @@
 ;;;; procedure (#f) and its arguments: what (system vm frame) makes of a
 ;;;; primitive's frame.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defstruct (gframe (:constructor make-gframe (kind name code locals ip)) (:copier nil))
   kind					; :lisp or :vm
@@ -34,7 +34,7 @@
 
 (defmethod print-object ((f gframe) stream)
   (format stream "#<frame ~(~X~) ~A>" (logand (sb-kernel:get-lisp-obj-address f) #xffffffffff)
-	  (let ((n (gframe-name f))) (if (and n (not (eq n ps:false))) (ps:scheme-symbol-name n) "_"))))
+	  (let ((n (gframe-name f))) (if (and n (not (eq n qs:false))) (qs:scheme-symbol-name n) "_"))))
 
 (defstruct (gstack (:constructor make-gstack (id frames)) (:copier nil))
   id
@@ -78,7 +78,7 @@
     (if (hash-table-p table) (hash-table-count table) 0)))
 
 (defvar *lisp-source-root*
-  (namestring (asdf:system-source-directory :pseudoscheme)))
+  (namestring (asdf:system-source-directory :quasischeme)))
 
 (defun scheme-debug-name-p (name)
   "Whether NAME, a Lisp debug name, is that of code compiled from Scheme:
@@ -101,7 +101,7 @@ file that isn't Lisp's (a Scheme file, or the module cache's)."
 
 (defun machine-debug-name-p (name)
   "Whether NAME is that of a machine: (labels %machine... ...)."
-  (and (consp name) (eq (car name) 'labels) (psx::machine-name-p (cadr name))))
+  (and (consp name) (eq (car name) 'labels) (qsx::machine-name-p (cadr name))))
 
 ;;; Frames from Lisp's stack
 
@@ -122,7 +122,7 @@ file that isn't Lisp's (a Scheme file, or the module cache's)."
 	 (code (ignore-errors (sb-di:debug-fun-fun df)))
 	 (name (or (and code (or (gethash code *code-names*) (root-code-name code)))
 		   (and (machine-debug-name-p debug-name)
-			(let ((n (psx::machine-procedure-name (cadr debug-name))))
+			(let ((n (qsx::machine-procedure-name (cadr debug-name))))
 			  (cond ((null n) nil)
 				((string= n +inline-body-name+) :inline)
 				(t (ssym n))))))))
@@ -130,7 +130,7 @@ file that isn't Lisp's (a Scheme file, or the module cache's)."
       ;; boot-9's throw is Scheme in Guile, with a frame of its own
       (destructuring-bind (&optional key args) (lisp-frame-arguments frame)
 	(let ((g (make-gframe :lisp (ssym "throw") (gethash "throw" *guile-primitives*)
-			      (coerce (list* ps:false key (if (listp args) args '())) 'simple-vector)
+			      (coerce (list* qs:false key (if (listp args) args '())) 'simple-vector)
 			      nil)))
 	  (setf (gframe-ip g) (lisp-frame-ip g))
 	  (return-from lisp-scheme-frame g))))
@@ -141,16 +141,16 @@ file that isn't Lisp's (a Scheme file, or the module cache's)."
 	(when (machine-debug-name-p debug-name)
 	  (setq args (nthcdr 3 args))
 	  ;; a rest list, spread as it was passed
-	  (when (and (psx::machine-rest-p (cadr debug-name)) args (listp (car (last args))))
+	  (when (and (qsx::machine-rest-p (cadr debug-name)) args (listp (car (last args))))
 	    (setq args (append (butlast args) (car (last args))))))
-	(let ((g (make-gframe :lisp (or name ps:false) code (coerce (cons ps:false args) 'simple-vector) nil)))
+	(let ((g (make-gframe :lisp (or name qs:false) code (coerce (cons qs:false args) 'simple-vector) nil)))
 	  (setf (gframe-ip g) (lisp-frame-ip g))
 	  g)))))
 
 (defun prompt-marker (frame)
-  "For FRAME of psx::prompt-extent, while its thunk runs: (:prompt . tag)."
+  "For FRAME of qsx::prompt-extent, while its thunk runs: (:prompt . tag)."
   (let ((pframe (car (ignore-errors (sb-debug::frame-args-as-list frame 1)))))
-    (when (and (simple-vector-p pframe) (member pframe psx::*fstack* :test #'eq))
+    (when (and (simple-vector-p pframe) (member pframe qsx::*fstack* :test #'eq))
       (let ((cell (svref pframe 2)))
 	(cons :prompt (if (consp cell) (cdr cell) cell))))))
 
@@ -224,7 +224,7 @@ a prompt is."
 		    (multiple-value-bind (frames next) (vm-run-frames vm cursor run)
 		      (dolist (g frames) (push g entries))
 		      (setq cursor next)))))
-	       ((eq name 'psx::prompt-extent)
+	       ((eq name 'qsx::prompt-extent)
 		(let ((marker (prompt-marker frame)))
 		  (when marker
 		    (push marker entries)
@@ -252,11 +252,11 @@ a prompt is."
 	 (<= (car cut) (gframe-ip g) (cdr cut)))))
 
 (defun prompt-cut-p (cut)
-  (not (or (integerp cut) (functionp cut) (eq cut ps:true)
+  (not (or (integerp cut) (functionp cut) (eq cut qs:true)
 	   (and (consp cut) (integerp (car cut)) (integerp (cdr cut))))))
 
 (defun cut-inner (entries cut)
-  (cond ((eq cut ps:true) entries)
+  (cond ((eq cut qs:true) entries)
 	((integerp cut)
 	 (let ((n cut))
 	   (loop while (and entries (plusp n))
@@ -272,7 +272,7 @@ a prompt is."
 (defun cut-outer (entries cut)
   (nreverse
    (let ((reversed (reverse entries)))
-     (cond ((eq cut ps:true) reversed)
+     (cond ((eq cut qs:true) reversed)
 	   ((integerp cut)
 	    (let ((n cut))
 	      (loop while (and reversed (plusp n))
@@ -300,22 +300,22 @@ a prompt is."
     (and (fluid-p v) (fluid-value v))))
 
 (defguile "make-stack" (obj &rest cuts)
-  (cond ((eq obj ps:true)
+  (cond ((eq obj qs:true)
 	 (let* ((started (stacks-fluid-value))
 		(entries (current-frame-entries))
 		(entries (if (consp started)
 			     ;; start-stack: nothing outside its prompt
 			     (cut-outer entries (cdr started))
 			     entries)))
-	   (stack-from-entries (if (consp started) (car started) ps:false) entries cuts)))
+	   (stack-from-entries (if (consp started) (car started) qs:false) entries cuts)))
 	((gframe-p obj)
 	 (let ((stack (gframe-stack obj)))
 	   (stack-from-entries (gstack-id stack)
 			       (coerce (subseq (gstack-frames stack) (gframe-index obj)) 'list)
 			       cuts)))
-	((psx::continuation-procedure-p obj)
+	((qsx::continuation-procedure-p obj)
 	 ;; its frames are copies of the runtime's, not calls in progress
-	 (make-gstack ps:false #()))
+	 (make-gstack qs:false #()))
 	(t (wrong-type "make-stack" 1 obj))))
 
 (defun check-stack (who s) (unless (gstack-p s) (wrong-type who 1 s)) s)
@@ -324,9 +324,9 @@ a prompt is."
 (defguile "stack?" (x) (bool (gstack-p x)))
 (defguile "stack-id" (s)
   (cond ((gstack-p s) (gstack-id s))
-	((or (eq s ps:true) (psx::continuation-procedure-p s))
+	((or (eq s qs:true) (qsx::continuation-procedure-p s))
 	 (let ((started (stacks-fluid-value)))
-	   (if (consp started) (car started) ps:false)))
+	   (if (consp started) (car started) qs:false)))
 	(t (wrong-type "stack-id" 1 s))))
 (defguile "stack-length" (s) (length (gstack-frames (check-stack "stack-length" s))))
 (defguile "stack-ref" (s i)
@@ -340,7 +340,7 @@ a prompt is."
   (let* ((f (check-frame "frame-previous" f))
 	 (frames (gstack-frames (gframe-stack f)))
 	 (i (1+ (gframe-index f))))
-    (if (< i (length frames)) (svref frames i) ps:false)))
+    (if (< i (length frames)) (svref frames i) qs:false)))
 (defguile "frame-instruction-pointer" (f) (gframe-ip (check-frame "frame-instruction-pointer" f)))
 (defguile "frame-address" (f)
   (let ((f (check-frame "frame-address" f)))
@@ -350,11 +350,11 @@ a prompt is."
     (+ (- (length (gstack-frames (gframe-stack f))) (gframe-index f)) (length (gframe-locals f)))))
 (defguile "frame-dynamic-link" (f)
   (let ((previous (funcall (gethash "frame-previous" *guile-primitives*) f)))
-    (if (gframe-p previous) (funcall (gethash "frame-address" *guile-primitives*) previous) ps:false)))
+    (if (gframe-p previous) (funcall (gethash "frame-address" *guile-primitives*) previous) qs:false)))
 (defguile "frame-return-address" (f)
   (let ((previous (funcall (gethash "frame-previous" *guile-primitives*) f)))
-    (if (gframe-p previous) (gframe-ip previous) ps:false)))
-(defguile "frame-source" (f) (check-frame "frame-source" f) ps:false)
+    (if (gframe-p previous) (gframe-ip previous) qs:false)))
+(defguile "frame-source" (f) (check-frame "frame-source" f) qs:false)
 
 (defun frame-module-procedure (name)
   "(system vm frame)'s NAME, if the module is loaded."
@@ -408,7 +408,7 @@ a prompt is."
     (and m (let ((v (module-variable* m (ssym name))))
 	     (and v (not (eq (gvariable-value v) +unbound+)) (gvariable-value v))))))
 
-(defun given (x) (and x (not (eq x ps:false)) (not (eq x +unbound+))))
+(defun given (x) (and x (not (eq x qs:false)) (not (eq x +unbound+))))
 
 (defguile "display-backtrace" (stack port &optional first depth highlights)
   (declare (ignore highlights))
@@ -427,7 +427,7 @@ a prompt is."
 (defguile "backtrace" (&optional highlights)
   (declare (ignore highlights))
   ;; without make-stack's frame and its own
-  (let ((stack (funcall (gethash "make-stack" *guile-primitives*) ps:true 2)))
+  (let ((stack (funcall (gethash "make-stack" *guile-primitives*) qs:true 2)))
     (funcall (gethash "display-backtrace" *guile-primitives*) stack
 	     *standard-output*)
     *unspecified*))

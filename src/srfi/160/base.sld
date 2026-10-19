@@ -20,5 +20,5 @@
     (rename %make-c64vector make-c64vector) (rename %c64vector c64vector) (rename %c64vector? c64vector?) (rename %c64vector-length c64vector-length) (rename %c64vector-ref c64vector-ref) (rename %c64vector-set! c64vector-set!) (rename %c64vector->list c64vector->list) (rename %list->c64vector list->c64vector)
     (rename %make-c128vector make-c128vector) (rename %c128vector c128vector) (rename %c128vector? c128vector?) (rename %c128vector-length c128vector-length) (rename %c128vector-ref c128vector-ref) (rename %c128vector-set! c128vector-set!) (rename %c128vector->list c128vector->list) (rename %list->c128vector list->c128vector)
     u8? s8? u16? s16? u32? s32? u64? s64? f32? f64? c64? c128?)
-  (import (scheme base) (scheme complex) (prefix (pseudoscheme host) %))
+  (import (scheme base) (scheme complex) (prefix (quasischeme host) %))
   (include "../reference/srfi-160/valid.scm"))

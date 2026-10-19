@@ -23,7 +23,7 @@
 # sh utils/racket/setup.sh first.  Status: strategy linklet runs the
 # linklets and expander steps; the rest report "not implemented yet".
 cd "$(dirname "$0")/../.." || exit 1
-OUT=${OUT:-${TMPDIR:-/tmp}/pseudoscheme-racket-tests}
+OUT=${OUT:-${TMPDIR:-/tmp}/quasischeme-racket-tests}
 mkdir -p "$OUT"
 [ $# -gt 0 ] || set -- cs linklet hybrid
 status=0
@@ -33,7 +33,7 @@ for strategy in "$@"; do
     name=$(basename "$f" .rktl)
     out=$OUT/$strategy-$name.out
     total=$((total + 1))
-    bin/pseudoscheme --racket="$strategy" "$f" > "$out" 2>&1
+    bin/quasischeme --racket="$strategy" "$f" > "$out" 2>&1
     if cmp -s "$out" "tests/racket/linklets/$name.expected"; then
       pass=$((pass + 1))
     else
@@ -49,7 +49,7 @@ for strategy in "$@"; do
   done < tests/racket/expander.rktd
   program="$program)"
   out=$OUT/$strategy-expander.out
-  bin/pseudoscheme --racket="$strategy" -e "$program" > "$out" 2>&1
+  bin/quasischeme --racket="$strategy" -e "$program" > "$out" 2>&1
   cut -f2 tests/racket/expander.rktd > "$OUT/$strategy-expander.expected"
   n=$(wc -l < tests/racket/expander.rktd)
   if cmp -s "$out" "$OUT/$strategy-expander.expected"; then
@@ -64,7 +64,7 @@ for strategy in "$@"; do
     name=$(basename "$f" .rkt)
     out=$OUT/$strategy-program-$name.out
     total=$((total + 1))
-    bin/pseudoscheme --racket="$strategy" "$f" > "$out" 2>&1
+    bin/quasischeme --racket="$strategy" "$f" > "$out" 2>&1
     if cmp -s "$out" "tests/racket/programs/$name.expected"; then
       pass=$((pass + 1))
     else

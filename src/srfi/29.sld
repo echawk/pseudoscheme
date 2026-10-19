@@ -2,7 +2,7 @@
 ;;; from the SRFI document (reference/srfi-29/srfi-29.scm; MIT licence
 ;;; in reference/srfi-29/LICENSE).
 ;;;
-;;; Changes, marked PSEUDOSCHEME in the reference file:
+;;; Changes, marked QUASISCHEME in the reference file:
 ;;; - Its current-language and current-country, which it says "must be
 ;;;   rewritten for each Scheme system to default to the actual locale
 ;;;   of the session", are commented out; they are defined below, with

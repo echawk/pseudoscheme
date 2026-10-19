@@ -44,21 +44,21 @@
 	      (CL-sym (program-variable-CL-symbol lhs))
 	      (name (program-variable-name lhs)))
 	(cond ((mutable-program-variable? lhs)
-	       `(ps-lisp:progn
+	       `(qs-lisp:progn
 		 ,(generate-setq-top lhs rhs env)
-		 (ps:set-forwarding-function (ps-lisp:quote ,CL-sym)
-					       (ps-lisp:quote ,name))))
+		 (qs:set-forwarding-function (qs-lisp:quote ,CL-sym)
+					       (qs-lisp:quote ,name))))
 	      ((lambda? rhs)
-	       `(ps-lisp:progn
-		 (ps-lisp:defun ,CL-sym ,@(cdr (generate-lambda-top rhs env)))
-		 (ps:set-value-from-function (ps-lisp:quote ,CL-sym)
-					       (ps-lisp:quote ,name))))
+	       `(qs-lisp:progn
+		 (qs-lisp:defun ,CL-sym ,@(cdr (generate-lambda-top rhs env)))
+		 (qs:set-value-from-function (qs-lisp:quote ,CL-sym)
+					       (qs-lisp:quote ,name))))
 
 	      (else
-	       `(ps-lisp:progn
+	       `(qs-lisp:progn
 		 ,(generate-setq-top lhs rhs env)
-		 (ps:set-function-from-value (ps-lisp:quote ,CL-sym)
-					       (ps-lisp:quote ,name))))))))))
+		 (qs:set-function-from-value (qs-lisp:quote ,CL-sym)
+					       (qs-lisp:quote ,name))))))))))
 
 (define (generate-expression-top node env ignore?)
   (let-fluid @lambda-encountered? #f
@@ -77,10 +77,10 @@
        (lambda ()
 	 (let* ((bvl+body (generate-lambda-aux node env cont/value))
 		(body (locally-specialize (cdr bvl+body))))
-	   `(ps-lisp:lambda ,(car bvl+body)
+	   `(qs-lisp:lambda ,(car bvl+body)
 	      ,@(if (and (pair? body)
 			 (null? (cdr body))
-			 (car-is? (car body) 'ps-lisp:locally))
+			 (car-is? (car body) 'qs-lisp:locally))
 		    (cdr (car body))
 		    body))))))))
 
@@ -93,7 +93,7 @@
 	 (let ((code (generate rhs env cont/ignore)))
 	   (note-variable-reference! lhs)
 	   (emit-top-level
-	    (locally-specialize `((ps-lisp:setq ,(program-variable-CL-symbol lhs)
+	    (locally-specialize `((qs-lisp:setq ,(program-variable-CL-symbol lhs)
 					     ,code))))))))))
 
 
@@ -127,15 +127,15 @@
   env					;ignored
   (let ((val (constant-value node)))
     (cond ((constant-quoted? node)
-	   (deliver-value-to-cont `(ps-lisp:quote ,val) cont))
+	   (deliver-value-to-cont `(qs-lisp:quote ,val) cont))
 	  ;; Hack for bootstrap from Schemes that don't distinguish ()
-	  ;; from #f: the expression #f or () is translated as ps:false,
+	  ;; from #f: the expression #f or () is translated as qs:false,
 	  ;; while '#f or '() is translated as '().
-	  ((eq? val #t) (deliver-value-to-cont `ps:true cont))
+	  ((eq? val #t) (deliver-value-to-cont `qs:true cont))
 	  ((eq? val #f)
 	   (if (eq? (continuation-type cont) 'cont/test)
-	       `ps-lisp:nil
-	       (deliver-value-to-cont `ps:false cont)))
+	       `qs-lisp:nil
+	       (deliver-value-to-cont `qs:false cont)))
 	  (else
 	   ;; Not quoted in Scheme implies doesn't need quoting in Common Lisp
 	   (deliver-value-to-cont val cont)))))
@@ -149,10 +149,10 @@
      (if (pair? sub)
 	 (case (car sub)
 	   ((val) (cadr sub))
-	   ((fun) `(ps-lisp:function ,(cadr sub)))
+	   ((fun) `(qs-lisp:function ,(cadr sub)))
 	   (else (error "lossage in generate-local-variable" sub)))
 	 (if (memq var (fluid @unassigned-letrec-vars))
-	     `(ps:letrec-value ,sub (ps-lisp:quote ,(local-variable-name var)))
+	     `(qs:letrec-value ,sub (qs-lisp:quote ,(local-variable-name var)))
 	     sub))
      cont)))
 
@@ -163,7 +163,7 @@
      (if (pair? sub)
 	 (case (car sub)
 	   ((val) (cadr sub))
-	   ((fun) `(ps-lisp:function ,(cadr sub)))
+	   ((fun) `(qs-lisp:function ,(cadr sub)))
 	   (else
 	    (note-variable-reference! var)
 	    (program-variable-CL-symbol var)))
@@ -235,7 +235,7 @@
 			(generate-call-to-unknown pvar args env cont)))))
 	  ((lambda)
 	   (if (= (length args) (length (cadr sub)))
-	       `(ps-lisp:let ,(map list (cadr sub) (generate-list args env))
+	       `(qs-lisp:let ,(map list (cadr sub) (generate-list args env))
 		  ,@(deprognify
 		     (deliver-value-to-cont (prognify (cddr sub))
 					    cont)))
@@ -255,7 +255,7 @@
 	     ((not)
 	      (if (= (length args) 1)
 		  (deliver-test-to-cont
-		     `(ps-lisp:not ,(generate (car args) env cont/test))
+		     `(qs-lisp:not ,(generate (car args) env cont/test))
 		     cont)
 		  (generate-call-to-unknown pvar args env cont)))
 	     ((and-aux)
@@ -300,65 +300,65 @@
 	   (error "losing CASE" sub))))))
 
 ;(and x y)         == (if x y #f)
-;		   == (ps-lisp:if (truep x) y #f)
+;		   == (qs-lisp:if (truep x) y #f)
 ;
 ;(and (true? x) y) == (if (true? x) y #f)
-;                  == (ps-lisp:if (truep (true? x)) y #f)
-;                  == (ps-lisp:if x y #f)
+;                  == (qs-lisp:if (truep (true? x)) y #f)
+;                  == (qs-lisp:if x y #f)
 ;
 ;(truep (and x y)) == (truep (if x y #f))
-;                  == (truep (ps-lisp:if (truep x) y #f))
-;                  == (ps-lisp:if (truep x) (truep y) nil)    [(truep #f) = nil]
-;                  == (ps-lisp:and (truep x) (truep y))
+;                  == (truep (qs-lisp:if (truep x) y #f))
+;                  == (qs-lisp:if (truep x) (truep y) nil)    [(truep #f) = nil]
+;                  == (qs-lisp:and (truep x) (truep y))
 
 (define (generate-and first second env cont)
   (case (continuation-type cont)
     ((cont/test cont/ignore)
-     `(ps-lisp:and ,(generate first env cont/test)
+     `(qs-lisp:and ,(generate first env cont/test)
 		,@(deandify (generate second env cont/test))))
     (else
-     `(ps-lisp:if ,(generate first env cont/test)
+     `(qs-lisp:if ,(generate first env cont/test)
 	       ,(generate second env cont)
-	       ,(deliver-value-to-cont `ps:false cont)))))
+	       ,(deliver-value-to-cont `qs:false cont)))))
 
 ;(or x y)          == (let ((temp x)) (if temp temp y))
-;		   == (let ((temp x)) (ps-lisp:if (truep temp) temp y))
+;		   == (let ((temp x)) (qs-lisp:if (truep temp) temp y))
 ;
 ;(or (true? x) y)  == (if (true? x) (true? x) y)
-;                  == (ps-lisp:if (truep (true? x)) (true? x) y)
-;                  == (ps-lisp:if x (true? x) y)      [cf. value-form->test-form]
-;                  == (ps-lisp:if x (ps-lisp:or x #f) y)
-;                  == (ps-lisp:if x x y)
-;                  == (ps-lisp:or x y)
+;                  == (qs-lisp:if (truep (true? x)) (true? x) y)
+;                  == (qs-lisp:if x (true? x) y)      [cf. value-form->test-form]
+;                  == (qs-lisp:if x (qs-lisp:or x #f) y)
+;                  == (qs-lisp:if x x y)
+;                  == (qs-lisp:or x y)
 ;
 ;(truep (or x y))  == (truep (if x x y))
-;                  == (truep (ps-lisp:if (truep x) x y))
-;                  == (truep (ps-lisp:if (truep x) x y))
-;                  == (ps-lisp:if (truep x) (truep x) (truep y))
-;                  == (ps-lisp:or (truep x) (truep y))
+;                  == (truep (qs-lisp:if (truep x) x y))
+;                  == (truep (qs-lisp:if (truep x) x y))
+;                  == (qs-lisp:if (truep x) (truep x) (truep y))
+;                  == (qs-lisp:or (truep x) (truep y))
 
 (define (generate-or first second env cont)
   (case (continuation-type cont)
     ((cont/test cont/ignore)
-     `(ps-lisp:or ,(generate first env cont/test)
+     `(qs-lisp:or ,(generate first env cont/test)
 	       ,@(deorify
 		  (generate second env cont))))
     (else
      (let ((first-code (generate first env cont/value)))
-       (if (car-is? first-code 'ps:true?)
+       (if (car-is? first-code 'qs:true?)
 	   ;; This assumes that #t = t.
-	   `(ps-lisp:or ,(cadr first-code)
+	   `(qs-lisp:or ,(cadr first-code)
 		     ,@(deorify (generate second env cont)))
 	   (let* ((var (make-local-variable 'temp))
 		  (new-name (cl-externalize-local 'temp env))
 		  (new-env (bind-variables (list var) (list new-name) env)))
-	     `(ps-lisp:let ((,new-name ,first-code))
-		(ps-lisp:if (ps:truep ,new-name)
+	     `(qs-lisp:let ((,new-name ,first-code))
+		(qs-lisp:if (qs:truep ,new-name)
 			 ,(deliver-value-to-cont new-name cont)
 			 ,(generate second new-env cont)))))))))
 
 (define (generate-case key key-lists else-thunk thunks env cont)
-  `(ps-lisp:case ,(generate key env cont/value)
+  `(qs-lisp:case ,(generate key env cont/value)
      ,@(map (lambda (key-list thunk)
 	      `(,key-list
 		,@(deprognify (generate (if (lambda? thunk)
@@ -370,7 +370,7 @@
 		(constant-value key-lists)
 		(error "case: invalid key-lists" key-lists))
 	    thunks)
-     (ps-lisp:otherwise
+     (qs-lisp:otherwise
       ,@(deprognify (generate (if (lambda? else-thunk)
 				  (lambda-body else-thunk)
 				  (make-call else-thunk '()))
@@ -380,8 +380,8 @@
 (define (generate-=> test var then else-thunk env cont)
   (let* ((new-name (cl-externalize-local (local-variable-name var) env))
 	 (new-env (bind-variables (list var) (list new-name) env)))
-    `(ps-lisp:let ((,new-name ,(generate test env cont/value)))
-       (ps-lisp:if (ps:truep ,new-name)
+    `(qs-lisp:let ((,new-name ,(generate test env cont/value)))
+       (qs-lisp:if (qs:truep ,new-name)
 		,(generate then new-env cont)
 		,(generate (if (lambda? else-thunk)
 			       (lambda-body else-thunk)
@@ -397,7 +397,7 @@
      (if (and (not (qualified-symbol? CL-sym))
 	      (defined-as-CL-macro? CL-sym))
 	 ;; Prevent infinite compilation loops!
-	 `(ps-lisp:funcall ,CL-sym ,@args-code)
+	 `(qs-lisp:funcall ,CL-sym ,@args-code)
 	 `(,CL-sym ,@args-code))
      cont)))
 
@@ -407,8 +407,8 @@
 (define (generate-lambda node env cont)
   (set-fluid! @lambda-encountered? #t)
   (deliver-value-to-cont
-     `(ps-lisp:function
-       (ps-lisp:lambda ,@(let-fluid @unassigned-letrec-vars '()
+     `(qs-lisp:function
+       (qs-lisp:lambda ,@(let-fluid @unassigned-letrec-vars '()
 			   (lambda () (generate-lambda-aux node env cont/value)))))
      cont))
 
@@ -423,7 +423,7 @@
 	(let* ((bvl (insert-&rest new-names))
 	       (rest-var (car (last-pair bvl))))
 	  `(,bvl
-	    (ps:maybe-fix-&rest-parameter ,rest-var)
+	    (qs:maybe-fix-&rest-parameter ,rest-var)
 	    ,@body-code))
 	`(,new-names ,@body-code))))
 
@@ -432,14 +432,14 @@
     (if (function-bindable? vars args)
 	(let* ((new-names (cl-externalize-locals vars env))
 	       (new-env (bind-functions vars new-names env)))
-	  `(ps-lisp:flet ,(map (lambda (new-name proc)
+	  `(qs-lisp:flet ,(map (lambda (new-name proc)
 			       `(,new-name
 				 ,@(generate-lambda-aux proc env cont/value)))
 			    new-names
 			    args)
 	     ,@(generate-body (lambda-body proc) new-env cont)))
 	(let ((bvl+body (generate-lambda-aux proc env cont)))
-	  `(ps-lisp:let ,(map list (car bvl+body) (generate-list args env))
+	  `(qs-lisp:let ,(map list (car bvl+body) (generate-list args env))
 	     ,@(cdr bvl+body))))))
 
 ; IF
@@ -449,11 +449,11 @@
 	(con  (generate (if-con node) env cont))
 	(alt  (generate (if-alt node) env cont)))
     ;;+++ Reconstruct COND, WHEN, UNLESS ?
-    (if (and (eq? alt 'ps:unspecific)
+    (if (and (eq? alt 'qs:unspecific)
 	     (or (eq? (continuation-type cont) 'cont/ignore)
 		 (fluid @translating-to-file?)))
-	`(ps-lisp:if ,test ,con)		;Make prettier code
-	`(ps-lisp:if ,test ,con ,alt))))
+	`(qs-lisp:if ,test ,con)		;Make prettier code
+	`(qs-lisp:if ,test ,con ,alt))))
 
 ; BEGIN
 
@@ -476,11 +476,11 @@
 	      cont)))
 	  (else
 	   (let ((the-setq
-		  `(ps-lisp:setq ,(variable-substitution var) ,rhs-code)))
+		  `(qs-lisp:setq ,(variable-substitution var) ,rhs-code)))
 	     (if (eq? (continuation-type cont) 'cont/ignore)
 		 the-setq
-		 `(ps-lisp:progn ,the-setq
-			      ,(deliver-value-to-cont `ps:unspecific
+		 `(qs-lisp:progn ,the-setq
+			      ,(deliver-value-to-cont `qs:unspecific
 						      cont))))))))
 
 
@@ -498,14 +498,14 @@
 	 (vals (letrec-vals node))
 	 (new-names (cl-externalize-locals vars env))
 	 (new-env (bind-variables vars new-names env)))
-    `(ps-lisp:let ,(map (lambda (new-name)
-		       `(,new-name ps:unassigned))
+    `(qs-lisp:let ,(map (lambda (new-name)
+		       `(,new-name qs:unassigned))
 		     new-names)
        ,@(let-fluid @unassigned-letrec-vars
 		    (append vars (fluid @unassigned-letrec-vars))
 	   (lambda ()
 	     (map (lambda (new-name val)
-		    `(ps-lisp:setq ,new-name ,(generate val new-env cont/value)))
+		    `(qs-lisp:setq ,new-name ,(generate val new-env cont/value)))
 		  new-names
 		  vals)))
        ,@(deprognify (generate (letrec-body node) new-env cont)))))
@@ -515,7 +515,7 @@
 	 (vals (letrec-vals node))
 	 (new-names (cl-externalize-locals vars env))
 	 (new-env (bind-functions vars new-names env)))
-    `(ps-lisp:labels ,(map (lambda (new-name proc)
+    `(qs-lisp:labels ,(map (lambda (new-name proc)
 			   `(,new-name
 			     ,@(generate-lambda-aux proc new-env cont/value)))
 			new-names
@@ -552,7 +552,7 @@
     (for-each set-letrec-substitution!
 	      vars new-names proc-new-nameses temp-lists)
     (deliver-value-to-cont		;Suboptimal.
-     `(ps-lisp:prog ,(apply append (map (lambda (temp-list new-names)
+     `(qs-lisp:prog ,(apply append (map (lambda (temp-list new-names)
 				       (map (lambda (temp new-name)
 					      (or temp new-name))
 					    temp-list
@@ -581,15 +581,15 @@
 	   (if (not (eq? (continuation-type cont) 'cont/return))
 	       (note "screwed-up LETREC" cont))
 	   (if (null? args)
-	       `(ps-lisp:go ,new-name)
-	       `(ps-lisp:progn
+	       `(qs-lisp:go ,new-name)
+	       `(qs-lisp:progn
 		 ;; If we had free-variable information, we could
 		 ;; optimize this PSETQ into a SETQ, sometimes.
-		 (,(if (null? (cdr args)) 'ps-lisp:setq 'ps-lisp:psetq)
+		 (,(if (null? (cdr args)) 'qs-lisp:setq 'qs-lisp:psetq)
 		  ,@(apply append
 			   (map (lambda (new-name temp actual)
 				  `(,(or temp new-name) ,actual))
 				proc-new-names
 				temp-list
 				args)))
-		 (ps-lisp:go ,new-name)))))))
+		 (qs-lisp:go ,new-name)))))))

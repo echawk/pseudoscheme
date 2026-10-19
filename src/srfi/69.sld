@@ -1,4 +1,4 @@
-;;; SRFI 69: basic hash tables.  Written for Pseudoscheme on top of R6RS
+;;; SRFI 69: basic hash tables.  Written for Quasischeme on top of R6RS
 ;;; (rnrs hashtables), after the interface of Panu Kalliokoski's
 ;;; reference implementation (MIT licence, in the SRFI document), which
 ;;; is not used: its hash-by-identity is its equal?-hash, so eq? tables

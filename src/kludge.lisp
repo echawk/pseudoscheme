@@ -1,12 +1,12 @@
 
-; Clobber some internal Lucid functions to make Pseudoscheme run
+; Clobber some internal Lucid functions to make Quasischeme run
 ; better.  This will probably break in some future Lucid release, but
 ; it works in 4.1 on a Sparc.
 
 ; As far as I can tell, (lcl::top-level-read) is the same as (read)
 ; except that it also sets the variables -, +, ++, and +++.
 
-(in-package "PS")
+(in-package "QS")
 
 (defun kludge-top-level-read (original-top-level-read
 			      preserve-whitespace-p

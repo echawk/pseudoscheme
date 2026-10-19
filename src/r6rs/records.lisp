@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs records procedural (6)) and (rnrs records inspection (6)),
 ;;;; library report chapter 6.  (rnrs records syntactic (6)) is psyntax's
@@ -7,7 +7,7 @@
 ;;;; A record is an instance of RECORD: its type descriptor and a simple
 ;;;; vector holding all of its fields, the parent type's first.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 ;;; Defined in conditions.lisp; records signal violations through it.
 (declaim (ftype function r6rs-assertion-violation))
@@ -30,7 +30,7 @@
 (defstruct (rcd (:constructor %make-rcd (rtd parent protocol)))
   rtd parent protocol)
 
-(defun scheme-name (x) (if (symbolp x) (ps:scheme-symbol-name x) x))
+(defun scheme-name (x) (if (symbolp x) (qs:scheme-symbol-name x) x))
 
 (defmethod print-object ((r rtd) stream)
   (if (and *print-readably* (rtd-uid r))
@@ -45,7 +45,7 @@
       (print-unreadable-object (r stream) (format stream "Record ~A" (scheme-name (rtd-name (record-rtd r)))))))
 
 (defun check-rtd (who x)
-  (unless (rtd-p x) (ps:scheme-error "~A: not a record-type descriptor: ~S" who x)))
+  (unless (rtd-p x) (qs:scheme-error "~A: not a record-type descriptor: ~S" who x)))
 
 (defvar *nongenerative-types* (make-hash-table :test 'eq)
   "uid -> rtd, for nongenerative record types (6.3).")
@@ -58,20 +58,20 @@
 
 (defun field-spec (spec)
   (unless (and (consp spec) (consp (cdr spec)) (symbolp (cadr spec)))
-    (ps:scheme-error "make-record-type-descriptor: bad field spec ~S" spec))
-  (let ((kind (ps:scheme-symbol-name (car spec))))
+    (qs:scheme-error "make-record-type-descriptor: bad field spec ~S" spec))
+  (let ((kind (qs:scheme-symbol-name (car spec))))
     (cons (cond ((string= kind "mutable") t)
 		((string= kind "immutable") nil)
-		(t (ps:scheme-error "make-record-type-descriptor: bad field spec ~S" spec)))
+		(t (qs:scheme-error "make-record-type-descriptor: bad field spec ~S" spec)))
 	  (cadr spec))))
 
 (defprim "make-record-type-descriptor" (name parent uid sealed opaque fields)
-  (let ((parent (if (eq parent ps:false) nil parent))
-	(uid (if (eq uid ps:false) nil uid)))
+  (let ((parent (if (eq parent qs:false) nil parent))
+	(uid (if (eq uid qs:false) nil uid)))
     (when parent
       (check-rtd "make-record-type-descriptor" parent)
       (when (rtd-sealed parent)
-	(ps:scheme-error "make-record-type-descriptor: parent ~A is sealed" (rtd-name parent))))
+	(qs:scheme-error "make-record-type-descriptor: parent ~A is sealed" (rtd-name parent))))
     (let ((existing (and uid (gethash uid *nongenerative-types*))))
       (or existing
 	  (let* ((own (map 'simple-vector #'field-spec fields))
@@ -115,10 +115,10 @@
 
 (defprim "make-record-constructor-descriptor" (rtd parent-rcd protocol)
   (check-rtd "make-record-constructor-descriptor" rtd)
-  (let ((parent-rcd (if (eq parent-rcd ps:false) nil parent-rcd))
-	(protocol (if (eq protocol ps:false) nil protocol)))
+  (let ((parent-rcd (if (eq parent-rcd qs:false) nil parent-rcd))
+	(protocol (if (eq protocol qs:false) nil protocol)))
     (when (and parent-rcd (not (rtd-parent rtd)))
-      (ps:scheme-error "make-record-constructor-descriptor: ~A has no parent" (rtd-name rtd)))
+      (qs:scheme-error "make-record-constructor-descriptor: ~A has no parent" (rtd-name rtd)))
     (%make-rcd rtd parent-rcd protocol)))
 
 ;;; record-constructor (6.3).  A protocol receives a procedure p and
@@ -149,7 +149,7 @@ type FINAL whose fields after RCD's type's are TAIL."
 	 (nown (length (rtd-fields rtd)))
 	 (check (lambda (own)
 		  (unless (= (length own) nown)
-		    (ps:scheme-error "~A constructor: expected ~D field values, got ~D"
+		    (qs:scheme-error "~A constructor: expected ~D field values, got ~D"
 				     (rtd-name rtd) nown (length own))))))
     (if (null (rtd-parent rtd))
 	(lambda (&rest own)
@@ -166,7 +166,7 @@ type FINAL whose fields after RCD's type's are TAIL."
 	   (constructor-maker rcd final tail)))
 
 (defprim "record-constructor" (rcd)
-  (unless (rcd-p rcd) (ps:scheme-error "record-constructor: not a constructor descriptor: ~S" rcd))
+  (unless (rcd-p rcd) (qs:scheme-error "record-constructor: not a constructor descriptor: ~S" rcd))
   (build-constructor rcd (rcd-rtd rcd) '()))
 
 (defun rtd-descends-p (rtd ancestor)
@@ -188,7 +188,7 @@ type FINAL whose fields after RCD's type's are TAIL."
 
 (defun field-index (who rtd k)
   (unless (and (integerp k) (< -1 k (length (rtd-fields rtd))))
-    (ps:scheme-error "~A: bad field index ~S for ~A" who k (rtd-name rtd)))
+    (qs:scheme-error "~A: bad field index ~S for ~A" who k (rtd-name rtd)))
   (+ (- (rtd-count rtd) (length (rtd-fields rtd))) k))
 
 ;;; What R7RS's define-record-type (src/r7rs/syntax.sls) defines its
@@ -205,7 +205,7 @@ type FINAL whose fields after RCD's type's are TAIL."
   (unless (record-of-type-p x rtd)
     (r6rs-assertion-violation who "not a record of the right type" x))
   (setf (svref (record-values x) i) value)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "r7rs:record?" (x rtd) (bool (record-of-type-p x rtd)))
 
@@ -225,13 +225,13 @@ type FINAL whose fields after RCD's type's are TAIL."
   (let ((i (field-index "record-mutator" rtd k))
 	(field (svref (rtd-fields rtd) k)))
     (unless (car field)
-      (ps:scheme-error "record-mutator: field ~A of ~A is immutable"
-		       (ps:scheme-symbol-name (cdr field)) (rtd-name rtd)))
+      (qs:scheme-error "record-mutator: field ~A of ~A is immutable"
+		       (qs:scheme-symbol-name (cdr field)) (rtd-name rtd)))
     (lambda (x v)
       (unless (record-of-type-p x rtd)
 	(r6rs-assertion-violation (cdr field) "not a record of the right type" x))
       (setf (svref (record-values x) i) v)
-      ps:unspecific)))
+      qs:unspecific)))
 
 ;;; 6.4 Inspection
 
@@ -242,8 +242,8 @@ type FINAL whose fields after RCD's type's are TAIL."
     (r6rs-assertion-violation "record-rtd" "not a non-opaque record" x))
   (record-rtd x))
 (defprim "record-type-name" (rtd) (check-rtd "record-type-name" rtd) (rtd-name rtd))
-(defprim "record-type-parent" (rtd) (check-rtd "record-type-parent" rtd) (or (rtd-parent rtd) ps:false))
-(defprim "record-type-uid" (rtd) (check-rtd "record-type-uid" rtd) (or (rtd-uid rtd) ps:false))
+(defprim "record-type-parent" (rtd) (check-rtd "record-type-parent" rtd) (or (rtd-parent rtd) qs:false))
+(defprim "record-type-uid" (rtd) (check-rtd "record-type-uid" rtd) (or (rtd-uid rtd) qs:false))
 (defprim "record-type-generative?" (rtd) (check-rtd "record-type-generative?" rtd) (bool (null (rtd-uid rtd))))
 (defprim "record-type-sealed?" (rtd) (check-rtd "record-type-sealed?" rtd) (bool (rtd-sealed rtd)))
 (defprim "record-type-opaque?" (rtd) (check-rtd "record-type-opaque?" rtd) (bool (rtd-opaque rtd)))

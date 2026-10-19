@@ -1,7 +1,7 @@
 ;;; (srfi private srfi-89-keywords): keyword objects for (srfi 89),
 ;;; needed both when lambda* expands and when its expansion runs.
 ;;;
-;;; Pseudoscheme has no SRFI 88, so its keyword objects are the Lisp
+;;; Quasischeme has no SRFI 88, so its keyword objects are the Lisp
 ;;; keywords that #:name reads as (self-evaluating, and distinct from
 ;;; every Scheme symbol; docs/interop.md 3.3).  In a lambda* parameter
 ;;; list a keyword may be written #:name or, as in SRFI 88 and the
@@ -12,7 +12,7 @@
   (export keyword? keyword->string syntax-keyword? syntax-keyword
           make-perfect-hash-table)
   (import (scheme base)
-          (pseudoscheme lisp))
+          (quasischeme lisp))
   (begin
     (define %keywordp (lisp-function "keywordp" "cl"))
 

@@ -1,9 +1,9 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PS; -*-
 ; File eval.lisp / Copyright (c) 1991 Jonathan Rees / See file COPYING
 
-;;;; Pseudoscheme run-time system
+;;;; Quasischeme run-time system
 
-(in-package "PS")
+(in-package "QS")
 
 
 ;; User environment
@@ -171,7 +171,7 @@
 ;  - *target-environment* is bound in order to communicate the appropriate
 ;    environment to the translator.
 ;  - *target-package* is bound in case we're loading a file of translated
-;    code (extension .pso) produced by translate-file.  In this case,
+;    code (extension .qso) produced by translate-file.  In this case,
 ;    we check to make sure that *target-environment* agrees with the
 ;    IN-PACKAGE form in the file.  (?)
 
@@ -291,7 +291,7 @@
 
 (defun exit-scheme (&key (verbose t))
   (when verbose
-    (format t "~&Leaving Pseudoscheme.~&"))
+    (format t "~&Leaving Quasischeme.~&"))
   (mapc #'(lambda (var)
 	    (let ((probe (get var 'non-scheme-value 'no-such-property)))
 	      (unless (eq probe 'no-such-property)
@@ -318,8 +318,8 @@
 
 (defun write-result (result &optional (stream *standard-output*))
   (if (and (eq *result-display-style* :normalize)
-	   (not (or (eq result ps:true)  ;self-evaluating-p
-		    (eq result ps:false)
+	   (not (or (eq result qs:true)  ;self-evaluating-p
+		    (eq result qs:false)
 		    (numberp result)
 		    (characterp result)
 		    (stringp result)
@@ -351,7 +351,7 @@
 
 (flet ((set-in-user-env (name val)
          (setf (symbol-value name) val)
-	 (ps:set-function-from-value name)))
+	 (qs:set-function-from-value name)))
   (set-in-user-env 'scheme::quit  #'quit)
   (set-in-user-env 'scheme::compile        #'scheme-compile)
   (set-in-user-env 'scheme::compile-file   #'scheme-compile-file)

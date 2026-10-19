@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; The body of Pseudoscheme's (ikarus) library: the Ikarus Scheme
+;;;; The body of Quasischeme's (ikarus) library: the Ikarus Scheme
 ;;;; extensions that the Ikarus variants of libraries (foo.ikarus.sls)
 ;;;; import.  The library form around this, which re-exports R6RS as
 ;;;; Ikarus's does, is built by src/r7rs/front.lisp; what Ikarus shares

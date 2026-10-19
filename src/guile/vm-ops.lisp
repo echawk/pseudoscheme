@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Guile's VM instructions: their table, and decoding them
 ;;;;
@@ -9,7 +9,7 @@
 ;;;; first word's low 8 bits are the opcode (the X8 that starts its
 ;;;; format).  See the manual's "Instruction Set" (docs/guile-vm.md).
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defstruct (vm-op (:constructor make-vm-op (name opcode kind formats)))
   name opcode kind formats
@@ -44,8 +44,8 @@ begins with X8 (the opcode), which isn't a field.")
     (clrhash *vm-ops-by-name*)
     (dolist (entry (instruction-list))
       (destructuring-bind (name opcode kind &rest formats) entry
-	(let* ((formats (mapcar #'ps:scheme-symbol-name formats))
-	       (op (make-vm-op (ps:scheme-symbol-name name) opcode (ps:scheme-symbol-name kind) formats)))
+	(let* ((formats (mapcar #'qs:scheme-symbol-name formats))
+	       (op (make-vm-op (qs:scheme-symbol-name name) opcode (qs:scheme-symbol-name kind) formats)))
 	  (setf (vm-op-fields op) (mapcan (lambda (f) (copy-list (word-format-fields f))) formats))
 	  (setf (svref ops opcode) op
 		(gethash (vm-op-name op) *vm-ops-by-name*) op))))

@@ -1,7 +1,7 @@
 ;;; Tests for SRFI 240: the sample implementation's test suite
 ;;; (reference/srfi-240/tests.sps), as SRFI 64 tests, plus a few more.
 ;;; Most definitions are internal ones, in several procedures:
-;;; Pseudoscheme compiles many definitions and calls in one body slowly
+;;; Quasischeme compiles many definitions and calls in one body slowly
 ;;; (see ../57.sld).
 (import (except (scheme base) define-record-type)
         (scheme process-context)

@@ -83,12 +83,12 @@
 		     (let ((sym (program-variable-location den)))
 		       (case (car info)
 			 ((val)
-			  (write-form `(ps-lisp:locally
-					   (ps-lisp:declare (ps-lisp:special ,sym))
-					 (ps-lisp:setq ,sym ,(cadr info)))
+			  (write-form `(qs-lisp:locally
+					   (qs-lisp:declare (qs-lisp:special ,sym))
+					 (qs-lisp:setq ,sym ,(cadr info)))
 				      port)
-			  (write-form `(ps:set-function-from-value
-					    (ps-lisp:quote ,sym))
+			  (write-form `(qs:set-function-from-value
+					    (qs-lisp:quote ,sym))
 				      port))
 			 ((fun)
 			  (if (not (memq name '(car cdr))) ;kludge
@@ -100,19 +100,19 @@
 				    'n
 				    (caddr info))
 			     ((1)
-			      `(ps-lisp:defun ,sym (x)
-				 (ps:true? (,(cadr info) x))))
+			      `(qs-lisp:defun ,sym (x)
+				 (qs:true? (,(cadr info) x))))
 			     ((2)
-			      `(ps-lisp:defun ,sym (x y)
-				 (ps:true? (,(cadr info) x y))))
+			      `(qs-lisp:defun ,sym (x y)
+				 (qs:true? (,(cadr info) x y))))
 			     (else
-			      `(ps-lisp:defun ,sym (ps-lisp:&rest x)
-				 (ps:true? (ps-lisp:apply #',(cadr info)
+			      `(qs-lisp:defun ,sym (qs-lisp:&rest x)
+				 (qs:true? (qs-lisp:apply #',(cadr info)
 							 x)))))
 			   port)
 			  (set! defs (cons sym defs)))
 			 ((subst lambda)
-			  (write-form `(ps-lisp:defun ,sym ,@(cdr info)) port)
+			  (write-form `(qs-lisp:defun ,sym ,@(cdr info)) port)
 			  (set! defs (cons sym defs)))
 			 ((special) 0) ;don't generate any definition
 			 (else
@@ -120,17 +120,17 @@
 	(for-each do-it (interface-names sig))
 	(for-each do-it (interface-aux-names sig)))
       (write-form
-        `(ps-lisp:mapc (ps-lisp:function ps:set-value-from-function)
-		    (ps-lisp:quote ,(reverse defs)))
+        `(qs-lisp:mapc (qs-lisp:function qs:set-value-from-function)
+		    (qs-lisp:quote ,(reverse defs)))
 	port)
       (write-form
-        `(ps-lisp:mapc #'(ps-lisp:lambda (z)
-			(ps-lisp:let ((our-sym (ps-lisp:car z))
-				   (cl-sym (ps-lisp:cadr z)))
-			  (ps-lisp:setf (ps-lisp:symbol-function our-sym) 
-				     (ps-lisp:symbol-function cl-sym))
-			  (ps:set-value-from-function our-sym)))
-		    (ps-lisp:quote ,(reverse funs)))
+        `(qs-lisp:mapc #'(qs-lisp:lambda (z)
+			(qs-lisp:let ((our-sym (qs-lisp:car z))
+				   (cl-sym (qs-lisp:cadr z)))
+			  (qs-lisp:setf (qs-lisp:symbol-function our-sym) 
+				     (qs-lisp:symbol-function cl-sym))
+			  (qs:set-value-from-function our-sym)))
+		    (qs-lisp:quote ,(reverse funs)))
 	port))))
 
 
@@ -150,11 +150,11 @@
 	      (write-file-identification port)
 	      (write-message port)
 	      (newline port)
-	      (display "(ps:in-package " port)
+	      (display "(qs:in-package " port)
 	      (write (package-name package) port)
 	      (display ")" port)
 	      (newline port)
-	      (write-form '(ps:begin-translated-file) port)
+	      (write-form '(qs:begin-translated-file) port)
 	      (newline port)
 	      ;; Now do the real work.
 	      (proc port)
@@ -186,9 +186,9 @@
 		      (char? form)))
 	     ;; Who knows, it might be important.
 	     (write-form form port)))
-        ((eq? (car form) 'ps-lisp:quote)
+        ((eq? (car form) 'qs-lisp:quote)
 	 )				;do nothing
-	((eq? (car form) 'ps-lisp:progn)
+	((eq? (car form) 'qs-lisp:progn)
 	 (for-each (lambda (form)
 		     (write-flattened form port))
 		   (cdr form)))

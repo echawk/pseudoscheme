@@ -1,10 +1,10 @@
 ;;; -*- Mode: Scheme -*-
-;;;; (pseudoscheme chez extend-syntax): what extend-syntax's
+;;;; (quasischeme chez extend-syntax): what extend-syntax's
 ;;;; transformers (src/chez/syntax.scm) call when they run.  A library of
 ;;;; its own, which (chezscheme) imports (src/chez/chez.lisp), because a
 ;;;; transformer can't use definitions of the library it is defined in.
 
-(library (pseudoscheme chez extend-syntax)
+(library (quasischeme chez extend-syntax)
   (export es-pattern-depths es-check-pattern es-match es-bind
           es-template-symbols es-map es-subst es-wrap
           meta-cond-test)

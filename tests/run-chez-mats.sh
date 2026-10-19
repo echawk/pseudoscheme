@@ -4,24 +4,24 @@
 # macro), JOBS at a time, each under LIMIT seconds; then per-file and
 # total counts.  Arguments, if any, name the files to run (e.g. "hash 5_3").
 #
-# Clauses that need what Pseudoscheme won't have (`#%$` primitives,
+# Clauses that need what Quasischeme won't have (`#%$` primitives,
 # compile-file, the inspector, ...) count as "unsup", not as failures;
 # "unbound" is a clause that referred to a name not bound here (a missing
 # export).  Whole files that are about the compiler or C (cp0, cptypes,
 # foreign, profile, windows) are listed as unsupported too.
 #
 # Usage: sh tests/run-chez-mats.sh [name ...]
-#   PS=bin/pseudoscheme  JOBS=6  LIMIT=120  OUT=/tmp/pseudoscheme-chez-mats
+#   PS=bin/quasischeme  JOBS=6  LIMIT=120  OUT=/tmp/quasischeme-chez-mats
 cd "$(dirname "$0")/.." || exit 1
 ROOT=$(pwd)
-PS=${PS:-$ROOT/bin/pseudoscheme}
+PS=${QS:-$ROOT/bin/quasischeme}
 JOBS=${JOBS:-6}
 LIMIT=${LIMIT:-120}
-OUT=${OUT:-/tmp/pseudoscheme-chez-mats}
+OUT=${OUT:-/tmp/quasischeme-chez-mats}
 UNSUPPORTED_FILES="cp0 cptypes foreign profile windows"
 mkdir -p "$OUT" || exit 1
 OUT=$(cd "$OUT" && pwd)
-# separate-eval's Scheme: Pseudoscheme run as `chez`, its Chez mode
+# separate-eval's Scheme: Quasischeme run as `chez`, its Chez mode
 ln -sf "$PS" "$OUT/chez"
 CHEZ_MAT_SCHEME="$OUT/chez --no-userinit"
 export PS LIMIT OUT ROOT CHEZ_MAT_SCHEME
@@ -47,7 +47,7 @@ if [ "$1" = "--one" ]; then
   attempt=0
   while [ $attempt -lt 8 ]; do
     attempt=$((attempt + 1))
-    # exec, so that the kill below reaches pseudoscheme, not just a subshell
+    # exec, so that the kill below reaches quasischeme, not just a subshell
     ( cd "$work" && CHEZ_MAT_SKIP="$skip" exec "$PS" --chez "$ROOT/tests/chez-mat.ss" $files \
         > "$OUT/$name.out.$attempt" 2>> "$OUT/$name.err" < /dev/null ) & pid=$!
     ( sleep "$LIMIT"; kill -9 $pid 2>/dev/null ) > /dev/null 2>&1 & w=$!

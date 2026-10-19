@@ -1,6 +1,6 @@
 ;;; (srfi private srfi-180-helpers): what SRFI 180's sample
 ;;; implementation imports from its (srfi 180 helpers), written for
-;;; Pseudoscheme: that library is chibi-specific (chibi ast, chibi
+;;; Quasischeme: that library is chibi-specific (chibi ast, chibi
 ;;; regexp; reference/srfi-180/helpers.sld).
 ;;;
 ;;; - (%read-error? x): the sample guards each read-char with it, to turn

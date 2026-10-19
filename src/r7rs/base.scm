@@ -7,7 +7,7 @@
 ;;;; the Lisp primitives of rts.lisp, so redefining e.g. VECTOR-FILL!
 ;;;; here to take a range does not disturb the R5RS one.
 ;;;;
-;;;; Written against Pseudoscheme's own (R4RS-style) SYNTAX-RULES, so no
+;;;; Written against Quasischeme's own (R4RS-style) SYNTAX-RULES, so no
 ;;;; patterns after an ellipsis, no custom ellipsis, no (... ...).  The
 ;;;; same definitions will be fine under syntax-case's SYNTAX-RULES.
 

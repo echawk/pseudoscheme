@@ -3,7 +3,7 @@
 ;;; simply Scheme strings, so that its textual procedures become SRFI
 ;;; 140's string procedures.  It stands in for SRFI 135's kernel0, with
 ;;; the same exports (minus the debugging ones).  Written for
-;;; Pseudoscheme.
+;;; Quasischeme.
 ;;;
 ;;; Every string this kernel returns is newly allocated (subtext always
 ;;; copies, %string->text copies), so a result never shares storage with

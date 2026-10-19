@@ -3,7 +3,7 @@
 ;;;; Scheme procedures (table.lisp, DEFS): the C name, the procedure,
 ;;;; its required and optional arguments, and whether it has a rest list.
 
-(in-package "PSEUDOSCHEME-LIBGUILE")
+(in-package "QUASISCHEME-LIBGUILE")
 
 (defs "scm_abs" "abs" 1 0 nil)
 (defs "scm_access" "access?" 2 0 nil)

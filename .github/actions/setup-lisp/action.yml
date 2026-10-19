@@ -1,6 +1,6 @@
 name: Set up SBCL and Quicklisp
 description: >
-  Installs SBCL from the distribution and Quicklisp, loads Pseudoscheme
+  Installs SBCL from the distribution and Quicklisp, loads Quasischeme
   once (fetching its dependencies and compiling it, psyntax's image
   included), and caches both.
 
@@ -20,7 +20,7 @@ runs:
         path: |
           ~/quicklisp
           ~/.cache/common-lisp
-        key: lisp-${{ runner.os }}-${{ hashFiles('pseudoscheme.asd', 'src/**/*.lisp', 'src/**/*.pso', 'vendor/psyntax/psyntax-pseudoscheme.pp') }}
+        key: lisp-${{ runner.os }}-${{ hashFiles('quasischeme.asd', 'src/**/*.lisp', 'src/**/*.qso', 'vendor/psyntax/psyntax-quasischeme.pp') }}
         restore-keys: lisp-${{ runner.os }}-
 
     - name: Install Quicklisp
@@ -32,7 +32,7 @@ runs:
                --eval '(quicklisp-quickstart:install)'
         fi
 
-    - name: Load Pseudoscheme once
+    - name: Load Quasischeme once
       shell: bash
       # Fetches the dependencies and compiles everything, so the suites
       # that run in parallel or one after another don't each do it.
@@ -40,5 +40,5 @@ runs:
         sbcl --dynamic-space-size 4GB --control-stack-size 500MB --non-interactive \
              --eval '(load (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname)))' \
              --eval "(push (truename \"./\") asdf:*central-registry*)" \
-             --eval '(ql:quickload (list :pseudoscheme/api :bordeaux-threads) :silent t)' \
-             --eval '(format t "~&Pseudoscheme ~A loaded~%" (asdf:component-version (asdf:find-system :pseudoscheme)))'
+             --eval '(ql:quickload (list :quasischeme/api :bordeaux-threads) :silent t)' \
+             --eval '(format t "~&Quasischeme ~A loaded~%" (asdf:component-version (asdf:find-system :quasischeme)))'

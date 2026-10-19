@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; Part of the body of Pseudoscheme's (chezscheme) library: more of
+;;;; Part of the body of Quasischeme's (chezscheme) library: more of
 ;;;; the names Chez has that its mats use, which the other files don't
 ;;;; have: the r6rs: versions of procedures Chez extends, the old hash
 ;;;; table interface, the hashtable cells, signed byte lists.

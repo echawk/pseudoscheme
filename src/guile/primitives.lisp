@@ -1,13 +1,13 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; More of libguile's primitives: lists and association lists, sorting,
 ;;;; numbers, symbols, strings, vectors, bit vectors and arrays, the
 ;;;; operating system, and the C halves of (ice-9 ports) and friends,
 ;;;; which Guile's modules install with load-extension.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
-(defun scheme-equal (a b) (ps:scheme-equal-p a b))
+(defun scheme-equal (a b) (qs:scheme-equal-p a b))
 (defun scheme-eqv (a b) (or (eql a b) (and (numberp a) (numberp b) (= a b) (eq (type-of a) (type-of b)))))
 
 ;;; ------------------------------------------------------------------
@@ -20,20 +20,20 @@
 	do (let ((e (car alist)))
 	     (when (and (consp e) (funcall test (car e) key)) (return e))
 	     (setq alist (cdr alist)))
-	finally (return ps:false)))
+	finally (return qs:false)))
 (defguile "sloppy-assq" (key alist) (sloppy-ass #'eq key alist))
 (defguile "sloppy-assv" (key alist) (sloppy-ass #'scheme-eqv key alist))
 (defguile "sloppy-assoc" (key alist) (sloppy-ass #'scheme-equal key alist))
 
 (defguile "delq" (x list) (remove x list :test #'eq))
 (defguile "delv" (x list) (remove x list :test #'scheme-eqv))
-(defguile "delete" (x list &optional (eq ps:false))
+(defguile "delete" (x list &optional (eq qs:false))
   (if (truthy eq)
       (remove-if (lambda (y) (truthy (funcall eq x y))) list)
       (remove x list :test #'scheme-equal)))
 (defguile "delq!" (x list) (delete x list :test #'eq))
 (defguile "delv!" (x list) (delete x list :test #'scheme-eqv))
-(defguile "delete!" (x list &optional (eq ps:false))
+(defguile "delete!" (x list &optional (eq qs:false))
   (if (truthy eq)
       (delete-if (lambda (y) (truthy (funcall eq x y))) list)
       (delete x list :test #'scheme-equal)))
@@ -182,7 +182,7 @@ NaN is itself."
 (defun numerical-overflow (who)
   (guile-error (ssym "numerical-overflow") who "Numerical overflow" '()))
 
-(defun host-call (name &rest args) (apply (psx:host-ref name) args))
+(defun host-call (name &rest args) (apply (qsx:host-ref name) args))
 
 (defun exact-zero-p (x) (eql x 0))
 
@@ -350,7 +350,7 @@ square, else the nearest double, however big or small X is."
 		 ;; reals only: 12@12+0i isn't a number
 		 (not (char-equal (char mag-text (1- (length mag-text))) #\i))
 		 (not (char-equal (char ang-text (1- (length ang-text))) #\i)))
-      (return-from polar-string->number ps:false))
+      (return-from polar-string->number qs:false))
     (when (and inexact (zerop ang) (char= (char ang-text 0) #\-))
       (setq ang -0d0))
     (cond ((eql mag 0) 0)
@@ -368,7 +368,7 @@ square, else the nearest double, however big or small X is."
 		  (dotimes (i (length s) s)
 		    (let ((c (char s i)))
 		      (cond ((digit-char-p c radix)
-			     (when hashed (return-from guile-string->number-1 ps:false))
+			     (when hashed (return-from guile-string->number-1 qs:false))
 			     (setq after-digit t))
 			    ((and (char= c #\#) after-digit) (setf (char s i) #\0 hashed t))
 			    ((char= c #\.))
@@ -380,7 +380,7 @@ square, else the nearest double, however big or small X is."
 	    (out-of-range "string->number" string))
 	  n)
 	(let ((n (host-call "string->number" digits radix)))
-	  (cond ((not (numberp n)) ps:false)
+	  (cond ((not (numberp n)) qs:false)
 		((search "#e" string :test #'char-equal) n) ; exact, as asked
 		((rationalp n) (coerce n 'double-float))
 		(t n))))))
@@ -481,12 +481,12 @@ square, else the nearest double, however big or small X is."
 ;;; ------------------------------------------------------------------
 ;;; Symbols
 
-(defguile "make-symbol" (name) (make-symbol (ps::invert-case name)))
+(defguile "make-symbol" (name) (make-symbol (qs::invert-case name)))
 (defguile "symbol-interned?" (s) (bool (symbol-package s)))
 (defguile "string-ci->symbol" (s) (ssym (string-downcase s)))
-(defguile "symbol-pref" (s) (get s 'guile-pref ps:false))
+(defguile "symbol-pref" (s) (get s 'guile-pref qs:false))
 (defguile "symbol-pset!" (s v) (setf (get s 'guile-pref) v) *unspecified*)
-(defguile "symbol-fref" (s) (get s 'guile-fref ps:false))
+(defguile "symbol-fref" (s) (get s 'guile-fref qs:false))
 (defguile "symbol-fset!" (s v) (setf (get s 'guile-fref) v) *unspecified*)
 
 ;;; ------------------------------------------------------------------
@@ -508,7 +508,7 @@ square, else the nearest double, however big or small X is."
 (defguile "string-rindex" (s pred &optional (start 0) (end (length s)))
   (let ((match (char-matcher pred)))
     (or (loop for i from (1- end) downto start when (funcall match (char s i)) return i)
-	ps:false)))
+	qs:false)))
 (defguile "substring" (s start &optional end)
   ;; checked in Guile's order: the string, then the indices
   (unless (stringp s) (wrong-type "substring" 1 s))
@@ -529,20 +529,20 @@ square, else the nearest double, however big or small X is."
   (flet ((entry (key value) (cons (ssym key) value)))
     (progn
       (list (entry "string" s) (entry "start" 0) (entry "length" (length s))
-	  (entry "shared" (let ((base (gethash s *shared-substrings*))) (if base (car base) ps:false)))
+	  (entry "shared" (let ((base (gethash s *shared-substrings*))) (if base (car base) qs:false)))
 	  (entry "read-only" (bool (read-only-string-p s)))
 	  (entry "stringbuf" s) (entry "stringbuf-chars" (copy-seq s))
-	  (entry "stringbuf-length" (length s)) (entry "stringbuf-shared" ps:false)
+	  (entry "stringbuf-length" (length s)) (entry "stringbuf-shared" qs:false)
 	  (entry "stringbuf-mutable" (bool (gethash s *mutated-strings*)))
 	  (entry "stringbuf-wide" (bool (wide-string-p s)))))))
 
 (defguile "%symbol-dump" (sym)
-  (unless (ps:scheme-symbol-p sym) (wrong-type "%symbol-dump" 1 sym))
-  (let ((name (ps:scheme-symbol-name sym)))
+  (unless (qs:scheme-symbol-p sym) (wrong-type "%symbol-dump" 1 sym))
+  (let ((name (qs:scheme-symbol-name sym)))
     (flet ((entry (key value) (cons (ssym key) value)))
-      (list (entry "symbol" sym) (entry "hash" (sxhash name)) (entry "interned" ps:true)
+      (list (entry "symbol" sym) (entry "hash" (sxhash name)) (entry "interned" qs:true)
 	    (entry "stringbuf" name) (entry "stringbuf-chars" (copy-seq name))
-	    (entry "stringbuf-length" (length name)) (entry "stringbuf-shared" ps:false)
+	    (entry "stringbuf-length" (length name)) (entry "stringbuf-shared" qs:false)
 	    (entry "stringbuf-wide" (bool (wide-string-p name)))))))
 
 ;;; String comparisons: any number of strings, as Guile's (the host's
@@ -585,7 +585,7 @@ square, else the nearest double, however big or small X is."
 
 (defun check-mutable-string (s)
   (when (read-only-string-p s)
-    (guile-error (ssym "misc-error") ps:false "string is read-only: ~s" (list s))))
+    (guile-error (ssym "misc-error") qs:false "string is read-only: ~s" (list s))))
 
 (defparameter +string-mutators+
   '(("string-set!" . 0) ("string-fill!" . 0) ("substring-fill!" . 0) ("string-copy!" . 0)
@@ -699,9 +699,9 @@ bytevector mutators read-only bytevectors."
   "Symbol -> its name, read-only, as symbol->string gives it each time.")
 
 (defguile "symbol->string" (sym)
-  (unless (ps:scheme-symbol-p sym) (wrong-type "symbol->string" 1 sym))
+  (unless (qs:scheme-symbol-p sym) (wrong-type "symbol->string" 1 sym))
   (or (gethash sym *symbol-strings*)
-      (setf (gethash sym *symbol-strings*) (read-only-string (copy-seq (ps:scheme-symbol-name sym))))))
+      (setf (gethash sym *symbol-strings*) (read-only-string (copy-seq (qs:scheme-symbol-name sym))))))
 
 (defguile "string-append/shared" (&rest strings) (apply #'concatenate 'string strings))
 (defguile "string-bytes-per-char" (s) (if (every (lambda (c) (< (char-code c) 256)) s) 1 4))
@@ -755,7 +755,7 @@ bytevector mutators read-only bytevectors."
 ;;; Bit vectors
 
 (defguile "bitvector?" (x) (bool (typep x 'simple-bit-vector)))
-(defguile "make-bitvector" (n &optional (fill ps:false))
+(defguile "make-bitvector" (n &optional (fill qs:false))
   (make-array n :element-type 'bit :initial-element (if (truthy fill) 1 0)))
 (defguile "bitvector" (&rest bits)
   (make-array (length bits) :element-type 'bit :initial-contents (mapcar (lambda (b) (if (truthy b) 1 0)) bits)))
@@ -776,9 +776,9 @@ bytevector mutators read-only bytevectors."
 (defguile "bitvector-count" (v) (count 1 v))
 (defguile "bitvector-copy" (v &optional (start 0) (end (length v))) (subseq v start end))
 (defguile "bitvector-position" (v b &optional (start 0))
-  (or (position (if (truthy b) 1 0) v :start start) ps:false))
+  (or (position (if (truthy b) 1 0) v :start start) qs:false))
 (defguile "bit-count" (b v) (count (if (truthy b) 1 0) v))
-(defguile "bit-position" (b v start) (or (position (if (truthy b) 1 0) v :start start) ps:false))
+(defguile "bit-position" (b v start) (or (position (if (truthy b) 1 0) v :start start) qs:false))
 (defun bit-selection (who kv v)
   (declare (ignore who v))
   "The indices KV (a bitvector's set bits, or a u32vector's elements) select."
@@ -801,7 +801,7 @@ bytevector mutators read-only bytevectors."
 (defun system-error (subr &optional (errno (sb-alien:extern-alien "errno" sb-alien:int)))
   (guile-error (ssym "system-error") subr "~A" (list (sb-int:strerror errno)) (list errno)))
 
-(defguile "getenv" (name) (or (sb-posix:getenv name) ps:false))
+(defguile "getenv" (name) (or (sb-posix:getenv name) qs:false))
 (defguile "setenv" (name value)
   (if (truthy value) (sb-posix:setenv name value 1) (sb-posix:unsetenv name))
   *unspecified*)
@@ -830,7 +830,7 @@ bytevector mutators read-only bytevectors."
 (defguile "geteuid" () (sb-posix:geteuid))
 (defguile "getgid" () (sb-posix:getgid))
 (defguile "getegid" () (sb-posix:getegid))
-(defguile "getlogin" () (or (sb-posix:getenv "USER") ps:false))
+(defguile "getlogin" () (or (sb-posix:getenv "USER") qs:false))
 (defguile "gethostname" () (machine-instance))
 (defguile "umask" (&optional mode) (if mode (sb-posix:umask mode) (let ((m (sb-posix:umask 0))) (sb-posix:umask m) m)))
 (defguile "mkdir" (path &optional (mode #o777)) (sb-posix:mkdir path mode) *unspecified*)
@@ -880,7 +880,7 @@ bytevector mutators read-only bytevectors."
     (unless p (system-error "canonicalize-path" sb-posix:enoent))
     (let ((s (namestring p))) (if (and (> (length s) 1) (char= (char s (1- (length s))) #\/)) (subseq s 0 (1- (length s))) s))))
 (defguile "system-file-name-convention" () (ssym "posix"))
-(defguile "file-encoding" (port) (declare (ignore port)) ps:false)
+(defguile "file-encoding" (port) (declare (ignore port)) qs:false)
 
 (defun stat-vector (st)
   (vector (sb-posix:stat-dev st) (sb-posix:stat-ino st) (sb-posix:stat-mode st)
@@ -895,14 +895,14 @@ bytevector mutators read-only bytevectors."
 			(t "regular"))))
 	  (logand (sb-posix:stat-mode st) #o7777)
 	  0 0 0))
-(defguile "stat" (path &optional (exception-on-error ps:true))
+(defguile "stat" (path &optional (exception-on-error qs:true))
   (handler-case (stat-vector (cond ((integerp path) (sb-posix:fstat path))
 				   ((streamp path) (sb-posix:fstat (port-fdes path "stat")))
 				   (t (sb-posix:stat path))))
     (sb-posix:syscall-error (e)
       (if (truthy exception-on-error)
 	  (system-error "stat" (sb-posix:syscall-errno e))
-	  ps:false))))
+	  qs:false))))
 (defguile "lstat" (path)
   (handler-case (stat-vector (sb-posix:lstat path))
     (sb-posix:syscall-error (e) (system-error "lstat" (sb-posix:syscall-errno e)))))
@@ -917,7 +917,7 @@ bytevector mutators read-only bytevectors."
       (sb-posix:closedir d))
     (make-directory-stream (nreverse entries))))
 (defguile "readdir" (d)
-  (if (directory-stream-entries d) (pop (directory-stream-entries d)) ps:eof-object))
+  (if (directory-stream-entries d) (pop (directory-stream-entries d)) qs:eof-object))
 (defguile "closedir" (d) (setf (directory-stream-open d) nil) *unspecified*)
 (defguile "directory-stream?" (x) (bool (directory-stream-p x)))
 (defguile "rewinddir" (d) (declare (ignore d)) *unspecified*)
@@ -934,14 +934,14 @@ bytevector mutators read-only bytevectors."
 	(ash 127 8)
 	(nth-value 1 (sb-posix:waitpid pid 0)))))
 
-(defguile "system" (&optional (command ps:false))
+(defguile "system" (&optional (command qs:false))
   (if (truthy command)
       (run-and-wait "/bin/sh" (list "-c" command))
-      ps:true))
+      qs:true))
 (defguile "system*" (prog &rest args) (run-and-wait prog args))
-(defguile "status:exit-val" (status) (if (zerop (logand status #x7f)) (ash status -8) ps:false))
-(defguile "status:term-sig" (status) (let ((s (logand status #x7f))) (if (zerop s) ps:false s)))
-(defguile "status:stop-sig" (status) (declare (ignore status)) ps:false)
+(defguile "status:exit-val" (status) (if (zerop (logand status #x7f)) (ash status -8) qs:false))
+(defguile "status:term-sig" (status) (let ((s (logand status #x7f))) (if (zerop s) qs:false s)))
+(defguile "status:stop-sig" (status) (declare (ignore status)) qs:false)
 (defguile "sleep" (n) (sleep n) 0)
 (defguile "usleep" (n) (sleep (/ n 1000000)) 0)
 (defguile "gettimeofday" ()
@@ -956,7 +956,7 @@ bytevector mutators read-only bytevectors."
       (coerce (loop for i below 5
 		    collect (cffi:foreign-string-to-lisp (cffi:inc-pointer u (* i width))))
 	      'simple-vector))))
-(defguile "isatty?" (port) (declare (ignore port)) ps:false)
+(defguile "isatty?" (port) (declare (ignore port)) qs:false)
 (defguile "kill" (pid sig) (sb-posix:kill pid sig) *unspecified*)
 (defguile "strerror" (n) (sb-int:strerror n))
 
@@ -982,7 +982,7 @@ bytevector mutators read-only bytevectors."
 	    (cffi:mem-aref tm :int 6) (cffi:mem-aref tm :int 7) (cffi:mem-aref tm :int 8)
 	    ;; Guile's gmtoff is seconds west of UTC
 	    (- (cffi:mem-ref tm :long 40))
-	    (if (cffi:null-pointer-p zone) ps:false (cffi:foreign-string-to-lisp zone)))))
+	    (if (cffi:null-pointer-p zone) qs:false (cffi:foreign-string-to-lisp zone)))))
 
 (defun vector->tm (v tm)
   (dotimes (i 9) (setf (cffi:mem-aref tm :int i) (svref v i)))
@@ -1002,7 +1002,7 @@ bytevector mutators read-only bytevectors."
 ;;; ------------------------------------------------------------------
 ;;; Odds and ends
 
-(defguile "defined?" (sym &optional (module ps:false))
+(defguile "defined?" (sym &optional (module qs:false))
   (let ((v (module-variable* (if (truthy module) module *current-module*) sym)))
     (bool (and v (not (eq (gvariable-value v) +unbound+))))))
 (macrolet ((comparisons (&rest pairs)
@@ -1019,7 +1019,7 @@ bytevector mutators read-only bytevectors."
   (loop for tail on args while (cdr tail) always (funcall test (car tail) (cadr tail))))
 (defguile "eq?" (&rest args) (bool (all-adjacent #'eq args)))
 (defguile "eqv?" (&rest args) (bool (all-adjacent #'eql args)))
-(defguile "equal?" (&rest args) (bool (all-adjacent #'ps:scheme-equal-p args)))
+(defguile "equal?" (&rest args) (bool (all-adjacent #'qs:scheme-equal-p args)))
 
 (defun nan-p (x) (and (floatp x) (sb-ext:float-nan-p x)))
 
@@ -1142,36 +1142,36 @@ less than 0.0."
     (if (simple-vector-p v)
 	(list (cons (ssym "filename") (svref v 0)) (cons (ssym "line") (svref v 1))
 	      (cons (ssym "column") (svref v 2)))
-	ps:false)))
+	qs:false)))
 (defvar *guardian-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "The procedures that are guardians, for scm->object.")
 (defguile "make-guardian" ()
   ;; src/r6rs/guardians.lisp; checked after a (gc)
-  (let* ((g (ps-r6rs::new-guardian))
+  (let* ((g (qs-r6rs::new-guardian))
 	 (f (lambda (&optional (x nil x-p))
 	      (if x-p
-		  (progn (ps-r6rs::guardian-register g x) *unspecified*)
-		  (ps-r6rs::guardian-next g)))))
+		  (progn (qs-r6rs::guardian-register g x) *unspecified*)
+		  (qs-r6rs::guardian-next g)))))
     (setf (gethash f *guardian-procedures*) t)
     f))
 (defguile "display-error" (frame port subr message args rest)
   (declare (ignore frame rest))
   (when (truthy subr) (format port "In procedure ~A: " subr))
-  (write-string (apply #'simple-format ps:false message (if (listp args) args '())) port)
+  (write-string (apply #'simple-format qs:false message (if (listp args) args '())) port)
   (terpri port)
   *unspecified*)
-(defguile "eval-string" (string &optional (module ps:false))
+(defguile "eval-string" (string &optional (module qs:false))
   (with-input-from-string (in string)
     (let ((result *unspecified*))
       (loop for form = (guile-read in)
-	    until (eq form ps:eof-object)
+	    until (eq form qs:eof-object)
 	    do (setq result (guile-eval form module)))
       result)))
 (defguile "gettext" (msg &rest args) (declare (ignore args)) msg)
 (defguile "ngettext" (msg plural n &rest args) (declare (ignore args)) (if (= n 1) msg plural))
-(defguile "textdomain" (&rest args) (declare (ignore args)) ps:false)
-(defguile "bindtextdomain" (&rest args) (declare (ignore args)) ps:false)
-(defguile "bind-textdomain-codeset" (&rest args) (declare (ignore args)) ps:false)
+(defguile "textdomain" (&rest args) (declare (ignore args)) qs:false)
+(defguile "bindtextdomain" (&rest args) (declare (ignore args)) qs:false)
+(defguile "bind-textdomain-codeset" (&rest args) (declare (ignore args)) qs:false)
 (defguile "setlocale" (&rest args) (declare (ignore args)) "C")
 (defguile "%package-data-dir" () (namestring (uiop:pathname-parent-directory-pathname *guile-source-directory*)))
 (defguile "%library-dir" () (namestring *guile-source-directory*))	; guile-procedures.txt is here
@@ -1179,13 +1179,13 @@ less than 0.0."
 (defguile "%global-site-dir" () "")
 (defguile "%site-ccache-dir" () "")
 (defguile "%resolve-variable" (spec module)
-  (or (module-variable* module (if (consp spec) (cdr spec) spec)) ps:false))
+  (or (module-variable* module (if (consp spec) (cdr spec) spec)) qs:false))
 (defguile "module-import-interface" (module sym)
   ;; the interface MODULE's binding of SYM comes from
   (let ((v (imported-variable module sym)))
     (or (and v (find-if (lambda (iface) (eq (module-variable* iface sym) v))
 			(module-slot module +module-uses+)))
-	ps:false)))
+	qs:false)))
 (defguile "memoized-typecode" (x) (declare (ignore x)) 0)
 (defguile "unmemoize-expression" (x) x)
 ;;; Signals, timers and asyncs.  A Guile signal handler is an SBCL
@@ -1205,7 +1205,7 @@ less than 0.0."
 	       (let ((old (sb-sys:enable-interrupt signum lisp-handler)))
 		 (unless (nth-value 1 (gethash signum *original-interrupt-handlers*))
 		   (setf (gethash signum *original-interrupt-handlers*) old)))))
-	(cond ((eq handler ps:false)
+	(cond ((eq handler qs:false)
 	       ;; the handler there was before Guile's
 	       (multiple-value-bind (original found) (gethash signum *original-interrupt-handlers*)
 		 (when found (sb-sys:enable-interrupt signum original)))
@@ -1251,7 +1251,7 @@ Guile's ((seconds . microseconds) (seconds . microseconds))."
 ;;; *after-gc-hooks*, in whichever thread SBCL runs them)
 
 (defun run-after-gc-hook ()
-  (psx::with-thread-state (run-after-gc-hook-1)))
+  (qsx::with-thread-state (run-after-gc-hook-1)))
 
 (defvar *hooked-gc-epoch* nil
   "The collection the after-gc-hook last ran after: (gc) runs it at once,
@@ -1338,12 +1338,12 @@ that name, if the host has one."
       (dolist (handle (ghash-handles obarray))
 	(let ((name (car handle)) (v (cdr handle)))
 	  (when (and (gvariable-p v) (eq (gvariable-value v) +unbound+))
-	    (let ((s (ps:scheme-symbol-name name)))
+	    (let ((s (qs:scheme-symbol-name name)))
 	      (cond ((gethash s *extension-primitives*)
 		     (setf (gvariable-value v) (gethash s *extension-primitives*)))
 		    ((gethash s *guile-primitives*)
 		     (setf (gvariable-value v) (gethash s *guile-primitives*)))
-		    ((host-bound-p s) (setf (gvariable-value v) (psx:host-ref s)))
+		    ((host-bound-p s) (setf (gvariable-value v) (qsx:host-ref s)))
 		    (t (push (cons init s) *missing-extension-names*))))))))))
 
 (defextension "scm_init_ice_9_control"
@@ -1351,7 +1351,7 @@ that name, if the host has one."
   ;; what is captured up to it can be resumed
   (list (cons "suspendable-continuation?"
 	      (lambda (tag)
-		(bool (dolist (frame psx::*fstack*)
+		(bool (dolist (frame qsx::*fstack*)
 			(when (vectorp frame)
 			  (case (svref frame 0)
 			    (:barrier (return nil))
@@ -1369,21 +1369,21 @@ that name, if the host has one."
 	(cons "sint-list->bytevector"
 	      (lambda (list &rest args)
 		(check-proper-list "sint-list->bytevector" 1 list)
-		(apply (psx:host-ref "sint-list->bytevector") list args)))
+		(apply (qsx:host-ref "sint-list->bytevector") list args)))
 	(cons "uint-list->bytevector"
 	      (lambda (list &rest args)
 		(check-proper-list "uint-list->bytevector" 1 list)
-		(apply (psx:host-ref "uint-list->bytevector") list args)))
+		(apply (qsx:host-ref "uint-list->bytevector") list args)))
 	(cons "bytevector-fill!"
 	      ;; with Guile's optional range
 	      (lambda (bv fill &optional (start 0) (end (length bv)))
-		(unless (typep bv 'ps-r6rs::octets) (wrong-type "bytevector-fill!" 1 bv))
+		(unless (typep bv 'qs-r6rs::octets) (wrong-type "bytevector-fill!" 1 bv))
 		(unless (and (integerp fill) (<= -128 fill 255)) (wrong-type "bytevector-fill!" 2 fill))
 		(fill bv (ldb (byte 8 0) fill) :start start :end end)
 		*unspecified*))
 	(cons "bytevector-slice"
 	      (lambda (bv offset &optional (size nil size-p))
-		(unless (typep bv 'ps-r6rs::octets) (wrong-type "bytevector-slice" 1 bv))
+		(unless (typep bv 'qs-r6rs::octets) (wrong-type "bytevector-slice" 1 bv))
 		(unless (and (integerp offset) (<= 0 offset (length bv)))
 		  (out-of-range "bytevector-slice" offset))
 		(let ((size (if size-p size (- (length bv) offset))))
@@ -1397,30 +1397,30 @@ that name, if the host has one."
 		    (if (read-only-bytevector-p bv) (read-only-bytevector slice) slice)))))
 	;; Guile's checks of the size, before the host's
 	(cons "bytevector->sint-list" (lambda (bv endianness size) (integer-list-size-check "bytevector->sint-list" bv size)
-					(funcall (psx:host-ref "bytevector->sint-list") bv endianness size)))
+					(funcall (qsx:host-ref "bytevector->sint-list") bv endianness size)))
 	(cons "bytevector->uint-list" (lambda (bv endianness size) (integer-list-size-check "bytevector->uint-list" bv size)
-					(funcall (psx:host-ref "bytevector->uint-list") bv endianness size)))
+					(funcall (qsx:host-ref "bytevector->uint-list") bv endianness size)))
 	(cons "utf8->string"
 	      (lambda (bv &optional (start 0) (end nil))
-		(unless (typep bv 'ps-r6rs::octets) (wrong-type "utf8->string" 1 bv))
+		(unless (typep bv 'qs-r6rs::octets) (wrong-type "utf8->string" 1 bv))
 		(handler-case (sb-ext:octets-to-string bv :external-format '(:utf-8 :replacement nil)
 							  :start start :end end)
 		  (sb-int:character-decoding-error ()
 		    (call-throw (ssym "decoding-error") (list "utf8->string" "input decoding error" +eilseq+ bv))))))
 	;; the endianness is optional, big by default
 	(cons "utf16->string" (lambda (bv &optional (endianness (ssym "big")) endianness-mandatory)
-				(funcall (psx:host-ref "utf16->string") bv endianness
-					 (if (truthy endianness-mandatory) ps:true ps:false))))
+				(funcall (qsx:host-ref "utf16->string") bv endianness
+					 (if (truthy endianness-mandatory) qs:true qs:false))))
 	(cons "utf32->string" (lambda (bv &optional (endianness (ssym "big")) endianness-mandatory)
-				(funcall (psx:host-ref "utf32->string") bv endianness
-					 (if (truthy endianness-mandatory) ps:true ps:false))))))
+				(funcall (qsx:host-ref "utf32->string") bv endianness
+					 (if (truthy endianness-mandatory) qs:true qs:false))))))
 
 (defun integer-list-size-check (who bv size)
-  (unless (typep bv 'ps-r6rs::octets) (wrong-type who 1 bv))
+  (unless (typep bv 'qs-r6rs::octets) (wrong-type who 1 bv))
   (unless (and (integerp size) (plusp size)) (out-of-range who size))
   (unless (zerop (mod (length bv) size)) (wrong-type who 3 size)))
 
-(defguile "raise" (signal) (sb-posix:kill (sb-posix:getpid) signal) ps:true)
+(defguile "raise" (signal) (sb-posix:kill (sb-posix:getpid) signal) qs:true)
 
 ;;; File descriptors and processes
 
@@ -1465,7 +1465,7 @@ that name, if the host has one."
   (if (and (stringp path) (plusp (length path)))
       (append (funcall (gethash "string-split" *guile-primitives*) path #\:) tail)
       tail))
-(defguile "search-path" (path filename &optional (extensions '("")) (require-exts ps:false))
+(defguile "search-path" (path filename &optional (extensions '("")) (require-exts qs:false))
   (let ((extensions (let ((l (loop for tail = extensions then (cdr tail)
 				   while (consp tail) collect (car tail))))	; #nil may end it
 		      (or l '("")))))
@@ -1482,7 +1482,7 @@ that name, if the host has one."
 	      (loop for tail = path then (cdr tail)
 		    while (consp tail)
 		    thereis (try (format nil "~A/~A" (string-right-trim "/" (car tail)) filename))))
-	  ps:false))))
+	  qs:false))))
 (defguile "procedure" (x)
   (if (typep x 'applicable-struct) (svref (astruct-slots x) 0) (wrong-type "procedure" 1 x)))
 
@@ -1508,7 +1508,7 @@ that name, if the host has one."
     ("LC_NUMERIC" . 4) ("LC_TIME" . 5) ("LC_MESSAGES" . 6)))
 
 (defguile "setlocale" (category &optional locale)
-  (let ((result (if (or (null locale) (eq locale ps:false))
+  (let ((result (if (or (null locale) (eq locale qs:false))
 		    (cffi:foreign-funcall "setlocale" :int category :pointer (cffi:null-pointer) :pointer)
 		    (cffi:foreign-funcall "setlocale" :int category :string locale :pointer))))
     (if (cffi:null-pointer-p result)
@@ -1552,10 +1552,10 @@ installed Guile returns it; '() if there's no guile program."
 (defextension "scm_init_programs"
   (flet ((no-program (p) (guile-error (ssym "wrong-type-arg") "program-code"
 				      "Wrong type argument in position ~A: ~S" (list 1 p) (list p))))
-    (list (cons "program?" (lambda (x) (declare (ignore x)) ps:false))
+    (list (cons "program?" (lambda (x) (declare (ignore x)) qs:false))
 	  (cons "program-code" #'no-program)
-	  (cons "primitive-code?" (lambda (x) (declare (ignore x)) ps:false))
-	  (cons "primitive-code-name" (lambda (x) (declare (ignore x)) ps:false))
+	  (cons "primitive-code?" (lambda (x) (declare (ignore x)) qs:false))
+	  (cons "primitive-code-name" (lambda (x) (declare (ignore x)) qs:false))
 	  (cons "program-num-free-variables" #'no-program)
 	  (cons "program-free-variable-ref" (lambda (p i) (declare (ignore i)) (no-program p)))
 	  (cons "program-free-variable-set!" (lambda (p i x) (declare (ignore i x)) (no-program p))))))
@@ -1703,7 +1703,7 @@ true (the predicate's value) if it matches."
 
 (defun string-bounds (who s start end)
   (unless (stringp s) (wrong-type who 2 s))
-  (let ((end (if (or (null end) (eq end ps:false)) (length s) end)))
+  (let ((end (if (or (null end) (eq end qs:false)) (length s) end)))
     (unless (and (integerp start) (<= 0 start (length s))) (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list start) (list start)))
     (unless (and (integerp end) (<= start end (length s))) (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list end) (list end)))
     end))
@@ -1713,20 +1713,20 @@ true (the predicate's value) if it matches."
 	(end (string-bounds "string-any" s start end)))
     (loop for i from start below end
 	  for v = (funcall match (char s i))
-	  when (truthy* v) return (if (functionp pred) v ps:true)
-	  finally (return ps:false))))
+	  when (truthy* v) return (if (functionp pred) v qs:true)
+	  finally (return qs:false))))
 
 (defguile "string-every-c-code" (pred s &optional (start 0) end)	; and string-every
   (let ((match (char-or-set-matcher "string-every" 1 pred))
 	(end (string-bounds "string-every" s start end))
-	(last ps:true))
+	(last qs:true))
     (loop for i from start below end
 	  for v = (funcall match (char s i))
-	  unless (truthy* v) return ps:false
-	  do (setq last (if (functionp pred) v ps:true))
+	  unless (truthy* v) return qs:false
+	  do (setq last (if (functionp pred) v qs:true))
 	  finally (return last))))
 
-(defun truthy* (v) (and v (not (eq v ps:false))))
+(defun truthy* (v) (and v (not (eq v qs:false))))
 
 (defguile "string-replace" (s1 s2 &optional (start1 0) end1 (start2 0) end2)
   (let ((end1 (string-bounds "string-replace" s1 start1 end1))
@@ -1812,7 +1812,7 @@ true (the predicate's value) if it matches."
 (defextension "scm_init_popen"
   (list
    (cons "piped-process"
-	 (lambda (prog args &optional (from ps:false) (to ps:false))
+	 (lambda (prog args &optional (from qs:false) (to qs:false))
 	   (flush-all-ports)
 	   (let* ((out (if (consp from) (cdr from) (port-fd-or *standard-output* sb-posix:o-wronly)))
 		  (in (if (consp to) (car to) (port-fd-or *standard-input* sb-posix:o-rdonly)))
@@ -1841,7 +1841,7 @@ true (the predicate's value) if it matches."
   (check-stack-limit "call-with-stack-overflow-handler" limit)
   ;; deep recursion (past the binding stack, src/continuations.lisp) stops
   ;; at 64 MB more of control stack, short of the stack's own end
-  (handler-case (let ((psx::*stack-limit* (cons (sb-sys:sap-int (sb-vm::current-sp)) (* 64 1024 1024))))
+  (handler-case (let ((qsx::*stack-limit* (cons (sb-sys:sap-int (sb-vm::current-sp)) (* 64 1024 1024))))
 		  (funcall thunk))
     (storage-condition ()
       (check-stack-limit "call-with-stack-overflow-handler" (funcall handler))
@@ -1948,10 +1948,10 @@ true (the predicate's value) if it matches."
 (defun weak-cell (x) (if (or (numberp x) (characterp x) (symbolp x)) x (sb-ext:make-weak-pointer x)))
 (defun weak-cell-value (c)
   (if (sb-ext:weak-pointer-p c)
-      (multiple-value-bind (v alive) (sb-ext:weak-pointer-value c) (if alive v ps:false))
+      (multiple-value-bind (v alive) (sb-ext:weak-pointer-value c) (if alive v qs:false))
       c))
 (defun weak-vector-elements (w) (map 'list #'weak-cell-value (weak-vector-cells w)))
-(defguile "make-weak-vector" (n &optional (fill ps:false))
+(defguile "make-weak-vector" (n &optional (fill qs:false))
   (unless (and (integerp n) (>= n 0)) (wrong-type "make-weak-vector" 1 n))
   (%make-weak-vector (make-array n :initial-element (weak-cell fill))))
 (defguile "list->weak-vector" (list)
@@ -1967,7 +1967,7 @@ true (the predicate's value) if it matches."
 (defguile "module-reverse-lookup" (module variable)
   ;; the name VARIABLE has in MODULE: its own, or (through the modules it
   ;; uses, interfaces renaming) an imported one
-  (unless (or (module-p* module) (eq module ps:false)) (wrong-type "module-reverse-lookup" 1 module))
+  (unless (or (module-p* module) (eq module qs:false)) (wrong-type "module-reverse-lookup" 1 module))
   (unless (gvariable-p variable) (wrong-type "module-reverse-lookup" 2 variable))
   (let ((seen '()))
     (labels ((look-in (m)
@@ -1977,7 +1977,7 @@ true (the predicate's value) if it matches."
 		   (or (loop for (name . v) in (ghash-handles obarray) when (eq v variable) return name)
 		       (and (module-p* m)
 			    (loop for iface in (module-slot m +module-uses+) thereis (look-in iface))))))))
-      (or (look-in module) ps:false))))
+      (or (look-in module) qs:false))))
 
 ;;; POSIX odds and ends
 (defguile "ttyname" (port)
@@ -2009,7 +2009,7 @@ true (the predicate's value) if it matches."
 
 ;;; spawn: Guile 3.0.9's posix_spawn interface.  ARGS includes argv[0].
 (defguile "spawn" (program args &key (environment nil) (input nil) (output nil) (error nil)
-			   (search-path? ps:true))
+			   (search-path? qs:true))
   (flet ((fd-of (port default who)
 	   (cond ((null port) (port-fd-or default (if (eq default *standard-input*) sb-posix:o-rdonly sb-posix:o-wronly)))
 		 ((and (gport-p port) (port-fd port)) (flush-output port) (port-fd port))
@@ -2058,7 +2058,7 @@ true (the predicate's value) if it matches."
 
 (defun load-thunk-from-memory (bv)
   (flet ((fail (message) (guile-error (ssym "misc-error") "load-thunk-from-memory" message '())))
-    (unless (typep bv 'ps-r6rs::octets) (wrong-type "load-thunk-from-memory" 1 bv))
+    (unless (typep bv 'qs-r6rs::octets) (wrong-type "load-thunk-from-memory" 1 bv))
     (unless (and (>= (length bv) 64) (= (aref bv 0) #x7f) (= (aref bv 1) (char-code #\E))
 		 (= (aref bv 2) (char-code #\L)) (= (aref bv 3) (char-code #\F)))
       (fail "not an ELF file"))
@@ -2080,7 +2080,7 @@ true (the predicate's value) if it matches."
 ;; the strict-infix grammar
 (defguile "string-join" (strings &optional (delimiter " ") (grammar (ssym "infix")))
   (when (and (null strings) (symbolp grammar) grammar
-	     (string= (ps:scheme-symbol-name grammar) "strict-infix"))
+	     (string= (qs:scheme-symbol-name grammar) "strict-infix"))
     (guile-error (ssym "misc-error") "string-join"
 		 "strict-infix grammar requires non-empty list" '()))
   (funcall (gethash (cons "(srfi 13)" "string-join") *library-values*) strings delimiter grammar))
@@ -2091,7 +2091,7 @@ true (the predicate's value) if it matches."
 
 (defun at-directory-fd (who dir)
   "DIR's descriptor; #f is the current directory (AT_FDCWD)."
-  (cond ((eq dir ps:false) #+darwin -2 #-darwin -100)
+  (cond ((eq dir qs:false) #+darwin -2 #-darwin -100)
 	((and (gport-p dir) (port-open-p dir) (port-fd dir)) (port-fd dir))
 	(t (wrong-type who 1 dir))))
 
@@ -2245,7 +2245,7 @@ true (the predicate's value) if it matches."
 (defguile "mknod" (path type perms dev)
   (unless (stringp path) (wrong-type "mknod" 1 path))
   (let ((kind (cond ((not (symbolp type)) (wrong-type "mknod" 2 type))
-		    (t (let ((name (ps:scheme-symbol-name type)))
+		    (t (let ((name (qs:scheme-symbol-name type)))
 			 (cond ((string= name "regular") #o100000)
 			       ((string= name "directory") #o040000)
 			       ((string= name "symlink") #o120000)
@@ -2270,7 +2270,7 @@ true (the predicate's value) if it matches."
 (defguile "getpass" (prompt)
   (unless (stringp prompt) (wrong-type "getpass" 1 prompt))
   (let ((r (cffi:foreign-funcall "getpass" :string prompt :pointer)))
-    (if (cffi:null-pointer-p r) ps:false (cffi:foreign-string-to-lisp r))))
+    (if (cffi:null-pointer-p r) qs:false (cffi:foreign-string-to-lisp r))))
 
 (defguile "nice" (increment)
   (setf (sb-alien:extern-alien "errno" sb-alien:int) 0)
@@ -2289,10 +2289,10 @@ true (the predicate's value) if it matches."
   *unspecified*)
 
 (defun rlim-in (n)
-  (if (eq n ps:false) (1- (ash 1 63)) n))
+  (if (eq n qs:false) (1- (ash 1 63)) n))
 
 (defun rlim-out (n)
-  (if (or (= n (1- (ash 1 63))) (= n (1- (ash 1 64)))) ps:false n))
+  (if (or (= n (1- (ash 1 63))) (= n (1- (ash 1 64)))) qs:false n))
 
 (defguile "getrlimit" (resource)
   (cffi:with-foreign-object (r :uint64 2)
@@ -2387,12 +2387,12 @@ true (the predicate's value) if it matches."
       (funcall vector-function pointer)))
 
 (defguile "getpw" (&optional user)
-  (let ((pw (cond ((or (null user) (eq user ps:false)) (cffi:foreign-funcall "getpwent" :pointer))
+  (let ((pw (cond ((or (null user) (eq user qs:false)) (cffi:foreign-funcall "getpwent" :pointer))
 		  ((integerp user) (cffi:foreign-funcall "getpwuid" :unsigned-int user :pointer))
 		  ((stringp user) (cffi:foreign-funcall "getpwnam" :string user :pointer))
 		  (t (wrong-type "getpw" 1 user)))))
     (cond ((not (cffi:null-pointer-p pw)) (passwd-vector pw))
-	  ((or (null user) (eq user ps:false)) ps:false)
+	  ((or (null user) (eq user qs:false)) qs:false)
 	  (t (system-error "getpw" (c-errno))))))
 
 (defguile "setpw" (&optional arg)
@@ -2402,12 +2402,12 @@ true (the predicate's value) if it matches."
   *unspecified*)
 
 (defguile "getgr" (&optional group)
-  (let ((gr (cond ((or (null group) (eq group ps:false)) (cffi:foreign-funcall "getgrent" :pointer))
+  (let ((gr (cond ((or (null group) (eq group qs:false)) (cffi:foreign-funcall "getgrent" :pointer))
 		  ((integerp group) (cffi:foreign-funcall "getgrgid" :unsigned-int group :pointer))
 		  ((stringp group) (cffi:foreign-funcall "getgrnam" :string group :pointer))
 		  (t (wrong-type "getgr" 1 group)))))
     (cond ((not (cffi:null-pointer-p gr)) (group-vector gr))
-	  ((or (null group) (eq group ps:false)) ps:false)
+	  ((or (null group) (eq group qs:false)) qs:false)
 	  (t (system-error "getgr" 0)))))
 
 (defguile "setgr" (&optional arg)
@@ -2448,8 +2448,8 @@ one up by the first matching LOOKUP, (type-test c-function arg-types...)."
 			  ,@(loop for (test form) in lookups collect `(,test ,form))
 			  (t (wrong-type ,getter 1 key)))))
 	 (cond ((not (cffi:null-pointer-p entry)) (,vector-function entry))
-	       ((null key) ps:false)
-	       (t (guile-error (ssym "misc-error") ,getter "no such ~A" (list ,getter) ps:false)))))
+	       ((null key) qs:false)
+	       (t (guile-error (ssym "misc-error") ,getter "no such ~A" (list ,getter) qs:false)))))
      (defguile ,setter (&optional arg)
        (if (and arg (truthy arg))
 	   (cffi:foreign-funcall ,(format nil "set~A" (subseq next 3)) :int 1 :void)
@@ -2477,8 +2477,8 @@ one up by the first matching LOOKUP, (type-test c-function arg-types...)."
 							    :string proto :pointer))
 		     (t (wrong-type "getserv" 1 name)))))
     (cond ((not (cffi:null-pointer-p entry)) (serv-vector entry))
-	  ((null name) ps:false)
-	  (t (guile-error (ssym "misc-error") "getserv" "no such service ~A" (list name) ps:false)))))
+	  ((null name) qs:false)
+	  (t (guile-error (ssym "misc-error") "getserv" "no such service ~A" (list name) qs:false)))))
 (defguile "setserv" (&optional arg)
   (if (and arg (truthy arg))
       (cffi:foreign-funcall "setservent" :int 1 :void)
@@ -2545,7 +2545,7 @@ one up by the first matching LOOKUP, (type-test c-function arg-types...)."
 	(when (cffi:null-pointer-p end) (system-error "strptime" 22))
 	(let ((v (tm->vector tm)))
 	  ;; the zone is never reported
-	  (setf (svref v 10) ps:false)
+	  (setf (svref v 10) qs:false)
 	  (cons v (length (sb-ext:octets-to-string input :external-format :utf-8
 							 :end (- (cffi:pointer-address end) (cffi:pointer-address in))))))))))
 
@@ -2595,9 +2595,9 @@ one up by the first matching LOOKUP, (type-test c-function arg-types...)."
 (defguile "gc-enable" () *unspecified*)
 (defguile "gc-dump" () *unspecified*)
 (defguile "dynamic-unlink" (lib) (declare (ignore lib)) *unspecified*)
-(defguile "get-print-state" (port) (declare (ignore port)) ps:false)
+(defguile "get-print-state" (port) (declare (ignore port)) qs:false)
 (defguile "port-with-print-state" (port &optional state) (declare (ignore state)) port)
-(defguile "has-shown-backtrace-hint?" () ps:false)
+(defguile "has-shown-backtrace-hint?" () qs:false)
 (defguile "set-procedure-minimum-arity!" (proc required optional rest)
   (declare (ignore required optional rest proc))
   *unspecified*)

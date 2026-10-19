@@ -22,7 +22,7 @@
 ;;; Timing.
 
 (define (runtime) ;; r7rs
-  ;; PSEUDOSCHEME: was (round (* (current-jiffy) (jiffies-per-second) #e1e6)),
+  ;; QUASISCHEME: was (round (* (current-jiffy) (jiffies-per-second) #e1e6)),
   ;; which isn't microseconds.
   (round (/ (* (current-jiffy) #e1e6) (jiffies-per-second)))) ;; microseconds
 

@@ -1,4 +1,4 @@
-;;; SRFI 107: XML reader syntax.  Written for Pseudoscheme.  The reader
+;;; SRFI 107: XML reader syntax.  Written for Quasischeme.  The reader
 ;;; reads #<tag attr="value">content</tag>, #<tag/>, #<!--comment-->,
 ;;; #<![CDATA[text]]> and #<?target content?> (src/quasi.lisp) as the
 ;;; SRFI's $xml-element$ and other forms; this library makes SXML of them:

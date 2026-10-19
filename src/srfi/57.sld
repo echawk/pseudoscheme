@@ -20,7 +20,7 @@
 ;;;   - make-generic and define-method, the generic functions behind
 ;;;     record schemes.  The reference's generic answers a zero-argument
 ;;;     call with a message dispatcher, so each define-method made three
-;;;     calls at top level.  With full continuations, Pseudoscheme's
+;;;     calls at top level.  With full continuations, Quasischeme's
 ;;;     compile time grows steeply with the number of top-level calls to
 ;;;     procedures it doesn't know (see the report on this SRFI), and a
 ;;;     handful of record types took minutes to compile.  Here a

@@ -1,4 +1,4 @@
-;;; SRFI 192: port positioning.  Written for Pseudoscheme on its R6RS
+;;; SRFI 192: port positioning.  Written for Quasischeme on its R6RS
 ;;; port positions (see 181.sld), not Shiro Kawai's sample
 ;;; implementation, which works only on that sample's custom ports.
 ;;; make-i/o-invalid-position-error and i/o-invalid-position-error? are

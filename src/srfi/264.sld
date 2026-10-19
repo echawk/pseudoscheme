@@ -1,12 +1,12 @@
 ;;; SRFI 264: string notation for regular expressions (SSRE).  Sergei
 ;;; Egorov's sample implementation, srfi/264.sld (a copy is in
 ;;; reference/srfi-264/; MIT licence in reference/srfi-264/LICENSE).
-;;; One change, marked PSEUDOSCHEME: the parameter ssre-definitions is
+;;; One change, marked QUASISCHEME: the parameter ssre-definitions is
 ;;; set by calling it with an argument, which the sample notes R7RS
-;;; doesn't require and Pseudoscheme's parameters don't accept; it is
+;;; doesn't require and Quasischeme's parameters don't accept; it is
 ;;; wrapped with settable-parameter from SRFI 215's helper library,
 ;;; (srfi private srfi-215-parameter), so that it can be.  It translates SSRE strings to
-;;; SRFI 115 SREs, and ssre->regexp compiles them with Pseudoscheme's
+;;; SRFI 115 SREs, and ssre->regexp compiles them with Quasischeme's
 ;;; (srfi 115).
 ;;; SPDX-FileCopyrightText: 2025 Sergei Egorov
 ;;; SPDX-License-Identifier: MIT
@@ -15,7 +15,7 @@
   (export ssre->sre ssre->regexp sre->ssre ssre-definitions ssre-bind ssre-unbind)
   (import (scheme base) (scheme char) (scheme cxr) (scheme write)
           (srfi 14) (srfi 39) (srfi 115)
-          (srfi private srfi-215-parameter))  ; PSEUDOSCHEME: added
+          (srfi private srfi-215-parameter))  ; QUASISCHEME: added
 
 (begin
 ;========================================================================================
@@ -1017,7 +1017,7 @@
 
 (define ssre-definitions
   ; named-exprs is reversed here to make sure o-reverse-lookup picks shorter names
-  (settable-parameter (make-parameter (make-ds (reverse named-exprs)))))  ; PSEUDOSCHEME: was the make-parameter alone
+  (settable-parameter (make-parameter (make-ds (reverse named-exprs)))))  ; QUASISCHEME: was the make-parameter alone
 
 (define (ssre-bind n t e ds)
   (make-ds (cons (list n t e) (ds-nes (ssre-unbind n ds)))))

@@ -1,19 +1,19 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R7RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R7RS -*-
 
 ;;;; Chez Scheme: the (chezscheme) library, and Chez's top level, which
-;;;; pseudoscheme --chez runs scripts at.  docs/chez.md.
+;;;; quasischeme --chez runs scripts at.  docs/chez.md.
 ;;;;
 ;;;; (chezscheme) is R6RS, as Chez's re-exports it, plus the Scheme of
 ;;;; src/chez/*.scm, which uses the host procedures of host.lisp and
-;;;; this file through (pseudoscheme chez host), prefixed %.
+;;;; this file through (quasischeme chez host), prefixed %.
 ;;;;
 ;;;; Chez's top level is an interaction library whose unbound names come
-;;;; from (chezscheme), as the R5RS one's come from (pseudoscheme r5rs).
+;;;; from (chezscheme), as the R5RS one's come from (quasischeme r5rs).
 ;;;; A library file whose library a macro makes -- (import ...) and then
 ;;;; a use of a macro that expands into (library ...), as Chez allows --
 ;;;; is loaded at a fresh top level of its own (*LIBRARY-LOADERS*).
 
-(in-package "PSEUDOSCHEME-R7RS")
+(in-package "QUASISCHEME-R7RS")
 
 (defparameter *chezscheme-sources*
   '("chezscheme.scm" "lists.scm" "records.scm" "syntax.scm" "numbers.scm" "hashtables.scm" "threads.scm"
@@ -254,14 +254,14 @@
 ;;; The libraries
 
 (defun chez-host-names ()
-  "Every host global named chez:..., for (pseudoscheme chez host)."
+  "Every host global named chez:..., for (quasischeme chez host)."
   (let ((names (remove-duplicates
-		(append (loop for (name) in ps-r6rs::*primitives*
+		(append (loop for (name) in qs-r6rs::*primitives*
 			      when (and (> (length name) 5) (string= "chez:" name :end2 5))
 				collect name)
 			*chez-top-level-primitives*)
 		:test #'string=)))
-    (remove-if-not (lambda (n) (boundp (psx::location (ssym n)))) names)))
+    (remove-if-not (lambda (n) (boundp (qsx::location (ssym n)))) names)))
 
 ;;; Chez's extensions to R6RS procedures: in Chez, (rnrs) and
 ;;; (chezscheme) export the same bindings, whose procedures take Chez's
@@ -271,29 +271,29 @@
 ;;; procedures' options ('replace, 'append, ...), delete-file's error?
 ;;; and file-exists?'s follow?, and eval of one
 ;;; argument (through psyntax's eval-hook).  Without Chez's arguments they behave as before.  They are
-;;; closed primitives (psx::*closed-primitives*): the translator's
+;;; closed primitives (qsx::*closed-primitives*): the translator's
 ;;; built-ins of those names, open-coded, wouldn't take the arguments.
 
 (defun extend-host-procedure (name make &optional arity)
   "Replace host procedure NAME by (funcall MAKE old-procedure).  ARITY,
 (min max), says with how many arguments the new procedure is the old:
 calls with those are still open-coded."
-  (let ((old (psx:host-ref name)))
-    (psx:host-set! name (funcall make old))
-    (pushnew name psx::*closed-primitives* :test #'string=)
+  (let ((old (qsx:host-ref name)))
+    (qsx:host-set! name (funcall make old))
+    (pushnew name qsx::*closed-primitives* :test #'string=)
     (when arity
-      (pushnew (cons name arity) psx::*extended-primitives* :test #'equal))))
+      (pushnew (cons name arity) qsx::*extended-primitives* :test #'equal))))
 
 (defun chez-file-options-p (options)
-  (and options (not (eq (car options) ps:false))))
+  (and options (not (eq (car options) qs:false))))
 
 ;;; In the Chez mode, the mutators refuse immutable objects (host.lisp),
 ;;; the comparisons check their arguments' types, the vector and string
 ;;; iterators their arguments, and the constructors of an empty vector,
 ;;; string or bytevector give the single one.  A reference to such a
 ;;; primitive there is one to a host global chez:NAME
-;;; (psx::*chez-renamed-primitives*), called directly, its usual case
-;;; inlined (psx::*inline-primitives*).  Elsewhere they're as before.
+;;; (qsx::*chez-renamed-primitives*), called directly, its usual case
+;;; inlined (qsx::*inline-primitives*).  Elsewhere they're as before.
 
 (defparameter *chez-checked-mutators*
   '(("vector-set!" 0 "vector") ("vector-fill!" 0 "vector") ("string-set!" 0 "string")
@@ -344,49 +344,49 @@ calls with those are still open-coded."
 
 (defun chez-rename (name function &optional nullary)
   (let ((global (concatenate 'string "chez:" name)))
-    (psx:host-set! global function)
-    (setf (gethash name psx::*chez-renamed-primitives*) (if nullary (list global) global))))
+    (qsx:host-set! global function)
+    (setf (gethash name qsx::*chez-renamed-primitives*) (if nullary (list global) global))))
 
 (defun wrong-argument (who x what)
-  (ps-r6rs::r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "~~s is not a ~A" what) x))
+  (qs-r6rs::r6rs-assertion-violation (qs:intern-scheme-symbol who) (format nil "~~s is not a ~A" what) x))
 
 (defun install-chez-mutators ()
-  (setq psx::*canonical-empty* 'ps-r6rs::empty-like)
-  (pushnew (cons "base-rtd" ps-r6rs::*base-rtd*) ps:*sharp-bang-data* :test #'equal)
+  (setq qsx::*canonical-empty* 'qs-r6rs::empty-like)
+  (pushnew (cons "base-rtd" qs-r6rs::*base-rtd*) qs:*sharp-bang-data* :test #'equal)
   (loop for (name position kind) in *chez-checked-mutators*
-	for old = (ignore-errors (psx:host-ref name))
+	for old = (ignore-errors (qsx:host-ref name))
 	when old
 	do (let ((old old) (name name) (position position) (kind kind))
 	     (chez-rename name (lambda (&rest args)
-				 (ps-r6rs::check-mutable-object name (nth position args) kind)
+				 (qs-r6rs::check-mutable-object name (nth position args) kind)
 				 (apply old args)))))
   (flet ((canonical (x)
-	   (if (and (typep x '(simple-array * (0))) (not (bit-vector-p x))) (ps-r6rs::empty-like x) x)))
+	   (if (and (typep x '(simple-array * (0))) (not (bit-vector-p x))) (qs-r6rs::empty-like x) x)))
     (dolist (name *chez-empty-constructors*)
-      (let ((old (psx:host-ref name)))
+      (let ((old (qsx:host-ref name)))
 	(chez-rename name (lambda (&rest args) (canonical (apply old args))))))
     ;; (vector) and (string): only calls with no arguments
-    (chez-rename "vector" (lambda () ps-r6rs::*empty-vector*) t)
-    (chez-rename "string" (lambda () ps-r6rs::*empty-string*) t))
+    (chez-rename "vector" (lambda () qs-r6rs::*empty-vector*) t)
+    (chez-rename "string" (lambda () qs-r6rs::*empty-string*) t))
   (loop for (name . type) in *chez-checked-comparisons*
-	do (let ((old (psx:host-ref name)) (name name) (type type))
+	do (let ((old (qsx:host-ref name)) (name name) (type type))
 	     (chez-rename name (lambda (a &rest more)
 				 (dolist (x (cons a more))
 				   (unless (funcall type x)
 				     (wrong-argument name x (if (eq type 'characterp) "character" "string"))))
 				 (apply old a more)))))
   (flet ((iterator (name kind for-each)
-	   (let ((old (psx:host-ref name)))
+	   (let ((old (qsx:host-ref name)))
 	     (chez-rename name (lambda (f s &rest more)
-				 (psx::check-index-loop-arguments kind f (cons s more))
+				 (qsx::check-index-loop-arguments kind f (cons s more))
 				 (let ((r (apply old f s more)))
-				   (if for-each ps:unspecific r)))))))
+				   (if for-each qs:unspecific r)))))))
     (iterator "vector-map" :vector-map nil)
     (iterator "vector-for-each" :vector-for-each t)
     (iterator "string-for-each" :string-for-each t))
-  (let ((old (psx:host-ref "vector-sort")))
+  (let ((old (qsx:host-ref "vector-sort")))
     (chez-rename "vector-sort" (lambda (proc v)
-				 (ps-r6rs::check-procedure "vector-sort" proc)
+				 (qs-r6rs::check-procedure "vector-sort" proc)
 				 (unless (simple-vector-p v) (wrong-argument "vector-sort" v "vector"))
 				 (funcall old proc v)))))
 
@@ -397,19 +397,19 @@ calls with those are still open-coded."
 	 (open-output (old)
 	   (lambda (path &rest options)
 	     (if (chez-file-options-p options)
-		 (funcall (psx:host-ref "chez:open-output-file") path (car options))
+		 (funcall (qsx:host-ref "chez:open-output-file") path (car options))
 		 (funcall old path))))
 	 (call-with-output (old)
 	   (lambda (path proc &rest options)
 	     (if (chez-file-options-p options)
-		 (let ((port (funcall (psx:host-ref "chez:open-output-file") path (car options))))
+		 (let ((port (funcall (qsx:host-ref "chez:open-output-file") path (car options))))
 		   (multiple-value-prog1 (funcall proc port)
 		     (close port)))
 		 (funcall old path proc))))
 	 (with-output (old)
 	   (lambda (path thunk &rest options)
 	     (if (chez-file-options-p options)
-		 (let ((port (funcall (psx:host-ref "chez:open-output-file") path (car options))))
+		 (let ((port (funcall (qsx:host-ref "chez:open-output-file") path (car options))))
 		   (unwind-protect
 			(let ((*standard-output* port)) (funcall thunk))
 		     (close port)))
@@ -435,14 +435,14 @@ calls with those are still open-coded."
 				 (if more
 				     (apply old x more)
 				     ;; the comparison of x with itself checks its type
-				     (progn (funcall old x x) ps:true))))
+				     (progn (funcall old x x) qs:true))))
 			     '(2 nil)))
     (flet ((arithmetic (name zero one)
 	     (extend-host-procedure name
 				    (lambda (old)
 				      (lambda (&rest args)
 					(cond ((null args)
-					       (if zero zero (ps:scheme-error "~A: no arguments" name)))
+					       (if zero zero (qs:scheme-error "~A: no arguments" name)))
 					      ((null (cdr args)) (funcall one old (car args)))
 					      (t (reduce old args)))))
 				    '(2 2))))
@@ -451,30 +451,30 @@ calls with those are still open-coded."
       (arithmetic "fx-" nil (lambda (old x) (funcall old 0 x))))
         ;; (delete-file path error?) and (file-exists? path follow?)
     (dolist (name '("delete-file" "file-exists?"))
-      (let ((chez (psx:host-ref (concatenate 'string "chez:" name))))
+      (let ((chez (qsx:host-ref (concatenate 'string "chez:" name))))
 	(extend-host-procedure name
 			       (lambda (old)
 				 (lambda (path &optional (arg nil arg-p))
 				   (cond (arg-p (funcall chez path arg))
 					 ;; Chez's delete-file: #f if it can't, unless error?
-					 ((and ps:*chez-reader* (string= name "delete-file"))
-					  (funcall chez path ps:false))
+					 ((and qs:*chez-reader* (string= name "delete-file"))
+					  (funcall chez path qs:false))
 					 (t (funcall old path))))))))
     ;; (record-constructor rtd): a procedure of every field's value
-    (let ((chez (psx:host-ref "chez:record-constructor")))
+    (let ((chez (qsx:host-ref "chez:record-constructor")))
       (extend-host-procedure "record-constructor"
 			     (lambda (old)
-			       (lambda (x) (funcall (if (ps-r6rs::rtd-p x) chez old) x)))))
+			       (lambda (x) (funcall (if (qs-r6rs::rtd-p x) chez old) x)))))
     ;; (record? x rtd): whether x is of type rtd, even if it is opaque
     (extend-host-procedure "record?"
 			   (lambda (old)
 			     (lambda (x &optional (rtd nil rtd-p))
 			       (if rtd-p
-				   (progn (ps-r6rs::check-rtd "record?" rtd)
-					  (ps-r6rs::bool (ps-r6rs::record-of-type-p x rtd)))
+				   (progn (qs-r6rs::check-rtd "record?" rtd)
+					  (qs-r6rs::bool (qs-r6rs::record-of-type-p x rtd)))
 				   ;; a record type descriptor is a record in Chez
-				   (if (ps-r6rs::rtd-p x)
-				       (ps-r6rs::bool (not (ps-r6rs::rtd-opaque (ps-r6rs::record-rtd x))))
+				   (if (qs-r6rs::rtd-p x)
+				       (qs-r6rs::bool (not (qs-r6rs::rtd-opaque (qs-r6rs::record-rtd x))))
 				       (funcall old x)))))
 			   '(1 1))
     (extend-host-procedure "call-with-output-file" #'call-with-output)
@@ -482,33 +482,33 @@ calls with those are still open-coded."
     ;; (rnrs eval)'s eval is psyntax's: with one argument, or the
     ;; interaction environment, it evaluates at the top level running,
     ;; Chez's or the REPL's
-    (funcall (psx:host-ref "psyntax:eval-hook")
+    (funcall (qsx:host-ref "psyntax:eval-hook")
 	     (lambda (form env)
-	       (cond ((not (or (eq env ps:false) (eq env *interaction-environment*)))
-		      (ps:scheme-error "eval: not an environment: ~S" env))
+	       (cond ((not (or (eq env qs:false) (eq env *interaction-environment*)))
+		      (qs:scheme-error "eval: not an environment: ~S" env))
 		     ((at-chez-top-level-p) (eval-at-chez-top-level form))
 		     (t (eval-at-current-repl form)))))))
 
 (defun install-chez-libraries ()
-  "Install (pseudoscheme chez host), (chezscheme) and Chez's top level.
+  "Install (quasischeme chez host), (chezscheme) and Chez's top level.
 Called while the standard libraries are installed."
   (install-chez-extensions)
-  (ps-r6rs::install-chez-writer)	; host.lisp: Chez's printer, in the Chez mode
+  (qs-r6rs::install-chez-writer)	; host.lisp: Chez's printer, in the Chez mode
   (install-chez-mutators)
   (install-chez-top-level-primitives)
-  (install-host-library '("pseudoscheme" "chez" "host")
+  (install-host-library '("quasischeme" "chez" "host")
 			(mapcar (lambda (n) (cons n n)) (chez-host-names)))
   (let ((exports (install-chezscheme-library)))
     ;; (scheme), Chez's library of all of Chez, which the top-level
     ;; module scheme names too (import scheme)
-    (psx:eval-library
+    (qsx:eval-library
      (list (ssym "library") (list (ssym "scheme"))
 	   (cons (ssym "export") (mapcar #'ssym exports))
 	   (list (ssym "import") (list (ssym "chezscheme"))))))
   ;; ($system), which Racket CS's chezpart imports $begin-unsafe from:
   ;; here it is begin
   (handler-case
-      (psx:eval-library
+      (qsx:eval-library
        (car (read-scheme "(library ($system)
                             (export $begin-unsafe $lambda/lift-barrier)
                             (import (chezscheme))
@@ -518,41 +518,41 @@ Called while the standard libraries are installed."
                               (syntax-rules () ((_ . x) (lambda . x)))))")))
     (error () nil))
   (install-interaction-library *chez-interaction-library*)
-  (pushnew 'load-library-file-at-top-level psx::*library-loaders*))
+  (pushnew 'load-library-file-at-top-level qsx::*library-loaders*))
 
 (defun install-chezscheme-library ()
-  (let* ((r6rs (remove-duplicates (psx:table-exports '("r" "mp" "ms" "r5" "ev")) :test #'string=))
+  (let* ((r6rs (remove-duplicates (qsx:table-exports '("r" "mp" "ms" "r5" "ev")) :test #'string=))
 	 (exports (remove-duplicates
 		   (append r6rs *chezscheme-extras* *chezscheme-from-psyntax*)
 		   :test #'string= :from-end t)))
     ;; what extend-syntax's transformers call (syntax.scm)
-    (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme "src/chez/extend-syntax.sls")))
-      (psx:eval-library form))
+    (dolist (form (read-forms (asdf:system-relative-pathname :quasischeme "src/chez/extend-syntax.sls")))
+      (qsx:eval-library form))
     ;; and define-ftype's (ftype.scm)
-    (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme "src/chez/ftype-helpers.sls")))
-      (psx:eval-library form))
-    (psx:eval-library
+    (dolist (form (read-forms (asdf:system-relative-pathname :quasischeme "src/chez/ftype-helpers.sls")))
+      (qsx:eval-library form))
+    (qsx:eval-library
      (list* (ssym "library") (list (ssym "chezscheme"))
 	    (cons (ssym "export")
 		  (mapcar #'ssym exports))
 	    (read-scheme (format nil "(import (rnrs) (rnrs mutable-pairs) (rnrs mutable-strings) (rnrs r5rs) (rnrs eval)
-                                  (only (pseudoscheme r7rs syntax) parameterize include define-values)
+                                  (only (quasischeme r7rs syntax) parameterize include define-values)
 
-                                  (only (pseudoscheme) ~{~A~^ ~})
-                                  (prefix (pseudoscheme host) %)
-                                  (prefix (pseudoscheme chez host) %)
-                                  (pseudoscheme chez extend-syntax)
-                                  (pseudoscheme chez ftype-helpers))"
+                                  (only (quasischeme) ~{~A~^ ~})
+                                  (prefix (quasischeme host) %)
+                                  (prefix (quasischeme chez host) %)
+                                  (quasischeme chez extend-syntax)
+                                  (quasischeme chez ftype-helpers))"
 				 *chezscheme-from-psyntax*))
 	    (loop for file in *chezscheme-sources*
 		  append (read-forms (asdf:system-relative-pathname
-				      :pseudoscheme (concatenate 'string "src/chez/" file))))))
+				      :quasischeme (concatenate 'string "src/chez/" file))))))
     exports))
 
 ;;; ------------------------------------------------------------------
 ;;; The top level
 
-(defparameter *chez-interaction-library* '("pseudoscheme" "chez" "interaction")
+(defparameter *chez-interaction-library* '("quasischeme" "chez" "interaction")
   "The interaction library of Chez's top level: what scripts and the
 REPL run in, with (chezscheme)'s bindings.")
 
@@ -560,17 +560,17 @@ REPL run in, with (chezscheme)'s bindings.")
   "How many fresh top levels library files have been loaded at.")
 
 (defun install-interaction-library (name)
-  (funcall (psx:host-ref "psyntax:install-library")
-	   (funcall (psx:host-ref "gensym"))
+  (funcall (qsx:host-ref "psyntax:install-library")
+	   (funcall (qsx:host-ref "gensym"))
 	   (mapcar #'ssym name)
-	   '() '() '() '() '() '() (lambda () ps:unspecific) (lambda () ps:unspecific) t))
+	   '() '() '() '() '() '() (lambda () qs:unspecific) (lambda () qs:unspecific) t))
 
 (defun at-chez-top-level-p ()
   "Is what's running being evaluated at a Chez top level?"
-  (and psx:*host*
-       (let ((name (mapcar #'sname* (funcall (psx:host-ref "psyntax:interaction-library-name")))))
+  (and qsx:*host*
+       (let ((name (mapcar #'sname* (funcall (qsx:host-ref "psyntax:interaction-library-name")))))
 	 (and (>= (length name) 2)
-	      (equal (subseq name 0 2) '("pseudoscheme" "chez"))))))
+	      (equal (subseq name 0 2) '("quasischeme" "chez"))))))
 
 (defun eval-at-chez-top-level (form &optional library)
   "Evaluate FORM at Chez's top level: LIBRARY's (a list of strings), or
@@ -578,12 +578,12 @@ the top level already running, or the main one."
   (boot)
   (let ((library (or library
 		     (and (at-chez-top-level-p)
-			  (mapcar #'sname* (funcall (psx:host-ref "psyntax:interaction-library-name"))))
+			  (mapcar #'sname* (funcall (qsx:host-ref "psyntax:interaction-library-name"))))
 		     *chez-interaction-library*)))
     (with-psyntax-parameter ("psyntax:interaction-library-name" (mapcar #'ssym library))
       (with-psyntax-parameter ("psyntax:interaction-source-name" (list (ssym "chezscheme")))
 	;; a body's definitions come before its expressions, as in Chez
-	(with-psyntax-parameter ("psyntax:mixed-bodies" ps:false)
+	(with-psyntax-parameter ("psyntax:mixed-bodies" qs:false)
 	  (eval-top-level-forms form))))))
 
 (defun eval-top-level-forms (form)
@@ -592,16 +592,16 @@ top level, so that each is expanded after the ones before it have run, and
 a library is invoked only when a form that runs references it.  A
 (top-level-program (import ...) body ...) is its forms in turn, and
 (import-only spec ...) an import."
-  (let ((stripped (if (ps::annotation-p form) (ps::annotation-stripped form) form)))
+  (let ((stripped (if (qs::annotation-p form) (qs::annotation-stripped form) form)))
     (cond ((and (head-is stripped "top-level-program") (listp (cdr stripped)))
 	   (return-from eval-top-level-forms
 	     (eval-top-level-forms (cons (ssym "begin") (cdr stripped)))))
 	  ((and (head-is stripped "import-only") (listp (cdr stripped)))
 	   (return-from eval-top-level-forms
-	     (psx:eval-top-level (cons (ssym "import") (cdr stripped)))))))
-  (when (and (ps::annotation-p form) (head-is (ps::annotation-stripped form) "begin"))
+	     (qsx:eval-top-level (cons (ssym "import") (cdr stripped)))))))
+  (when (and (qs::annotation-p form) (head-is (qs::annotation-stripped form) "begin"))
     ;; an annotated begin: its annotated forms
-    (let ((parts (ps::annotation-expression form)))
+    (let ((parts (qs::annotation-expression form)))
       (when (and (consp parts) (consp (cdr parts)) (null (cdr (last parts))))
 	(return-from eval-top-level-forms
 	  (progn (mapc #'eval-top-level-forms (butlast (cdr parts)))
@@ -609,30 +609,30 @@ a library is invoked only when a form that runs references it.  A
   (if (and (head-is form "begin") (consp (cdr form)) (null (cdr (last form))))
       (progn (mapc #'eval-top-level-forms (butlast (cdr form)))
 	     (eval-top-level-forms (car (last form))))
-      (psx:eval-top-level form)))
+      (qsx:eval-top-level form)))
 
 (defun read-annotated-forms (path name)
   "PATH's forms, read as Chez's load reads them: each part annotated with
 its source (src/core.lisp), the file named NAME in its descriptor."
-  (let ((ps:*annotating-sfd* (ps::make-sfd name (ps::file-checksum path))))
+  (let ((qs:*annotating-sfd* (qs::make-sfd name (qs::file-checksum path))))
     (read-forms path)))
 
 (defun load-file-at-chez-top-level (path &optional library (name (namestring path)))
   "Load PATH's forms one by one at Chez's top level (see
 EVAL-AT-CHEZ-TOP-LEVEL), annotated with their source in the Chez mode."
-  (when (psx::compiled-file-p path)
-    (return-from load-file-at-chez-top-level (psx::load-compiled-file path)))
+  (when (qsx::compiled-file-p path)
+    (return-from load-file-at-chez-top-level (qsx::load-compiled-file path)))
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
-	(value ps:unspecific))
-    (dolist (form (if ps:*chez-reader* (read-annotated-forms path name) (read-forms path)) value)
+	(value qs:unspecific))
+    (dolist (form (if qs:*chez-reader* (read-annotated-forms path name) (read-forms path)) value)
       (setq value (eval-at-chez-top-level form library)))))
 
 ;;; Library files whose library a macro makes, at their own top level
 
 (defun first-datum (path)
   (handler-case (with-open-file (in path)
-		  (ps:skip-script-header in)
-		  (funcall ps:*scheme-read* in))
+		  (qs:skip-script-header in)
+		  (funcall qs:*scheme-read* in))
     (error () nil)))
 
 (defun library-file-defines-at-top-level-p (path name)
@@ -655,15 +655,15 @@ defines it at top level, load the file at a fresh Chez top level, and
 return true if that installed the library."
   (let ((name (if (listp (car (last name))) (butlast name) name)))
     (dolist (stem (stems name) nil)
-      (dolist (path (psx:candidate-files stem))
+      (dolist (path (qsx:candidate-files stem))
 	(when (probe-file path)
 	  (when (library-file-defines-at-top-level-p path name)
-	    (let ((library (list "pseudoscheme" "chez" "file"
+	    (let ((library (list "quasischeme" "chez" "file"
 				 (princ-to-string (incf *chez-file-libraries*)))))
 	      (install-interaction-library library)
 	      (load-file-at-chez-top-level path library)
 	      (return-from load-library-file-at-top-level
-		(ps:truep (funcall (psx:host-ref "psyntax:library-exists?") name)))))
+		(qs:truep (funcall (qsx:host-ref "psyntax:library-exists?") name)))))
 	  ;; the first file found is the library's, whatever it holds
 	  (return-from load-library-file-at-top-level nil))))))
 
@@ -678,38 +678,38 @@ return true if that installed the library."
 (defun quoted (x) (list (ssym "quote") x))
 
 (defun install-chez-top-level-primitives ()
-  (psx:defhost "chez:eval-at-top-level" (form) (eval-at-chez-top-level form))
-  (psx:defhost "chez:load" (path)
+  (qsx:defhost "chez:eval-at-top-level" (form) (eval-at-chez-top-level form))
+  (qsx:defhost "chez:load" (path)
     (load-file-at-chez-top-level (merge-pathnames path) nil (if (stringp path) path (namestring path)))
-    ps:unspecific)
-  (psx:defhost "chez:compile-program" (in out)
+    qs:unspecific)
+  (qsx:defhost "chez:compile-program" (in out)
     (compile-chez-program in out))
-  (psx:defhost "chez:set-top-level-value!" (symbol value)
+  (qsx:defhost "chez:set-top-level-value!" (symbol value)
     (eval-at-chez-top-level (list (ssym "set!") symbol (quoted value)))
-    ps:unspecific)
-  (psx:defhost "chez:define-top-level-value!" (symbol value)
+    qs:unspecific)
+  (qsx:defhost "chez:define-top-level-value!" (symbol value)
     (eval-at-chez-top-level (list (ssym "define") symbol (quoted value)))
-    ps:unspecific)
-  (psx:defhost "chez:top-level-bound?" (symbol)
-    (ps:true? (handler-case (progn (eval-at-chez-top-level symbol) t)
+    qs:unspecific)
+  (qsx:defhost "chez:top-level-bound?" (symbol)
+    (qs:true? (handler-case (progn (eval-at-chez-top-level symbol) t)
 		(error () nil))))
-  (psx:defhost "chez:top-level-symbols" ()
-    (funcall (psx:host-ref "psyntax:environment-symbols")
-	     (funcall (psx:host-ref "psyntax:environment") (list (ssym "chezscheme")))))
-  (psx:defhost "chez:library-exports" (name)
-    (mapcar #'car (funcall (psx:host-ref "psyntax:library-export-bindings")
+  (qsx:defhost "chez:top-level-symbols" ()
+    (funcall (qsx:host-ref "psyntax:environment-symbols")
+	     (funcall (qsx:host-ref "psyntax:environment") (list (ssym "chezscheme")))))
+  (qsx:defhost "chez:library-exports" (name)
+    (mapcar #'car (funcall (qsx:host-ref "psyntax:library-export-bindings")
 			   (translate-name name))))
   ;; Chez's library directories are (source . object) pairs: the sources
   ;; are *LIBRARY-PATH*, which the other modes search too, and the object
   ;; directories, where they differ, *OBJECT-DIRECTORIES*
-  (psx:defhost "chez:library-directories" ()
+  (qsx:defhost "chez:library-directories" ()
     (mapcar (lambda (d)
 	      (let* ((s (if (pathnamep d) (namestring d) d))
 		     (o (or (cdr (assoc s *object-directories* :test #'string=)) s)))
 		(flet ((chez (dir) (if (string= dir "./") "." dir))) ; as Chez shows it
 		  (cons (chez s) (chez o)))))
-	    psx:*library-path*))
-  (psx:defhost "chez:set-library-directories!" (dirs)
+	    qsx:*library-path*))
+  (qsx:defhost "chez:set-library-directories!" (dirs)
     (let ((pairs (if (stringp dirs)
 		     ;; "src1:src2::obj2": :: separates a source and an object directory
 		     (let ((parts (uiop:split-string dirs :separator ":")) (pairs '()))
@@ -721,9 +721,9 @@ return true if that installed the library."
 					((string/= src "") (push (cons src src) pairs)))))
 		       (nreverse pairs))
 		     (mapcar (lambda (d) (if (consp d) d (cons d d))) dirs))))
-      (setf psx:*library-path* (mapcar #'car pairs)
+      (setf qsx:*library-path* (mapcar #'car pairs)
 	    *object-directories* (remove-if (lambda (p) (string= (car p) (cdr p))) pairs)))
-    ps:unspecific))
+    qs:unspecific))
 
 (defvar *object-directories* '()
   "Chez's library directories' object directories, as (SOURCE . OBJECT),
@@ -736,12 +736,12 @@ where they differ from their source directories.")
 (defun chez-error-text (e)
   "Uncaught condition E as Chez's top level reports it: \"Exception in
 car: ...\", \"Exception occurred with non-condition value 42\"."
-  (flet ((component (c type) (ps-r6rs::component-of c type))
-	 (value (s) (svref (ps-r6rs::record-values s) 0))
-	 (written (x) (with-output-to-string (s) (funcall ps:*scheme-write* x s))))
-    (if (typep e 'ps-r7rs::uncaught-raise)
-	(let ((c (ps-r7rs::uncaught-payload e)))
-	  (if (not (ps-r6rs::condition-p* c))
+  (flet ((component (c type) (qs-r6rs::component-of c type))
+	 (value (s) (svref (qs-r6rs::record-values s) 0))
+	 (written (x) (with-output-to-string (s) (funcall qs:*scheme-write* x s))))
+    (if (typep e 'qs-r7rs::uncaught-raise)
+	(let ((c (qs-r7rs::uncaught-payload e)))
+	  (if (not (qs-r6rs::condition-p* c))
 	      (format nil "Exception occurred with non-condition value ~A" (written c))
 	      (let ((who (component c "&who"))
 		    (message (component c "&message"))
@@ -749,15 +749,15 @@ car: ...\", \"Exception occurred with non-condition value 42\"."
 		(with-output-to-string (s)
 		  (write-string (if (component c "&warning") "Warning" "Exception") s)
 		  (let ((who (and who (value who))))
-		    (when (and who (not (eq who ps:false)))
+		    (when (and who (not (eq who qs:false)))
 		      (format s " in ~A" (if (stringp who) who (written who)))))
 		  (format s ": ~A" (if message (value message) ""))
 		  (let ((irritants (and irritants (value irritants))))
 		    (cond ((null irritants))
 			  ((null (cdr irritants)) (format s " with irritant ~A" (written (car irritants))))
 			  (t (format s " with irritants ~A" (written irritants)))))))))
-	(format nil "Exception: ~A" (pseudoscheme-api-error-message e)))))
+	(format nil "Exception: ~A" (quasischeme-api-error-message e)))))
 
-(defun pseudoscheme-api-error-message (e)
-  ;; pseudoscheme-api is loaded after this system
-  (uiop:symbol-call "PSEUDOSCHEME-API" "ERROR-MESSAGE" e))
+(defun quasischeme-api-error-message (e)
+  ;; quasischeme-api is loaded after this system
+  (uiop:symbol-call "QUASISCHEME-API" "ERROR-MESSAGE" e))

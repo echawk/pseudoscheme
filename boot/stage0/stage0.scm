@@ -9,8 +9,8 @@
 ;;; macros they define (syntax-rules macros, and four procedural ones
 ;;; rewritten here by hand), and evaluates the result in the host.  Then
 ;;; psyntax, running in the host, runs its own build script, which
-;;; expands psyntax's sources and writes psyntax-pseudoscheme.pp: a seed
-;;; image.  Pseudoscheme rebuilds from the seed until the image
+;;; expands psyntax's sources and writes psyntax-quasischeme.pp: a seed
+;;; image.  Quasischeme rebuilds from the seed until the image
 ;;; reproduces itself, so nothing of this stage survives into the result;
 ;;; boot/psyntax.sh checks that it comes out the same as from Chez's seed.
 ;;;
@@ -47,7 +47,7 @@
 ;;;   (s0:table-keys table)        a list of the keys
 ;;; and calls (s0:build) in the directory holding psyntax's sources
 ;;; (psyntax/*.ss and psyntax-buildscript.ss), which writes
-;;; psyntax-pseudoscheme.pp there.
+;;; psyntax-quasischeme.pp there.
 
 ;;; ------------------------------------------------------------------
 ;;; Utilities

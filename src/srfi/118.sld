@@ -1,8 +1,8 @@
-;;; SRFI 118: simple adjustable-size strings.  Written for Pseudoscheme,
-;;; and only an approximation: Pseudoscheme's strings are Common Lisp
+;;; SRFI 118: simple adjustable-size strings.  Written for Quasischeme,
+;;; and only an approximation: Quasischeme's strings are Common Lisp
 ;;; simple strings, which cannot change length in place (make-string and
 ;;; string-copy cannot return variable-size strings without a change to
-;;; Pseudoscheme's string representation).
+;;; Quasischeme's string representation).
 ;;;
 ;;; So string-append! and string-replace! are macros, in the manner of
 ;;; SRFI 185's: when the string argument is a variable, the variable is
@@ -53,7 +53,7 @@
       (unless (eq? dst result)
         (error (string-append
                 who ": cannot change the length of a string that is not "
-                "in a variable (Pseudoscheme's strings are fixed-size)")
+                "in a variable (Quasischeme's strings are fixed-size)")
                dst)))
 
     (define-syntax string-append!

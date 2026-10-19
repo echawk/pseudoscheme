@@ -1,11 +1,11 @@
 ;;; Tests for SRFI 55.  require-extension works at the REPL's top level,
 ;;; so these tests evaluate forms there, through the R7RS front end's
-;;; REPL entry point (Lisp's pseudoscheme-r7rs::eval-at-repl).  The
+;;; REPL entry point (Lisp's quasischeme-r7rs::eval-at-repl).  The
 ;;; examples are the SRFI document's.
 (import (scheme base) (scheme process-context) (srfi 64)
-        (pseudoscheme lisp))
+        (quasischeme lisp))
 
-(define repl (lisp-function "eval-at-repl" "pseudoscheme-r7rs"))
+(define repl (lisp-function "eval-at-repl" "quasischeme-r7rs"))
 
 (test-begin "srfi-55")
 

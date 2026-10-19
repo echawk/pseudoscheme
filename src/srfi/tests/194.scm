@@ -1,6 +1,6 @@
 ;;; Tests for SRFI 194: the sample implementation's test suite
 ;;; (reference/srfi-194/srfi-194-test.scm), with its import header
-;;; replaced by Pseudoscheme's libraries, the paths of its two includes
+;;; replaced by Quasischeme's libraries, the paths of its two includes
 ;;; (zipf-test.scm, sphere-test.scm) pointed at reference/srfi-194/,
 ;;; and its last line replaced by the exit
 ;;; below; the rest is unchanged.

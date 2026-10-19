@@ -1,7 +1,7 @@
 ;;; A bank in SQLite, from Scheme, through cl-sqlite (which binds the C
 ;;; library with CFFI).
 ;;;
-;;;   bin/pseudoscheme --quicklisp tests/programs/sqlite-bank.scm
+;;;   bin/quasischeme --quicklisp tests/programs/sqlite-bank.scm
 ;;;
 ;;; Transfers run inside cl-sqlite's with-transaction, a Lisp macro whose
 ;;; body is Lisp code calling Scheme procedures.  A CHECK constraint
@@ -13,7 +13,7 @@
 
 (import (scheme base) (scheme process-context)
         (srfi 1) (srfi 64)
-        (pseudoscheme lisp)
+        (quasischeme lisp)
         (prefix (cl common-lisp) cl:)
         (prefix (cl sqlite) sql:))
 

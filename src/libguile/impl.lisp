@@ -1,13 +1,13 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-LIBGUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-LIBGUILE -*-
 
 ;;;; The table's functions, implemented (docs/libguile.md): the entry
 ;;;; point C calls, each type's conversion, and a DEFIMPL for each DEFC.
 
-(in-package "PSEUDOSCHEME-LIBGUILE")
+(in-package "QUASISCHEME-LIBGUILE")
 
 (defvar *embedded* nil "True in the core a C program starts (START-EMBEDDED).")
 (defvar *trace-calls* nil
-  "Print each function C calls (PSEUDOSCHEME_LIBGUILE_TRACE=1), with its
+  "Print each function C calls (QUASISCHEME_LIBGUILE_TRACE=1), with its
 arguments and result (=2).")
 (defun brief (x depth)
   "X as text for the trace: lists and atoms, not objects."
@@ -25,12 +25,12 @@ arguments and result (=2).")
 
 (defvar *call-count* 0 "The calls from C so far, when tracing.")
 (defvar *profile* nil
-  "Count and time each function C calls (PSEUDOSCHEME_LIBGUILE_PROFILE=1);
+  "Count and time each function C calls (QUASISCHEME_LIBGUILE_PROFILE=1);
 the table is printed when the program exits.")
 (defvar *profile-counts*) (defvar *profile-times*) (defvar *profile-child* 0)
 (defvar *profile-refreshed*) (defvar *profile-absorbed*)
 (defvar *subr-stats* (vector 0 0 0) "Calls of C subrs from Scheme, and the entries they write and read, for the profile.")
-(defvar *trace-after* 0 "Trace at level 2 only from this call on (PSEUDOSCHEME_LIBGUILE_TRACE_AFTER).")
+(defvar *trace-after* 0 "Trace at level 2 only from this call on (QUASISCHEME_LIBGUILE_TRACE_AFTER).")
 (defvar *entered* nil "True inside a call from C that embedded Lisp made Guile code.")
 (defvar *impls* (make-array 0 :adjustable t) "Index -> function of the args SAP.")
 (defvar *reader-ids* (make-array 0) "Index -> true if the function only reads (READER-FUNCTION-P).")
@@ -128,7 +128,7 @@ the table is printed when the program exits.")
     ;; A C program that embeds us makes the first call outside any
     ;; Guile code: errors become Guile exceptions from here
     (if (and *embedded* (not *entered*))
-	(let ((*entered* t)) (psg::with-guile-errors (if *profile* (profiled-call id) (call))))
+	(let ((*entered* t)) (qsg::with-guile-errors (if *profile* (profiled-call id) (call))))
 	(if *profile* (profiled-call id) (call)))))
 
 (defun psg-profile-dump ()
@@ -146,7 +146,7 @@ the table is printed when the program exits.")
 	    do (format *error-output* ";; ~8,1F ~8D ~9D ~9D  ~A~%"
 		       (/ (* 1000 time) internal-time-units-per-second) n written read name))
       (finish-output *error-output*))))
-(defvar *sprof* nil "SBCL's statistical profiler runs (PSEUDOSCHEME_LIBGUILE_PROFILE=sprof).")
+(defvar *sprof* nil "SBCL's statistical profiler runs (QUASISCHEME_LIBGUILE_PROFILE=sprof).")
 (defun psg-sprof-dump ()
   (let ((*standard-output* *error-output*))
 	(handler-case
@@ -236,10 +236,10 @@ names start scm_from_, scm_to_ and scm_is_.")
 (defun guile-procedure (name)
   (or (funcall (pg root-value) name)
       (gethash name (symbol-value (pg *guile-primitives*)))
-      (ignore-errors (psx:host-ref name))
+      (ignore-errors (qsx:host-ref name))
       ;; defined in a module of Guile's own (ice-9 ports)
       (loop for module in '("guile" "ice-9 ports" "oop goops")
-	    do (let ((value (scm "catch" ps:true
+	    do (let ((value (scm "catch" qs:true
 				 (lambda ()
 				   (scm "module-ref" (scm "resolve-module" (mapcar (pg ssym) (uiop:split-string module)))
 					(funcall (pg ssym) name)))
@@ -320,14 +320,14 @@ built against Guile find their libguile already loaded."
   (initialize-data))
 
 (defun start-embedded ()
-  "The start-up of pseudoscheme-guile.core (src/libguile/build-core.lisp),
+  "The start-up of quasischeme-guile.core (src/libguile/build-core.lisp),
 which a C program linked against our libguile starts at its first call
 (core.c, boot_lisp): Lisp then serves the library already loaded."
   (sb-ext:disable-debugger)
   (setq *embedded* t
-	*trace-calls* (let ((n (parse-integer (or (uiop:getenv "PSEUDOSCHEME_LIBGUILE_TRACE") "") :junk-allowed t)))
+	*trace-calls* (let ((n (parse-integer (or (uiop:getenv "QUASISCHEME_LIBGUILE_TRACE") "") :junk-allowed t)))
 			(and n (plusp n) n)))
-  (when (equal (uiop:getenv "PSEUDOSCHEME_LIBGUILE_PROFILE") "sprof")
+  (when (equal (uiop:getenv "QUASISCHEME_LIBGUILE_PROFILE") "sprof")
     (require :sb-sprof)
     (setq *sprof* t *profile* t
 	  *profile-counts* (make-array (fill-pointer *api*) :initial-element 0)
@@ -337,7 +337,7 @@ which a C program linked against our libguile starts at its first call
     (c-call "psg_at_exit" sb-alien:void sb-sys:system-area-pointer
 	    (sb-alien:alien-sap (sb-alien:alien-callable-function 'psg-profile-dump-callback)))
     (uiop:symbol-call "SB-SPROF" "START-PROFILING" :mode :cpu :sample-interval 0.002 :threads :all))
-  (when (equal (uiop:getenv "PSEUDOSCHEME_LIBGUILE_PROFILE") "1")
+  (when (equal (uiop:getenv "QUASISCHEME_LIBGUILE_PROFILE") "1")
     (setq *profile* t
 	  *profile-counts* (make-array (fill-pointer *api*) :initial-element 0)
 	  *profile-times* (make-array (fill-pointer *api*) :initial-element 0)
@@ -345,8 +345,8 @@ which a C program linked against our libguile starts at its first call
 	  *profile-absorbed* (make-array (fill-pointer *api*) :initial-element 0))
     (c-call "psg_at_exit" sb-alien:void sb-sys:system-area-pointer
 	    (sb-alien:alien-sap (sb-alien:alien-callable-function 'psg-profile-dump-callback))))
-  (setq *trace-after* (or (parse-integer (or (uiop:getenv "PSEUDOSCHEME_LIBGUILE_TRACE_AFTER") "") :junk-allowed t) 0))
-  (psg::add-environment-load-path)
+  (setq *trace-after* (or (parse-integer (or (uiop:getenv "QUASISCHEME_LIBGUILE_TRACE_AFTER") "") :junk-allowed t) 0))
+  (qsg::add-environment-load-path)
   (attach-library "libguile-3.0.so.1"))
 
 (defun data-address (name) (sb-sys:sap-int (sb-sys:foreign-symbol-sap name t)))

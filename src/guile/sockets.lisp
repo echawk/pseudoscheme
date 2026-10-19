@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Sockets, the network database and poll, as Guile's
 ;;;;
@@ -10,7 +10,7 @@
 ;;;; with the platform's struct layouts written out here.  Behaviour is
 ;;;; from Guile's manual and the installed Guile's, not libguile's sources.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 ;;; The platform's constants, as Guile defines them
 
@@ -254,7 +254,7 @@ fill: its result and the address."
 			 fd)
 	(cond ((>= new 0) (return (cons (socket-port new) address)))
 	      ((= (sb-alien:get-errno) sb-unix:eintr))
-	      ((= (sb-alien:get-errno) sb-unix:eagain) (return ps:false))
+	      ((= (sb-alien:get-errno) sb-unix:eagain) (return qs:false))
 	      (t (socket-error "accept")))))))
 
 (macrolet ((name-call (who name)
@@ -375,7 +375,7 @@ fill: its result and the address."
   "Offsets in struct addrinfo of its canonical name and address."
   #+darwin (values 24 32) #-darwin (values 32 24))
 
-(defguile "getaddrinfo" (name &optional (service ps:false) (flags 0) (family 0) (socktype 0) (protocol 0))
+(defguile "getaddrinfo" (name &optional (service qs:false) (flags 0) (family 0) (socktype 0) (protocol 0))
   (let ((hints (make-array 48 :element-type '(unsigned-byte 8) :initial-element 0))
 	(result (make-array 8 :element-type '(unsigned-byte 8) :initial-element 0)))
     (let ((h (sb-sys:vector-sap hints)))
@@ -405,7 +405,7 @@ fill: its result and the address."
 					(sb-sys:signed-sap-ref-32 ai 8) (sb-sys:signed-sap-ref-32 ai 12)
 					(octets-sockaddr octets)
 					(if (zerop (sb-sys:sap-int canon))
-					    ps:false
+					    qs:false
 					    (sap-c-string canon)))
 				infos)))
 	    (libc "freeaddrinfo" sb-alien:void (sb-sys:system-area-pointer head))))

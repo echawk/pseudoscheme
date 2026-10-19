@@ -51,10 +51,10 @@
     (set!                (set!))
     (let-syntax          (let-syntax))
     (letrec-syntax       (letrec-syntax))
-    ;; PSEUDOSCHEME: SRFIs 212, 213 and 139
+    ;; QUASISCHEME: SRFIs 212, 213 and 139
     (alias               (alias))
     (define-property     (define-property))
-    ;; PSEUDOSCHEME: Chez Scheme's library (as a top-level form, so a
+    ;; QUASISCHEME: Chez Scheme's library (as a top-level form, so a
     ;; macro can produce one) and meta definitions
     (library             (library))
     (meta                (meta))
@@ -85,7 +85,7 @@
     (identifier-syntax   (macro . identifier-syntax))
     (let                 (macro . let))
     (let*                (macro . let*))
-    (let*-values         (macro . let*-values))   ; PSEUDOSCHEME
+    (let*-values         (macro . let*-values))   ; QUASISCHEME
     (cond                (macro . cond))
     (do                  (macro . do))
     (and                 (macro . and))
@@ -164,15 +164,15 @@
 
 (define library-legend
   ;; abbr.       name                             visible? required?
-  ;; PSEUDOSCHEME: (pseudoscheme) holds every public binding -- the
-  ;; source the REPL's (pseudoscheme interaction) library copies from
+  ;; QUASISCHEME: (quasischeme) holds every public binding -- the
+  ;; source the REPL's (quasischeme interaction) library copies from
   ;; on demand (expander.ss, interaction-sym->label); it was (ikarus).
-  '((interaction (pseudoscheme interaction)            #t    #f)
-    (ps          (pseudoscheme)                        #t    #f)
+  '((interaction (quasischeme interaction)            #t    #f)
+    (ps          (quasischeme)                        #t    #f)
     (ne          (psyntax null-environment-5)          #t    #f)
     (se          (psyntax scheme-report-environment-5) #t    #f)
     (cm          (psyntax modules)                     #t    #f)
-    ;; PSEUDOSCHEME: alias, define-property and syntax-parameterize
+    ;; QUASISCHEME: alias, define-property and syntax-parameterize
     (ext         (psyntax extensions)                  #t    #f)
     (parameters  (chez parameters)                     #t    #f)
     (r           (rnrs)                                #t    #t)
@@ -539,12 +539,12 @@
     (bytevector-ieee-single-native-ref          r bv)
     (bytevector-ieee-single-native-set!         r bv)
     (bytevector-ieee-single-ref                 r bv)
-    ;; PSEUDOSCHEME: missing from the 2007 table, present in the final
+    ;; QUASISCHEME: missing from the 2007 table, present in the final
     ;; report (library report 2.8 and 8.1)
     (bytevector-ieee-single-set!                r bv)
     (bytevector-ieee-double-set!                r bv)
     (i/o-error-position                         r ip is fi)
-    ;; PSEUDOSCHEME: builds a promise from a thunk, for DELAY
+    ;; QUASISCHEME: builds a promise from a thunk, for DELAY
     ($delay                   )
     (bytevector-length                          r bv)
     (bytevector-s16-native-ref                  r bv)
@@ -958,9 +958,9 @@
     (gensym                   $boot)
     (symbol-value             $boot)
     (set-symbol-value!        $boot)
-    (lisp-keyword?            $boot)  ; PSEUDOSCHEME: self-evaluating Lisp keywords
-    (host-literal?            $boot)  ; PSEUDOSCHEME: the host's other self-evaluating data
-    ;; PSEUDOSCHEME: Chez's source annotations, which psyntax looks through
+    (lisp-keyword?            $boot)  ; QUASISCHEME: self-evaluating Lisp keywords
+    (host-literal?            $boot)  ; QUASISCHEME: the host's other self-evaluating data
+    ;; QUASISCHEME: Chez's source annotations, which psyntax looks through
     (annotation?              $boot)
     (annotation-expression    $boot)
     (annotation-stripped      $boot)
@@ -968,18 +968,18 @@
     (eval-core                $boot)
     (pretty-print             $boot)
     (module                   cm)
-    ;; PSEUDOSCHEME: so (import ...) is available at the REPL (it was in
-    ;; no library), via (psyntax modules) and so (pseudoscheme)
+    ;; QUASISCHEME: so (import ...) is available at the REPL (it was in
+    ;; no library), via (psyntax modules) and so (quasischeme)
     (import                   cm)
-    (alias                    ext)  ; PSEUDOSCHEME: SRFI 212
-    (define-property          ext)  ; PSEUDOSCHEME: SRFI 213
-    (library                  ext)  ; PSEUDOSCHEME: Chez's top-level library form
-    (meta                     ext)  ; PSEUDOSCHEME: Chez's meta definitions
-    (syntax-parameterize      ext)  ; PSEUDOSCHEME: SRFI 139
-    (type-descriptor          ext)  ; PSEUDOSCHEME: Chez's
+    (alias                    ext)  ; QUASISCHEME: SRFI 212
+    (define-property          ext)  ; QUASISCHEME: SRFI 213
+    (library                  ext)  ; QUASISCHEME: Chez's top-level library form
+    (meta                     ext)  ; QUASISCHEME: Chez's meta definitions
+    (syntax-parameterize      ext)  ; QUASISCHEME: SRFI 139
+    (type-descriptor          ext)  ; QUASISCHEME: Chez's
     (syntax-dispatch ) ; only goes to $all
-    (%guard-reraise ) ; PSEUDOSCHEME: guard's expansion, so only $all
-    ;; PSEUDOSCHEME: the run-time values behind the $core-rtd bindings
+    (%guard-reraise ) ; QUASISCHEME: guard's expansion, so only $all
+    ;; QUASISCHEME: the run-time values behind the $core-rtd bindings
     ;; above (the comment there: "the implementation must export the
     ;; identifiers &condition-type-rtd ... and &condition-type-rcd");
     ;; they go only to $all, where blessed expander output finds them.
@@ -1116,7 +1116,7 @@
               (lambda (q)
                 (cond
                   ((or (memq key (cdr q))
-                       ;; PSEUDOSCHEME: (pseudoscheme) gets everything
+                       ;; QUASISCHEME: (quasischeme) gets everything
                        ;; that goes to some visible library.
                        (and (eq? key 'ps)
                             (exists (lambda (k) (not (memq k '($all $boot))))
@@ -1282,10 +1282,10 @@
         (cond
           ((assq x locs) => cdr)
           (else #f))))
-    ;; PSEUDOSCHEME: output file name
-    (when (file-exists? "psyntax-pseudoscheme.pp")
-      (delete-file "psyntax-pseudoscheme.pp"))
-    (let ((p (open-output-file "psyntax-pseudoscheme.pp")))
+    ;; QUASISCHEME: output file name
+    (when (file-exists? "psyntax-quasischeme.pp")
+      (delete-file "psyntax-quasischeme.pp"))
+    (let ((p (open-output-file "psyntax-quasischeme.pp")))
       (display ";;; Copyright (c) 2006, 2007 Abdulaziz Ghuloum and Kent Dybvig" p) (newline p)
       (display ";;; automatically generated from psyntax sources" p) (newline p)
       (display ";;; for copyright details, see psyntax/main.ss" p) (newline p) (newline p)

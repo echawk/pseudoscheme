@@ -79,7 +79,7 @@ SYNTH_BENCHMARKS="equal bv2string"
 
 ALL_BENCHMARKS="$GABRIEL_BENCHMARKS $NUM_BENCHMARKS $KVW_BENCHMARKS $IO_BENCHMARKS $OTHER_BENCHMARKS $GC_BENCHMARKS $SYNTH_BENCHMARKS"
 
-ALL_SYSTEMS="pseudoscheme bigloo bones chez chibi chicken cyclone femtolisp gambitc gauche gerbil guile ironscheme kawa larceny loko mit mosh picrin racket s7 s9fes sagittarius stklos tr7 ypsilon" # tinyscheme seems to run out of memory or time on *every* benchmark :-/
+ALL_SYSTEMS="quasischeme bigloo bones chez chibi chicken cyclone femtolisp gambitc gauche gerbil guile ironscheme kawa larceny loko mit mosh picrin racket s7 s9fes sagittarius stklos tr7 ypsilon" # tinyscheme seems to run out of memory or time on *every* benchmark :-/
 # petite-chez  chickencsi
 # foment owllisp rhizome rscheme scheme48 vicare
 ################################################################
@@ -134,7 +134,7 @@ setup ()
     PETIT=${PETIT:-"../../../../PetitGit/larceny"}
     PETITE_CHEZ=${PETITE_CHEZ:-"petite"}
     PICRIN=${PICRIN:-"picrin"}
-    PSEUDOSCHEME=${PSEUDOSCHEME:-"${HOME}/../../bin/pseudoscheme"}
+    QUASISCHEME=${QUASISCHEME:-"${HOME}/../../bin/quasischeme"}
     RACKET=${RACKET:-"racket"}
     RACKET_RACO=${RACKET_RACO:-"raco"}
     RSCHEME=${RSCHEME:-"fshell"}
@@ -354,57 +354,57 @@ chibi_comp ()
     :
 }
 
-# PSEUDOSCHEME: Pseudoscheme's command-line program (make -C contrib/cli).
+# QUASISCHEME: Quasischeme's command-line program (make -C contrib/cli).
 # It translates the program to Lisp and compiles it with the host Lisp's
 # compiler before running it; run-r7rs-benchmark's timing covers only the
 # run.
-pseudoscheme_comp ()
+quasischeme_comp ()
 {
     :
 }
 
-pseudoscheme_exec ()
+quasischeme_exec ()
 {
-    time "${PSEUDOSCHEME}" "$1" < "$2"
+    time "${QUASISCHEME}" "$1" < "$2"
 }
 
-# PSEUDOSCHEME: Pseudoscheme's other modes run the same programs: R6RS
+# QUASISCHEME: Quasischeme's other modes run the same programs: R6RS
 # (expanded by psyntax), Chez Scheme and Guile take them as they are;
 # Racket and R5RS get a prelude of the R7RS names they lack.
-pseudoscheme_r6rs_exec ()
+quasischeme_r6rs_exec ()
 {
-    time "${PSEUDOSCHEME}" --r6rs "$1" < "$2"
+    time "${QUASISCHEME}" --r6rs "$1" < "$2"
 }
 
-pseudoscheme_chez_exec ()
+quasischeme_chez_exec ()
 {
-    time "${PSEUDOSCHEME}" --chez "$1" < "$2"
+    time "${QUASISCHEME}" --chez "$1" < "$2"
 }
 
-pseudoscheme_guile_exec ()
+quasischeme_guile_exec ()
 {
-    time "${PSEUDOSCHEME}" --guile "$1" < "$2"
+    time "${QUASISCHEME}" --guile "$1" < "$2"
 }
 
-pseudoscheme_racket_exec ()
+quasischeme_racket_exec ()
 {
-    time "${PSEUDOSCHEME}" --racket=linklet "$1" < "$2"
+    time "${QUASISCHEME}" --racket=linklet "$1" < "$2"
 }
 
 # R5RS has no clock, so this times the whole run from outside, the
 # program's startup and compilation included, and puts that in the
 # CSV line in place of the program's 0.
-pseudoscheme_r5rs_exec ()
+quasischeme_r5rs_exec ()
 {
     t0=$(perl -MTime::HiRes=time -e 'printf "%.6f", time')
-    out=$("${PSEUDOSCHEME}" --r5rs "$1" < "$2")
+    out=$("${QUASISCHEME}" --r5rs "$1" < "$2")
     status=$?
     secs=$(perl -MTime::HiRes=time -e "printf '%.3f', time - $t0")
     printf '%s\n' "$out" | sed "s/^\(+!CSVLINE!+[^,]*,[^,]*\),0\(\.0\)*$/\1,$secs/"
     return $status
 }
 
-# Racket's racket/base with the same prelude as pseudoscheme-racket
+# Racket's racket/base with the same prelude as quasischeme-racket
 # (Racket's #lang r7rs is a separate package)
 racket_base_exec ()
 {
@@ -1029,7 +1029,7 @@ for system in $systems ; do
                   EXTENSIONCOMP="slfasl"
                   ;;
 
-        # PSEUDOSCHEME: Chez with Akku's R7RS libraries (akku-r7rs) on
+        # QUASISCHEME: Chez with Akku's R7RS libraries (akku-r7rs) on
         # CHEZ_LIBDIRS, and no prelude (Chez takes one import per program).
         chez-akku) NAME='ChezAkku'
                COMP=chez_comp
@@ -1038,7 +1038,7 @@ for system in $systems ; do
                EXTENSIONCOMP="scm"
                ;;
 
-        # PSEUDOSCHEME: Gauche without SLIB (the stock postlude imports
+        # QUASISCHEME: Gauche without SLIB (the stock postlude imports
         # it only for the version string).
         gauche-local) NAME='GaucheLocal'
                COMP=gauche_comp
@@ -1047,51 +1047,51 @@ for system in $systems ; do
                EXTENSIONCOMP="scm"
                ;;
 
-        # PSEUDOSCHEME: bench/run.sh's "modes" runs these and the next six.
-        pseudoscheme) NAME='Pseudoscheme'
-               COMP=pseudoscheme_comp
-               EXEC=pseudoscheme_exec
+        # QUASISCHEME: bench/run.sh's "modes" runs these and the next six.
+        quasischeme) NAME='Quasischeme'
+               COMP=quasischeme_comp
+               EXEC=quasischeme_exec
                EXTENSION="scm"
                EXTENSIONCOMP="scm"
                ;;
 
-        pseudoscheme-r6rs) NAME='PseudoschemeR6RS'
-               COMP=pseudoscheme_comp
-               EXEC=pseudoscheme_r6rs_exec
+        quasischeme-r6rs) NAME='QuasischemeR6RS'
+               COMP=quasischeme_comp
+               EXEC=quasischeme_r6rs_exec
                EXTENSION="scm"
                EXTENSIONCOMP="scm"
                ;;
 
-        pseudoscheme-r5rs) NAME='PseudoschemeR5RS'
-               COMP=pseudoscheme_comp
-               EXEC=pseudoscheme_r5rs_exec
+        quasischeme-r5rs) NAME='QuasischemeR5RS'
+               COMP=quasischeme_comp
+               EXEC=quasischeme_r5rs_exec
                EXTENSION="scm"
                EXTENSIONCOMP="scm"
                ;;
 
-        pseudoscheme-chez) NAME='PseudoschemeChez'
-               COMP=pseudoscheme_comp
-               EXEC=pseudoscheme_chez_exec
+        quasischeme-chez) NAME='QuasischemeChez'
+               COMP=quasischeme_comp
+               EXEC=quasischeme_chez_exec
                EXTENSION="scm"
                EXTENSIONCOMP="scm"
                ;;
 
-        pseudoscheme-guile) NAME='PseudoschemeGuile'
-               COMP=pseudoscheme_comp
-               EXEC=pseudoscheme_guile_exec
+        quasischeme-guile) NAME='QuasischemeGuile'
+               COMP=quasischeme_comp
+               EXEC=quasischeme_guile_exec
                EXTENSION="scm"
                EXTENSIONCOMP="scm"
                ;;
 
-        pseudoscheme-racket) NAME='PseudoschemeRacket'
-               COMP=pseudoscheme_comp
-               EXEC=pseudoscheme_racket_exec
+        quasischeme-racket) NAME='QuasischemeRacket'
+               COMP=quasischeme_comp
+               EXEC=quasischeme_racket_exec
                EXTENSION="rkt"
                EXTENSIONCOMP="rkt"
                ;;
 
         racket-base) NAME='RacketBase'
-               COMP=pseudoscheme_comp
+               COMP=quasischeme_comp
                EXEC=racket_base_exec
                EXTENSION="rkt"
                EXTENSIONCOMP="rkt"

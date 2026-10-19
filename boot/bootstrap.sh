@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Regenerate Pseudoscheme's .pso files (and spack.lisp) from their
-# .scm sources, using some Scheme other than Pseudoscheme.  See
+# Regenerate Quasischeme's .qso files (and spack.lisp) from their
+# .scm sources, using some Scheme other than Quasischeme.  See
 # boot/README.md.
 #
 # Usage: boot/bootstrap.sh [--all] [--no-install] [--check]
@@ -14,7 +14,7 @@
 #                  with --all runs just those two.
 #   --no-install   leave the results in boot/build/<host>/ instead of
 #                  copying them into src/.
-#   --check        also check the results against what Pseudoscheme's
+#   --check        also check the results against what Quasischeme's
 #                  own translator, loaded from src/, produces (needs
 #                  $SBCL, default sbcl; see boot/check.lisp).
 #
@@ -48,8 +48,8 @@ host_installed() {
 # The files bootstrap.scm writes: closed, read and write, the
 # translator, and spack.lisp.
 expected_files() {
-    echo closed.pso read.pso write.pso
-    sed 's/;.*//' src/translator.files | grep -o '"[^"]*"' | tr -d '"' | sed 's/$/.pso/'
+    echo closed.qso read.qso write.qso
+    sed 's/;.*//' src/translator.files | grep -o '"[^"]*"' | tr -d '"' | sed 's/$/.qso/'
     echo spack.lisp
 }
 

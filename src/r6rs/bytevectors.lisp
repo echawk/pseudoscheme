@@ -1,11 +1,11 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs bytevectors (6)), library report chapter 2.  Bytevectors are
 ;;;; (simple-array (unsigned-byte 8) (*)), as in the R7RS layer, which
 ;;;; already provides make-bytevector, bytevector?, bytevector-length,
 ;;;; bytevector-u8-ref/set!, utf8->string and string->utf8.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (deftype octets ()
   ;; any octet vector: a slice (Guile's bytevector-slice) is displaced
@@ -16,7 +16,7 @@
   x)
 
 (defun endianness-of (who e)
-  (let ((name (and (symbolp e) (ps:scheme-symbol-name e))))
+  (let ((name (and (symbolp e) (qs:scheme-symbol-name e))))
     (cond ((equal name "big") :big)
 	  ((equal name "little") :little)
 	  (t (r6rs-assertion-violation who "bad endianness" e)))))
@@ -28,7 +28,7 @@
   (make-array k :element-type '(unsigned-byte 8) :initial-element (ldb (byte 8 0) fill)))
 
 (defprim "native-endianness" ()
-  (ps:intern-scheme-symbol #+little-endian "little" #-little-endian "big"))
+  (qs:intern-scheme-symbol #+little-endian "little" #-little-endian "big"))
 
 (defprim "bytevector=?" (a b)
   (check-bv "bytevector=?" a) (check-bv "bytevector=?" b)
@@ -37,7 +37,7 @@
 (defprim "bytevector-fill!" (bv fill)
   (check-bv "bytevector-fill!" bv)
   (fill bv (ldb (byte 8 0) fill))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "bytevector-copy!" (source source-start target target-start k)
   ;; R6RS argument order; see R7RS's in ../r7rs/rts.lisp.
@@ -46,7 +46,7 @@
 	       (<= 0 target-start) (<= (+ target-start k) (length target)))
     (r6rs-assertion-violation "bytevector-copy!" "range out of bounds" source-start target-start k))
   (replace target source :start1 target-start :start2 source-start :end2 (+ source-start k))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "bytevector->u8-list" (bv) (check-bv "bytevector->u8-list" bv) (coerce bv 'list))
 (defprim "u8-list->bytevector" (list)
@@ -59,7 +59,7 @@
   (check-bv "bytevector-s8-set!" bv)
   (unless (and (integerp v) (<= -128 v 127)) (r6rs-assertion-violation "bytevector-s8-set!" "out of range" v))
   (setf (aref bv k) (ldb (byte 8 0) v))
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; Multi-byte integers
 
@@ -89,7 +89,7 @@
     (dotimes (i size)
       (setf (aref bv (+ k (if (eq endian :big) (- size 1 i) i)))
 	    (ldb (byte 8 (* 8 i)) u))))
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; R6RS's native accessors take an aligned index; Guile's any index.
 (defvar *native-alignment* t
@@ -223,7 +223,7 @@
 (defprim "string->utf32" (string &optional (e nil))
   (let ((endian (if e (endianness-of "string->utf32" e) :big)))
     (int-list->bv "string->utf32" (map 'list #'char-code string)
-		  (ps:intern-scheme-symbol (if (eq endian :big) "big" "little")) 4 nil)))
+		  (qs:intern-scheme-symbol (if (eq endian :big) "big" "little")) 4 nil)))
 
 (defprim "utf32->string" (bv e &optional mandatory)
   (check-bv "utf32->string" bv)

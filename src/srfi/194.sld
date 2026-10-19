@@ -3,7 +3,7 @@
 ;;; unmodified (reference/srfi-194/194-impl.scm, zipf-zri.scm and
 ;;; sphere.scm; MIT licence per their SPDX headers, in
 ;;; reference/srfi-194/LICENSE).  The library form is the shipped
-;;; srfi/194.sld, with its cond-expands resolved for Pseudoscheme:
+;;; srfi/194.sld, with its cond-expands resolved for Quasischeme:
 ;;; (scheme base), (srfi 133) and (srfi 158).  Random sources are
 ;;; SRFI 27's.
 (define-library (srfi 194)

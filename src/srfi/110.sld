@@ -1,7 +1,7 @@
 ;;; SRFI 110: Sweet-expressions (t-expressions).  The SRFI's
 ;;; implementation, kernel.scm of the readable project, by David A.
 ;;; Wheeler and Alan Manuel K. Gloria (MIT; reference/srfi-110/), its R5RS
-;;; branch, included whole.  Two changes, marked PSEUDOSCHEME: the
+;;; branch, included whole.  Two changes, marked QUASISCHEME: the
 ;;; Guile-only cond-expand has an empty else clause; and replace-read-with,
 ;;; which assigned read (imported here), is an error.  The Guile
 ;;; procedures it uses even so (catch, throw, debug-set!, force-output,

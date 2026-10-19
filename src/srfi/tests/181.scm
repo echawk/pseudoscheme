@@ -1,7 +1,7 @@
 ;;; Tests for SRFI 181 and 192: the sample implementation's test.scm (by
 ;;; Shiro Kawai, MIT licence; in reference/srfi-181/), with its
 ;;; implementation-specific imports replaced.  Changes, marked
-;;; PSEUDOSCHEME: its textual read! procedures, when given a string (as
+;;; QUASISCHEME: its textual read! procedures, when given a string (as
 ;;; here; Gauche and the sample's adapter give vectors), didn't advance
 ;;; their positions.
 (import (scheme base) (scheme process-context) (srfi 64) (scheme write) (scheme read) (scheme char) (srfi 1) (only (srfi 13) string-tabulate) (srfi 181) (srfi 192))
@@ -100,7 +100,7 @@
               (let ((size (min count (- (string-length data) pos))))
                 (unless (zero? size)
                   (if (string? buf)
-                    (begin    ; PSEUDOSCHEME: added the begin and set!
+                    (begin    ; QUASISCHEME: added the begin and set!
                       (string-copy! buf start data pos (+ pos size))
                       (set! pos (+ pos size)))
                     (do ((i 0 (+ i 1))
@@ -148,7 +148,7 @@
               (let ((size (min count (- (string-length data) pos))))
                 (unless (zero? size)
                   (if (string? buf)
-                    (begin    ; PSEUDOSCHEME: added the begin and set!
+                    (begin    ; QUASISCHEME: added the begin and set!
                       (string-copy! buf start data pos (+ pos size))
                       (set! pos (+ pos size)))
                     (do ((i 0 (+ i 1))
@@ -395,7 +395,7 @@
                 (let ((size (min count (- (string-length source) source-pos))))
                   (unless (zero? size)
                     (if (string? buf)
-                      (begin  ; PSEUDOSCHEME: was count, and no set!
+                      (begin  ; QUASISCHEME: was count, and no set!
                         (string-copy! buf start source
                                       source-pos (+ source-pos size))
                         (set! source-pos (+ source-pos size)))
@@ -435,9 +435,9 @@
  (test-equal "native" "ABCD"
              (bytevector->string '#u8(#x41 #x42 #x43 #x44)
                                  (native-transcoder)))
- ;; PSEUDOSCHEME: the sample assumed a host whose characters are ASCII
+ ;; QUASISCHEME: the sample assumed a host whose characters are ASCII
  ;; (see its README), so that every non-ASCII character decoded is
- ;; replaced or raises an error.  Pseudoscheme has all of Unicode: these
+ ;; replaced or raises an error.  Quasischeme has all of Unicode: these
  ;; five tests' expectations are changed to the characters themselves.
  (test-equal "latin1 -> ascii" "ABC\xA1;\xA2;\xA3;XYZ\xC1;\xC2;\xC3;"
              (bytevector->string '#u8(#x41 #x42 #x43 #xa1 #xa2 #xa3

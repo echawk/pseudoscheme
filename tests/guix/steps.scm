@@ -1,7 +1,7 @@
 ;;; `guix build -d hello', step by step, each timed: for finding which
 ;;; step of it goes wrong or takes long on --guile.
 ;;;
-;;;   pseudoscheme --guile tests/guix/steps.scm [PACKAGE]
+;;;   quasischeme --guile tests/guix/steps.scm [PACKAGE]
 ;;;
 ;;; GUIX_TRACE_LOADS=1 also logs each module load (as tests/guix/guix.scm).
 

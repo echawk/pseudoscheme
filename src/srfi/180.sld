@@ -7,11 +7,11 @@
 ;;; (srfi private srfi-180-helpers) (see that file).  And integer->char
 ;;; is shadowed by one that raises a json-error for a surrogate code
 ;;; point, which the body may pass it for a lone \uD800-style escape:
-;;; Pseudoscheme's characters exclude surrogates, and its integer->char
+;;; Quasischeme's characters exclude surrogates, and its integer->char
 ;;; would raise an assertion violation, not a json-error.  Likewise
 ;;; string->number is shadowed by one that gives 0.0 or an infinity
 ;;; for a decimal number whose exponent puts it far outside the
-;;; flonums' range: Pseudoscheme's computes 10^|exponent| exactly, which
+;;; flonums' range: Quasischeme's computes 10^|exponent| exactly, which
 ;;; takes 50 seconds for 123e-10000000 (a test input).
 ;;;
 ;;; JSON objects are association lists with symbol keys, arrays are

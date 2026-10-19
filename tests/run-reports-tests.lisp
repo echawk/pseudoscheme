@@ -30,18 +30,18 @@
        (root (merge-pathnames (make-pathname :directory '(:relative :up)) here)))
   (pushnew (truename root) asdf:*central-registry* :test #'equal))
 
-(load-system :pseudoscheme/api)
-(ps:disable-float-traps)
+(load-system :quasischeme/api)
+(qs:disable-float-traps)
 
 (defparameter *tests-directory*
   (merge-pathnames "reports/" (make-pathname :name nil :type nil
 					     :defaults (or *load-truename* *load-pathname*))))
 
 (defun scheme-string (x)
-  (with-output-to-string (s) (funcall ps:*scheme-write* x s)))
+  (with-output-to-string (s) (funcall qs:*scheme-write* x s)))
 
 (defun head-p (form name)
-  (and (consp form) (symbolp (car form)) (string= (ps:scheme-symbol-name (car form)) name)))
+  (and (consp form) (symbolp (car form)) (string= (qs:scheme-symbol-name (car form)) name)))
 
 (defvar *passed* 0)
 (defvar *run* 0)
@@ -49,15 +49,15 @@
 (defun run-report (report)
   (let* ((file (merge-pathnames (format nil "~(~A~).scm" report) *tests-directory*))
 	 (passed 0) (run 0))
-    (flet ((evaluate (form) (ps-r7rs::eval-at-report-top-level report form)))
-      (let ((ps:*fold-case* t))
+    (flet ((evaluate (form) (qs-r7rs::eval-at-report-top-level report form)))
+      (let ((qs:*fold-case* t))
 	(with-open-file (in file)
-	  (loop for form = (funcall ps:*scheme-read* in)
-		until (eq form ps:eof-object)
+	  (loop for form = (funcall qs:*scheme-read* in)
+		until (eq form qs:eof-object)
 		do (cond
 		     ((head-p form "test")
 		      (incf run)
-		      (let ((expected (scheme-string (ps-r7rs::replace-null-markers (second form) t)))
+		      (let ((expected (scheme-string (qs-r7rs::replace-null-markers (second form) t)))
 			    (got (handler-case (scheme-string (evaluate (third form)))
 				   (error (e) (format nil "ERROR ~A" e)))))
 			(if (string= expected got)
@@ -81,7 +81,7 @@
 (let ((reports (or (mapcar (lambda (a) (intern (string-upcase a) :keyword))
 			   (uiop:command-line-arguments))
 		   '(:r4rs :ieee :r3rs :r2rs :rrs))))
-  (uiop:symbol-call "PSEUDOSCHEME-R7RS" "BOOT")
+  (uiop:symbol-call "QUASISCHEME-R7RS" "BOOT")
   (dolist (r reports) (run-report r))
   (format t "~&~%Reports: ~D of ~D tests passed.~%" *passed* *run*)
   (uiop:quit (if (= *passed* *run*) 0 1)))

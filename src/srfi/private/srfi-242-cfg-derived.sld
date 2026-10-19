@@ -63,6 +63,6 @@
 	[_
 	 (syntax-violation who "invalid syntax" stx)])))
 
-  ;; PSEUDOSCHEME: referred to by (srfi private srfi-242-cfg), so that
+  ;; QUASISCHEME: referred to by (srfi private srfi-242-cfg), so that
   ;; this library is invoked, registering its cfg syntax, before cfg runs.
   (define %srfi-242-derived #t)))

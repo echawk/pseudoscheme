@@ -1,6 +1,6 @@
-# Guile on Pseudoscheme: `--guile`
+# Guile on Quasischeme: `--guile`
 
-Status: **running.** `pseudoscheme --guile prog.scm` loads GNU Guile 3.0's
+Status: **running.** `quasischeme --guile prog.scm` loads GNU Guile 3.0's
 own `ice-9/boot-9.scm` and `ice-9/psyntax-pp.scm`, unmodified, from the
 Guile installation on the machine. They run on libguile's primitives
 written in Lisp and a Tree-IL compiler. After that, `define-module`,
@@ -185,7 +185,7 @@ continuations"):
   caller's stack, the same way a re-entered full continuation is
   rebuilt, without a throw to a base. It can be called any number of
   times, and `dynamic-wind`s inside it run their befores again.
-- `(pseudoscheme control)` (src/control.sls) adds Guile's `%`,
+- `(quasischeme control)` (src/control.sls) adds Guile's `%`,
   `shift`/`reset`, `call/ec` and `let/ec`.
 - Guile code should run with full continuations, the default. With
   `--continuations=escape`, aborts work but their continuations can't
@@ -216,7 +216,7 @@ Guile libraries bind C with `(system foreign)`: `pointer->procedure`,
 `foreign-library-function`. Guile's two modules load unmodified. Their
 C halves (`scm_init_foreign`, `scm_init_system_foreign_library`) are
 src/guile/foreign.lisp, on the foreign-function layer the Chez mode
-uses too (src/ffi.lisp, system `pseudoscheme/cffi`).
+uses too (src/ffi.lisp, system `quasischeme/cffi`).
 - `pointer->procedure` takes the C types at run time. SBCL's compiler is
   there at run time, so each call compiles a CFFI call stub, without
   libffi. `procedure->pointer` compiles a CFFI callback the same way.
@@ -366,13 +366,13 @@ address, and is only needed for compression.
 
 ### How it is built
 
-All of it is in `src/guile/`, system `pseudoscheme/guile`:
+All of it is in `src/guile/`, system `quasischeme/guile`:
 
 | file | what |
 |---|---|
 | reader.lisp | Guile's reader: `#:kw`, `#{odd}#`, `#!...!#`, `#nil`, `#*101`, `#vu8(...)`, arrays, `read-hash-extend` |
 | runtime.lisp | structs and vtables (applicable structs are funcallable instances, so they are procedures), variables, Guile's hash tables (one table for `hashq-`/`hashv-`/`hash-`, handles shared with the table), fluids, syntax objects, macros, procedure properties, hooks, `scm-error` |
-| compile.lisp | Tree-IL to Pseudoscheme's core Scheme, and a pre-expander standing in for libguile's `expand.c` until psyntax is loaded |
+| compile.lisp | Tree-IL to Quasischeme's core Scheme, and a pre-expander standing in for libguile's `expand.c` until psyntax is loaded |
 | boot.lisp | the module system's C half (`module-variable` and friends over boot-9's module records), `primitive-eval`, `primitive-load`, the root module's bindings, errors, the REPL |
 | ports.lisp | Guile's ports: binary and textual at once, any encoding, Guile's custom ports, and the C halves of `(ice-9 ports)`, `(ice-9 binary-ports)`, `(ice-9 custom-ports)`, `(rnrs io ports)`, rdelim and rw |
 | write.lisp | `write` and `display` as libguile's print.c writes, following the print options |
@@ -413,12 +413,12 @@ How each problem was solved:
 - **boot-9's `dynamic-wind`, `with-fluid*`, `apply`, `call/cc` and
   `call-with-prompt`** are written on libguile's internal `wind`/`unwind`
   and `push-fluid`. Their definitions are replaced, as they are made, by
-  Pseudoscheme's own continuation-aware procedures (`*boot-overrides*`).
+  Quasischeme's own continuation-aware procedures (`*boot-overrides*`).
 - **Fluids** are the R7RS layer's parameter states, so they are
   per-thread and survive re-entered continuations. They keep the stack of
   outer values that `fluid-ref*` reads, which boot-9's `raise-exception`
   walks. The current-port fluids hold Lisp's `*standard-output*` and the
-  other stream variables, so Pseudoscheme's own I/O follows
+  other stream variables, so Quasischeme's own I/O follows
   `(current-output-port)`.
 - **Errors.** A Lisp error inside Guile code is raised as a Guile
   exception (`wrong-type-arg`, `unbound-variable`, `misc-error`, ...)
@@ -429,7 +429,7 @@ How each problem was solved:
 - **C extensions.** `load-extension` runs a Lisp version of the C init
   function where there is one (ports, fports, ioext, threads, control,
   i18n, bytevectors, rdelim, rw). After that, every variable the module
-  exports and nothing has defined gets Pseudoscheme's procedure of the
+  exports and nothing has defined gets Quasischeme's procedure of the
   same name, if it has one. That is how `(rnrs bytevectors)`, SRFI 4 and
   others get their C procedures.
 - **Ports** are Gray streams over a byte backend (a file descriptor, a
@@ -469,12 +469,12 @@ How each problem was solved:
 - **The compiled-module cache.** A module loaded from the load path is
   expanded (as Guile's `compile-file` expands, in `c` mode), translated
   and compiled once; its code is then written with `compile-file` to a
-  fasl under `~/.cache/pseudoscheme/guile/`, keyed by the file, its date
-  and the Pseudoscheme it was compiled by. The next load is the fasl's:
+  fasl under `~/.cache/quasischeme/guile/`, keyed by the file, its date
+  and the Quasischeme it was compiled by. The next load is the fasl's:
   twelve large modules (GOOPS, SRFI 19, the web, PEG, ...) load in 6 s
   instead of 49. The literals in compiled code (modules, syntax objects,
   variable sites) have load forms; a file whose code holds anything else
-  isn't cached. `PSEUDOSCHEME_GUILE_CACHE=0` turns it off. Files loaded
+  isn't cached. `QUASISCHEME_GUILE_CACHE=0` turns it off. Files loaded
   with `load` are evaluated as read, as Guile's evaluator does.
 
 ### Guile's test suite
@@ -522,7 +522,7 @@ What fails now, by cause:
   are unresolved, not failures.
 
 Fixed since the last count: `types` (all 47: a `(system base types)`
-written for Pseudoscheme decodes `object-address`'s bits, which are now
+written for Quasischeme decodes `object-address`'s bits, which are now
 Guile's for immediates and a stable number for heap objects),
 `strings` (all 136: `substring/shared` remembers where it came from, and
 a root mutator's change is copied to the strings sharing characters),
@@ -554,7 +554,7 @@ evaluator, its compiler to bytecode and the VM are not involved; the VM runs
 only `.go` files that are loaded.
 
 What the native code costs, against `--r7rs` on the same program (the
-r7rs-benchmarks, `bench/run.sh pseudoscheme-guile`):
+r7rs-benchmarks, `bench/run.sh quasischeme-guile`):
 
 - **Top-level references.** A call of a top-level procedure, `(fib ...)`,
   reads its variable each time (a *site*, cached after the first lookup;
@@ -603,7 +603,7 @@ r7rs-benchmarks, `bench/run.sh pseudoscheme-guile`):
   frame-aware `map`, which is in order and re-entrant, 4 to 5 times faster.
 - **Allocation, GC and the rest** are those of every mode.
 
-On the r7rs-benchmarks (`bench/run.sh pseudoscheme-guile`), `fib`, `tak`,
+On the r7rs-benchmarks (`bench/run.sh quasischeme-guile`), `fib`, `tak`,
 `lattice` and `nqueens` now run 1.3 to 1.6 times as long as with `--r7rs`
 (they ran 2 to 4 times as long). Left over are the reads of the variable
 that guard each call of a procedure by its own name, and the `#nil` checks
@@ -625,7 +625,7 @@ Guile code can also be compiled by Guile's own compiler to bytecode and
 run on the VM (docs/guile-vm.md): a `.go` file, from the installed Guile
 or from `compile-file` here. Measured on arm64 (2026-10-17, a busy machine,
 so within 20% or so), the r7rs-benchmarks programs as `bench/run.sh
-pseudoscheme-guile` runs them, natively, against the same file compiled by
+quasischeme-guile` runs them, natively, against the same file compiled by
 `guild compile -O2` and loaded with `load-compiled`, run time only, in
 seconds:
 
@@ -670,7 +670,7 @@ to another image or to Lisp leaves the translation.
 Loading, with nothing to compile (19 modules, SRFI 1, 9, 19, 26, 41, 43,
 64, 69, `(ice-9 match)`, `format`, `regex`, `peg` and the rest):
 
-| | from the cache's fasls, native | from the installed `.go` files, on the VM (`PSEUDOSCHEME_GUILE_GO=all`) |
+| | from the cache's fasls, native | from the installed `.go` files, on the VM (`QUASISCHEME_GUILE_GO=all`) |
 |---|---|---|
 | all 19 | 57 ms | 400 to 530 ms |
 | `(srfi srfi-19)` alone | 19 ms | 454 ms |
@@ -682,7 +682,7 @@ SBCL; there is one more for each symbol whose hash compiled code reads
 (a `case` on symbols), the first time. Compiling from source:
 the 21 modules with GOOPS and `(web uri)` take 16.5 s natively, cache off
 (21.7 s writing the cache); compiling `srfi-19.scm` to bytecode here, with
-Guile's compiler on the VM (`PSEUDOSCHEME_GUILE_COMPILER=vm`), didn't finish
+Guile's compiler on the VM (`QUASISCHEME_GUILE_COMPILER=vm`), didn't finish
 in 11 minutes, where `guild` takes 0.3 s.
 
 So native code with the fasl cache is the faster both to run and to load,
@@ -733,7 +733,7 @@ and what changed:
   `GUILE-CACHE-PARENT` (cache.lisp) falls back to `~/.cache/` when the
   XDG directory can't be written, as LilyPond's installation can't be by
   a user. The cache's key (the build signature) holds the dates of all
-  the files Pseudoscheme is built from, those of Chez mode among them
+  the files Quasischeme is built from, those of Chez mode among them
   (Guile mode's library uses `(chezscheme)`), so an edit to any of them
   makes the next run cold; a rebuild from unchanged files doesn't.
 

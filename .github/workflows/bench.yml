@@ -33,24 +33,24 @@ jobs:
         run: |
           # full continuations are the default
           if [ "${{ matrix.mode }}" = escape ]; then
-            printf '#!/bin/sh\nexec "%s/bin/pseudoscheme" --continuations=escape "$@"\n' "$PWD" > /tmp/pseudoscheme-escape
-            chmod +x /tmp/pseudoscheme-escape
-            export PSEUDOSCHEME=/tmp/pseudoscheme-escape
+            printf '#!/bin/sh\nexec "%s/bin/quasischeme" --continuations=escape "$@"\n' "$PWD" > /tmp/quasischeme-escape
+            chmod +x /tmp/quasischeme-escape
+            export QUASISCHEME=/tmp/quasischeme-escape
           fi
-          bench/run.sh pseudoscheme
+          bench/run.sh quasischeme
 
       - name: Results
         if: always()
-        # full continuations' results are named pseudoscheme_full, so the
+        # full continuations' results are named quasischeme_full, so the
         # table has a column for each mode
         run: |
           mkdir -p /tmp/bench
-          r=bench/r7rs-benchmarks/results.Pseudoscheme
+          r=bench/r7rs-benchmarks/results.Quasischeme
           [ -f "$r" ] || exit 0
           if [ "${{ matrix.mode }}" = full ]; then
-            sed 's/+!CSVLINE!+pseudoscheme-/+!CSVLINE!+pseudoscheme_full-/' "$r" > /tmp/bench/results.PseudoschemeFull
+            sed 's/+!CSVLINE!+quasischeme-/+!CSVLINE!+quasischeme_full-/' "$r" > /tmp/bench/results.QuasischemeFull
           else
-            cp "$r" /tmp/bench/results.Pseudoscheme
+            cp "$r" /tmp/bench/results.Quasischeme
           fi
 
       - uses: actions/upload-artifact@v4
@@ -78,4 +78,4 @@ jobs:
         # ratio to escape-only
         run: |
           echo "## r7rs-benchmarks: escape-only and full continuations" >> "$GITHUB_STEP_SUMMARY"
-          python3 bench/summarize.py /tmp/bench --baseline pseudoscheme | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 bench/summarize.py /tmp/bench --baseline quasischeme | tee -a "$GITHUB_STEP_SUMMARY"

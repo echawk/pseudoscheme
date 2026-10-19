@@ -2,7 +2,7 @@
 ;;; implementation, unmodified (reference/srfi-165/165.scm; MIT licence,
 ;;; in reference/srfi-165/LICENSE).  The library form is the shipped
 ;;; reference/srfi-165/165.sld; its dependencies, SRFIs 1, 111, 125, 128
-;;; and 146, are Pseudoscheme's own.
+;;; and 146, are Quasischeme's own.
 (define-library (srfi 165)
   (export make-computation-environment-variable
           make-computation-environment computation-environment-ref

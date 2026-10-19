@@ -5,7 +5,7 @@
 #
 # Steps, each logging to /logs/STEP.log (build/container/logs/guix/ on
 # the host) and appending a line to /logs/summary.txt:
-#   build       build bin/pseudoscheme and our libguile
+#   build       build bin/quasischeme and our libguile
 #   reference   real Guix (the store's Guile 3.0.9): `guix build -d
 #               --no-grafts -e PACKAGE', and `guix build -e PACKAGE' from
 #               substitutes
@@ -81,7 +81,7 @@ logged() {
 # compiling Guix's package modules takes hours; guix build doesn't re-enter
 # a continuation.  CONTINUATIONS=full for the other.
 CONTINUATIONS=${CONTINUATIONS:-escape}
-PS="bin/pseudoscheme --no-userinit --continuations=$CONTINUATIONS --guile"
+PS="bin/quasischeme --no-userinit --continuations=$CONTINUATIONS --guile"
 PACKAGE=${PACKAGE:-"(@ (gnu packages base) hello)"}
 
 step_build() {
@@ -193,13 +193,13 @@ step_tests() {
   : > "$LOGS/tests.txt"
   for t in $names; do
     run_test "$guile --no-auto-compile" "$t" "$LOGS/tests/$t.guile.log"
-    run_test "$PS" "$t" "$LOGS/tests/$t.pseudoscheme.log"
+    run_test "$PS" "$t" "$LOGS/tests/$t.quasischeme.log"
     count() { grep -c "^$2:" "$1"; }
-    printf '%s guile: pass=%s fail=%s %s; pseudoscheme: pass=%s fail=%s %s\n' "$t" \
+    printf '%s guile: pass=%s fail=%s %s; quasischeme: pass=%s fail=%s %s\n' "$t" \
       "$(grep -c '^PASS:' "$LOGS/tests/$t.guile.log")" "$(grep -c '^FAIL:' "$LOGS/tests/$t.guile.log")" \
       "$(tail -1 "$LOGS/tests/$t.guile.log")" \
-      "$(grep -c '^PASS:' "$LOGS/tests/$t.pseudoscheme.log")" "$(grep -c '^FAIL:' "$LOGS/tests/$t.pseudoscheme.log")" \
-      "$(tail -1 "$LOGS/tests/$t.pseudoscheme.log")" >> "$LOGS/tests.txt"
+      "$(grep -c '^PASS:' "$LOGS/tests/$t.quasischeme.log")" "$(grep -c '^FAIL:' "$LOGS/tests/$t.quasischeme.log")" \
+      "$(tail -1 "$LOGS/tests/$t.quasischeme.log")" >> "$LOGS/tests.txt"
   done
   note "tests: $(wc -l < "$LOGS/tests.txt") files; tests.txt compares real Guile and --guile"
 }

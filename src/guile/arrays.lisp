@@ -1,6 +1,6 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
-;;;; Guile's arrays, written for Pseudoscheme.  An array is a view of a
+;;;; Guile's arrays, written for Quasischeme.  An array is a view of a
 ;;;; root vector: an offset, and for each dimension its lower and upper
 ;;;; bounds and its stride in the root.  A one-dimensional, zero-based
 ;;;; view of the whole of a root is the root itself, as in Guile, so
@@ -12,7 +12,7 @@
 ;;;; vu8 (bytevectors), and the SRFI 4 types u8 ... f64, c32 and c64,
 ;;;; which, as in Guile 3, are bytevectors tagged with their element type.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defstruct (garray (:constructor %make-garray (root type offset dims)) (:copier nil))
   root
@@ -33,34 +33,34 @@
 
 ;; for EQUAL?: a u8vector's bytes are a bytevector's, as in Guile, where
 ;; (equal? #u8(1) #vu8(1)); other element types differ
-(setq ps::*bytevector-type*
+(setq qs::*bytevector-type*
       (lambda (v) (let ((type (gethash v *bytevector-types* "vu8"))) (if (equal type "u8") "vu8" type))))
 
 (defun type-size (type) (cdr (assoc type *type-sizes* :test #'string=)))
 
 (defun type-name (type)
   "TYPE, a symbol or #t, as a string."
-  (cond ((eq type ps:true) "#t")
-	((symbolp type) (ps:scheme-symbol-name type))
+  (cond ((eq type qs:true) "#t")
+	((symbolp type) (qs:scheme-symbol-name type))
 	((stringp type) type)
 	(t (wrong-type "make-typed-array" 1 type))))
 
 (defun type-symbol (type)
-  (if (string= type "#t") ps:true (ssym type)))
+  (if (string= type "#t") qs:true (ssym type)))
 
 (defun root-type (root)
   "The array type of ROOT, a vector, or NIL if it isn't an array."
   (cond ((stringp root) "a")
 	((bit-vector-p root) "b")
-	((typep root 'ps-r6rs::octets) (gethash root *bytevector-types* "vu8"))
+	((typep root 'qs-r6rs::octets) (gethash root *bytevector-types* "vu8"))
 	((simple-vector-p root) "#t")
-	((and (vectorp root) (ps::numeric-vector-tag root))
-	 (let ((tag (ps::numeric-vector-tag root)))
+	((and (vectorp root) (qs::numeric-vector-tag root))
+	 (let ((tag (qs::numeric-vector-tag root)))
 	   (cond ((string= tag "c64") "c32") ((string= tag "c128") "c64") (t tag))))
 	(t nil)))
 
 (defun root-length (root type)
-  (if (and (typep root 'ps-r6rs::octets) (string/= type "vu8"))
+  (if (and (typep root 'qs-r6rs::octets) (string/= type "vu8"))
       (floor (length root) (type-size type))
       (length root)))
 
@@ -76,7 +76,7 @@
   (cond ((simple-vector-p root) (svref root i))
 	((stringp root) (char root i))
 	((bit-vector-p root) (bool (= 1 (sbit root i))))
-	((and (typep root 'ps-r6rs::octets) (string/= type "vu8") (string/= type "u8"))
+	((and (typep root 'qs-r6rs::octets) (string/= type "vu8") (string/= type "u8"))
 	 (let* ((size (type-size type)) (at (* i size)))
 	   (flet ((float-at (at bytes)
 		    (if (= bytes 4)
@@ -109,7 +109,7 @@
   (cond ((simple-vector-p root) (setf (svref root i) x))
 	((stringp root) (setf (char root i) x))
 	((bit-vector-p root) (setf (sbit root i) (if (truthy x) 1 0)))
-	((and (typep root 'ps-r6rs::octets) (string/= type "vu8") (string/= type "u8"))
+	((and (typep root 'qs-r6rs::octets) (string/= type "vu8") (string/= type "u8"))
 	 (let* ((size (type-size type)) (at (* i size)))
 	   (flet ((float-to (at bytes x)
 		    (if (= bytes 4)
@@ -315,8 +315,8 @@
 	  (unless (or (= s stride) (= lo hi)) (setq contiguous nil))
 	  (setq stride (* stride (max 0 (1+ (- hi lo)))))))
       (cond ((and (= (length dims) 1) (not (truthy strict))) a)
-	    ((not contiguous) ps:false)
-	    ((and (truthy strict) (/= offset 0)) ps:false)
+	    ((not contiguous) qs:false)
+	    ((and (truthy strict) (/= offset 0)) qs:false)
 	    (t (make-view root type offset (list (list 0 (1- (dims-size dims)) 1))))))))
 
 (defun arrays-equal (a b)
@@ -326,7 +326,7 @@
 	   (declare (ignore ra rb oa ob))
 	   (and (string= ta tb)
 		(equal (mapcar (lambda (d) (subseq d 0 2)) da) (mapcar (lambda (d) (subseq d 0 2)) db))
-		(ps:scheme-equal-p (array->list* a) (array->list* b)))))))
+		(qs:scheme-equal-p (array->list* a) (array->list* b)))))))
 
 (defun same-shape-p (arrays)
   "Whether ARRAYS have the same lengths (their bounds may differ)."
@@ -361,7 +361,7 @@
   (nth-value 2 (array-view a "shared-array-offset")))
 (defguile "shared-array-increments" (a) (mapcar #'third (nth-value 3 (array-view a "shared-array-increments"))))
 (defguile "make-typed-array" (type fill &rest bounds) (make-typed-array* type fill bounds))
-(defguile "make-array" (fill &rest bounds) (make-typed-array* ps:true fill bounds))
+(defguile "make-array" (fill &rest bounds) (make-typed-array* qs:true fill bounds))
 (defguile "make-shared-array" (a mapping &rest bounds) (shared-array a mapping bounds))
 (defguile "array-slice" (a &rest indices)
   (multiple-value-bind (root type offset dims) (cell-view a indices "array-slice")
@@ -377,9 +377,9 @@
 	  (walk-indices dims (lambda (ix) (set-array-element cell (array-element value ix "array-cell-set!") ix "array-cell-set!")))))
     a))
 (defguile "transpose-array" (a &rest axes) (transpose a axes))
-(defguile "array-contents" (a &optional (strict ps:false)) (array-contents* a strict))
+(defguile "array-contents" (a &optional (strict qs:false)) (array-contents* a strict))
 (defguile "list->typed-array" (type shape list) (list->typed-array* type shape list))
-(defguile "list->array" (shape list) (list->typed-array* ps:true shape list))
+(defguile "list->array" (shape list) (list->typed-array* qs:true shape list))
 (defguile "array-fill!" (a fill)
   (let ((dims (nth-value 3 (array-view a "array-fill!"))))
     (walk-indices dims (lambda (ix) (set-array-element a fill ix "array-fill!"))))

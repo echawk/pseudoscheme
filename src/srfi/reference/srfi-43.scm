@@ -448,12 +448,12 @@
 ;;;   [R5RS] Create a vector of length LENGTH.  If FILL is present,
 ;;;   initialize each slot in the vector with it; if not, the vector's
 ;;;   initial contents are unspecified.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define make-vector make-vector)
 
 ;;; (VECTOR <elt> ...) -> vector
 ;;;   [R5RS] Create a vector containing ELEMENT ..., in order.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define vector vector)
 
 ;;; This ought to be able to be implemented much more efficiently -- if
@@ -607,7 +607,7 @@
 ;;; (VECTOR-APPEND <vector> ...) -> vector
 ;;;   Append VECTOR ... into a newly allocated vector and return that
 ;;;   new vector.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define (vector-append . vectors)
 ;  (vector-concatenate:aux vectors vector-append))
 
@@ -665,7 +665,7 @@
 
 ;;; (VECTOR? <value>) -> boolean
 ;;;   [R5RS] Return #T if VALUE is a vector and #F if not.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define vector? vector?)
 
 ;;; (VECTOR-EMPTY? <vector>) -> boolean
@@ -734,12 +734,12 @@
 ;;; (VECTOR-REF <vector> <index>) -> value
 ;;;   [R5RS] Return the value that the location in VECTOR at INDEX is
 ;;;   mapped to in the store.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define vector-ref vector-ref)
 
 ;;; (VECTOR-LENGTH <vector>) -> exact, nonnegative integer
 ;;;   [R5RS] Return the length of VECTOR.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define vector-length vector-length)
 
 
@@ -1084,7 +1084,7 @@
 
 ;;; (VECTOR-SET! <vector> <index> <value>) -> unspecified
 ;;;   [R5RS] Assign the location at INDEX in VECTOR to VALUE.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define vector-set! vector-set!)
 
 ;;; (VECTOR-SWAP! <vector> <index1> <index2>) -> unspecified
@@ -1102,7 +1102,7 @@
 ;;;   is 0, and END, whose default is the length of VECTOR, with VALUE.
 ;;;
 ;;; This one can probably be made really fast natively.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define vector-fill!
 ;  (let ((%vector-fill! vector-fill!))   ; Take the native one, under
 ;                                        ;   the assumption that it's
@@ -1123,7 +1123,7 @@
 ;;;   Copy the values in the locations in [SSTART,SEND) from SOURCE to
 ;;;   to TARGET, starting at TSTART in TARGET.
 ;;; [wdc] Corrected to allow 0 <= sstart <= send <= (vector-length source).
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define (vector-copy! target tstart source . maybe-sstart+send)
 ;  (define (doit! sstart send source-length)
 ;    (let ((tstart (check-type nonneg-int? tstart vector-copy!))
@@ -1214,7 +1214,7 @@
 ;;;   [R5RS+] Produce a list containing the elements in the locations
 ;;;   between START, whose default is 0, and END, whose default is the
 ;;;   length of VECTOR, from VECTOR.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define vector->list
 ;  (let ((%vector->list vector->list))
 ;    (lambda (vec . maybe-start+end)
@@ -1258,7 +1258,7 @@
 ;;; and causes - to fail as well.  Given a LENGTH* that computes the
 ;;; length of a list's cycle, this wouldn't diverge, and would work
 ;;; great for circular lists.
-;;; Pseudoscheme: R7RS's (scheme base) binding meets the spec; commented out.
+;;; Quasischeme: R7RS's (scheme base) binding meets the spec; commented out.
 ;(define list->vector
 ;  (let ((%list->vector list->vector))
 ;    (lambda (lst . maybe-start+end)

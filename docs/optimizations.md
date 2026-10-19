@@ -1,6 +1,6 @@
 # Optimization: what's done, what could be, and how it could be chosen
 
-Pseudoscheme's output is meant to stay readable: a Scheme procedure
+Quasischeme's output is meant to stay readable: a Scheme procedure
 becomes a Lisp function a person could have written, and SBCL does the
 optimizing. This document lists what the translator already does for
 speed and the ideas that remain, with each one's status and an example
@@ -40,10 +40,10 @@ Here is `fib`, as the translator writes it (identifiers simplified):
 
 ```lisp
 (labels ((fib (n)
-           (if (ps:scheme< n '2)
+           (if (qs:scheme< n '2)
                n
-               (ps:scheme+ (fib (ps:scheme- n '1))
-                           (fib (ps:scheme- n '2))))))
+               (qs:scheme+ (fib (qs:scheme- n '1))
+                           (fib (qs:scheme- n '2))))))
   #'fib)
 ```
 
@@ -63,11 +63,11 @@ and a loop over a vector:
        (psetq i '0 acc '0.0d0)
        (go loop)
      loop
-       (if (ps:scheme= i (length (the simple-vector v)))
+       (if (qs:scheme= i (length (the simple-vector v)))
            (return acc)
            (progn
-             (psetq i (ps:scheme+ i '1)
-                    acc (ps:scheme+ acc (svref v i)))
+             (psetq i (qs:scheme+ i '1)
+                    acc (qs:scheme+ acc (svref v i)))
              (go loop)))))
 ```
 
@@ -93,14 +93,14 @@ to an SBCL policy and switch the more aggressive transformations on.
 How it could be chosen:
 - on the command line, `--optimize-level=N`;
 - per library or program, by a declaration form in a library of our
-  own, `(import (pseudoscheme optimize))` then `(declare-optimize-level
+  own, `(import (quasischeme optimize))` then `(declare-optimize-level
   3)`, in the body it applies to;
 - by each mode's own mechanism, which the modes already accept and
   ignore: Chez's `optimize-level` parameter and `(optimize-level 3)`
   in `compile-file` (src/chez/top-level.scm has the parameter, with no
   effect), and Guile's `-O0`…`-O3` to `guild compile` and
   `%auto-compilation-options`;
-- from Lisp, a special variable, as `psx::*full-continuations*` is
+- from Lisp, a special variable, as `qsx::*full-continuations*` is
   now.
 
 The level is part of the library cache's key, as the continuations
@@ -232,7 +232,7 @@ much from run to run as between the two.
 `truep` is now an inline `eq` test, so a test whose value is a Scheme
 boolean costs a comparison. It and `true?` compare with `#f` as a
 constant of the code that uses them (`load-time-value`), not by reading
-the special variable `ps:false`, which on arm64 cost two dependent loads
+the special variable `qs:false`, which on arm64 cost two dependent loads
 and a check that it's bound on every test (October 2026): `puzzle` went
 from 71 to 45 billion instructions, `triangl` from 37 to 27, `browse`
 5% fewer, `nqueens` and `matrix` 3-4%. A procedure known to return a CL boolean,
@@ -255,10 +255,10 @@ Already per form: calls that can't capture aren't sites (done).
 
 **Across top-level forms in Guile mode (done, October 2026).**
 - A top-level definition whose lambda can't capture is wrapped in
-  `%note-safe`, which records the procedure in `psx::*safe-functions*`
+  `%note-safe`, which records the procedure in `qsx::*safe-functions*`
   when the definition runs, including when it's loaded from a cached
   fasl.
-- `psx::*safe-operator-hook*` lets a language mode say when an operator
+- `qsx::*safe-operator-hook*` lets a language mode say when an operator
   form the transformation can't see into is safe. Guile mode's says so
   for `(%guile-ref site)` in two cases:
   - the site's variable holds a recorded procedure, in a declarative
@@ -329,9 +329,9 @@ through our generic calls. The user approved this list, in this order:
    definitions are immutable, so their small procedures can be inlined.
    For Guile, running Guile's own `peval` on Tree-IL first is a cheap
    step. *First pass done 2026-10-18* (src/cp0.lisp): it runs on
-   every core form, whatever made it; `PSEUDOSCHEME_OPTIMIZE=0` turns
+   every core form, whatever made it; `QUASISCHEME_OPTIMIZE=0` turns
    it off, `1` runs cp0 alone, `2` (the default) adds cptypes, and
-   `PSEUDOSCHEME_OPTIMIZE_TRACE=1` prints each form before and after.
+   `QUASISCHEME_OPTIMIZE_TRACE=1` prints each form before and after.
    The library cache's signature records a level other than 2.
 2. **cptypes: type recovery** (idea 4): facts from predicate tests and
    result types (`(pair? x)` → `car` unchecked; fixnum loop counters;

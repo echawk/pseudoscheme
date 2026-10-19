@@ -1,6 +1,6 @@
 ;;; (srfi 231 private u1vector): the u1vector procedures SRFI 231's
 ;;; u1-storage-class needs, which chibi's (srfi 160 base) provides as an
-;;; extension and Pseudoscheme's does not.  Written for Pseudoscheme: a
+;;; extension and Quasischeme's does not.  Written for Quasischeme: a
 ;;; u1vector is a record around a bytevector holding one element (0 or
 ;;; 1) per byte -- simple rather than compact.
 (define-library (srfi 231 private u1vector)

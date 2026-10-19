@@ -1,4 +1,4 @@
-;;; SRFI 203: a simple picture language in the style of SICP.  Pseudoscheme
+;;; SRFI 203: a simple picture language in the style of SICP.  Quasischeme
 ;;; has no graphics, so this is Vasilij Schneidermann's portable
 ;;; implementation from the SRFI's repository (contrib/vasilij-
 ;;; schneidermann; BSD-3-Clause, after Peter Danenberg's sicp egg; in

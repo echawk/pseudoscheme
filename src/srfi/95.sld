@@ -5,7 +5,7 @@
 ;;; rank-1 arrays here are vectors and strings, and the few array
 ;;; procedures it needs are defined below on them.
 ;;;
-;;; One change to the reference file, marked PSEUDOSCHEME there:
+;;; One change to the reference file, marked QUASISCHEME there:
 ;;; sorted? took every two-element vector or string as sorted.
 (define-library (srfi 95)
   (export sorted? merge merge! sort sort!)

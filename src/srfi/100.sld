@@ -4,7 +4,7 @@
 ;;; reference/srfi-100/define-lambda-object.scm, is its define-syntax
 ;;; part (the define-macro alternative is left out; of its two opt-key
 ;;; variants, the procedure is used, as shipped), with one change, marked
-;;; PSEUDOSCHEME: the predicates need the host to tell lambda objects
+;;; QUASISCHEME: the predicates need the host to tell lambda objects
 ;;; from other procedures (the implementation uses mzscheme's
 ;;; object-name), so each constructor registers the object it makes in
 ;;; a weak eq hashtable, and object-name, below, returns

@@ -1,4 +1,4 @@
-;;; SRFI 211: explicit-renaming macros.  Written for Pseudoscheme (the SRFI's implementation is
+;;; SRFI 211: explicit-renaming macros.  Written for Quasischeme (the SRFI's implementation is
 ;;; necessarily per-implementation); see 211.sld.
 ;;; er-macro-transformer is a macro (it captures the place it's used,
 ;;; to rename symbols there); as a variable reference it's a procedure.

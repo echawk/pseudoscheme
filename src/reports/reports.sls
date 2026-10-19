@@ -9,7 +9,7 @@
 ;;; unspecified (a one-armed if whose test fails, a cond with no clause
 ;;; chosen, a do with no result expressions) is '(), which is NIL in the
 ;;; Revised Report.
-(library (pseudoscheme reports truth)
+(library (quasischeme reports truth)
   (export if cond and or do not)
   (import (except (rnrs) if cond and or do not)
           (prefix (only (rnrs) if cond and or do not) r6:))
@@ -75,7 +75,7 @@
 
 ;;; The names the reports have that R5RS doesn't (or has differently),
 ;;; and the extra procedures of their optional features.
-(library (pseudoscheme reports extras)
+(library (quasischeme reports extras)
   (export define named-lambda rec sequence
           =? <? >? <=? >=? 1+ -1+ append! last-pair string-null?
           substring-fill! substring-move-left! substring-move-right!

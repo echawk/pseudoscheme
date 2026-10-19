@@ -1,11 +1,11 @@
 
-; Scheme48's READ module, adapted for use in Pseudoscheme.
+; Scheme48's READ module, adapted for use in Quasischeme.
 ; (compile-file "~/pseudo/read" scheme-translator::revised^4-scheme-env)
 ; (load "~/pseudo/read" scheme-translator::revised^4-scheme-env)
 ; (define read revised^4-scheme:.read)
 
-(define char->ascii #'ps-lisp:char-code)
-(define ascii->char #'ps-lisp:code-char)
+(define char->ascii #'qs-lisp:char-code)
+(define ascii->char #'qs-lisp:code-char)
 (define ascii-whitespaces '(32 10 9 12 13)) ;space linefeed tab page return
 (define ascii-limit 128)
 
@@ -24,8 +24,8 @@
 	((null? (cdr port-option)) (car port-option))
 	(else (error "read-mumble: too many arguments" port-option))))
 
-(define error #'ps:scheme-error)
-(define warn #'ps:scheme-warn)
+(define error #'qs:scheme-error)
+(define warn #'qs:scheme-warn)
 
 
 ; -*- Mode: Scheme; Syntax: Scheme; Package: Scheme; -*-
@@ -46,7 +46,7 @@
 
 (define (scheme-read . port-option)
   (let ((port (input-port-option port-option)))
-    (ps:call-with-reader-state
+    (qs:call-with-reader-state
      port
      (lambda ()
        (let ((form (sub-read port)))
@@ -58,7 +58,7 @@
 ; A datum the reader looks into itself (a character's name, a labelled
 ; datum, a box's contents): read without annotations.
 (define (sub-read-plain port)
-  (ps:call-without-annotating (lambda () (sub-read-carefully port))))
+  (qs:call-without-annotating (lambda () (sub-read-carefully port))))
 
 (define (sub-read-carefully port)
   (let ((form (sub-read port)))
@@ -70,7 +70,7 @@
 ; Chez Scheme's #!eof, the end-of-file object as a datum: read as this
 ; marker, so that a list or the like doesn't take it for the file's end.
 (define eof-datum (list 'eof-datum))
-(define (datum-of form) (if (eq? form eof-datum) ps:eof-object form))
+(define (datum-of form) (if (eq? form eof-datum) qs:eof-object form))
 
 (define reader-token-marker (list 'reader-token))
 (define (make-reader-token message) (cons reader-token-marker message))
@@ -84,7 +84,7 @@
 ; or ], except in Chez Scheme's reader, where they must match.
 (define (closes? form c port)
   (cond ((not (or (eq? form close-paren) (eq? form close-bracket))) #f)
-	((not (ps:true? (ps:chez-reader-p))) #t)
+	((not (qs:true? (qs:chez-reader-p))) #t)
 	((and (eqv? c #\() (eq? form close-bracket))
 	 (reading-error port "parenthesized list terminated by close bracket"))
 	((and (eqv? c #\[) (eq? form close-paren))
@@ -100,16 +100,16 @@
 ; R6RS and R7RS allow for most of Unicode.
 
 (define (sub-read port)
-  (let* ((start (and (ps:true? (ps:annotating-p)) (ps:reader-position port)))
+  (let* ((start (and (qs:true? (qs:annotating-p)) (qs:reader-position port)))
 	 (form (sub-read-1 port))
-	 (form (if (and (ps:neoteric-p) (not (eof-object? form)) (not (reader-token? form)))
+	 (form (if (and (qs:neoteric-p) (not (eof-object? form)) (not (reader-token? form)))
 		   (neoteric-suffixes form port)
 		   form)))
     ;; Chez's annotations, while a file is read for them: a datum read
     ;; after atmosphere already has its own
     (if (and start (not (eof-object? form)) (not (reader-token? form))
-	     (not (eq? form eof-datum)) (not (ps:true? (ps:annotated-p form))))
-	(ps:reader-annotate form port start)
+	     (not (eq? form eof-datum)) (not (qs:true? (qs:annotated-p form))))
+	(qs:reader-annotate form port start)
 	form)))
 
 (define (sub-read-1 port)
@@ -155,7 +155,7 @@
 	   (if (and (char=? c #\&) (null? (cdr token))
 		    (let ((next (peek-char port)))
 		      (and (char? next) (or (char=? next #\{) (char=? next #\[)))))
-	       (ps:read-quasi-literal (substring (car token) 1 (string-length (car token))) port)
+	       (qs:read-quasi-literal (substring (car token) 1 (string-length (car token))) port)
 	       (parse-token token port))))))
   (for-each (lambda (c)
               (set-standard-syntax! c #f sub-read-constituent))
@@ -220,7 +220,7 @@
     close-paren))
 
 (define (sub-read-curly c port)
-  (curly-infix (ps:call-neoterically (lambda () (sub-read-list c port)))))
+  (curly-infix (qs:call-neoterically (lambda () (sub-read-list c port)))))
 
 (define (curly-infix es)
   (cond ((not (list? es)) (cons '$nfx$ es))
@@ -285,7 +285,7 @@
 	(cond ((eof-object? c)
 	       (reading-error port "end of file within |symbol|"))
 	      ((char=? c #\|)
-	       (ps:intern-scheme-symbol (reverse-list->string l i)))
+	       (qs:intern-scheme-symbol (reverse-list->string l i)))
 	      ((char=? c #\\)
 	       (loop (cons (read-escape port) l) (+ i 1)))
 	      (else (loop (cons c l) (+ i 1))))))))
@@ -455,7 +455,7 @@
 ; Directives: #!fold-case and #!no-fold-case (R7RS 2.1), #!r6rs (R6RS
 ; 4.2.4, a flag with no effect here), #!srfi-88 and #!no-srfi-88 (SRFI
 ; 88's keywords, foo:, on or off), those that select an alternative
-; reader for the rest of the port (ps:*reader-directives*: #!sweet,
+; reader for the rest of the port (qs:*reader-directives*: #!sweet,
 ; ...), and any other #!<identifier>, which is ignored the same way.  Each is a comment, so read on.
 
 (define-sharp-macro #\!
@@ -465,26 +465,26 @@
       ;; Folding is per port (R7RS 2.1): it applies to what is read
       ;; from this port after the directive.
       (if (or (string=? name "fold-case") (string=? name "no-fold-case"))
-	  (ps:set-port-fold-case port (ps-lisp:string= name "fold-case")))
+	  (qs:set-port-fold-case port (qs-lisp:string= name "fold-case")))
       ;; SRFI 88: after #!srfi-88, foo: is a keyword
       (if (or (string=? name "srfi-88") (string=? name "no-srfi-88"))
-	  (ps:set-port-keywords port (ps-lisp:string= name "srfi-88")))
+	  (qs:set-port-keywords port (qs-lisp:string= name "srfi-88")))
       ;; Chez Scheme's #!r6rs: only R6RS syntax after it, until #!chezscheme
       (if (or (string=? name "r6rs") (string=? name "chezscheme"))
-	  (ps:set-port-r6rs port (ps-lisp:string= name "r6rs")))
+	  (qs:set-port-r6rs port (qs-lisp:string= name "r6rs")))
       (if (and (r6rs-strict? port) (member name '("eof" "bwp")))
 	  (not-in-r6rs port (string-append "#!" name)))
       ;; Chez Scheme's #!eof: the end-of-file object
       (if (string=? name "eof")
 	  eof-datum
       ;; Chez Scheme's #!base-rtd and the like
-      (let ((datum (ps:sharp-bang-datum name)))
+      (let ((datum (qs:sharp-bang-datum name)))
 	(if datum
 	    datum
       ;; #!sweet and the like: the port's alternative reader reads on
-      (let ((reader (ps:reader-directive port name)))
+      (let ((reader (qs:reader-directive port name)))
 	(if reader
-	    (ps:call-alternative-reader reader port)
+	    (qs:call-alternative-reader reader port)
 	    (sub-read port)))))))))
 
 ; Datum labels, #<n>=<datum> and #<n># (R7RS 2.4).
@@ -501,10 +501,10 @@
 	    ((char-numeric? d)
 	     (loop (+ (* n 10) (- (char->ascii d) (char->ascii #\0)))))
 	    ((char=? d #\=)
-	     (ps:read-labelled-datum port n
+	     (qs:read-labelled-datum port n
 	       (lambda () (sub-read-plain port))))
 	    ((char=? d #\#)
-	     (ps:datum-label-reference port n))
+	     (qs:datum-label-reference port n))
 	    ;; Chez Scheme's #3(a b): a vector of length 3, the last
 	    ;; element repeated to fill it
 	    ((char=? d #\()
@@ -534,7 +534,7 @@
 	     (read-char port)
 	     (if (not (eqv? (read-char port) #\())
 		 (reading-error port "bad #vs syntax"))
-	     (ps:make-stencil-vector n (sub-read-list c port)))
+	     (qs:make-stencil-vector n (sub-read-list c port)))
 	    ((char=? d #\v)
 	     (if (> n vector-length-limit)
 		 (reading-error port "invalid vector length" n))
@@ -548,10 +548,10 @@
 				    (else (last (cdr l))))))
 		      (elements (let pad ((l elements) (k (length elements)))
 				  (if (< k n) (pad (append l (list fill)) (+ k 1)) l))))
-		 (cond ((and (eqv? a #\u) (eqv? b #\8)) (ps:list->bytevector elements))
-		       ((and (eqv? a #\f) (eqv? b #\x)) (ps:list->fxvector elements))
+		 (cond ((and (eqv? a #\u) (eqv? b #\8)) (qs:list->bytevector elements))
+		       ((and (eqv? a #\f) (eqv? b #\x)) (qs:list->fxvector elements))
 		       ((and (eqv? a #\f) (eqv? b #\l))
-			(ps:list->numeric-vector "f64" elements))
+			(qs:list->numeric-vector "f64" elements))
 		       (else (reading-error port "bad #v syntax"))))))
 	    ((char-alphabetic? d)
 	     (sub-read-array-literal n d port))
@@ -561,13 +561,13 @@
 ; Array literals (SRFI 163, and SRFI 58's): #<rank><tag><bounds><datum>,
 ; the tag a (or A) or a SRFI 4 tag (u32, f64, ...), or SRFI 58's A:type;
 ; each bound @lower, :length or @lower:length.  The array is made by
-; ps:make-array-literal (src/core.lisp), with (srfi 163)'s procedure.
+; qs:make-array-literal (src/core.lisp), with (srfi 163)'s procedure.
 
 (define (sub-read-array-literal rank first port)
   (let* ((tag (read-array-tag first port))
 	 (bounds (read-array-bounds port))
 	 (datum (sub-read-plain port)))
-    (ps:make-array-literal rank tag bounds datum)))
+    (qs:make-array-literal rank tag bounds datum)))
 
 (define (read-array-tag first port)
   (let loop ((l (list first)))
@@ -706,14 +706,14 @@
     (let ((p (peek-char port)))
       (if (or (eof-object? p) (terminating? p))
           (reading-error port "missing keyword name after #:")
-          (ps:intern-lisp-keyword (car (sub-read-token (read-char port) port)))))))
+          (qs:intern-lisp-keyword (car (sub-read-token (read-char port) port)))))))
 
 ;; SRFI 107: #<tag ...>...</tag> (src/quasi.lisp)
 (define-sharp-macro #\<
   (lambda (c port)
     c
     (read-char port)
-    (ps:read-xml-literal port)))
+    (qs:read-xml-literal port)))
 
 (define-sharp-macro #\;
   (lambda (c port)
@@ -763,7 +763,7 @@
 
 (define (read-symbol-escape port)
   ;; Chez Scheme's \c, any character but x, stands for c
-  (if (and (ps:true? (ps:chez-reader-p))
+  (if (and (qs:true? (qs:chez-reader-p))
 	   (not (eqv? (peek-char port) #\x))
 	   (not (eof-object? (peek-char port))))
       (read-char port)
@@ -799,7 +799,7 @@
 	      ;; if it can be one (R6RS/R7RS "peculiar identifiers" such
 	      ;; as ->x and .foo), else an error.
 	      ((and (char-numeric? (string-ref string 0))
-		    (not (ps:true? (ps:chez-reader-p))))
+		    (not (qs:true? (qs:chez-reader-p))))
 	       (reading-error port "unsupported number syntax" string))
 	      (else (token-symbol token port)))
 	(token-symbol token port))))
@@ -809,11 +809,11 @@
 (define (token-symbol token port)
   (if (and (null? (cdr token))
 	   (r6rs-strict? port)
-	   (not (ps:true? (ps:r6rs-identifier-p (car token)))))
+	   (not (qs:true? (qs:r6rs-identifier-p (car token)))))
       (reading-error port (string-append (car token) " symbol syntax not allowed in #!r6rs mode"))
       (intern-token (car token))))
 
-(define (r6rs-strict? port) (ps:true? (ps:port-r6rs-p port)))
+(define (r6rs-strict? port) (qs:true? (qs:port-r6rs-p port)))
 
 (define (not-in-r6rs port what)
   (reading-error port (string-append what " syntax not allowed in #!r6rs mode")))
@@ -833,21 +833,21 @@
 ; at the top of this file do.
 
 (define (intern-token string)
-  (let ((string (ps-lisp:if ps:*fold-case* (common-lisp:string-downcase string) string))
+  (let ((string (qs-lisp:if qs:*fold-case* (common-lisp:string-downcase string) string))
 	(n (string-length string)))
-    (if (and (ps:keywords-p) (> n 1) (char=? (string-ref string (- n 1)) #\:))
-	(ps:intern-keyword-object (substring string 0 (- n 1)))
-	(ps:intern-scheme-symbol string))))
+    (if (and (qs:keywords-p) (> n 1) (char=? (string-ref string (- n 1)) #\:))
+	(qs:intern-keyword-object (substring string 0 (- n 1)))
+	(qs:intern-scheme-symbol string))))
 
 ; Reader errors
 
 (define (reading-error port message . irritants)
-  (apply #'ps:scheme-reading-error port message irritants))
+  (apply #'qs:scheme-reading-error port message irritants))
 
 
-; Initialize for Pseudoscheme...
+; Initialize for Quasischeme...
 
-(ps-lisp:setq ps:*scheme-read* scheme-read)
+(qs-lisp:setq qs:*scheme-read* scheme-read)
 
 
 ;; Bytevectors: R7RS #u8(...) and R6RS #vu8(...); and SRFI 4's (and
@@ -875,7 +875,7 @@
 		    (string->list ((vector-ref read-dispatch-vector (char->ascii #\")) #\" port)))))
     (if (not (null? (filter-out-bytes codes)))
 	(reading-error port "a character in #u8\"...\" isn't a byte"))
-    (ps:list->bytevector codes)))
+    (qs:list->bytevector codes)))
 
 (define (filter-out-bytes codes)
   (cond ((null? codes) '())
@@ -886,8 +886,8 @@
   (if (not (eqv? (read-char port) #\())
       (reading-error port "bad homogeneous vector syntax" tag))
   (if (string=? tag "u8")
-      (ps:list->bytevector (sub-read-list c port))
-      (ps:list->numeric-vector tag (sub-read-list c port))))
+      (qs:list->bytevector (sub-read-list c port))
+      (qs:list->numeric-vector tag (sub-read-list c port))))
 
 (define-sharp-macro #\u sharp-numeric-vector)
 (define-sharp-macro #\s sharp-numeric-vector)
@@ -903,12 +903,12 @@
       (if (and (r6rs-strict? port) (not (and (eqv? a #\u) (eqv? b #\8))))
 	  (not-in-r6rs port (string #\# #\v a b)))
       (cond ((and (eqv? a #\u) (eqv? b #\8))
-	     (ps:list->bytevector (sub-read-list c port)))
+	     (qs:list->bytevector (sub-read-list c port)))
 	    ;; Chez Scheme's fxvectors and flvectors (f64vectors here)
 	    ((and (eqv? a #\f) (eqv? b #\x))
-	     (ps:list->fxvector (sub-read-list c port)))
+	     (qs:list->fxvector (sub-read-list c port)))
 	    ((and (eqv? a #\f) (eqv? b #\l))
-	     (ps:list->numeric-vector "f64" (sub-read-list c port)))
+	     (qs:list->numeric-vector "f64" (sub-read-list c port)))
 	    (else (reading-error port "bad #v syntax"))))))
 
 ; Chez Scheme's #[name field ...]: a record of the type record-reader
@@ -919,7 +919,7 @@
     c
     (read-char port)
     (if (r6rs-strict? port) (not-in-r6rs port "#["))
-    (ps:read-record-literal (sub-read-list #\[ port))))
+    (qs:read-record-literal (sub-read-list #\[ port))))
 
 ; Chez Scheme's #&x (a box) and #%x (($primitive x): the system's x).
 
@@ -927,7 +927,7 @@
   (lambda (c port)
     c
     (read-char port)
-    (ps:make-box (sub-read-plain port))))
+    (qs:make-box (sub-read-plain port))))
 
 (define-sharp-macro #\%
   (lambda (c port)
@@ -959,14 +959,14 @@
 			    (probe (assoc unique *read-gensyms*)))
 		       (if probe
 			   (cdr probe)
-			   (let ((symbol (ps:make-gensym-from-name name)))
+			   (let ((symbol (qs:make-gensym-from-name name)))
 			     (set! *read-gensyms* (cons (cons unique symbol) *read-gensyms*))
 			     symbol)))
-		     (ps:make-gensym-from-name text))))
+		     (qs:make-gensym-from-name text))))
 	      (else (loop (cons d l))))))))
 
 ;; R6RS 4.3.5 abbreviations: #'x #`x #,x #,@x.  (These replace an older
-;; Pseudoscheme-specific #'cl-function escape; see README.)
+;; Quasischeme-specific #'cl-function escape; see README.)
 
 (define-sharp-macro #\'
   (lambda (c port)
@@ -990,7 +990,7 @@
 	;; SRFI 10: #,(tag datum ...) is the datum tag's reader
 	;; constructor makes, if define-reader-ctor gave it one
 	(let* ((datum (sub-read-carefully port))
-	       (ctor (and (pair? datum) (symbol? (car datum)) (ps:reader-ctor (car datum)))))
+	       (ctor (and (pair? datum) (symbol? (car datum)) (qs:reader-ctor (car datum)))))
 	  (if ctor
 	      (apply ctor (cdr datum))
 	      (list 'unsyntax datum))))))

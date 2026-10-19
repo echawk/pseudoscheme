@@ -34,6 +34,7 @@ else
     s/(?<![\w*%-])(PSR|PSX|PSL|PSG|PSFFI)\b/ "QS".substr($1,2) /ge;
     s/(?<![\w*%-])ps(::?)(?=[\w*%+&<>=!?\/-])/qs$1/g;
     s/(?<![\w*%-])PS(::?)(?=[\w*%+&<>=!?\/-])/QS$1/g;
+    s/(?<![\w*%-])ps(::?)(?=[\s)"])/qs$1/g;     # a bare prefix: (prefix ... ps:), "ps:"
     s/"PS"/"QS"/g;
     s/\.pso\b/.qso/g;
     s/"pso"/"qso"/g;

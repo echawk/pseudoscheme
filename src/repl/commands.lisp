@@ -1,8 +1,8 @@
-;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-REPL -*-
+;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-REPL -*-
 
 ;;;; The REPL's meta-commands, named as Guile's are where they overlap.
 
-(in-package "PSEUDOSCHEME-REPL")
+(in-package "QUASISCHEME-REPL")
 
 (define-command (help h) (text)
   "Show the commands, or one command's help: ,help [COMMAND]."
@@ -187,7 +187,7 @@ frames and the error system's too)."
   "Set a top-level procedure's location, value and function both, as
 psyntax's host-set! does: calls go through the function."
   (setf (symbol-value cell) f)
-  (ps:set-function-from-value cell))
+  (qs:set-function-from-value cell))
 
 (defun tracer (name f)
   (lambda (&rest args)
@@ -229,11 +229,11 @@ own, renumbered."
 	 (signal (position-if (lambda (l) (some (lambda (s) (search s l))
 						'("%SIGNAL" "(ERROR " "(CERROR " "INTERNAL-ERROR")))
 			      lines :from-end t
-				    :end (or (position-if (lambda (l) (search "PSEUDOSCHEME-REPL::EVAL-TEXT" l))
+				    :end (or (position-if (lambda (l) (search "QUASISCHEME-REPL::EVAL-TEXT" l))
 							  lines)
 					     (length lines))))
 	 (start (if signal (1+ signal) 0))
-	 (end (or (position-if (lambda (l) (search "PSEUDOSCHEME-REPL::" l)) lines :start start)
+	 (end (or (position-if (lambda (l) (search "QUASISCHEME-REPL::" l)) lines :start start)
 		  (length lines))))
     (with-output-to-string (out)
       (loop for line in (remove-if #'plumbing-frame-p (subseq lines start end))
@@ -246,8 +246,8 @@ own, renumbered."
 
 (defparameter *plumbing-frames*
   '("SB-INT:SIMPLE-EVAL" "(EVAL " "SB-IMPL::" "SB-C::" "SB-C:" "(FLET \"WITHOUT"
-    "PSEUDOSCHEME-PSYNTAX::EVAL-COMPILED" "PSEUDOSCHEME-PSYNTAX::CALL-WITH-"
-    "PSEUDOSCHEME-PSYNTAX::HOST-EVAL" ":IN PSEUDOSCHEME-PSYNTAX::HOST-EVAL")
+    "QUASISCHEME-PSYNTAX::EVAL-COMPILED" "QUASISCHEME-PSYNTAX::CALL-WITH-"
+    "QUASISCHEME-PSYNTAX::HOST-EVAL" ":IN QUASISCHEME-PSYNTAX::HOST-EVAL")
   "Frames ,bt leaves out: the evaluator's own (,bt all shows them).")
 
 (defun plumbing-frame-p (line)

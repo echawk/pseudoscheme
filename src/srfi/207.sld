@@ -1,7 +1,7 @@
 ;;; SRFI 207: String-notated bytevectors.  The sample implementation by
 ;;; Wolfgang Corcoran-Mathe (MIT; reference/srfi-207/LICENSE), from the
 ;;; SRFI repository's srfi/207.sld and srfi/207/*.scm, unmodified but for
-;;; the include paths.  Its cond-expands find Pseudoscheme's SRFIs 133,
+;;; the include paths.  Its cond-expands find Quasischeme's SRFIs 133,
 ;;; 145, 152, 158 and 160.
 ;;;
 ;;; The #u8"..." syntax is the reader's (src/read.scm).

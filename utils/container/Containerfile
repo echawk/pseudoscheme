@@ -1,4 +1,4 @@
-# A Linux environment for Pseudoscheme (utils/container/README.md):
+# A Linux environment for Quasischeme (utils/container/README.md):
 # - SBCL 2.6.9 from source, with libsbcl.so; Quicklisp and the Lisp
 #   libraries the build needs;
 # - GNU Guile 3.0.11's sources (what --guile loads), and Guile 3.0.11

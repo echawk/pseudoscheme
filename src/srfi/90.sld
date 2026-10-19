@@ -1,16 +1,16 @@
 ;;; SRFI 90: extensible hash table constructor.  Written for
-;;; Pseudoscheme, after the implementation in the SRFI document (Marc
+;;; Quasischeme, after the implementation in the SRFI document (Marc
 ;;; Feeley, 2006; MIT licence), which passes the parameters on to SRFI 69's
 ;;; make-hash-table; the tables are SRFI 69 tables.
 ;;;
 ;;; The SRFI's named parameters are SRFI 88 keywords (test: eq?), which
-;;; Pseudoscheme's reader does not have: there test: is an ordinary
+;;; Quasischeme's reader does not have: there test: is an ordinary
 ;;; identifier.  So this library exports test:, hash:, size:, min-load:,
 ;;; max-load:, weak-keys: and weak-values: as variables whose values are
 ;;; the symbols of the same names, and (make-table test: eq? size: 10)
 ;;; works as written.  A hash function given to make-table takes one
 ;;; argument, as SRFI 90 says; it is wrapped to take SRFI 69's optional
-;;; bound too, so hash-table-hash-function returns the wrapper.  make-table also accepts Pseudoscheme's own
+;;; bound too, so hash-table-hash-function returns the wrapper.  make-table also accepts Quasischeme's own
 ;;; keywords (#:test eq?) and the quoted symbols ('test: eq?).
 ;;;
 ;;; size, min-load, max-load, weak-keys and weak-values are checked but,

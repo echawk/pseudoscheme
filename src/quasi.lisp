@@ -21,7 +21,7 @@
 ;;;; nested constructor.  The libraries (srfi 107), (srfi 108) and (srfi
 ;;;; 109) give the forms their meanings.
 
-(in-package "PS")
+(in-package "QS")
 
 (defun quasi-error (port message &rest irritants)
   (apply #'scheme-reading-error port message irritants))

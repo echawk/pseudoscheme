@@ -5,7 +5,7 @@
 ;;; The reference implementation is written on top of SRFI 126.  Every
 ;;; SRFI 126 name it uses is also an R6RS (rnrs hashtables) name with
 ;;; the same meaning (it always passes hashtable-ref a default), except
-;;; symbol-hash, which here comes from SRFI 128 instead (Pseudoscheme's
+;;; symbol-hash, which here comes from SRFI 128 instead (Quasischeme's
 ;;; (rnrs hashtables) exports a symbol-hash of its own, excluded).  So this
 ;;; library imports (rnrs hashtables) where the shipped srfi/125.sld
 ;;; imports (srfi 126); SRFI 125 hash tables are R6RS hashtables.

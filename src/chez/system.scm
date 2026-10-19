@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; Part of the body of Pseudoscheme's (chezscheme) library: Chez's
+;;;; Part of the body of Quasischeme's (chezscheme) library: Chez's
 ;;;; system procedures, the $-names that a program reaches as #%$name
 ;;;; ($primitive, top-level.scm) and that (chezscheme) doesn't export, and
 ;;;; the other names Racket CS's rumble layer and the schemified layers

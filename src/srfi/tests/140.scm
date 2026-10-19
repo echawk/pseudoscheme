@@ -1,5 +1,5 @@
 ;;; SRFI 140 tests: the SRFI's strings-test.scm (Per Bothner, William D
-;;; Clinger; MIT licence; also in reference/srfi-140), with Pseudoscheme's
+;;; Clinger; MIT licence; also in reference/srfi-140), with Quasischeme's
 ;;; full-unicode feature added to the cond-expand clauses that test
 ;;; non-ASCII strings, and some tests of the sublibraries and of
 ;;; string-append! at the end.

@@ -1,6 +1,6 @@
 ;;; The body of the library (srfi :99 records syntactic), from srfi-99.sls
 ;;; (William D Clinger's reference implementation), with two changes
-;;; marked PSEUDOSCHEME, both because Pseudoscheme's psyntax wraps the
+;;; marked QUASISCHEME, both because Quasischeme's psyntax wraps the
 ;;; syntax objects for lists and non-symbol data, as R6RS allows:
 ;;;   - frob strips a non-identifier syntax object (the parent #f)
 ;;;     before datum->syntax, which takes a datum;
@@ -31,7 +31,7 @@
                    (cons (frob (car x)) (frob (cdr x))))
                   ((vector? x)
                    (vector-map frob x))
-                  (else  ; PSEUDOSCHEME: was (datum->syntax tname x)
+                  (else  ; QUASISCHEME: was (datum->syntax tname x)
                    (datum->syntax tname (syntax->datum x)))))
 
           #`(#,(frob #'define-record-type-helper)
@@ -65,9 +65,9 @@
 
       (define (syntax->list x)
         (syntax-case x ()
-         (()       ; PSEUDOSCHEME: was x
+         (()       ; QUASISCHEME: was x
           '())
-         ((x0)     ; PSEUDOSCHEME: was x
+         ((x0)     ; QUASISCHEME: was x
           (list #'x0))
          ((x0 . x1)
           (cons #'x0 (syntax->list #'x1)))))

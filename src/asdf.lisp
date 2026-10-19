@@ -1,9 +1,9 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-ASDF -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-ASDF -*-
 
 ;;;; Scheme sources as ASDF components
 ;;;;
 ;;;;   (defsystem :my-app
-;;;;     :defsystem-depends-on (:pseudoscheme/asdf)
+;;;;     :defsystem-depends-on (:quasischeme/asdf)
 ;;;;     :depends-on (:alexandria)              ; Lisp libraries the Scheme uses
 ;;;;     :components ((:r7rs-library "lib/stats")  ; lib/stats.sld
 ;;;;                  (:r7rs-file "setup")         ; setup.scm, run at load
@@ -15,7 +15,7 @@
 ;;;;   :r7rs-library, :r6rs-library   a file of library definitions (.sld,
 ;;;;       .sls).  Loading the component puts the library's root
 ;;;;       directory -- the file's directory, less one level per part of
-;;;;       the library's name -- on psx:*library-path* and installs the
+;;;;       the library's name -- on qsx:*library-path* and installs the
 ;;;;       libraries, so Lisp code (r7rs:use-library) and Scheme code
 ;;;;       (import) later in the system can use them.
 ;;;;   :r7rs-file, :r6rs-file, :r5rs-file   a program or REPL-style
@@ -35,12 +35,12 @@
 ;;;; source is expanded again.  Program files (:r7rs-file ...) are run
 ;;;; from source when loaded.
 
-(defpackage "PSEUDOSCHEME-ASDF"
+(defpackage "QUASISCHEME-ASDF"
   (:use "COMMON-LISP")
   (:export "SCHEME-SOURCE-FILE" "R7RS-FILE" "R6RS-FILE" "R5RS-FILE"
 	   "R7RS-LIBRARY" "R6RS-LIBRARY"))
 
-(in-package "PSEUDOSCHEME-ASDF")
+(in-package "QUASISCHEME-ASDF")
 
 (defclass scheme-source-file (asdf:source-file) ()
   (:documentation "A Scheme source file: compiling it does nothing, loading
@@ -80,21 +80,21 @@ it evaluates it (see PERFORM methods)."))
 
 (defun library-forms (file)
   "FILE's library forms, their library directories put on the library path."
-  (let ((forms (ps-r7rs::read-forms file)))
+  (let ((forms (qs-r7rs::read-forms file)))
     (dolist (form forms)
-      (let ((name (ps-r7rs::library-name-of form)))
+      (let ((name (qs-r7rs::library-name-of form)))
 	(when name
-	  (pseudoscheme-api:add-library-directory (library-root file name)))))
-    (pseudoscheme-api::ensure-psyntax)
-    (let ((ps-r7rs::*include-directory* (make-pathname :name nil :type nil :defaults file)))
-      (mapcar (lambda (form) (ps-r7rs::resolve-includes (ps-r7rs::library-form form))) forms))))
+	  (quasischeme-api:add-library-directory (library-root file name)))))
+    (quasischeme-api::ensure-psyntax)
+    (let ((qs-r7rs::*include-directory* (make-pathname :name nil :type nil :defaults file)))
+      (mapcar (lambda (form) (qs-r7rs::resolve-includes (qs-r7rs::library-form form))) forms))))
 
 (defun compile-library-file (file fasl)
   "Expand FILE's libraries and write their compiled code to FASL (the
 cache's fasls of them, one after another); if one of them can't be
 compiled to a file, FASL has none of them, and loading expands the
 source."
-  (let ((fasls (mapcar #'psx::compile-library-form (library-forms file))))
+  (let ((fasls (mapcar #'qsx::compile-library-form (library-forms file))))
     (ensure-directories-exist fasl)
     (with-open-file (out fasl :direction :output :element-type '(unsigned-byte 8)
 			      :if-exists :supersede)
@@ -110,15 +110,15 @@ source."
 them and what they were expanded against is unchanged, else from source."
   (let ((forms (library-forms file)))
     (unless (and fasl (probe-file fasl) (plusp (with-open-file (in fasl) (file-length in)))
-		 (let ((psx::*compiled-libraries* '()))
+		 (let ((qsx::*compiled-libraries* '()))
 		   (handler-case
 		       (handler-bind ((warning #'muffle-warning))
 			 (load fasl)
-			 (and (= (length psx::*compiled-libraries*) (length forms))
-			      (psx::install-compiled-libraries (reverse psx::*compiled-libraries*))))
+			 (and (= (length qsx::*compiled-libraries*) (length forms))
+			      (qsx::install-compiled-libraries (reverse qsx::*compiled-libraries*))))
 		     (error () nil))))
       (dolist (form forms)
-	(psx:eval-library form)))))
+	(qsx:eval-library form)))))
 
 (defmethod asdf:perform ((o asdf:load-op) (c r7rs-file))
   (r7rs:load (asdf:component-pathname c)))

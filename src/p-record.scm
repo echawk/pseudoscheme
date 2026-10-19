@@ -1,9 +1,9 @@
 ; -*- Mode: Scheme; Syntax: Scheme; Package: Scheme; -*-
 ; File record.scm / Copyright (c) 1989 Jonathan Rees / See file COPYING
 
-;;;; Record package for Pseudoscheme
+;;;; Record package for Quasischeme
 
-(ps-lisp:defstruct (record-type-descriptor (:constructor make-rtd)
+(qs-lisp:defstruct (record-type-descriptor (:constructor make-rtd)
 					(:print-function print-rtd)
 					(:conc-name "RTD-"))
   identification
@@ -16,11 +16,11 @@
 (define *record-type-unique-id* 0)
 
 (define package-for-record-functions
-  (ps-lisp:make-package
-   (ps-lisp:if (ps-lisp:find-package ".RECORD")
+  (qs-lisp:make-package
+   (qs-lisp:if (qs-lisp:find-package ".RECORD")
 	    (let loop ((n 0))
 	      (let ((name (string-append ".RECORD-" (number->string n))))
-		(ps-lisp:if (ps-lisp:find-package name)
+		(qs-lisp:if (qs-lisp:find-package name)
 			 (loop (+ n 1))
 			 name)))
 	    ".RECORD")
@@ -29,14 +29,14 @@
 (define (really-make-record-type type-id field-names)
   (let* ((conc
 	  (lambda things
-	    (ps-lisp:intern
+	    (qs-lisp:intern
 	     (apply string-append
 		    (map (lambda (thing)
 			   (cond ((string? thing) thing)
 				 ((number? thing)
 				  (number->string thing))
 				 ((symbol? thing)
-				  (ps-lisp:symbol-name thing))
+				  (qs-lisp:symbol-name thing))
 				 (else "?")))
 			 things))
 	     package-for-record-functions)))
@@ -56,16 +56,16 @@
 			:constructor-function constructor-function
 			:predicate-function predicate-function
 			:accessor-functions accessor-functions)))
-    (ps-lisp:setf (ps-lisp:get id-symbol 'rtd) rtd)
-    (let ((ps-lisp:*package* package-for-record-functions))
+    (qs-lisp:setf (qs-lisp:get id-symbol 'rtd) rtd)
+    (let ((qs-lisp:*package* package-for-record-functions))
       ;; Careful -- :CONC-NAME NIL doesn't mean defstruct won't try to
       ;; intern new symbols in current package!
-      (ps-lisp:eval `(ps-lisp:defstruct (,id-symbol
+      (qs-lisp:eval `(qs-lisp:defstruct (,id-symbol
 				   (:constructor ,constructor-function ())
-				   (:print-function ,(ps-lisp:quote print-record))
+				   (:print-function ,(qs-lisp:quote print-record))
 				   (:predicate ,predicate-function)
-				   (:copier ps-lisp:nil)
-				   (:conc-name ps-lisp:nil))
+				   (:copier qs-lisp:nil)
+				   (:conc-name qs-lisp:nil))
 		    ,@accessor-functions)))
     (set! *record-type-unique-id* (+ *record-type-unique-id* 1))
     rtd))
@@ -77,42 +77,42 @@
 		   (if (null? init-names-option)
 		       (rtd-field-names rtd)
 		       (car init-names-option)))))
-    (ps-lisp:unless (ps-lisp:compiled-function-p (ps-lisp:symbol-function cfun))
-		 (ps-lisp:compile cfun))
-    (ps-lisp:compile 'ps-lisp:nil
-		  `(ps-lisp:lambda ,funs
-		     (ps-lisp:let ((the-record (,cfun)))
+    (qs-lisp:unless (qs-lisp:compiled-function-p (qs-lisp:symbol-function cfun))
+		 (qs-lisp:compile cfun))
+    (qs-lisp:compile 'qs-lisp:nil
+		  `(qs-lisp:lambda ,funs
+		     (qs-lisp:let ((the-record (,cfun)))
 		       ,@(map (lambda (fun)
-				`(ps-lisp:setf (,fun the-record)
+				`(qs-lisp:setf (,fun the-record)
 					    ,fun))
 			      funs)
 		       the-record)))))
 
 (define (record-predicate rtd)
   (let ((fun (rtd-predicate-function rtd)))
-;    (ps-lisp:unless (ps-lisp:compiled-function-p (ps-lisp:symbol-function fun))
-;                 (ps-lisp:compile fun))
-;    (ps-lisp:symbol-function fun)
-    (ps-lisp:compile 'ps-lisp:nil
-		  `(ps-lisp:lambda (x)
-		     (ps-lisp:if (,fun x) ,#t ,#f))))) ;bootstrap subtlety
+;    (qs-lisp:unless (qs-lisp:compiled-function-p (qs-lisp:symbol-function fun))
+;                 (qs-lisp:compile fun))
+;    (qs-lisp:symbol-function fun)
+    (qs-lisp:compile 'qs-lisp:nil
+		  `(qs-lisp:lambda (x)
+		     (qs-lisp:if (,fun x) ,#t ,#f))))) ;bootstrap subtlety
 
 (define (record-accessor rtd name)
   (let ((fun (rtd-accessor-function rtd name)))
-    (ps-lisp:unless (ps-lisp:compiled-function-p (ps-lisp:symbol-function fun))
-		 (ps-lisp:compile fun))
-    (ps-lisp:symbol-function fun)))
+    (qs-lisp:unless (qs-lisp:compiled-function-p (qs-lisp:symbol-function fun))
+		 (qs-lisp:compile fun))
+    (qs-lisp:symbol-function fun)))
 
 (define (record-modifier rtd name)
   (let ((fun (rtd-accessor-function rtd name)))
-    (ps-lisp:compile 'ps-lisp:nil `(ps-lisp:lambda (x y)
-			       (ps-lisp:setf (,fun x) y)))))
+    (qs-lisp:compile 'qs-lisp:nil `(qs-lisp:lambda (x y)
+			       (qs-lisp:setf (,fun x) y)))))
 
 (define (rtd-accessor-function rtd name)
   (let loop ((l (rtd-field-names rtd))
 	     (a (rtd-accessor-functions rtd)))
     (if (null? l)
-	(ps-lisp:error "~S is not a field name for ~S records"
+	(qs-lisp:error "~S is not a field name for ~S records"
 		    name
 		    (rtd-identification rtd))
 	(if (eq? name (car l))
@@ -121,35 +121,35 @@
 
 ; make-record-type:
 
-(define record-type-table (ps-lisp:make-hash-table :test 'ps-lisp:equal))
+(define record-type-table (qs-lisp:make-hash-table :test 'qs-lisp:equal))
 
 (define (make-record-type type-id field-names)
   (let* ((key (cons type-id field-names))
-	 (existing (ps-lisp:gethash key record-type-table)))
-    (if (and (not (eq? existing 'ps-lisp:nil))
+	 (existing (qs-lisp:gethash key record-type-table)))
+    (if (and (not (eq? existing 'qs-lisp:nil))
 	     (begin ; Harlequin doesn't like ~&
-		    (common-lisp:fresh-line ps-lisp:*query-io*)
-		    (ps-lisp:format ps-lisp:*query-io*
+		    (common-lisp:fresh-line qs-lisp:*query-io*)
+		    (qs-lisp:format qs-lisp:*query-io*
 				    "Existing ~S has fields ~S.~%"
 				    existing
 				    field-names)
 		    (not (eq?
-			  (ps-lisp:y-or-n-p
+			  (qs-lisp:y-or-n-p
 			   "Use that descriptor (instead of creating a new one)? ")
-			  'ps-lisp:nil))))
+			  'qs-lisp:nil))))
 	existing
 	(let ((new (really-make-record-type type-id field-names)))
-	  (ps-lisp:setf (ps-lisp:gethash key record-type-table) new)
+	  (qs-lisp:setf (qs-lisp:gethash key record-type-table) new)
 	  new))))
 
 (define (record-type record)
-  (ps-lisp:get (ps-lisp:type-of record) 'rtd))
+  (qs-lisp:get (qs-lisp:type-of record) 'rtd))
 
 ; Printing
 
 (define (print-rtd rtd stream escape?)
   escape? ;ignored
-  (ps-lisp:format stream
+  (qs-lisp:format stream
 	       "#{Record-type-descriptor ~S.~S}"
 	       (rtd-identification rtd)
 	       (rtd-unique-id rtd)))
@@ -159,7 +159,7 @@
   (let ((d (disclose-record record)))
     (display "#{" stream)
     (display (if (symbol? (car d))
-		     (ps-lisp:string-capitalize (symbol->string (car d)))
+		     (qs-lisp:string-capitalize (symbol->string (car d)))
 		     (car d))
 	     stream)
     (for-each (lambda (x)
@@ -168,10 +168,10 @@
 	      (cdr d))
     (display "}" stream)))
 
-(define record-disclosers (ps-lisp:make-hash-table))
+(define record-disclosers (qs-lisp:make-hash-table))
 
 (define (disclose-record record)
-  ((ps-lisp:gethash (record-type record)
+  ((qs-lisp:gethash (record-type record)
 		    record-disclosers
 		    default-record-discloser)
    record))
@@ -180,4 +180,4 @@
   (list (rtd-identification (record-type record))))
 
 (define (define-record-discloser rtd proc)
-  (ps-lisp:setf (ps-lisp:gethash rtd record-disclosers) proc))
+  (qs-lisp:setf (qs-lisp:gethash rtd record-disclosers) proc))

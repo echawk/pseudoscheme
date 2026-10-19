@@ -1,4 +1,4 @@
-;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-REPL -*-
+;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-REPL -*-
 
 ;;;; The REPL every mode shares.  A language (DEFINE-LANGUAGE, in
 ;;;; languages.lisp) says how to read, evaluate and print, and what's
@@ -8,7 +8,7 @@
 ;;;; last error, and ,language to move between modes.  Without a
 ;;;; terminal it reads lines, prompting as before.
 
-(in-package "PSEUDOSCHEME-REPL")
+(in-package "QUASISCHEME-REPL")
 
 (defstruct (language (:constructor %make-language))
   name					; a keyword: :r7rs, :chez, ...
@@ -44,7 +44,7 @@
   (find (intern (string-upcase (string name)) :keyword) *languages* :key #'language-name))
 
 (defun default-write (value stream)
-  (funcall ps:*scheme-write* value stream))
+  (funcall qs:*scheme-write* value stream))
 
 ;;; ------------------------------------------------------------------
 ;;; State
@@ -132,7 +132,7 @@ in the source they stand for (made distinct with .1, .2 ...)."
 		   (setf (gethash sym names)
 			 (let* ((base (source-name sym))
 				(n (incf (gethash base used 0))))
-			   (ps:intern-scheme-symbol (if (= n 1) base (format nil "~A.~D" base (1- n))))))))
+			   (qs:intern-scheme-symbol (if (= n 1) base (format nil "~A.~D" base (1- n))))))))
 	     (walk (x seen)
 	       (cond ((and (symbolp x) (source-name x)) (rename x))
 		     ((and (consp x) (not (gethash x seen)))

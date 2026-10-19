@@ -1,4 +1,4 @@
-;;; SRFI 206: auxiliary syntax keywords.  Written for Pseudoscheme, and
+;;; SRFI 206: auxiliary syntax keywords.  Written for Quasischeme, and
 ;;; partial: the SRFI "cannot be implemented portably", and psyntax can't
 ;;; give two separately defined keywords the same binding (free-
 ;;; identifier=? compares their labels, and a definition always makes a
@@ -9,7 +9,7 @@
 ;;; binds KEYWORD to new auxiliary syntax (a syntax error when used as
 ;;; an expression), which matches itself as a literal, but not other
 ;;; auxiliary syntax of the same name.  auxiliary-syntax-name is bound
-;;; (to auxiliary syntax), but Pseudoscheme has no SRFI 213 identifier
+;;; (to auxiliary syntax), but Quasischeme has no SRFI 213 identifier
 ;;; properties to look it up with.
 ;;;
 ;;; (srfi 206 all) is the SRFI's portable "poor man's" library (see

@@ -1,4 +1,4 @@
-;;; SRFI 36: I/O conditions.  Written for Pseudoscheme, on (srfi 35) and
+;;; SRFI 36: I/O conditions.  Written for Quasischeme, on (srfi 35) and
 ;;; R6RS's I/O condition types (library report 8.1).
 ;;;
 ;;; Where R6RS has a type with the same place in the hierarchy and the
@@ -34,7 +34,7 @@
 ;;;   difference from SRFI 36: i/o-error? is true of a &read-error.
 ;;;
 ;;; SRFI 36 also asks that the R5RS I/O procedures raise these
-;;; conditions.  Pseudoscheme's file-opening procedures raise an
+;;; conditions.  Quasischeme's file-opening procedures raise an
 ;;; &i/o-filename-error (with &message and &irritants) when the file
 ;;; cannot be opened, but not the more specific subtypes, and the other
 ;;; procedures' failures are not classified.

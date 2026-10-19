@@ -1,7 +1,7 @@
-;;; SRFI 193: Command line.  Written for Pseudoscheme (the SRFI has no
+;;; SRFI 193: Command line.  Written for Quasischeme (the SRFI has no
 ;;; portable implementation: it describes what the implementation knows).
 ;;;
-;;; The command-line program, bin/pseudoscheme, makes (command-line)
+;;; The command-line program, bin/quasischeme, makes (command-line)
 ;;; (FILE ARG ...) when it runs FILE, and ("") otherwise, and records
 ;;; FILE's absolute name before running it; that is script-file.  A file
 ;;; run with load, from the REPL or elsewhere, is not a script here.
@@ -10,10 +10,10 @@
 (define-library (srfi 193)
   (export command-line command-name command-args script-file script-directory)
   (import (scheme base) (scheme process-context)
-          (only (pseudoscheme lisp) lisp-eval-string))
+          (only (quasischeme lisp) lisp-eval-string))
   (begin
     (define %script-file
-      (lisp-eval-string "(lambda () (or ps-r7rs:*script-file* ps:false))"))
+      (lisp-eval-string "(lambda () (or qs-r7rs:*script-file* qs:false))"))
 
     (define (last-slash s)
       (let loop ((i (- (string-length s) 1)))

@@ -1,11 +1,11 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; Host procedures behind Chez Scheme's (chezscheme) library
 ;;;; (src/chez/*.scm): what needs the operating system, threads, or Common
-;;;; Lisp.  Named chez:..., they reach Scheme through (pseudoscheme chez
+;;;; Lisp.  Named chez:..., they reach Scheme through (quasischeme chez
 ;;;; host), which src/chez/chez.lisp makes of every chez: primitive.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defun path-string (x) (if (pathnamep x) (namestring x) x))
 
@@ -75,12 +75,12 @@ than a few hundred.")
 		   (merge-pathnames (uiop:ensure-directory-pathname (uiop:parse-native-namestring dir))
 				    *default-pathname-defaults*))))
 	(unless (uiop:directory-exists-p path)
-	  (r6rs-assertion-violation (ps:intern-scheme-symbol "current-directory")
+	  (r6rs-assertion-violation (qs:intern-scheme-symbol "current-directory")
 				    (format nil "cannot set current directory to ~A" dir)))
 	(let ((path (truename path)))
 	  #+sbcl (sb-posix:chdir path)
 	  (setf *default-pathname-defaults* path))
-	ps:unspecific)
+	qs:unspecific)
       (let ((s (namestring *default-pathname-defaults*)))
 	(if (and (> (length s) 1) (char= (char s (1- (length s))) #\/))
 	    (subseq s 0 (1- (length s)))
@@ -97,12 +97,12 @@ than a few hundred.")
 
 (defun file-type-p (name follow? type)
   (let ((stat (file-stat name follow?)))
-    (ps:true? (and stat (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt) type)))))
+    (qs:true? (and stat (= (logand (sb-posix:stat-mode stat) sb-posix:s-ifmt) type)))))
 
-(defun follow-arg (follow?) (not (eq follow? ps:false)))
+(defun follow-arg (follow?) (not (eq follow? qs:false)))
 
 (defprim "chez:file-exists?" (name &optional (follow? t))
-  (ps:true? (and (file-stat name (follow-arg follow?)) t)))
+  (qs:true? (and (file-stat name (follow-arg follow?)) t)))
 
 (defprim "chez:file-directory?" (name &optional (follow? t))
   (file-type-p name (follow-arg follow?) sb-posix:s-ifdir))
@@ -161,19 +161,19 @@ or NIL if it can't be had."
   (let ((native (namestring (uiop:parse-native-namestring name))))
     (or (file-times-ns native (follow-arg follow?))
 	(let ((stat (or (file-stat name (follow-arg follow?))
-			(ps:scheme-error "failed for ~S: no such file or directory" name))))
+			(qs:scheme-error "failed for ~S: no such file or directory" name))))
 	  (list (cons (sb-posix:stat-atime stat) 0) (cons (sb-posix:stat-ctime stat) 0)
 		(cons (sb-posix:stat-mtime stat) 0))))))
 
 (defun call-for-file (who name error? function)
   "Call FUNCTION on NAME's native path: #t, or on failure #f, or an
 error if ERROR? is true."
-  (handler-case (progn (funcall function (namestring (uiop:parse-native-namestring name))) ps:true)
+  (handler-case (progn (funcall function (namestring (uiop:parse-native-namestring name))) qs:true)
     (sb-posix:syscall-error (e)
-      (if (and error? (not (eq error? ps:false)))
-	  (ps:scheme-error "~A: failed for ~A: ~A" who name
+      (if (and error? (not (eq error? qs:false)))
+	  (qs:scheme-error "~A: failed for ~A: ~A" who name
 			   (sb-int:strerror (sb-posix:syscall-errno e)))
-	  ps:false))))
+	  qs:false))))
 
 (defprim "chez:delete-file" (name &optional error?)
   (call-for-file "delete-file" name error? #'sb-posix:unlink))
@@ -192,11 +192,11 @@ error if ERROR? is true."
 (defprim "chez:mkdir" (name &optional mode)
   (declare (ignore mode))
   (ensure-directories-exist (uiop:ensure-directory-pathname name))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:rename-file" (old new)
   (rename-file (uiop:parse-native-namestring old) (uiop:parse-native-namestring new))
-  ps:unspecific)
+  qs:unspecific)
 
 
 (defprim "chez:timezone-offset" ()
@@ -224,7 +224,7 @@ error if ERROR? is true."
 (defprim "chez:get-mode" (name &optional (follow? t))
   #+sbcl
   (let ((path (namestring (uiop:parse-native-namestring name))))
-    (logand #o7777 (sb-posix:stat-mode (if (ps:truep follow?) (sb-posix:stat path) (sb-posix:lstat path)))))
+    (logand #o7777 (sb-posix:stat-mode (if (qs:truep follow?) (sb-posix:stat path) (sb-posix:lstat path)))))
   ;; GNU's %a is octal digits; BSD's %Lp too.
   #-sbcl (parse-integer (princ-to-string (stat-field name "%a" "%Lp")) :radix 8))
 
@@ -232,7 +232,7 @@ error if ERROR? is true."
   #+sbcl (sb-posix:chmod (namestring (uiop:parse-native-namestring name)) mode)
   #-sbcl (uiop:run-program (list "chmod" (format nil "~O" mode)
 				 (namestring (uiop:parse-native-namestring name))))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:machine-type" ()
   "Chez Scheme's name for this machine, threaded: ta6osx, tarm64le, ...
@@ -252,46 +252,46 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 		    ((search "sunos" s) "s2")
 		    ((search "win" s) "nt")
 		    (t s)))))
-    (ps:intern-scheme-symbol (concatenate 'string "t" arch os))))
+    (qs:intern-scheme-symbol (concatenate 'string "t" arch os))))
 
 ;;; ------------------------------------------------------------------
-;;; Boxes (#&x reads as one: PS:BOX, src/core.lisp)
+;;; Boxes (#&x reads as one: QS:BOX, src/core.lisp)
 
-(defprim "chez:box" (x) (ps:make-box x))
-(defprim "chez:box?" (x) (bool (ps:box-p x)))
+(defprim "chez:box" (x) (qs:make-box x))
+(defprim "chez:box?" (x) (bool (qs:box-p x)))
 (defprim "chez:unbox" (b)
-  (unless (ps:box-p b) (r6rs-assertion-violation "unbox" "not a box" b))
-  (ps:box-contents b))
+  (unless (qs:box-p b) (r6rs-assertion-violation "unbox" "not a box" b))
+  (qs:box-contents b))
 (defprim "chez:set-box!" (b x)
-  (unless (ps:box-p b) (r6rs-assertion-violation "set-box!" "not a box" b))
-  (setf (ps:box-contents b) x)
-  ps:unspecific)
+  (unless (qs:box-p b) (r6rs-assertion-violation "set-box!" "not a box" b))
+  (setf (qs:box-contents b) x)
+  qs:unspecific)
 (defprim "chez:box-cas!" (b old new)
-  (unless (ps:box-p b) (r6rs-assertion-violation "box-cas!" "not a box" b))
-  #+sbcl (bool (eq (sb-ext:compare-and-swap (ps:box-contents b) old new) old))
-  #-sbcl (if (eq (ps:box-contents b) old)
-	     (progn (setf (ps:box-contents b) new) t)
-	     ps:false))
+  (unless (qs:box-p b) (r6rs-assertion-violation "box-cas!" "not a box" b))
+  #+sbcl (bool (eq (sb-ext:compare-and-swap (qs:box-contents b) old new) old))
+  #-sbcl (if (eq (qs:box-contents b) old)
+	     (progn (setf (qs:box-contents b) new) t)
+	     qs:false))
 
 ;;; ------------------------------------------------------------------
 ;;; fxvectors (#vfx(...)); flvectors are f64vectors
 
 (defun check-fxvector (who v)
-  (unless (ps:fxvector-p v) (r6rs-assertion-violation who "not an fxvector" v)))
+  (unless (qs:fxvector-p v) (r6rs-assertion-violation who "not an fxvector" v)))
 
-(defprim "chez:fxvector?" (x) (bool (ps:fxvector-p x)))
+(defprim "chez:fxvector?" (x) (bool (qs:fxvector-p x)))
 (defprim "chez:make-fxvector" (n &optional (fill 0))
   (make-array n :element-type 'fixnum :initial-element fill))
-(defprim "chez:fxvector" (&rest xs) (ps:list->fxvector xs))
-(defprim "chez:list->fxvector" (xs) (ps:list->fxvector xs))
+(defprim "chez:fxvector" (&rest xs) (qs:list->fxvector xs))
+(defprim "chez:list->fxvector" (xs) (qs:list->fxvector xs))
 (defprim "chez:fxvector-length" (v) (check-fxvector "fxvector-length" v) (length v))
 (defprim "chez:fxvector-ref" (v i) (check-fxvector "fxvector-ref" v) (aref v i))
 (defprim "chez:fxvector-set!" (v i x)
   (check-fxvector "fxvector-set!" v)
   (setf (aref v i) x)
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:fxvector->list" (v) (check-fxvector "fxvector->list" v) (coerce v 'list))
-(defprim "chez:fxvector-fill!" (v x) (check-fxvector "fxvector-fill!" v) (fill v x) ps:unspecific)
+(defprim "chez:fxvector-fill!" (v x) (check-fxvector "fxvector-fill!" v) (fill v x) qs:unspecific)
 (defprim "chez:fxvector-copy" (v) (check-fxvector "fxvector-copy" v) (copy-seq v))
 
 (defun vector-copy! (who check src src-start dst dst-start n)
@@ -302,7 +302,7 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 	       (<= (+ src-start n) (length src)) (<= (+ dst-start n) (length dst)))
     (r6rs-assertion-violation who "invalid range" (list src-start dst-start n)))
   (replace dst src :start1 dst-start :end1 (+ dst-start n) :start2 src-start)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:fxvector-copy!" (src src-start dst dst-start n)
   (vector-copy! "fxvector-copy!" #'check-fxvector src src-start dst dst-start n))
@@ -337,13 +337,13 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
   (check-flvector-index "flvector-set!" v i)
   (check-flonum "flvector-set!" x)
   (setf (aref v i) x)
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:flvector->list" (v) (check-flvector "flvector->list" v) (coerce v 'list))
 (defprim "chez:flvector-fill!" (v x)
   (check-flvector "flvector-fill!" v)
   (check-flonum "flvector-fill!" x)
   (fill v x)
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:flvector-copy" (v) (check-flvector "flvector-copy" v) (copy-seq v))
 (defprim "chez:flvector-copy!" (src src-start dst dst-start n)
   (vector-copy! "flvector-copy!" #'check-flvector src src-start dst dst-start n))
@@ -422,22 +422,22 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
   (or (gethash sb-thread:*current-thread* *virtual-registers*)
       (setf (gethash sb-thread:*current-thread* *virtual-registers*) (make-array 16 :initial-element 0))))
 (defprim "chez:virtual-register" (i) (svref (virtual-registers) i))
-(defprim "chez:set-virtual-register!" (i x) (setf (svref (virtual-registers) i) x) ps:unspecific)
+(defprim "chez:set-virtual-register!" (i x) (setf (svref (virtual-registers) i) x) qs:unspecific)
 (defprim "chez:collect" ()
   (sb-ext:gc :full t)
-  (ps-r6rs::note-full-collection)
-  ps:unspecific)
+  (qs-r6rs::note-full-collection)
+  qs:unspecific)
 
 ;;; Guardians (src/r6rs/guardians.lisp): a guardian is a procedure
 
 (defvar *guardian-procedures* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t))
 
-(defprim "chez:make-guardian" (&optional (ordered ps:false))
-  (let* ((g (ps-r6rs::new-guardian (ps:true? ordered)))
+(defprim "chez:make-guardian" (&optional (ordered qs:false))
+  (let* ((g (qs-r6rs::new-guardian (qs:true? ordered)))
 	 (procedure (lambda (&optional (object nil object-p) (representative object))
 		      (if object-p
-			  (ps-r6rs::guardian-register g object representative)
-			  (ps-r6rs::guardian-next g)))))
+			  (qs-r6rs::guardian-register g object representative)
+			  (qs-r6rs::guardian-next g)))))
     (setf (gethash procedure *guardian-procedures*) g)
     procedure))
 
@@ -445,8 +445,8 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 
 (defprim "chez:unregister-guardian" (procedure)
   (let ((g (and (functionp procedure) (gethash procedure *guardian-procedures*))))
-    (unless g (ps:scheme-error "unregister-guardian: ~S is not a guardian" procedure))
-    (ps-r6rs::guardian-unregister g)))
+    (unless g (qs:scheme-error "unregister-guardian: ~S is not a guardian" procedure))
+    (qs-r6rs::guardian-unregister g)))
 (defprim "chez:gc-statistics" ()
   (vector *gc-count* (/ sb-ext:*gc-run-time* internal-time-units-per-second)))
 
@@ -511,7 +511,7 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 (defprim "chez:fork-thread" (thunk)
   (let* ((in *standard-input*) (out *standard-output*) (err *error-output*)
 	 (dir *default-pathname-defaults*)
-	 (parameters (ps-r7rs::thread-parameters-snapshot))
+	 (parameters (qs-r7rs::thread-parameters-snapshot))
 	 (id (bt2:with-lock-held (*thread-id-lock*) (incf *thread-ids*)))
 	 (thread (make-chez-thread nil id)))
     ;; bordeaux-threads' first API: its second ends a thread at the first
@@ -519,10 +519,10 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
     (setf (chez-thread-native thread)
 	  (bt:make-thread
 	   (lambda ()
-	     (ps:disable-float-traps)
+	     (qs:disable-float-traps)
 	     (let ((*standard-input* in) (*standard-output* out) (*error-output* err)
 		   (*default-pathname-defaults* dir)
-		   (ps-r7rs::*thread-parameters* parameters)
+		   (qs-r7rs::*thread-parameters* parameters)
 		   (*current-chez-thread* thread))
 	       ;; an exception nothing handles ends the thread, reported as
 	       ;; Chez reports it
@@ -530,9 +530,9 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 		 (error (e)
 		   (ignore-errors
 		    (format *error-output* "~&~A~%"
-			    (uiop:symbol-call "PSEUDOSCHEME-R7RS" "CHEZ-ERROR-TEXT" e))
+			    (uiop:symbol-call "QUASISCHEME-R7RS" "CHEZ-ERROR-TEXT" e))
 		    (finish-output *error-output*))
-		   ps:unspecific))))
+		   qs:unspecific))))
 	   :name (format nil "Chez thread ~D" id)))
     thread))
 
@@ -565,38 +565,38 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 (defstruct (chez-condition (:constructor make-chez-condition (cv name))) cv name)
 
 (defprim "chez:make-mutex" (&optional name)
-  (make-chez-mutex (bt2:make-lock :name (if (or (null name) (eq name ps:false)) "mutex" (princ-to-string name)))
-		   (or name ps:false)))
+  (make-chez-mutex (bt2:make-lock :name (if (or (null name) (eq name qs:false)) "mutex" (princ-to-string name)))
+		   (or name qs:false)))
 (defprim "chez:mutex?" (x) (bool (chez-mutex-p x)))
 (defprim "chez:mutex-name" (m) (chez-mutex-name m))
 (defprim "chez:mutex-acquire" (m &optional (block? t))
-  (bool (mutex-acquire m (not (eq block? ps:false)))))
+  (bool (mutex-acquire m (not (eq block? qs:false)))))
 (defprim "chez:mutex-release" (m)
   (mutex-release m)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:make-condition" (&optional name)
-  (make-chez-condition (bt2:make-condition-variable) (or name ps:false)))
+  (make-chez-condition (bt2:make-condition-variable) (or name qs:false)))
 (defprim "chez:condition?" (x) (bool (chez-condition-p x)))
 (defprim "chez:condition-wait" (c m &optional timeout)
   ;; TIMEOUT: a time object's seconds, or #f; the result is #t unless it
   ;; timed out.  The mutex is released fully while waiting, however many
   ;; times this thread holds it.
-  (let ((seconds (and timeout (not (eq timeout ps:false)) timeout))
+  (let ((seconds (and timeout (not (eq timeout qs:false)) timeout))
 	(count (chez-mutex-count m)))
     (setf (chez-mutex-owner m) nil (chez-mutex-count m) 0)
     (prog1 (bool (bt2:condition-wait (chez-condition-cv c) (chez-mutex-lock m) :timeout seconds))
       (setf (chez-mutex-owner m) (bt2:current-thread) (chez-mutex-count m) count))))
 (defprim "chez:condition-signal" (c)
   (bt2:condition-notify (chez-condition-cv c))
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:condition-broadcast" (c)
   (bt2:condition-broadcast (chez-condition-cv c))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:sleep-seconds" (seconds)
   (sleep (max 0 seconds))
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; ------------------------------------------------------------------
 ;;; The process
@@ -608,13 +608,13 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 (defprim "chez:putenv" (name value)
   #+sbcl (sb-posix:setenv name value 1)
   #-sbcl (setf (uiop:getenv name) value)
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; ------------------------------------------------------------------
 ;;; format: Common Lisp's, which Chez's follows, with every object
 ;;; printed as Scheme prints it: ~a displays, ~s writes.  Integers and
 ;;; ratios are left to Lisp, so that ~x, ~b and ~r print them in their
-;;; radix.  (A Scheme #f is true to ~[ and ~:[, being Lisp's PS:FALSE.)
+;;; radix.  (A Scheme #f is true to ~[ and ~:[, being Lisp's QS:FALSE.)
 
 (defvar *scheme-print-dispatch*
   (let ((table (copy-pprint-dispatch nil)))
@@ -625,8 +625,8 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 			   (let ((escape *print-escape*)
 				 (*print-pretty* nil))
 			     (if escape
-				 (funcall ps:*scheme-write* x stream)
-				 (funcall ps:*scheme-display* x stream))))
+				 (funcall qs:*scheme-write* x stream)
+				 (funcall qs:*scheme-display* x stream))))
 			 0 table)
     table))
 
@@ -643,7 +643,7 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
   (with-output-to-string (s) (chez-format s control args)))
 (defprim "chez:format-to-port" (port control &rest args)
   (chez-format port control args)
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; ------------------------------------------------------------------
 ;;; Numbers, symbols, procedures
@@ -661,10 +661,10 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
   ;; CL can't seed from a number portably: a fresh state for each seed
   #+sbcl (when n (setq *chez-random-state* (sb-ext:seed-random-state n)))
   #-sbcl (declare (ignore n))
-  ps:unspecific)
+  qs:unspecific)
 
 (macrolet ((def (name fn)
-	     `(defprim ,name (x) (ps:inexact (,fn (if (rationalp x) (coerce x 'double-float) x))))))
+	     `(defprim ,name (x) (qs:inexact (,fn (if (rationalp x) (coerce x 'double-float) x))))))
   (def "chez:sinh" sinh) (def "chez:cosh" cosh) (def "chez:tanh" tanh)
   (def "chez:asinh" asinh) (def "chez:acosh" acosh) (def "chez:atanh" atanh))
 
@@ -673,12 +673,12 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
 (defprim "chez:make-gensym" (prefix &optional counted)
   ;; an uninterned symbol, named as Scheme names symbols (case inverted);
   ;; (gensym) is g0, g1, ..., (gensym "name") is name
-  (let ((name (if (symbolp prefix) (ps:scheme-symbol-name prefix) prefix)))
-    (make-symbol (ps:invert-case (if counted
+  (let ((name (if (symbolp prefix) (qs:scheme-symbol-name prefix) prefix)))
+    (make-symbol (qs:invert-case (if counted
 				     (format nil "~A~D" name (prog1 *chez-gensym-counter* (incf *chez-gensym-counter*)))
 				     name)))))
 (defprim "chez:uninterned-symbol?" (x) (bool (and (symbolp x) x (null (symbol-package x)))))
-(defprim "chez:string->uninterned-symbol" (s) (make-symbol (ps:invert-case s)))
+(defprim "chez:string->uninterned-symbol" (s) (make-symbol (qs:invert-case s)))
 
 ;;; Chez 10's wrapper procedures: a procedure that calls another, with
 ;;; data and an arity mask of its own; an arity wrapper checks its
@@ -719,11 +719,11 @@ chez-srfi derives its platform features (posix, darwin, ...) from it."
   (check-wrapper "set-wrapper-procedure-procedure!" w)
   (unless (functionp proc) (r6rs-assertion-violation "set-wrapper-procedure-procedure!" "not a procedure" proc))
   (setf (wrapper-proc w) proc)
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:set-wrapper-procedure-data!" (w data)
   (check-wrapper "set-wrapper-procedure-data!" w)
   (setf (wrapper-data w) data)
-  ps:unspecific)
+  qs:unspecific)
 
 (defun lambda-list-arity-mask (proc)
   "Bit N set if PROC accepts N arguments (all bits from some on, a
@@ -755,17 +755,17 @@ negative mask, for a rest argument)."
 ;;; called with a value, they set it (through the converter)
 
 (defprim "chez:make-parameter" (init &optional converter)
-  (let* ((converter (and converter (not (eq converter ps:false)) converter))
-	 (state (ps-r7rs::make-parameter-state nil converter))
+  (let* ((converter (and converter (not (eq converter qs:false)) converter))
+	 (state (qs-r7rs::make-parameter-state nil converter))
 	 (param (lambda (&optional (value nil value-p))
 		  (if value-p
-		      (progn (setf (ps-r7rs::parameter-state-value state)
+		      (progn (setf (qs-r7rs::parameter-state-value state)
 				   (if converter (funcall converter value) value))
-			     ps:unspecific)
-		      (ps-r7rs::parameter-state-value state)))))
-    (setf (ps-r7rs::parameter-state-value state)
+			     qs:unspecific)
+		      (qs-r7rs::parameter-state-value state)))))
+    (setf (qs-r7rs::parameter-state-value state)
 	  (if converter (funcall converter init) init))
-    (setf (gethash param ps-r7rs::*parameter-states*) state)
+    (setf (gethash param qs-r7rs::*parameter-states*) state)
     param))
 
 ;;; ------------------------------------------------------------------
@@ -789,7 +789,7 @@ negative mask, for a rest argument)."
 	       :direction (if (eq direction :io) :io direction) :if-exists :append))
 
 (defun maybe-transcoded (port transcoder)
-  (if (and transcoder (not (eq transcoder ps:false)))
+  (if (and transcoder (not (eq transcoder qs:false)))
       (funcall (cdr (assoc "transcoded-port" *primitives* :test #'string=)) port transcoder)
       port))
 
@@ -822,21 +822,21 @@ nothing is ready.")
 
 (defprim "chez:get-bytevector-some!" (port bv start count)
   (let ((n (read-some-bytes port bv start count (gethash port *nonblocking-ports*))))
-    (if (eq n :eof) ps:eof-object n)))
+    (if (eq n :eof) qs:eof-object n)))
 
 (defprim "chez:set-port-nonblocking!" (port on?)
-  (if (eq on? ps:false)
+  (if (eq on? qs:false)
       (remhash port *nonblocking-ports*)
       (setf (gethash port *nonblocking-ports*) t))
   (let ((fd (port-descriptor port)))
     #+sbcl (when fd
 	     (let ((flags (sb-posix:fcntl fd sb-posix:f-getfl)))
 	       (sb-posix:fcntl fd sb-posix:f-setfl
-			       (if (eq on? ps:false)
+			       (if (eq on? qs:false)
 				   (logandc2 flags sb-posix:o-nonblock)
 				   (logior flags sb-posix:o-nonblock)))))
     #-sbcl (declare (ignore fd on?)))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:port-closed?" (port)
   (bool (not (open-stream-p port))))
@@ -848,7 +848,7 @@ nothing is ready.")
 ;;; and ignored.
 
 (defun chez-file-options (options)
-  (mapcar #'ps:scheme-symbol-name (if (listp options) options (list options))))
+  (mapcar #'qs:scheme-symbol-name (if (listp options) options (list options))))
 
 (defprim "chez:open-output-file" (path &optional options)
   (let* ((names (chez-file-options options))
@@ -868,70 +868,70 @@ nothing is ready.")
     (io-error-filename "open-input-file" path "make-i/o-file-does-not-exist-error"))
   (open path :direction :input :external-format :utf-8))
 
-;;; Stencil vectors (ps:stencil-vector, src/core.lisp)
+;;; Stencil vectors (qs:stencil-vector, src/core.lisp)
 
-(defstruct (system-stencil-vector (:include ps:stencil-vector)))
+(defstruct (system-stencil-vector (:include qs:stencil-vector)))
 
 (defun check-stencil-vector (who x)
-  (unless (and (ps:stencil-vector-p x) (not (system-stencil-vector-p x)))
-    (ps:scheme-error "~A: ~S is not a stencil vector" who x))
+  (unless (and (qs:stencil-vector-p x) (not (system-stencil-vector-p x)))
+    (qs:scheme-error "~A: ~S is not a stencil vector" who x))
   x)
 
 (defun stencil-vector-index (who sv i)
-  (unless (and (integerp i) (< -1 i (length (ps:stencil-vector-elements sv))))
-    (ps:scheme-error "~A: invalid index ~S" who i))
+  (unless (and (integerp i) (< -1 i (length (qs:stencil-vector-elements sv))))
+    (qs:scheme-error "~A: invalid index ~S" who i))
   i)
 
 (defprim "chez:stencil-vector" (mask &rest elements)
-  (ps:make-stencil-vector mask elements))
+  (qs:make-stencil-vector mask elements))
 
-(defprim "chez:stencil-vector?" (x) (bool (and (ps:stencil-vector-p x) (not (system-stencil-vector-p x)))))
+(defprim "chez:stencil-vector?" (x) (bool (and (qs:stencil-vector-p x) (not (system-stencil-vector-p x)))))
 
 (defprim "chez:stencil-vector-mask" (sv)
-  (ps:stencil-vector-mask (check-stencil-vector "stencil-vector-mask" sv)))
+  (qs:stencil-vector-mask (check-stencil-vector "stencil-vector-mask" sv)))
 
 (defprim "chez:stencil-vector-length" (sv)
-  (length (ps:stencil-vector-elements (check-stencil-vector "stencil-vector-length" sv))))
+  (length (qs:stencil-vector-elements (check-stencil-vector "stencil-vector-length" sv))))
 
 (defprim "chez:stencil-vector-ref" (sv i)
   (check-stencil-vector "stencil-vector-ref" sv)
-  (svref (ps:stencil-vector-elements sv) (stencil-vector-index "stencil-vector-ref" sv i)))
+  (svref (qs:stencil-vector-elements sv) (stencil-vector-index "stencil-vector-ref" sv i)))
 
 (defprim "chez:stencil-vector-set!" (sv i x)
   (check-stencil-vector "stencil-vector-set!" sv)
-  (setf (svref (ps:stencil-vector-elements sv) (stencil-vector-index "stencil-vector-set!" sv i)) x)
-  ps:unspecific)
+  (setf (svref (qs:stencil-vector-elements sv) (stencil-vector-index "stencil-vector-set!" sv i)) x)
+  qs:unspecific)
 
-(defprim "chez:stencil-vector-mask-width" () ps:stencil-vector-mask-width)
+(defprim "chez:stencil-vector-mask-width" () qs:stencil-vector-mask-width)
 
 (defun stencil-vector-updated (who sv remove add new make)
   "SV without the elements of the bits REMOVE and with those of ADD,
 NEW, as MAKE (of a mask and a list of elements) makes it."
-  (let* ((mask (ps:stencil-vector-mask sv))
+  (let* ((mask (qs:stencil-vector-mask sv))
 	 (kept (logandc2 mask remove)))
     (unless (and (integerp remove) (integerp add) (>= remove 0) (>= add 0)
 		 (= (logand mask remove) remove)
 		 (zerop (logand kept add))
 		 (= (logcount add) (length new)))
-      (ps:scheme-error "~A: invalid masks ~S and ~S for ~S" who remove add sv))
-    (let ((old (ps:stencil-vector-elements sv)) (oi 0) (out '()))
-      (loop for bit from 0 below ps:stencil-vector-mask-width
+      (qs:scheme-error "~A: invalid masks ~S and ~S for ~S" who remove add sv))
+    (let ((old (qs:stencil-vector-elements sv)) (oi 0) (out '()))
+      (loop for bit from 0 below qs:stencil-vector-mask-width
 	    do (cond ((logbitp bit add) (push (pop new) out))
 		     ((logbitp bit kept) (push (svref old oi) out)))
 	       (when (logbitp bit mask) (incf oi)))
       (funcall make (logior kept add) (nreverse out)))))
 
 (defun stencil-vector-truncated (who sv mask)
-  (let ((old (ps:stencil-vector-elements sv)))
+  (let ((old (qs:stencil-vector-elements sv)))
     (unless (and (integerp mask) (>= mask 0) (<= (logcount mask) (length old)))
-      (ps:scheme-error "~A: invalid mask ~S for ~S" who mask sv))
-    (setf (ps:stencil-vector-elements sv) (subseq old 0 (logcount mask))
-	  (ps:stencil-vector-mask sv) mask)
-    ps:unspecific))
+      (qs:scheme-error "~A: invalid mask ~S for ~S" who mask sv))
+    (setf (qs:stencil-vector-elements sv) (subseq old 0 (logcount mask))
+	  (qs:stencil-vector-mask sv) mask)
+    qs:unspecific))
 
 (defprim "chez:stencil-vector-update" (sv remove add &rest new)
   (check-stencil-vector "stencil-vector-update" sv)
-  (stencil-vector-updated "stencil-vector-update" sv remove add new #'ps:make-stencil-vector))
+  (stencil-vector-updated "stencil-vector-update" sv remove add new #'qs:make-stencil-vector))
 
 (defprim "chez:stencil-vector-truncate!" (sv mask)
   (check-stencil-vector "stencil-vector-truncate!" sv)
@@ -982,7 +982,7 @@ and the column is kept, from 0 when it's made, for ~t, ~& and ~<...~>."))
 
 (defprim "chez:fresh-line" (&optional (port *standard-output*))
   (fresh-line port)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:decode-float" (x)
   "Chez's decode-float: #(significand exponent sign), x being
@@ -1030,13 +1030,13 @@ NIL for any value.")
 
 (defun check-field-value (who type x)
   (unless (field-type-ok-p type x)
-    (ps:scheme-error "~A: invalid value ~S for ~A field" who x type)))
+    (qs:scheme-error "~A: invalid value ~S for ~A field" who x type)))
 
 (defprim "chez:set-record-field-types!" (rtd types)
   "TYPES: a list, a type name or #f for each of RTD's own fields."
   (setf (gethash rtd *record-field-types*)
-	(mapcar (lambda (ty) (if (eq ty ps:false) nil (ps:scheme-symbol-name ty))) types))
-  ps:unspecific)
+	(mapcar (lambda (ty) (if (eq ty qs:false) nil (qs:scheme-symbol-name ty))) types))
+  qs:unspecific)
 
 (defun all-fields (rtd)
   "Every field of RTD's records, (mutable-p name type), its ancestors' first."
@@ -1055,7 +1055,7 @@ every field's value, its ancestors' first."
 	(name (scheme-name (rtd-name rtd))))
     (lambda (&rest args)
       (unless (= (length args) n)
-	(ps:scheme-error "~A: incorrect number of arguments ~D (expected ~D)" name (length args) n))
+	(qs:scheme-error "~A: incorrect number of arguments ~D (expected ~D)" name (length args) n))
       (loop for type in types for x in args do (check-field-value name type x))
       (%make-record rtd (coerce args 'simple-vector)))))
 
@@ -1070,14 +1070,14 @@ every field's value, its ancestors' first."
   (check-rtd "$make-record-type" rtd)
   (check-rtd "$make-record-type" base)
   (unless (or (eq base *base-rtd*) (rtd-descends-p base *base-rtd*))
-    (ps:scheme-error "$make-record-type: ~S is not a base record type" base))
+    (qs:scheme-error "$make-record-type: ~S is not a base record type" base))
   (unless (= (length extras) (rtd-count base))
-    (ps:scheme-error "$make-record-type: ~D extra field values for ~D fields" (length extras) (rtd-count base)))
+    (qs:scheme-error "$make-record-type: ~D extra field values for ~D fields" (length extras) (rtd-count base)))
   (setf (record-rtd rtd) base
 	(record-values rtd) (coerce extras 'simple-vector)
 	(rtd-sealed rtd) (truthy sealed)
 	(rtd-opaque rtd) (or (truthy opaque) (rtd-opaque rtd)))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:make-record" (rtd values)
   (check-rtd "$record" rtd)
@@ -1088,10 +1088,10 @@ every field's value, its ancestors' first."
   (loop for i below (rtd-count rtd) collect (* 8 (1+ i))))
 
 (defun offset-index (who x offset)
-  (unless (record-p x) (ps:scheme-error "~A: ~S is not a record" who x))
+  (unless (record-p x) (qs:scheme-error "~A: ~S is not a record" who x))
   (let ((i (and (integerp offset) (1- (floor offset 8)))))
     (unless (and i (< -1 i (length (record-values x))))
-      (ps:scheme-error "~A: invalid offset ~S for ~S" who offset x))
+      (qs:scheme-error "~A: invalid offset ~S for ~S" who offset x))
     i))
 
 (defprim "chez:object-ref" (x offset)
@@ -1099,10 +1099,10 @@ every field's value, its ancestors' first."
 
 (defprim "chez:object-set!" (x offset value)
   (setf (svref (record-values x) (offset-index "$object-set!" x offset)) value)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "chez:record-type-of" (x)
-  (unless (record-p x) (ps:scheme-error "$record-type-descriptor: ~S is not a record" x))
+  (unless (record-p x) (qs:scheme-error "$record-type-descriptor: ~S is not a record" x))
   (record-rtd x))
 
 (defun field-position (who rtd field)
@@ -1112,30 +1112,30 @@ the field, (mutable-p name type)."
   (let* ((fields (all-fields rtd))
 	 (i (cond ((and (integerp field) (< -1 field (length fields))) field)
 		  ((symbolp field) (position field fields :key #'second :from-end t)))))
-    (unless i (ps:scheme-error "~A: invalid field ~S for ~A" who field (scheme-name (rtd-name rtd))))
+    (unless i (qs:scheme-error "~A: invalid field ~S for ~A" who field (scheme-name (rtd-name rtd))))
     (values i (nth i fields))))
 
 (defprim "chez:csv7-record-field-accessor" (rtd field)
   (let ((i (field-position "record-field-accessor" rtd field)))
     (lambda (r)
       (unless (record-of-type-p r rtd)
-	(ps:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
+	(qs:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
       (svref (record-values r) i))))
 
 (defprim "chez:csv7-record-field-mutator" (rtd field)
   (multiple-value-bind (i f) (field-position "record-field-mutator" rtd field)
     (unless (first f)
-      (ps:scheme-error "record-field-mutator: field ~S of ~A is immutable" field (scheme-name (rtd-name rtd))))
+      (qs:scheme-error "record-field-mutator: field ~S of ~A is immutable" field (scheme-name (rtd-name rtd))))
     (lambda (r x)
       (unless (record-of-type-p r rtd)
-	(ps:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
+	(qs:scheme-error "~S is not of type ~A" r (scheme-name (rtd-name rtd))))
       (check-field-value (scheme-name (rtd-name rtd)) (third f) x)
       (setf (svref (record-values r) i) x)
-      ps:unspecific)))
+      qs:unspecific)))
 
 (defprim "chez:csv7-record-field-accessible?" (rtd field)
   (field-position "record-field-accessible?" rtd field)
-  ps:true)
+  qs:true)
 
 (defprim "chez:csv7-record-field-mutable?" (rtd field)
   (bool (first (nth-value 1 (field-position "record-field-mutable?" rtd field)))))
@@ -1147,13 +1147,13 @@ the field, (mutable-p name type)."
 (defprim "chez:csv7-record-type-field-decls" (rtd)
   (check-rtd "record-type-field-decls" rtd)
   (mapcar (lambda (f)
-	    (list (ps:intern-scheme-symbol (if (first f) "mutable" "immutable"))
-		  (ps:intern-scheme-symbol (or (third f) "scheme-object"))
+	    (list (qs:intern-scheme-symbol (if (first f) "mutable" "immutable"))
+		  (qs:intern-scheme-symbol (or (third f) "scheme-object"))
 		  (second f)))
 	  (all-fields rtd)))
 
 ;;; record-type-equal-procedure and record-type-hash-procedure: equal?
-;;; and equal-hash on records (through PS::*RECORD-EQUAL-HOOK* and
+;;; and equal-hash on records (through QS::*RECORD-EQUAL-HOOK* and
 ;;; *RECORD-HASH-HOOK*, in the Chez mode only).  Two records are compared
 ;;; by the procedure of the nearest ancestor type (inclusive) of both
 ;;; that has one, if that is the same type for both; else by the
@@ -1168,12 +1168,12 @@ the parameters of src/chez/records.scm.")
 (defun record-type-procedure (table who rtd args)
   (check-rtd who rtd)
   (if (null args)
-      (gethash rtd table ps:false)
+      (gethash rtd table qs:false)
       (let ((proc (car args)))
-	(cond ((eq proc ps:false) (remhash rtd table))
+	(cond ((eq proc qs:false) (remhash rtd table))
 	      ((functionp proc) (setf (gethash rtd table) proc))
-	      (t (ps:scheme-error "~A: ~S is not a procedure or #f" who proc)))
-	ps:unspecific)))
+	      (t (qs:scheme-error "~A: ~S is not a procedure or #f" who proc)))
+	qs:unspecific)))
 
 (defprim "chez:record-type-equal-procedure" (rtd &rest args)
   (record-type-procedure *record-equal-procedures* "record-type-equal-procedure" rtd args))
@@ -1183,17 +1183,17 @@ the parameters of src/chez/records.scm.")
 
 (defprim "chez:set-record-procedure-defaults!" (equal hash)
   (setq *record-procedure-defaults* (cons equal hash))
-  ps:unspecific)
+  qs:unspecific)
 
 (defun nearest-type-with (table rtd)
   (loop for r = rtd then (rtd-parent r) while r when (gethash r table) return r))
 
 (defun record-procedure-default (key)
   (let ((param (and *record-procedure-defaults* (funcall key *record-procedure-defaults*))))
-    (if param (funcall param) ps:false)))
+    (if param (funcall param) qs:false)))
 
 (defun check-record (who x)
-  (unless (record-p x) (ps:scheme-error "~A: ~S is not a record" who x)))
+  (unless (record-p x) (qs:scheme-error "~A: ~S is not a record" who x)))
 
 (defun record-equal-procedure (r1 r2)
   (check-record "record-equal-procedure" r1)
@@ -1201,7 +1201,7 @@ the parameters of src/chez/records.scm.")
   (let ((t1 (nearest-type-with *record-equal-procedures* (record-rtd r1)))
 	(t2 (nearest-type-with *record-equal-procedures* (record-rtd r2))))
     (if (or t1 t2)
-	(if (eq t1 t2) (gethash t1 *record-equal-procedures*) ps:false)
+	(if (eq t1 t2) (gethash t1 *record-equal-procedures*) qs:false)
 	(record-procedure-default #'car))))
 
 (defun record-hash-procedure (r)
@@ -1213,29 +1213,29 @@ the parameters of src/chez/records.scm.")
 (defprim "chez:record-hash-procedure" (r) (record-hash-procedure r))
 
 (defun chez-record-equal (a b recur)
-  (if (and ps:*chez-reader* (record-p a) (record-p b))
+  (if (and qs:*chez-reader* (record-p a) (record-p b))
       (let ((proc (record-equal-procedure a b)))
-	(if (eq proc ps:false)
+	(if (eq proc qs:false)
 	    (eq a b)
-	    (ps:truep (funcall proc a b (lambda (x y) (bool (funcall recur x y)))))))
+	    (qs:truep (funcall proc a b (lambda (x y) (bool (funcall recur x y)))))))
       :pass))
 
 (defun chez-record-hash (r walk)
-  (when (and ps:*chez-reader* (record-p r))
+  (when (and qs:*chez-reader* (record-p r))
     (let ((proc (record-hash-procedure r)))
-      (unless (eq proc ps:false)
+      (unless (eq proc qs:false)
 	(let ((h (funcall proc r (lambda (x) (funcall walk x)))))
 	  (unless (integerp h)
-	    (ps:scheme-error "record hash procedure returned ~S, not an exact integer" h))
+	    (qs:scheme-error "record hash procedure returned ~S, not an exact integer" h))
 	  (logand most-positive-fixnum h))))))
 
-(setq ps::*record-equal-hook* 'chez-record-equal
+(setq qs::*record-equal-hook* 'chez-record-equal
       *record-hash-hook* 'chez-record-hash)
 
 (defprim "chez:record-constructor-descriptor?" (x) (bool (rcd-p x)))
 
 ;;; record-reader and record-writer: #[name field ...], read and written
-;;; in this mode (PS::*RECORD-LITERAL-HOOK*, PS::*WRITE-EXTENSION*).  A
+;;; in this mode (QS::*RECORD-LITERAL-HOOK*, QS::*WRITE-EXTENSION*).  A
 ;;; record is written as #[name field ...] unless its type, or an
 ;;; ancestor, has a writer of its own.
 
@@ -1245,14 +1245,14 @@ the parameters of src/chez/records.scm.")
   "Record-type descriptor -> its name in *RECORD-READERS*.")
 (defvar *record-writers* (make-hash-table :test 'eq :weakness :key))
 
-(defun record-reader-name-p (x) (and (ps:scheme-symbol-p x) (not (eq x ps:false))))
+(defun record-reader-name-p (x) (and (qs:scheme-symbol-p x) (not (eq x qs:false))))
 
 (defprim "chez:record-reader" (x &optional (y nil y-p))
   ;; a name may be a string
-  (when (stringp x) (setq x (ps:intern-scheme-symbol x)))
+  (when (stringp x) (setq x (qs:intern-scheme-symbol x)))
   (cond ((not y-p)
-	 (cond ((rtd-p x) (gethash x *record-reader-names* ps:false))
-	       ((record-reader-name-p x) (gethash x *record-readers* ps:false))
+	 (cond ((rtd-p x) (gethash x *record-reader-names* qs:false))
+	       ((record-reader-name-p x) (gethash x *record-readers* qs:false))
 	       (t (r6rs-assertion-violation "record-reader" "not a name or record-type descriptor" x))))
 	((and (record-reader-name-p x) (rtd-p y))
 	 (let ((old (gethash x *record-readers*)))
@@ -1260,40 +1260,40 @@ the parameters of src/chez/records.scm.")
 	 (let ((old-name (gethash y *record-reader-names*)))
 	   (when old-name (remhash old-name *record-readers*)))
 	 (setf (gethash x *record-readers*) y (gethash y *record-reader-names*) x)
-	 ps:unspecific)
-	((and (eq y ps:false) (or (rtd-p x) (record-reader-name-p x)))
+	 qs:unspecific)
+	((and (eq y qs:false) (or (rtd-p x) (record-reader-name-p x)))
 	 (let ((other (if (rtd-p x) (gethash x *record-reader-names*) (gethash x *record-readers*))))
 	   (when other
 	     (if (rtd-p x)
 		 (progn (remhash x *record-reader-names*) (remhash other *record-readers*))
 		 (progn (remhash x *record-readers*) (remhash other *record-reader-names*)))))
-	 ps:unspecific)
+	 qs:unspecific)
 	(t (r6rs-assertion-violation "record-reader" "invalid arguments" (list x y)))))
 
 (defun read-record-literal (elements)
   (let ((rtd (and (consp elements) (gethash (car elements) *record-readers*))))
     (unless rtd
-      (ps:scheme-error "#[...]: no record type is named ~S" (if (consp elements) (car elements) elements)))
+      (qs:scheme-error "#[...]: no record type is named ~S" (if (consp elements) (car elements) elements)))
     ;; the record is made before its labels are resolved, so a field can't
     ;; be one: Chez's #0=#[foo #0#] is an error
-    (when (some #'ps::label-placeholder-p (cdr elements))
-      (ps:scheme-error "#[...]: a datum label can't be a field of the record it labels"))
+    (when (some #'qs::label-placeholder-p (cdr elements))
+      (qs:scheme-error "#[...]: a datum label can't be a field of the record it labels"))
     (apply (rtd-record-constructor rtd) (cdr elements))))
 
 (defprim "chez:record-writer" (rtd &optional (proc nil proc-p))
   (check-rtd "record-writer" rtd)
-  (cond ((not proc-p) (gethash rtd *record-writers* ps:false))
-	((eq proc ps:false) (remhash rtd *record-writers*) ps:unspecific)
-	((functionp proc) (setf (gethash rtd *record-writers*) proc) ps:unspecific)
+  (cond ((not proc-p) (gethash rtd *record-writers* qs:false))
+	((eq proc qs:false) (remhash rtd *record-writers*) qs:unspecific)
+	((functionp proc) (setf (gethash rtd *record-writers*) proc) qs:unspecific)
 	(t (r6rs-assertion-violation "record-writer" "not a procedure or #f" proc))))
 
 (defun write-record (obj port recur)
   "Write record OBJ as Chez does, in the Chez mode; NIL otherwise.  The
 unspecified value too: #<void>."
-  (when (and ps:*chez-reader* (eq obj ps:unspecific))
+  (when (and qs:*chez-reader* (eq obj qs:unspecific))
     (write-string "#<void>" port)
     (return-from write-record t))
-  (when (and ps:*chez-reader* (record-p obj) (not (rtd-p obj)) (not (condition-p* obj)))
+  (when (and qs:*chez-reader* (record-p obj) (not (rtd-p obj)) (not (condition-p* obj)))
     (let* ((rtd (record-rtd obj))
 	   (writer (loop for r = rtd then (rtd-parent r) while r
 			 thereis (gethash r *record-writers*))))
@@ -1309,11 +1309,11 @@ unspecified value too: #<void>."
 
 (defun record-parts (x)
   "A record's fields, for datum labels (#0=#[foo #0#])."
-  (and ps:*chez-reader* (record-p x) (not (rtd-p x)) (not (condition-p* x)) (record-values x)))
+  (and qs:*chez-reader* (record-p x) (not (rtd-p x)) (not (condition-p* x)) (record-values x)))
 
-(setq ps::*record-literal-hook* 'read-record-literal
-      ps::*write-extension* 'write-record
-      ps::*datum-label-parts* 'record-parts)
+(setq qs::*record-literal-hook* 'read-record-literal
+      qs::*write-extension* 'write-record
+      qs::*datum-label-parts* 'record-parts)
 
 ;;; ------------------------------------------------------------------
 ;;; Immutable vectors, strings and bytevectors, and the empty ones
@@ -1360,14 +1360,14 @@ one if it is empty)."
   (unless (cond ((string= kind "vector") (simple-vector-p x))
 		((string= kind "string") (stringp x))
 		(t (typep x '(simple-array (unsigned-byte 8) (*)))))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "~~s is not a ~A" kind) x))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who) (format nil "~~s is not a ~A" kind) x))
   ;; the empty ones are immutable, but nothing of them can be changed
   (when (and (immutable-p x) (plusp (length x)))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "~~s is not a mutable ~A" kind) x)))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who) (format nil "~~s is not a mutable ~A" kind) x)))
 
 (defun check-vector (who v)
   (unless (simple-vector-p v)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a vector" v)))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who) "~s is not a vector" v)))
 
 (defun vector-range (who v start n)
   "START and N, defaulted and checked: Chez's vector-copy takes a start
@@ -1376,10 +1376,10 @@ and a count."
   (let* ((len (length v))
 	 (start (or start 0)))
     (unless (and (typep start 'fixnum) (<= 0 start len))
-      (r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "invalid start index ~S" start) start))
+      (r6rs-assertion-violation (qs:intern-scheme-symbol who) (format nil "invalid start index ~S" start) start))
     (let ((n (or n (- len start))))
       (unless (and (typep n 'fixnum) (<= 0 n (- len start)))
-	(r6rs-assertion-violation (ps:intern-scheme-symbol who) (format nil "invalid count ~S" n) n))
+	(r6rs-assertion-violation (qs:intern-scheme-symbol who) (format nil "invalid count ~S" n) n))
       (values start n))))
 
 (defprim "chez:immutable?" (x) (bool (immutable-p x)))
@@ -1406,33 +1406,33 @@ and a count."
 (defprim "chez:vector-set/copy" (v i x)
   (check-vector "vector-set/copy" v)
   (unless (and (typep i 'fixnum) (< -1 i (length v)))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "vector-set/copy") (format nil "invalid index ~S" i) i))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "vector-set/copy") (format nil "invalid index ~S" i) i))
   (let ((new (copy-seq v))) (setf (svref new i) x) new))
 (defprim "chez:immutable-vector-set/copy" (v i x)
   (immutable (funcall (prim "chez:vector-set/copy") v i x)))
 (defprim "chez:string->immutable-string" (s)
-  (unless (stringp s) (r6rs-assertion-violation (ps:intern-scheme-symbol "string->immutable-string") "not a string" s))
+  (unless (stringp s) (r6rs-assertion-violation (qs:intern-scheme-symbol "string->immutable-string") "not a string" s))
   (if (immutable-p s) s (immutable (coerce s 'simple-string))))
 (defprim "chez:string-append-immutable" (&rest ss)
   (dolist (s ss)
-    (unless (stringp s) (r6rs-assertion-violation (ps:intern-scheme-symbol "string-append-immutable") "not a string" s)))
+    (unless (stringp s) (r6rs-assertion-violation (qs:intern-scheme-symbol "string-append-immutable") "not a string" s)))
   (if (and ss (null (cdr ss)) (immutable-p (car ss)))
       (car ss)
       (immutable (coerce (apply #'concatenate 'string ss) 'simple-string))))
 (defprim "chez:bytevector->immutable-bytevector" (bv)
   (unless (typep bv '(simple-array (unsigned-byte 8) (*)))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "bytevector->immutable-bytevector") "not a bytevector" bv))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "bytevector->immutable-bytevector") "not a bytevector" bv))
   (if (immutable-p bv) bv (immutable (copy-seq bv))))
 (defprim "chez:empty-vector" () *empty-vector*)
 (defprim "chez:empty-string" () *empty-string*)
 (defprim "chez:empty-bytevector" () *empty-bytevector*)
 (defprim "chez:check-mutable" (who x kind)
-  (check-mutable-object (if (symbolp who) (ps:scheme-symbol-name who) who) x kind)
-  ps:unspecific)
+  (check-mutable-object (if (symbolp who) (qs:scheme-symbol-name who) who) x kind)
+  qs:unspecific)
 (defprim "chez:clear-port" (port input)
   (if (truthy input) (clear-input port) (clear-output port))
-  ps:unspecific)
-(defprim "chez:unread-char" (c port) (unread-char c port) ps:unspecific)
+  qs:unspecific)
+(defprim "chez:unread-char" (c port) (unread-char c port) qs:unspecific)
 
 ;;; Small system procedures: the oblist, file ports and their lengths,
 ;;; the installed libraries
@@ -1449,7 +1449,7 @@ and a count."
 (defun finish-output-if-output (s) (when (output-stream-p s) (finish-output s)))
 (defprim "chez:port-length" (p)
   (or (port-length* p)
-      (r6rs-assertion-violation (ps:intern-scheme-symbol "port-length") "port does not support port-length" p)))
+      (r6rs-assertion-violation (qs:intern-scheme-symbol "port-length") "port does not support port-length" p)))
 (defprim "chez:port-has-port-length?" (p) (bool (port-file-stream p)))
 ;;; Object files (src/chez/top-level.scm's compile-library and
 ;;; compile-whole-library; src/r7rs/front.lisp loads them)
@@ -1457,24 +1457,24 @@ and a count."
 (defprim "chez:install-file-libraries" (path)
   ;; compile-library's check: the libraries of file PATH not yet
   ;; installed are expanded and installed, read as an import reads them
-  (dolist (form (ps-r7rs::read-forms path) ps:unspecific)
-    (let ((name (ps-r7rs::library-name-of form)))
-      (when (and name (ps-r7rs::head-is form "library") (not (ps-r7rs::library-installed-p name)))
-	(psx::eval-library (ps-r7rs::library-form-from-file path name))))))
+  (dolist (form (qs-r7rs::read-forms path) qs:unspecific)
+    (let ((name (qs-r7rs::library-name-of form)))
+      (when (and name (qs-r7rs::head-is form "library") (not (qs-r7rs::library-installed-p name)))
+	(qsx::eval-library (qs-r7rs::library-form-from-file path name))))))
 
 (defprim "chez:set-library-search!" (procedure)
-  (setf ps-r7rs::*chez-library-search* procedure)
-  ps:unspecific)
+  (setf qs-r7rs::*chez-library-search* procedure)
+  qs:unspecific)
 
 (defprim "chez:library-exists?" (name)
-  (bool (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
+  (bool (ignore-errors (funcall (qsx:host-ref "psyntax:library-spec-by-name") name))))
 
-(defprim "chez:library-list" () (funcall (psx:host-ref "psyntax:library-names")))
+(defprim "chez:library-list" () (funcall (qsx:host-ref "psyntax:library-names")))
 (defprim "chez:library-version" (name)
-  (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
+  (let ((spec (ignore-errors (funcall (qsx:host-ref "psyntax:library-spec-by-name") name))))
     (if (consp spec)
 	(third spec)
-	(r6rs-assertion-violation (ps:intern-scheme-symbol "library-version") "library not found" name))))
+	(r6rs-assertion-violation (qs:intern-scheme-symbol "library-version") "library not found" name))))
 (defprim "chez:transcoder?" (x) (bool (transcoder-p x)))
 
 ;;; ------------------------------------------------------------------
@@ -1529,9 +1529,9 @@ and a count."
 	  (push (list (car m) (cdr m)) frames)))))
 
 (defun marks-of (set who)
-  (cond ((eq set ps:false) *marks*)
+  (cond ((eq set qs:false) *marks*)
 	((mark-set-p set) (mark-set-marks set))
-	(t (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a continuation-marks object" set))))
+	(t (r6rs-assertion-violation (qs:intern-scheme-symbol who) "~s is not a continuation-marks object" set))))
 
 (defvar *continuation-marks* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "A continuation procedure -> the marks of its continuation.")
@@ -1542,7 +1542,7 @@ and a count."
 (defprim "chez:continuation-marks?" (x) (bool (mark-set-p x)))
 (defprim "chez:continuation-next-marks" (k)
   (unless (functionp k)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "continuation-next-marks") "~s is not a continuation" k))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "continuation-next-marks") "~s is not a continuation" k))
   (make-mark-set (gethash k *continuation-marks* '())))
 (defprim "chez:note-continuation-marks" (k) (setf (gethash k *continuation-marks*) *marks*) k)
 (defprim "chez:continuation-marks-first" (set key default)
@@ -1563,13 +1563,13 @@ and a count."
 			 do (return (values (coerce (mapcar (lambda (k) (let ((e (assoc k entries :test #'eq))) (if e (cdr e) none))) keys)
 						    'simple-vector)
 					    (iterator (cdr rest))))
-		       finally (return (values ps:false (iterator '())))))))
+		       finally (return (values qs:false (iterator '())))))))
       (iterator (mark-frames (marks-of set "continuation-marks->iterator"))))))
-(setq psx::*continuation-hook*
+(setq qsx::*continuation-hook*
       ;; a call/cc in tail position of a mark's body (in its frame) has the
       ;; continuation of the whole: without that frame's marks
       (lambda (k frame)
-	(when ps:*chez-reader*
+	(when qs:*chez-reader*
 	  (setf (gethash k *continuation-marks*)
 		(let ((top (car *marks*)))
 		  (if (and top (= frame (car top)))
@@ -1660,8 +1660,8 @@ reaches it goes to the invoker.")
 
 (defun engine-main (e)
   (let ((*current-engine* e)
-	(ps-r7rs::*handlers* (list *engine-handler*))
-	(ps-r7rs::*call-handler* (engine-call-handler ps-r7rs::*call-handler*)))
+	(qs-r7rs::*handlers* (list *engine-handler*))
+	(qs-r7rs::*call-handler* (engine-call-handler qs-r7rs::*call-handler*)))
     (engine-receive e :engine)		; the first resume
     (setf (engine-state-running e) t)
     (engine-send e :invoker '(:running))
@@ -1677,7 +1677,7 @@ reaches it goes to the invoker.")
   "The engine, a procedure of ticks, complete and expire, for state E."
   (lambda (ticks complete expire)
     (unless (and (integerp ticks) (plusp ticks))
-      (r6rs-assertion-violation (ps:intern-scheme-symbol "engine") "invalid ticks" ticks))
+      (r6rs-assertion-violation (qs:intern-scheme-symbol "engine") "invalid ticks" ticks))
     (run-engine e ticks complete expire)))
 
 (defun run-engine (e ticks complete expire)
@@ -1686,14 +1686,14 @@ reaches it goes to the invoker.")
 	(finished nil))
     (unless (engine-state-thread e)
       (let ((in *standard-input*) (out *standard-output*) (err *error-output*)
-	    (parameters (ps-r7rs::thread-parameters-snapshot)))
+	    (parameters (qs-r7rs::thread-parameters-snapshot)))
 	(setf (engine-state-thread e)
 	      (sb-thread:make-thread
 	       (lambda ()
-		 (ps:disable-float-traps)
+		 (qs:disable-float-traps)
 		 (let ((*standard-input* in) (*standard-output* out) (*error-output* err)
-		       (ps-r7rs::*thread-parameters* parameters)
-		       (psx::*fstack* '()) (psx::*winders* '()))
+		       (qs-r7rs::*thread-parameters* parameters)
+		       (qsx::*fstack* '()) (qsx::*winders* '()))
 		   (engine-main e)))
 	       :name "engine"))))
     (engine-send e :engine '(:resume))
@@ -1717,7 +1717,7 @@ reaches it goes to the invoker.")
 		  (setq finished t)
 		  (return (funcall expire (engine-procedure e))))
 		 (:raise
-		  (let ((value (ps-r7rs::raise-object (second m) (third m))))
+		  (let ((value (qs-r7rs::raise-object (second m) (third m))))
 		    (engine-send e :engine (list :value value))))
 		 (:error
 		  (setq finished t)
@@ -1728,49 +1728,49 @@ reaches it goes to the invoker.")
 
 (defprim "chez:make-engine" (thunk)
   (unless (functionp thunk)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "make-engine") "~s is not a procedure" thunk))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "make-engine") "~s is not a procedure" thunk))
   ;; each call of a new engine starts the computation afresh
   (lambda (ticks complete expire)
     (funcall (engine-procedure (make-engine-state thunk)) ticks complete expire)))
 
 (defprim "chez:engine-block" ()
   (let ((e *current-engine*))
-    (unless e (r6rs-assertion-violation (ps:intern-scheme-symbol "engine-block") "no engine active"))
+    (unless e (r6rs-assertion-violation (qs:intern-scheme-symbol "engine-block") "no engine active"))
     (engine-wait-for-resume e)
-    ps:unspecific))
+    qs:unspecific))
 
 (defprim "chez:engine-return" (&rest values)
   (unless *current-engine*
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "engine-return") "no engine active"))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "engine-return") "no engine active"))
   (throw 'engine-return (cons :done values)))
 
 ;;; Source annotations, source objects and source file descriptors
 ;;; (src/core.lisp), which psyntax and the reader know
 (defprim "chez:make-annotation" (expression source stripped options)
-  (setq ps::*annotations-made* t)
-  (ps::make-annotation expression source stripped options))
-(defprim "chez:annotation?" (x) (bool (ps::annotation-p x)))
-(defprim "chez:annotation-expression" (x) (ps::annotation-expression x))
-(defprim "chez:annotation-source" (x) (ps::annotation-source x))
-(defprim "chez:annotation-stripped" (x) (ps::annotation-stripped x))
-(defprim "chez:annotation-options" (x) (ps::annotation-options x))
-(defprim "chez:make-sfd" (path checksum) (ps::make-sfd path checksum))
-(defprim "chez:sfd?" (x) (bool (ps::sfd-p x)))
-(defprim "chez:sfd-path" (x) (ps::sfd-path x))
-(defprim "chez:sfd-checksum" (x) (ps::sfd-checksum x))
+  (setq qs::*annotations-made* t)
+  (qs::make-annotation expression source stripped options))
+(defprim "chez:annotation?" (x) (bool (qs::annotation-p x)))
+(defprim "chez:annotation-expression" (x) (qs::annotation-expression x))
+(defprim "chez:annotation-source" (x) (qs::annotation-source x))
+(defprim "chez:annotation-stripped" (x) (qs::annotation-stripped x))
+(defprim "chez:annotation-options" (x) (qs::annotation-options x))
+(defprim "chez:make-sfd" (path checksum) (qs::make-sfd path checksum))
+(defprim "chez:sfd?" (x) (bool (qs::sfd-p x)))
+(defprim "chez:sfd-path" (x) (qs::sfd-path x))
+(defprim "chez:sfd-checksum" (x) (qs::sfd-checksum x))
 (defprim "chez:make-source-object" (sfd bfp efp line column)
-  (ps::make-source-object sfd bfp efp (and (truthy line) line) (and (truthy column) column)))
-(defprim "chez:source-object?" (x) (bool (ps::source-object-p x)))
-(defprim "chez:source-object-sfd" (x) (ps::source-object-sfd x))
-(defprim "chez:source-object-bfp" (x) (ps::source-object-bfp x))
-(defprim "chez:source-object-efp" (x) (ps::source-object-efp x))
-(defprim "chez:source-object-line" (x) (or (ps::source-object-line x) ps:false))
-(defprim "chez:source-object-column" (x) (or (ps::source-object-column x) ps:false))
+  (qs::make-source-object sfd bfp efp (and (truthy line) line) (and (truthy column) column)))
+(defprim "chez:source-object?" (x) (bool (qs::source-object-p x)))
+(defprim "chez:source-object-sfd" (x) (qs::source-object-sfd x))
+(defprim "chez:source-object-bfp" (x) (qs::source-object-bfp x))
+(defprim "chez:source-object-efp" (x) (qs::source-object-efp x))
+(defprim "chez:source-object-line" (x) (or (qs::source-object-line x) qs:false))
+(defprim "chez:source-object-column" (x) (or (qs::source-object-column x) qs:false))
 (defprim "chez:syntax->annotation" (x)
-  (if (ps::annotation-p x) x (funcall (psx:host-ref "psyntax:syntax->annotation") x)))
+  (if (qs::annotation-p x) x (funcall (qsx:host-ref "psyntax:syntax->annotation") x)))
 
 ;;; Library introspection
-(defprim "chez:library-requirements" (name) (funcall (psx:host-ref "psyntax:library-requirements") name))
+(defprim "chez:library-requirements" (name) (funcall (qsx:host-ref "psyntax:library-requirements") name))
 (defprim "chez:system-library-id?" (id)
   ;; the libraries of psyntax's image (g$123) and of boot (g$boot$...),
   ;; not the program's
@@ -1778,16 +1778,16 @@ reaches it goes to the invoker.")
     (bool (or (and (> (length s) 7) (string= "g$boot$" s :end2 7))
 	      (and (> (length s) 2) (string= "g$" s :end2 2) (every #'digit-char-p (subseq s 2)))))))
 (defprim "chez:system-library-name?" (name)
-  ;; an installed library of Pseudoscheme's own, as (chezscheme) and
+  ;; an installed library of Quasischeme's own, as (chezscheme) and
   ;; (rnrs) are, which Chez's library search never looks for
-  (bool (and (ps-r7rs::library-installed-p name)
-	     (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
+  (bool (and (qs-r7rs::library-installed-p name)
+	     (let ((spec (ignore-errors (funcall (qsx:host-ref "psyntax:library-spec-by-name") name))))
 	       (and (consp spec)
-		    (ps:truep (funcall (prim "chez:system-library-id?") (car spec))))))))
+		    (qs:truep (funcall (prim "chez:system-library-id?") (car spec))))))))
 (defprim "chez:enum-set?" (x) (bool (enum-set-p x)))
 (defprim "chez:library-id" (name)
-  (let ((spec (ignore-errors (funcall (psx:host-ref "psyntax:library-spec-by-name") name))))
-    (if (consp spec) (first spec) ps:false)))
+  (let ((spec (ignore-errors (funcall (qsx:host-ref "psyntax:library-spec-by-name") name))))
+    (if (consp spec) (first spec) qs:false)))
 
 ;;; ------------------------------------------------------------------
 ;;; Chez's system procedures, which Racket CS's rumble layer uses
@@ -1803,10 +1803,10 @@ reaches it goes to the invoker.")
   (rtd-count rtd))
 
 (defprim "chez:sys-record-cas!" (x i old new)
-  (unless (record-p x) (ps:scheme-error "$record-cas!: ~S is not a record" x))
+  (unless (record-p x) (qs:scheme-error "$record-cas!: ~S is not a record" x))
   (let ((fields (record-values x)))
     (unless (and (typep i 'fixnum) (< -1 i (length fields)))
-      (ps:scheme-error "$record-cas!: invalid index ~S for ~S" i x))
+      (qs:scheme-error "$record-cas!: invalid index ~S for ~S" i x))
     (bool (eq (sb-ext:compare-and-swap (svref fields i) old new) old))))
 
 (defprim "chez:sys-sealed-record?" (x rtd)
@@ -1822,42 +1822,42 @@ reaches it goes to the invoker.")
 (defprim "chez:sys-record-type-act-sealed!" (rtd)
   (check-rtd "$record-type-act-sealed!" rtd)
   (setf (gethash rtd *act-sealed*) t)
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; Stencil vectors of both kinds: $-names work on either, and
 ;;; $system-stencil-vector ones on the system's own only
 
 (defun any-stencil-vector (who x)
-  (unless (ps:stencil-vector-p x) (ps:scheme-error "~A: ~S is not a stencil vector" who x))
+  (unless (qs:stencil-vector-p x) (qs:scheme-error "~A: ~S is not a stencil vector" who x))
   x)
 
 (defun make-system-stencil (mask elements)
-  (unless (and (integerp mask) (<= 0 mask) (< mask (ash 1 ps:stencil-vector-mask-width))
+  (unless (and (integerp mask) (<= 0 mask) (< mask (ash 1 qs:stencil-vector-mask-width))
 	       (= (logcount mask) (length elements)))
-    (ps:scheme-error "$system-stencil-vector: invalid mask ~S for ~D elements" mask (length elements)))
+    (qs:scheme-error "$system-stencil-vector: invalid mask ~S for ~D elements" mask (length elements)))
   (make-system-stencil-vector :mask mask :elements (coerce elements 'simple-vector)))
 
-(defprim "chez:sys-stencil-vector?" (x) (bool (ps:stencil-vector-p x)))
+(defprim "chez:sys-stencil-vector?" (x) (bool (qs:stencil-vector-p x)))
 (defprim "chez:sys-system-stencil-vector?" (x) (bool (system-stencil-vector-p x)))
 (defprim "chez:sys-system-stencil-vector" (mask &rest elements) (make-system-stencil mask elements))
 (defprim "chez:sys-stencil-vector-mask" (sv)
-  (ps:stencil-vector-mask (any-stencil-vector "$stencil-vector-mask" sv)))
+  (qs:stencil-vector-mask (any-stencil-vector "$stencil-vector-mask" sv)))
 (defprim "chez:sys-stencil-vector-length" (sv)
-  (length (ps:stencil-vector-elements (any-stencil-vector "$stencil-vector-length" sv))))
+  (length (qs:stencil-vector-elements (any-stencil-vector "$stencil-vector-length" sv))))
 (defprim "chez:sys-stencil-vector-ref" (sv i)
   (any-stencil-vector "$stencil-vector-ref" sv)
-  (svref (ps:stencil-vector-elements sv) (stencil-vector-index "$stencil-vector-ref" sv i)))
+  (svref (qs:stencil-vector-elements sv) (stencil-vector-index "$stencil-vector-ref" sv i)))
 (defprim "chez:sys-stencil-vector-set!" (sv i x)
   (any-stencil-vector "$stencil-vector-set!" sv)
-  (setf (svref (ps:stencil-vector-elements sv) (stencil-vector-index "$stencil-vector-set!" sv i)) x)
-  ps:unspecific)
+  (setf (svref (qs:stencil-vector-elements sv) (stencil-vector-index "$stencil-vector-set!" sv i)) x)
+  qs:unspecific)
 (defprim "chez:sys-system-stencil-vector-update" (sv remove add &rest new)
   (unless (system-stencil-vector-p sv)
-    (ps:scheme-error "$system-stencil-vector-update: ~S is not a system stencil vector" sv))
+    (qs:scheme-error "$system-stencil-vector-update: ~S is not a system stencil vector" sv))
   (stencil-vector-updated "$system-stencil-vector-update" sv remove add new #'make-system-stencil))
 (defprim "chez:sys-system-stencil-vector-truncate!" (sv mask)
   (unless (system-stencil-vector-p sv)
-    (ps:scheme-error "$system-stencil-vector-truncate!: ~S is not a system stencil vector" sv))
+    (qs:scheme-error "$system-stencil-vector-truncate!: ~S is not a system stencil vector" sv))
   (stencil-vector-truncated "$system-stencil-vector-truncate!" sv mask))
 
 ;;; Immutability, and the checks inline vector operations make
@@ -1865,17 +1865,17 @@ reaches it goes to the invoker.")
 (defprim "chez:sys-vector-set-immutable!" (v)
   (check-vector "$vector-set-immutable!" v)
   (mark-immutable v)
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:sys-string-set-immutable!" (s)
   (unless (stringp s)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "$string-set-immutable!") "~s is not a string" s))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "$string-set-immutable!") "~s is not a string" s))
   (when (typep s '(simple-array * (*))) (mark-immutable s))
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:sys-bytevector-set-immutable!" (bv)
   (unless (typep bv '(simple-array (unsigned-byte 8) (*)))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "$bytevector-set-immutable!") "~s is not a bytevector" bv))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "$bytevector-set-immutable!") "~s is not a bytevector" bv))
   (mark-immutable bv)
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:sys-vector-ref-check?" (v i)
   (bool (and (simple-vector-p v) (typep i 'fixnum) (< -1 i (length v)))))
 (defprim "chez:sys-vector-set!-check?" (v i)
@@ -1885,14 +1885,14 @@ reaches it goes to the invoker.")
 
 (defprim "chez:sys-flhash" (x)
   (unless (typep x 'double-float)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "$flhash") "~s is not a flonum" x))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "$flhash") "~s is not a flonum" x))
   (logand (sxhash x) most-positive-fixnum))
 
 (defprim "chez:sys-quotient-remainder" (n m)
   (unless (and (integerp n) (integerp m))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "$quotient-remainder") "~s is not an exact integer" (if (integerp n) m n)))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "$quotient-remainder") "~s is not an exact integer" (if (integerp n) m n)))
   (when (zerop m)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "$quotient-remainder") "undefined for ~s" 0))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "$quotient-remainder") "undefined for ~s" 0))
   (multiple-value-bind (q r) (truncate n m) (cons q r)))
 
 (defprim "chez:sys-active-threads" ()
@@ -1918,19 +1918,19 @@ reaches it goes to the invoker.")
 	      (t s))))))
 
 (defprim "chez:sys-code-name" (f)
-  (or (and (functionp f) (procedure-name-string f)) ps:false))
+  (or (and (functionp f) (procedure-name-string f)) qs:false))
 
 ;;; The winders and the handler stack, which rumble saves and restores
 
 (defprim "chez:sys-current-winders" (&optional (w nil w-p))
   (if w-p
-      (progn (setf psx::*winders* w) ps:unspecific)
-      psx::*winders*))
+      (progn (setf qsx::*winders* w) qs:unspecific)
+      qsx::*winders*))
 
 (defprim "chez:sys-handler-stack" (&optional (stack nil stack-p))
   (if stack-p
-      (progn (setf ps-r7rs::*handlers* stack) ps:unspecific)
-      ps-r7rs::*handlers*))
+      (progn (setf qs-r7rs::*handlers* stack) qs:unspecific)
+      qs-r7rs::*handlers*))
 
 ;;; Continuation attachments, on the continuation marks above.  Chez's
 ;;; attachments are a list of values, one for each frame that has one;
@@ -1977,7 +1977,7 @@ same MARKS, so that eq? says whether two continuations' agree."
 (defprim "chez:sys-current-attachments" (&optional (l nil l-p))
   (cond (l-p
 	 (setf *marks* (loop for v in l collect (list* (decf *fake-frame*) *attachment-key* v)))
-	 ps:unspecific)
+	 qs:unspecific)
 	(t (attachment-list *marks*))))
 
 (defprim "chez:sys-continuation-attachments" (k)
@@ -2008,11 +2008,11 @@ same MARKS, so that eq? says whether two continuations' agree."
       (setf *timer-pending* t)
       (when *timer-trampoline* (funcall *timer-trampoline*))))
 
-(defprim "chez:sys-set-timer-trampoline" (thunk) (setf *timer-trampoline* thunk) ps:unspecific)
+(defprim "chez:sys-set-timer-trampoline" (thunk) (setf *timer-trampoline* thunk) qs:unspecific)
 
 (defprim "chez:sys-set-timer" (n)
   (unless (typep n '(integer 0))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "set-timer") "~s is not a nonnegative integer" n))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "set-timer") "~s is not a nonnegative integer" n))
   (let ((old (timer-remaining-ticks)))
     (when *timer*
       (sb-ext:unschedule-timer *timer*)
@@ -2119,7 +2119,7 @@ same MARKS, so that eq? says whether two continuations' agree."
 
 (defun check-prgen (who x)
   (unless (prgen-p x)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "not a pseudo-random generator ~s" x)))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who) "not a pseudo-random generator ~s" x)))
 
 (defprim "chez:make-pseudo-random-generator" ()
   (let ((g (make-prgen (make-array 6 :element-type 'double-float :initial-element 0d0))))
@@ -2129,15 +2129,15 @@ same MARKS, so that eq? says whether two continuations' agree."
 (defprim "chez:pseudo-random-generator-seed!" (g n)
   (check-prgen "pseudo-random-generator-seed!" g)
   (unless (typep n '(integer 0))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol "pseudo-random-generator-seed!")
+    (r6rs-assertion-violation (qs:intern-scheme-symbol "pseudo-random-generator-seed!")
 			      "not a nonnegative exact integer ~s" n))
   (prgen-seed g (logand n #xffffffff))
-  ps:unspecific)
+  qs:unspecific)
 (defprim "chez:pseudo-random-generator-next!" (g &optional (n nil n-p))
   (check-prgen "pseudo-random-generator-next!" g)
   (cond ((not n-p) (prgen-double g))
 	((not (typep n '(integer 1)))
-	 (r6rs-assertion-violation (ps:intern-scheme-symbol "pseudo-random-generator-next!")
+	 (r6rs-assertion-violation (qs:intern-scheme-symbol "pseudo-random-generator-next!")
 				   "not a positive exact integer ~s" n))
 	((<= n 4294967087) (prgen-int g n))
 	(t (prgen-integer g n))))
@@ -2146,8 +2146,8 @@ same MARKS, so that eq? says whether two continuations' agree."
   (map 'simple-vector #'truncate (prgen-state g)))
 (defprim "chez:vector->pseudo-random-generator" (g v)
   (let ((who "vector->pseudo-random-generator"))
-    (unless (or (eq g ps:false) (prgen-p g)) (check-prgen who g))
-    (flet ((bad () (r6rs-assertion-violation (ps:intern-scheme-symbol who)
+    (unless (or (eq g qs:false) (prgen-p g)) (check-prgen who g))
+    (flet ((bad () (r6rs-assertion-violation (qs:intern-scheme-symbol who)
 					     "not a valid pseudo-random generator state vector ~s" v)))
       (unless (and (simple-vector-p v) (= (length v) 6) (every #'integerp v)) (bad))
       (let ((state (map '(simple-array double-float (6)) (lambda (i) (float i 1d0)) v)))
@@ -2157,13 +2157,13 @@ same MARKS, so that eq? says whether two continuations' agree."
 	(when (or (and (zerop (aref state 0)) (zerop (aref state 1)) (zerop (aref state 2)))
 		  (and (zerop (aref state 3)) (zerop (aref state 4)) (zerop (aref state 5))))
 	  (bad))
-	(if (eq g ps:false)
+	(if (eq g qs:false)
 	    (make-prgen state)
-	    (progn (replace (prgen-state g) state) ps:unspecific))))))
+	    (progn (replace (prgen-state g) state) qs:unspecific))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Chez's writer.  In the Chez mode write and display (and what calls
-;;; PS:*SCHEME-WRITE*, put-datum and format's ~s) print as Chez's printer
+;;; QS:*SCHEME-WRITE*, put-datum and format's ~s) print as Chez's printer
 ;;; does, consulting its parameters (print-radix, print-length,
 ;;; print-level, print-graph, print-gensym, print-vector-length,
 ;;; print-unicode, print-extended-identifiers, print-positive-exponent-sign,
@@ -2177,7 +2177,7 @@ same MARKS, so that eq? says whether two continuations' agree."
 
 (defprim "chez:set-printer-parameters!" (&rest parameters)
   (setq *chez-printer-parameters* (coerce parameters 'simple-vector))
-  ps:unspecific)
+  qs:unspecific)
 
 (defstruct (chez-print (:conc-name cp-))
   (radix 10) length level graph gensym char-name vector-length unicode extended exponent-sign display)
@@ -2186,11 +2186,11 @@ same MARKS, so that eq? says whether two continuations' agree."
   "The printer parameters now."
   (let ((v *chez-printer-parameters*))
     (flet ((param (i) (funcall (svref v i)))
-	   (opt (x) (if (eq x ps:false) nil x)))
-      (make-chez-print :graph (not (eq (param 0) ps:false)) :length (opt (param 1)) :level (opt (param 2))
-		       :radix (param 3) :gensym (param 4) :char-name (not (eq (param 5) ps:false))
-		       :vector-length (not (eq (param 6) ps:false)) :unicode (not (eq (param 7) ps:false))
-		       :extended (not (eq (param 8) ps:false)) :exponent-sign (not (eq (param 9) ps:false))))))
+	   (opt (x) (if (eq x qs:false) nil x)))
+      (make-chez-print :graph (not (eq (param 0) qs:false)) :length (opt (param 1)) :level (opt (param 2))
+		       :radix (param 3) :gensym (param 4) :char-name (not (eq (param 5) qs:false))
+		       :vector-length (not (eq (param 6) qs:false)) :unicode (not (eq (param 7) qs:false))
+		       :extended (not (eq (param 8) qs:false)) :exponent-sign (not (eq (param 9) qs:false))))))
 
 ;;; Numbers
 
@@ -2336,18 +2336,18 @@ as part of it are \\x<hex>;."
 	      (format nil "~A-~D" *chez-gensym-prefix* (1- (incf *chez-gensym-count*)))))))
 
 (defun chez-gensym-p (x)
-  (and (symbolp x) x (not (eq x ps:true)) (not (eq x ps:false)) (null (symbol-package x))))
+  (and (symbolp x) x (not (eq x qs:true)) (not (eq x qs:false)) (null (symbol-package x))))
 
 (defun chez-write-symbol (x stream cp display)
-  (let* ((name (ps:scheme-symbol-name x))
+  (let* ((name (qs:scheme-symbol-name x))
 	 (text (chez-symbol-text name (cp-extended cp) (cp-unicode cp))))
     (cond (display (write-string name stream))
 	  ((not (chez-gensym-p x)) (write-string text stream))
 	  (t (let ((mode (cp-gensym cp)) (unique (chez-gensym-unique-name x)))
-	       (cond ((eq mode ps:false) (write-string text stream))
-		     ((eq mode (ps:intern-scheme-symbol "pretty"))
+	       (cond ((eq mode qs:false) (write-string text stream))
+		     ((eq mode (qs:intern-scheme-symbol "pretty"))
 		      (write-string "#:" stream) (write-string text stream))
-		     ((eq mode (ps:intern-scheme-symbol "pretty/suffix"))
+		     ((eq mode (qs:intern-scheme-symbol "pretty/suffix"))
 		      (write-string text stream)
 		      (format stream ".~A" (subseq unique (1+ (position #\- unique :from-end t)))))
 		     (t (format stream "#{~A ~A}" text unique))))))))
@@ -2359,7 +2359,7 @@ as part of it are \\x<hex>;."
 writer of that kind, for what this doesn't know."
   (let* ((cp (let ((cp (current-chez-print))) (setf (cp-display cp) display) cp))
 	 (labels (and (or (consp obj) (simple-vector-p obj))
-		      (ps::datum-labels obj (cp-graph cp))))
+		      (qs::datum-labels obj (cp-graph cp))))
 	 (next-label 0)
 	 (limit (cp-length cp)) (level (cp-level cp)))
     (labels ((out (s) (write-string s stream))
@@ -2417,45 +2417,45 @@ writer of that kind, for what this doesn't know."
 				(format stream "#~D=" next-label)
 				(incf next-label))))))
 	       (cond ((null x) (out "()"))
-		     ((eq x ps:true) (out "#t"))
-		     ((eq x ps:false) (out "#f"))
+		     ((eq x qs:true) (out "#t"))
+		     ((eq x qs:false) (out "#f"))
 		     ((consp x) (pr-list x depth))
 		     ((simple-vector-p x) (print-vector x "#" "" depth))
 		     ((numberp x) (out (chez-number-string x cp)))
 		     ((characterp x) (if display (write-char x stream) (out (chez-char-literal x (cp-unicode cp)))))
 		     ((stringp x) (if display (out x) (chez-write-string-literal x stream (cp-unicode cp))))
 		     ((and (symbolp x) (not (keywordp x))) (chez-write-symbol x stream cp display))
-		     ((eq x ps:eof-object) (out "#!eof"))
-		     ((eq x ps:unspecific) (out "#<void>"))
+		     ((eq x qs:eof-object) (out "#!eof"))
+		     ((eq x qs:unspecific) (out "#<void>"))
 		     ((typep x '(simple-array (unsigned-byte 8) (*))) (print-vector x "#" "vu8" depth))
 		     ((typep x '(simple-array double-float (*))) (print-vector x "#" "vfl" depth))
 		     ((typep x '(simple-array fixnum (*))) (print-vector x "#" "vfx" depth))
-		     ((ps::box-p x)
+		     ((qs::box-p x)
 		      (if (and level (> depth level))
 			  (out "#&...")
-			  (progn (out "#&") (pr (ps::box-contents x) (1+ depth)))))
+			  (progn (out "#&") (pr (qs::box-contents x) (1+ depth)))))
 		     ((functionp x)
 		      (let ((name (procedure-name-string x)))
 			(if name (format stream "#<procedure ~A>" name) (out "#<procedure>"))))
 		     (t (funcall old x stream)))))
       (pr obj 1)))
-  ps:unspecific)
+  qs:unspecific)
 
 (defvar *chez-writers-installed* nil)
 
 (defun install-chez-writer ()
-  "In the Chez mode (PS:*CHEZ-READER*), write and display print as Chez's do."
+  "In the Chez mode (QS:*CHEZ-READER*), write and display print as Chez's do."
   (unless *chez-writers-installed*
     (setq *chez-writers-installed* t)
-    (let ((old-write ps:*scheme-write*) (old-display ps:*scheme-display*))
-      (setq ps:*scheme-write*
+    (let ((old-write qs:*scheme-write*) (old-display qs:*scheme-display*))
+      (setq qs:*scheme-write*
 	    (lambda (obj port)
-	      (if (and ps:*chez-reader* *chez-printer-parameters*)
+	      (if (and qs:*chez-reader* *chez-printer-parameters*)
 		  (chez-write-datum obj port nil old-write)
 		  (funcall old-write obj port)))
-	    ps:*scheme-display*
+	    qs:*scheme-display*
 	    (lambda (obj port)
-	      (if (and ps:*chez-reader* *chez-printer-parameters*)
+	      (if (and qs:*chez-reader* *chez-printer-parameters*)
 		  (chez-write-datum obj port t old-display)
 		  (funcall old-display obj port)))))))
 
@@ -2482,12 +2482,12 @@ writer of that kind, for what this doesn't know."
 (defclass chez-generic-io-port (chez-generic-input-port trivial-gray-streams:fundamental-character-output-stream) ())
 
 (defun generic-message (port message &rest args)
-  (apply (generic-handler port) (ps:intern-scheme-symbol message) args))
+  (apply (generic-handler port) (qs:intern-scheme-symbol message) args))
 
 (defun generic-return-char (port result who)
   (cond ((characterp result) result)
-	((eq result ps:eof-object) :eof)
-	(t (r6rs-assertion-violation (ps:intern-scheme-symbol "generic-port-handler")
+	((eq result qs:eof-object) :eof)
+	(t (r6rs-assertion-violation (qs:intern-scheme-symbol "generic-port-handler")
 				     (format nil "invalid ~A return value ~~s" who) result))))
 (defmethod trivial-gray-streams:stream-read-char ((s chez-generic-input-port))
   (if (< (generic-iindex s) (generic-isize s))
@@ -2504,7 +2504,7 @@ writer of that kind, for what this doesn't know."
   nil)
 (defmethod trivial-gray-streams:stream-listen ((s chez-generic-input-port))
   (or (< (generic-iindex s) (generic-isize s))
-      (not (eq (generic-message s "char-ready?" s) ps:false))))
+      (not (eq (generic-message s "char-ready?" s) qs:false))))
 (defmethod trivial-gray-streams:stream-clear-input ((s chez-generic-input-port))
   (generic-message s "clear-input-port" s)
   nil)
@@ -2539,11 +2539,11 @@ writer of that kind, for what this doesn't know."
 
 (defun check-generic-handler (who handler)
   (unless (functionp handler)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a procedure" handler)))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who) "~s is not a procedure" handler)))
 
 (defun check-generic-buffer (who buffer)
   (unless (stringp buffer)
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "~s is not a string" buffer)))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who) "~s is not a string" buffer)))
 
 (defprim "chez:make-input-port" (handler buffer)
   (check-generic-handler "make-input-port" handler)
@@ -2570,7 +2570,7 @@ writer of that kind, for what this doesn't know."
   "X, a generic port with the DIRECTION (:input, :output) buffers."
   (unless (and (typep x 'chez-generic-port)
 	       (if (eq direction :input) (typep x 'chez-generic-input-port) (output-stream-p x)))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who)
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who)
 			      (format nil "~~s is not a generic ~A port" (string-downcase (symbol-name direction))) x))
   x)
 
@@ -2578,7 +2578,7 @@ writer of that kind, for what this doesn't know."
   (if (typep port 'chez-generic-port)
       (generic-handler port)
       (lambda (&rest args) (declare (ignore args))
-	(r6rs-assertion-violation (ps:intern-scheme-symbol "port-handler") "the handler of ~s can't be called" port))))
+	(r6rs-assertion-violation (qs:intern-scheme-symbol "port-handler") "the handler of ~s can't be called" port))))
 
 (macrolet ((accessors (&rest specs)
 	     `(progn
@@ -2597,44 +2597,44 @@ writer of that kind, for what this doesn't know."
 
 (defun check-generic-index (who n limit)
   (unless (and (integerp n) (<= 0 n limit))
-    (r6rs-assertion-violation (ps:intern-scheme-symbol who) "invalid index ~s" n)))
+    (r6rs-assertion-violation (qs:intern-scheme-symbol who) "invalid index ~s" n)))
 
 (defprim "chez:set-port-input-index!" (port n)
   (let ((p (generic-port "set-port-input-index!" :input port)))
     (check-generic-index "set-port-input-index!" n (generic-isize p))
     (setf (generic-iindex p) n)
-    ps:unspecific))
+    qs:unspecific))
 (defprim "chez:set-port-input-size!" (port n)
   (let ((p (generic-port "set-port-input-size!" :input port)))
     (check-generic-index "set-port-input-size!" n (length (generic-ibuf p)))
     (setf (generic-isize p) n (generic-iindex p) 0)
-    ps:unspecific))
+    qs:unspecific))
 (defprim "chez:set-port-input-buffer!" (port buffer)
   (let ((p (generic-port "set-port-input-buffer!" :input port)))
     (check-generic-buffer "set-port-input-buffer!" buffer)
     (setf (generic-ibuf p) buffer (generic-isize p) (length buffer) (generic-iindex p) 0)
-    ps:unspecific))
+    qs:unspecific))
 (defprim "chez:set-port-output-index!" (port n)
   (let ((p (generic-port "set-port-output-index!" :output port)))
     (check-generic-index "set-port-output-index!" n (generic-osize p))
     (setf (generic-oindex p) n)
-    ps:unspecific))
+    qs:unspecific))
 (defprim "chez:set-port-output-size!" (port n)
   (let ((p (generic-port "set-port-output-size!" :output port)))
     (check-generic-index "set-port-output-size!" n (length (generic-obuf p)))
     (setf (generic-osize p) n (generic-oindex p) 0)
-    ps:unspecific))
+    qs:unspecific))
 (defprim "chez:set-port-output-buffer!" (port buffer)
   (let ((p (generic-port "set-port-output-buffer!" :output port)))
     (check-generic-buffer "set-port-output-buffer!" buffer)
     (setf (generic-obuf p) buffer (generic-osize p) (length buffer) (generic-oindex p) 0)
-    ps:unspecific))
+    qs:unspecific))
 
 (defprim "chez:mark-port-closed!" (port)
   (if (typep port 'chez-generic-port)
       (setf (generic-closed port) t)
       (close port))
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; block-read and block-write: a count of characters, straight to or
 ;;; from the port (a generic port's handler does it)
@@ -2646,12 +2646,12 @@ writer of that kind, for what this doesn't know."
 		     until (eq c :eof)
 		     do (setf (char string i) c)
 		     finally (return i))))
-	(if (and (zerop n) (plusp count)) ps:eof-object n))))
+	(if (and (zerop n) (plusp count)) qs:eof-object n))))
 (defprim "chez:block-write" (port string count)
   (if (typep port 'chez-generic-port)
       (generic-message port "block-write" port string count)
       (write-string string port :end count))
-  ps:unspecific)
+  qs:unspecific)
 
 (defvar *chez-port-names* (make-hash-table :test 'eq :weakness :key :synchronized t))
 (defprim "chez:port-name" (port)
@@ -2660,7 +2660,7 @@ writer of that kind, for what this doesn't know."
 	(t "")))
 (defprim "chez:set-port-name!" (port name)
   (setf (gethash port *chez-port-names*) name)
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; file-position and file-length on the ports that have them
 (defprim "chez:file-position" (port &optional (position nil position-p))

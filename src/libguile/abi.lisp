@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-LIBGUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-LIBGUILE -*-
 
 ;;;; GNU Guile 3.0.11's ABI facts, as tests/libguile/probe.c measured
 ;;;; them on a real Guile build (aarch64-linux and any 64-bit target
@@ -6,7 +6,7 @@
 ;;;; word size).  tests/libguile/run.sh runs the probe again and
 ;;;; compares.  Words are 64 bits.
 
-(in-package "PSEUDOSCHEME-LIBGUILE")
+(in-package "QUASISCHEME-LIBGUILE")
 
 ;;; Immediates
 (defconstant +false+ #x4)

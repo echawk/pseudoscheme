@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-PSYNTAX -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-PSYNTAX -*-
 
 ;;;; cptypes: type recovery on core forms (docs/optimizations.md, "Plan
 ;;;; (2026-10-18)", item 2), after cp0 (src/cp0.lisp), as Chez Scheme's
@@ -38,7 +38,7 @@
 ;;;; A continuation re-entered restores the same values, so a type that
 ;;;; held still holds.
 
-(in-package "PSEUDOSCHEME-PSYNTAX")
+(in-package "QUASISCHEME-PSYNTAX")
 
 ;;; ------------------------------------------------------------------
 ;;; Types
@@ -79,8 +79,8 @@
     (character +char+)
     (function +proc+)
     (t (cond ((eq x t) +true+)
-	     ((eq x ps:false) +false+)
-	     ((and (symbolp x) (ps:scheme-symbol-p x)) +sym+)
+	     ((eq x qs:false) +false+)
+	     ((and (symbolp x) (qs:scheme-symbol-p x)) +sym+)
 	     (t +other+)))))
 
 ;;; (name bits exact): (name x) is true exactly when x is of BITS (EXACT),
@@ -318,7 +318,7 @@ procedure's (from *PTYPES*) and else unknown."
        (let* ((types-and-args (mapcar (lambda (a) (multiple-value-list (ty a))) args))
 	      (types (mapcar #'first types-and-args))
 	      (args2 (mapcar #'second types-and-args))
-	      (name (and (cp-primitive-p op) (ps:scheme-symbol-name op)))
+	      (name (and (cp-primitive-p op) (qs:scheme-symbol-name op)))
 	      (op2 (if (symbolp op) op (nth-value 1 (ty op)))))
 	 (when (and (symbolp op) (gethash op *known*))
 	   ;; a known procedure's call: its parameters get these types

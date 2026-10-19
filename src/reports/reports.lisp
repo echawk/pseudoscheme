@@ -1,10 +1,10 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R7RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R7RS -*-
 
 ;;;; The older Revised Reports as languages: the Revised Report on
 ;;;; Scheme (1978), R2RS (the "Revised Revised Report", 1985), R3RS,
 ;;;; IEEE 1178-1990 and R4RS, each a library of exactly the names its
 ;;;; report has, and a top level whose bindings are that library's, the
-;;;; way R5RS's is (pseudoscheme r5rs).  docs/reports.md.
+;;;; way R5RS's is (quasischeme r5rs).  docs/reports.md.
 ;;;;
 ;;;; R4RS and IEEE 1178 are subsets of (scheme r5rs).  R2RS and R3RS
 ;;;; differ in that the empty list is false, and have their own numeric
@@ -12,7 +12,7 @@
 ;;;; (R2RS); the Revised Report is another language, MacLISP's Scheme.
 ;;;; Those are in reports.sls and rrs.sls, which this file installs.
 
-(in-package "PSEUDOSCHEME-R7RS")
+(in-package "QUASISCHEME-R7RS")
 
 (defparameter *car-cdr-names*
   "caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr
@@ -120,10 +120,10 @@ the crutches nil and t.")
   (split-names "define named-lambda rec sequence =? <? >? <=? >=? 1+ -1+ append! last-pair
     string-null? substring-fill! substring-move-left! substring-move-right! object-hash
     object-unhash transcript-on transcript-off number->string string->number rationalize")
-  "What (pseudoscheme reports extras) exports.")
+  "What (quasischeme reports extras) exports.")
 
 (defparameter *truth-names* (split-names "if cond and or do not")
-  "What (pseudoscheme reports truth) exports.")
+  "What (quasischeme reports truth) exports.")
 
 (defun report-library-form (report)
   "The library form for REPORT (not the Revised Report, which rrs.sls has)."
@@ -148,11 +148,11 @@ the crutches nil and t.")
       (let ((missing (remove-if (lambda (n) (member n known :test #'string=)) r5rs)))
 	(when missing (error "reports: ~A has names nobody defines: ~{~A~^ ~}" name missing)))
       (read-scheme
-       (format nil "(library (pseudoscheme reports ~A)
+       (format nil "(library (quasischeme reports ~A)
   (export ~{~A~^ ~})
   (import (only (scheme r5rs) ~{~A~^ ~})
-          (only (pseudoscheme reports truth) ~{~A~^ ~})
-          (only (pseudoscheme reports extras) ~{~A~^ ~})
+          (only (quasischeme reports truth) ~{~A~^ ~})
+          (only (quasischeme reports extras) ~{~A~^ ~})
           (prefix (only (rnrs) define quote) r6:))
   ~{~A~^ ~})"
 	       name names r5rs truth extras
@@ -166,7 +166,7 @@ the crutches nil and t.")
 ;;; Installing them
 
 (defun report-library-name (report)
-  (list "pseudoscheme" "reports" (second (assoc report *reports*))))
+  (list "quasischeme" "reports" (second (assoc report *reports*))))
 
 (defun report-interaction-library (report)
   (append (report-library-name report) (list "interaction")))
@@ -175,13 +175,13 @@ the crutches nil and t.")
   (handler-bind ((serious-condition
 		   (lambda (e)
 		     (format *error-output* "~&reports: installing ~A: ~A~%" (cadr form) e))))
-    (psx:eval-library form)))
+    (qsx:eval-library form)))
 
 (defun install-report-libraries ()
   "Install the report libraries and their top levels.  Called while the
 standard libraries are installed."
   (dolist (file '("src/reports/reports.sls" "src/reports/rrs.sls"))
-    (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme file)))
+    (dolist (form (read-forms (asdf:system-relative-pathname :quasischeme file)))
       (eval-report-library form)))
   (dolist (entry *reports*)
     (let ((report (first entry)))
@@ -191,10 +191,10 @@ standard libraries are installed."
 
 (defun at-report-top-level-p ()
   "The report whose top level is being evaluated at, or NIL."
-  (and psx:*host*
-       (let ((name (mapcar #'sname* (funcall (psx:host-ref "psyntax:interaction-library-name")))))
+  (and qsx:*host*
+       (let ((name (mapcar #'sname* (funcall (qsx:host-ref "psyntax:interaction-library-name")))))
 	 (and (= (length name) 4)
-	      (equal (subseq name 0 2) '("pseudoscheme" "reports"))
+	      (equal (subseq name 0 2) '("quasischeme" "reports"))
 	      (equal (fourth name) "interaction")
 	      (car (find (third name) *reports* :key #'second :test #'string=))))))
 
@@ -227,14 +227,14 @@ standard libraries are installed."
 the port goes on being read as before."
   (lambda ()
     (lambda (port)
-      (remhash port ps::*port-readers*)
+      (remhash port qs::*port-readers*)
       value)))
 
-(setf ps:*reader-directives*
+(setf qs:*reader-directives*
       (append (list (cons "true" (report-literal-reader t))
-		    (cons "false" (report-literal-reader 'ps::false))
+		    (cons "false" (report-literal-reader 'qs::false))
 		    (cons "null" (report-literal-reader *null-marker*)))
-	      ps:*reader-directives*))
+	      qs:*reader-directives*))
 
 (defun eval-at-report-top-level (report form)
   "Evaluate FORM at REPORT's top level: the bindings of its library, in an
@@ -244,12 +244,12 @@ interaction library of its own."
 			   (mapcar #'ssym (report-interaction-library report)))
     (with-psyntax-parameter ("psyntax:interaction-source-name"
 			     (mapcar #'ssym (report-library-name report)))
-      (psx:eval-top-level (replace-null-markers form)))))
+      (qsx:eval-top-level (replace-null-markers form)))))
 
 (defun load-file-at-report-top-level (report path)
   "Load PATH's forms one by one at REPORT's top level; case is folded, as
 the reports say identifiers are."
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
-	(value ps:unspecific))
+	(value qs:unspecific))
     (dolist (form (read-forms path :fold-case t) value)
       (setq value (eval-at-report-top-level report form)))))

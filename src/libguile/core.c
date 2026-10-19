@@ -48,7 +48,7 @@ psg_set_entry (psg_entry_t f)
   psg_entry_fn = f;
 }
 
-/* Lisp's profile (PSEUDOSCHEME_LIBGUILE_PROFILE) is printed at exit.  */
+/* Lisp's profile (QUASISCHEME_LIBGUILE_PROFILE) is printed at exit.  */
 void
 psg_at_exit (void (*f) (void))
 {
@@ -60,12 +60,12 @@ psg_at_exit (void (*f) (void))
    loading us as an extension's libguile) makes its first call, there
    is no Lisp yet: boot_entry starts one.  It loads SBCL's runtime as a
    shared library (libsbcl.so) and starts it on the Guile mode's core
-   (pseudoscheme-guile.core, built by `make core`), whose start-up
+   (quasischeme-guile.core, built by `make core`), whose start-up
    sets the entry point (start-embedded in src/libguile/impl.lisp) and returns here.
 
-   PSEUDOSCHEME_GUILE_CORE names the core (default: the one beside this
-   library), PSEUDOSCHEME_LIBSBCL the runtime (default: libsbcl.so on
-   the library path), PSEUDOSCHEME_HEAP the heap's limit (8GB).  */
+   QUASISCHEME_GUILE_CORE names the core (default: the one beside this
+   library), QUASISCHEME_LIBSBCL the runtime (default: libsbcl.so on
+   the library path), QUASISCHEME_HEAP the heap's limit (8GB).  */
 
 /* Written by the core's start-up: its callable export, psg-entry.  */
 psg_entry_t psg_entry = 0;
@@ -75,7 +75,7 @@ static pthread_mutex_t boot_lock = PTHREAD_MUTEX_INITIALIZER;
 static void
 boot_failed (const char *what, const char *detail)
 {
-  fprintf (stderr, "libguile (Pseudoscheme): %s%s%s\n", what,
+  fprintf (stderr, "libguile (Quasischeme): %s%s%s\n", what,
            detail ? ": " : "", detail ? detail : "");
   abort ();
 }
@@ -84,7 +84,7 @@ static void
 boot_lisp (void)
 {
   char core[4096];
-  const char *env = getenv ("PSEUDOSCHEME_GUILE_CORE");
+  const char *env = getenv ("QUASISCHEME_GUILE_CORE");
   if (env)
     snprintf (core, sizeof core, "%s", env);
   else
@@ -95,9 +95,9 @@ boot_lisp (void)
       snprintf (core, sizeof core, "%s", info.dli_fname);
       char *slash = strrchr (core, '/');
       snprintf (slash ? slash + 1 : core, sizeof core - (slash ? slash + 1 - core : 0),
-                "pseudoscheme-guile.core");
+                "quasischeme-guile.core");
     }
-  const char *libsbcl = getenv ("PSEUDOSCHEME_LIBSBCL");
+  const char *libsbcl = getenv ("QUASISCHEME_LIBSBCL");
   void *runtime = dlopen (libsbcl ? libsbcl : "libsbcl.so", RTLD_NOW | RTLD_GLOBAL);
   if (!runtime)
     boot_failed ("can't load SBCL's runtime", dlerror ());
@@ -105,8 +105,8 @@ boot_lisp (void)
     = (int (*) (int, char **, char **)) dlsym (runtime, "initialize_lisp");
   if (!initialize_lisp)
     boot_failed ("no initialize_lisp in SBCL's runtime", dlerror ());
-  const char *heap = getenv ("PSEUDOSCHEME_HEAP");
-  char *argv[] = { "pseudoscheme", "--core", core,
+  const char *heap = getenv ("QUASISCHEME_HEAP");
+  char *argv[] = { "quasischeme", "--core", core,
                    "--dynamic-space-size", (char *) (heap ? heap : "8GB"),
                    "--control-stack-size", "256MB",
                    "--noinform", "--disable-ldb", "--lose-on-corruption",

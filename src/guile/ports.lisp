@@ -1,6 +1,6 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
-;;;; Guile's ports, written for Pseudoscheme: a port is a GPORT, a Gray
+;;;; Guile's ports, written for Quasischeme: a port is a GPORT, a Gray
 ;;;; stream (trivial-gray-streams) that is binary and textual at once, as
 ;;;; Guile's are.  Bytes come from and go to a backend (a file descriptor,
 ;;;; a string or bytevector buffer, a custom port's procedures, or a Lisp
@@ -10,12 +10,12 @@
 ;;;; back into the read buffer, as in Guile.
 ;;;;
 ;;;; The current ports are fluids whose values are the Lisp stream
-;;;; variables (*standard-output* and so on), so that Pseudoscheme's own
+;;;; variables (*standard-output* and so on), so that Quasischeme's own
 ;;;; procedures follow (current-output-port) and parameterize.  Guile code
 ;;;; runs with those variables bound to ports (CALL-WITH-GUILE-PORTS): a
 ;;;; Lisp stream there is wrapped in a port that writes to it.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (deftype octets () '(simple-array (unsigned-byte 8) (*)))
 
@@ -50,7 +50,7 @@
    (codec :initform nil :accessor port-codec)
    (strategy :initarg :strategy :initform nil :accessor port-strategy)
    (bom-state :initform nil :accessor port-bom-state)	; for UTF-16 and UTF-32
-   (filename :initarg :filename :initform ps:false :accessor port-filename*)
+   (filename :initarg :filename :initform qs:false :accessor port-filename*)
    (open :initform t :accessor port-open-p)
    (revealed :initform 0 :accessor port-revealed*)
    (properties :initform '() :accessor port-properties)))
@@ -58,7 +58,7 @@
 (defun gport-p (x) (typep x 'gport))
 
 (defun make-port-buffer (size position)
-  (vector (make-octets size) 0 0 ps:false position))
+  (vector (make-octets size) 0 0 qs:false position))
 
 (defmethod initialize-instance :after ((p gport) &key)
   (let ((position (cons 0 0)))
@@ -123,7 +123,7 @@
 
 (defun canonical-encoding (name)
   "Guile's name for the encoding NAME (a string or symbol), or NIL."
-  (let ((name (string-upcase (if (symbolp name) (ps:scheme-symbol-name name) name))))
+  (let ((name (string-upcase (if (symbolp name) (qs:scheme-symbol-name name) name))))
     (cond ((member name '("UTF-8" "UTF8") :test #'string=) "UTF-8")
 	  ((member name '("ISO-8859-1" "ISO8859-1" "ISO_8859-1" "LATIN1" "LATIN-1" "L1") :test #'string=)
 	   "ISO-8859-1")
@@ -174,7 +174,7 @@
 (defun strategy (port)
   (let ((s (or (port-strategy port)
 	       (fluid-value (root-value "%default-port-conversion-strategy")))))
-    (if (symbolp s) (ps:scheme-symbol-name s) "substitute")))
+    (if (symbolp s) (qs:scheme-symbol-name s) "substitute")))
 
 (defun default-encoding ()
   ;; #f is Latin-1, as Guile's: R6RS's binary ports are made so
@@ -182,7 +182,7 @@
     (cond ((stringp v)
 	   (or (canonical-encoding v)
 	       (guile-error (ssym "misc-error") "open-port" "unknown encoding: ~S" (list v))))
-	  ((eq v ps:false) "ISO-8859-1")
+	  ((eq v qs:false) "ISO-8859-1")
 	  (t "UTF-8"))))
 
 ;;; ------------------------------------------------------------------
@@ -482,7 +482,7 @@ mark, as Guile writes."
       (decf (port-line* port))
       (when (plusp (port-column* port)) (decf (port-column* port)))))
 
-;;; The Gray stream protocol: what Pseudoscheme's and Lisp's own
+;;; The Gray stream protocol: what Quasischeme's and Lisp's own
 ;;; procedures use on a port
 
 (defmethod trivial-gray-streams:stream-read-char ((p gport))
@@ -721,7 +721,7 @@ mark, as Guile writes."
   (let* ((input (or (find #\r mode) (find #\+ mode)))
 	 (output (or (find #\w mode) (find #\a mode) (find #\+ mode)))
 	 (port (apply #'make-port :kind "file" :input (and input t) :output (and output t)
-				  :filename (or filename ps:false)
+				  :filename (or filename qs:false)
 				  :encoding (cond ((find #\b mode) "ISO-8859-1") (encoding))
 				  :buffering (if (find #\0 mode) :none (if (find #\l mode) :line :full))
 				  (fd-backend fd))))
@@ -765,15 +765,15 @@ read buffer, unread."
     (let ((end (min (port-rend p) (+ (port-rpos p) 1024))))
       (or (scan-for-coding (sb-ext:octets-to-string (port-rbuf p) :start (port-rpos p) :end end
 								   :external-format :latin-1))
-	  ps:false))))
+	  qs:false))))
 
 (defguile "file-encoding" (port) (port-coding port))
 (defguile "%file-encoding" (port) (port-coding port))
 
-(defun open-file (filename mode &key (encoding ps:false) (guess-encoding ps:false) (buffering ps:false))
+(defun open-file (filename mode &key (encoding qs:false) (guess-encoding qs:false) (buffering qs:false))
   (declare (ignore buffering))
   (unless (stringp filename) (wrong-type "open-file" 1 filename))
-  (let* ((mode (if (symbolp mode) (ps:scheme-symbol-name mode) mode))
+  (let* ((mode (if (symbolp mode) (qs:scheme-symbol-name mode) mode))
 	 (base (find-if (lambda (c) (find c "rwa")) mode))
 	 (plus (find #\+ mode)))
     (when (some (lambda (c) (> (char-code c) 255)) mode)
@@ -809,7 +809,7 @@ read buffer, unread."
 (defun port-file-name (filename)
   (let* ((fluid (root-value "%file-port-name-canonicalization"))
 	 (mode (and fluid (fluid-p fluid) (fluid-value fluid)))
-	 (mode (and (symbolp mode) mode (not (eq mode ps:false)) (ps:scheme-symbol-name mode))))
+	 (mode (and (symbolp mode) mode (not (eq mode qs:false)) (qs:scheme-symbol-name mode))))
     (cond ((equal mode "absolute") (or (real-path filename) filename))
 	  ((equal mode "relative")
 	   (let ((canonical (real-path filename)) (best nil))
@@ -906,7 +906,7 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
 ;;; The procedures
 
 (defun make-special-fluid (symbol)
-  (let ((f (make-fluid* ps:false)))
+  (let ((f (make-fluid* qs:false)))
     (setf (fluid-special f) symbol)
     f))
 
@@ -934,11 +934,11 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
 
 (defun read-char* (&optional port)
   (let* ((p (in-port port "read-char")) (c (port-read-char p)))
-    (if (eq c :eof) ps:eof-object (progn (track-char p c) c))))
+    (if (eq c :eof) qs:eof-object (progn (track-char p c) c))))
 
 (defun peek-char* (&optional port)
   (let ((c (trivial-gray-streams:stream-peek-char (in-port port "peek-char"))))
-    (if (eq c :eof) ps:eof-object c)))
+    (if (eq c :eof) qs:eof-object c)))
 
 (defun unread-string* (string &optional port)
   (let ((p (in-port port "unread-string")))
@@ -954,7 +954,7 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
     (def "%current-warning-port-fluid" *current-warning-port-fluid*)
     (def "current-error-port" (lambda () *error-output*))
     (def "current-warning-port" (lambda () *error-output*))
-    (def "current-load-port" (lambda () ps:false))
+    (def "current-load-port" (lambda () qs:false))
     (def "open-file" (lambda (filename mode &rest keys)
 		       ;; Guile's keyword errors, rather than Lisp's
 		       (check-keywords keys '(:encoding :guess-encoding :buffering) nil nil)
@@ -1000,7 +1000,7 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
 
 (defun port-property (port key)
   (let ((e (assoc key (port-properties (->port port "%port-property")))))
-    (if e (cdr e) ps:false)))
+    (if e (cdr e) qs:false)))
 
 (defextension "scm_init_ice_9_ports"
   (append
@@ -1021,19 +1021,19 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
    (cons "port-closed?" (lambda (x) (bool (not (open-stream-p (->port x "port-closed?"))))))
    (cons "close-input-port" (lambda (p) (close (->port p "close-input-port")) *unspecified*))
    (cons "close-output-port" (lambda (p) (close (->port p "close-output-port")) *unspecified*))
-   (cons "the-eof-object" ps:eof-object)
+   (cons "the-eof-object" qs:eof-object)
    (cons "%port-encoding" (lambda (p) (ssym (port-encoding-name (->port p "port-encoding")))))
    (cons "port-conversion-strategy"
 	 (lambda (p)
-	   (if (eq p ps:false)
+	   (if (eq p qs:false)
 	       (fluid-value (root-value "%default-port-conversion-strategy"))
 	       (ssym (strategy (->port p "port-conversion-strategy"))))))
    (cons "set-port-conversion-strategy!"
 	 (lambda (p s)
-	   (unless (and (symbolp s) (member (ps:scheme-symbol-name s) '("error" "substitute" "escape")
+	   (unless (and (symbolp s) (member (qs:scheme-symbol-name s) '("error" "substitute" "escape")
 					    :test #'string=))
 	     (wrong-type "set-port-conversion-strategy!" 2 s))
-	   (if (eq p ps:false)
+	   (if (eq p qs:false)
 	       (setf (fluid-value (root-value "%default-port-conversion-strategy")) s)
 	       (setf (port-strategy (->port p "set-port-conversion-strategy!")) s))
 	   *unspecified*))
@@ -1049,7 +1049,7 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
 			 (wrong-type "setvbuf" 1 port))
 		       (flush-output p)
 		       (setf (port-buffering p)
-			     (let ((m (if (symbolp mode) (ps:scheme-symbol-name mode) mode)))
+			     (let ((m (if (symbolp mode) (qs:scheme-symbol-name mode) mode)))
 			       (cond ((member m '("none" 0) :test #'equal) :none)
 				     ((member m '("line" 1) :test #'equal) :line)
 				     (t :full))))
@@ -1149,9 +1149,9 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
 		 (check-open (->port p "port-write") "port-write")
 		 (lambda (port bv start count) (funcall (port-write-fn port) bv start count))))
 	 (cons "port-random-access?" (lambda (p) (bool (port-random-access-p (->port p "port-random-access?")))))
-	 (cons "port-poll" (lambda (p mode &optional timeout) (declare (ignore p mode timeout)) ps:true))
-	 (cons "port-read-wait-fd" (lambda (p) (or (port-fd (->port p "port-read-wait-fd")) ps:false)))
-	 (cons "port-write-wait-fd" (lambda (p) (or (port-fd (->port p "port-write-wait-fd")) ps:false)))
+	 (cons "port-poll" (lambda (p mode &optional timeout) (declare (ignore p mode timeout)) qs:true))
+	 (cons "port-read-wait-fd" (lambda (p) (or (port-fd (->port p "port-read-wait-fd")) qs:false)))
+	 (cons "port-write-wait-fd" (lambda (p) (or (port-fd (->port p "port-write-wait-fd")) qs:false)))
 	 (cons "port-clear-stream-start-for-bom-read"
 	       (lambda (p)
 		 (let ((p (->port p "port-clear-stream-start-for-bom-read")))
@@ -1179,7 +1179,7 @@ reader reads): what it peeked at and didn't take goes back to STREAM."
 		 (let* ((p (->port p "port-decode-char"))
 			(c (decode-octets-char (codec p) bv start count)))
 		   (case c
-		     (:incomplete ps:false)
+		     (:incomplete qs:false)
 		     (:invalid (if (string= (strategy p) "substitute") (code-char #xfffd) (decoding-error p)))
 		     (t c)))))
 	 (cons "port-encode-char"
@@ -1282,7 +1282,7 @@ those bytes begin one, or :INVALID."
 	(cons "primitive-move->fdes" (lambda (p fd)
 				       (let ((port (->port p "primitive-move->fdes")))
 					 (if (eql (port-fd port) fd)
-					     ps:false
+					     qs:false
 					     (progn (sb-posix:dup2 (port-fd port) fd)
 						    (sb-posix:close (port-fd port))
 						    (setf (port-fd port) fd)
@@ -1291,7 +1291,7 @@ those bytes begin one, or :INVALID."
 							    (port-write-fn port) (getf b :write)
 							    (port-seek-fn port) (getf b :seek)
 							    (port-close-fn port) (getf b :close)))
-						    ps:true)))))
+						    qs:true)))))
 	(cons "fdes->ports" (lambda (fd)
 			      (loop for p being the hash-keys of *fd-ports*
 				    when (and (port-open-p p) (eql (port-fd p) fd)) collect p)))))
@@ -1324,14 +1324,14 @@ those bytes begin one, or :INVALID."
 
 (defun transcoder-encoding (transcoder)
   "The encoding an R6RS transcoder (Guile's: a record) names."
-  (if (and transcoder (not (eq transcoder ps:false)) (struct-p transcoder))
+  (if (and transcoder (not (eq transcoder qs:false)) (struct-p transcoder))
       (let ((codec (svref (struct-slots-of transcoder) 0)))
 	(if (stringp codec) codec "UTF-8"))
       "ISO-8859-1"))
 
 (defextension "scm_init_r6rs_ports"
   (list
-   (cons "eof-object" (lambda () ps:eof-object))
+   (cons "eof-object" (lambda () qs:eof-object))
    (cons "open-bytevector-input-port"
 	 (lambda (bv &optional transcoder)
 	   (memory-port (copy-seq bv) :input t :encoding (transcoder-encoding transcoder))))
@@ -1342,21 +1342,21 @@ those bytes begin one, or :INVALID."
 			 (prog1 (memory-contents p)
 			   (let ((m (port-data p)))
 			     (setf (memory-length m) 0 (memory-position m) 0))))))))
-   (cons "get-u8" (lambda (p) (let ((b (port-read-byte (binary-in p "get-u8")))) (if (eq b :eof) ps:eof-object b))))
-   (cons "lookahead-u8" (lambda (p) (let ((b (port-peek-byte (binary-in p "lookahead-u8")))) (if (eq b :eof) ps:eof-object b))))
+   (cons "get-u8" (lambda (p) (let ((b (port-read-byte (binary-in p "get-u8")))) (if (eq b :eof) qs:eof-object b))))
+   (cons "lookahead-u8" (lambda (p) (let ((b (port-peek-byte (binary-in p "lookahead-u8")))) (if (eq b :eof) qs:eof-object b))))
    (cons "get-bytevector-n" (lambda (p n)
 			      (unless (and (integerp n) (>= n 0)) (wrong-type "get-bytevector-n" 2 n))
 			      (let ((bv (get-bytes (binary-in p "get-bytevector-n") n)))
-				(if (and (zerop (length bv)) (plusp n)) ps:eof-object bv))))
+				(if (and (zerop (length bv)) (plusp n)) qs:eof-object bv))))
    (cons "get-bytevector-n!" (lambda (p bv start count)
 			       (let ((got (get-bytes (binary-in p "get-bytevector-n!") count)))
 				 (replace bv got :start1 start)
-				 (if (and (zerop (length got)) (plusp count)) ps:eof-object (length got)))))
+				 (if (and (zerop (length got)) (plusp count)) qs:eof-object (length got)))))
    (cons "get-bytevector-some" (lambda (p)
 				 (let ((port (binary-in p "get-bytevector-some")))
 				   (if (fill-input port)
 				       (get-bytes port (- (port-rend port) (port-rpos port)))
-				       (progn (consume-eof port) ps:eof-object)))))
+				       (progn (consume-eof port) qs:eof-object)))))
    (cons "get-bytevector-some!" (lambda (p bv start count)
 				  (let ((port (binary-in p "get-bytevector-some!")))
 				    (cond ((zerop count) 0)
@@ -1364,7 +1364,7 @@ those bytes begin one, or :INVALID."
 					   (let ((got (get-bytes port (min count (- (port-rend port) (port-rpos port))))))
 					     (replace bv got :start1 start)
 					     (length got)))
-					  (t (consume-eof port) ps:eof-object)))))
+					  (t (consume-eof port) qs:eof-object)))))
    (cons "get-string-n!" (lambda (p string start count)
 			   (let ((port (->port p "get-string-n!")))
 			     (let ((n (loop for i from 0 below count
@@ -1372,7 +1372,7 @@ those bytes begin one, or :INVALID."
 					    until (eq c :eof)
 					    do (setf (char string (+ start i)) c) (track-char port c)
 					    finally (return i))))
-			       (if (and (zerop n) (plusp count)) ps:eof-object n)))))
+			       (if (and (zerop n) (plusp count)) qs:eof-object n)))))
    (cons "put-u8" (lambda (p b)
 		    (unless (typep b '(unsigned-byte 8)) (wrong-type "put-u8" 2 b))
 		    (write-octets (->port p "put-u8") (make-array 1 :element-type '(unsigned-byte 8) :initial-element b))
@@ -1405,8 +1405,8 @@ those bytes begin one, or :INVALID."
     (setq port
 	  (make-port :kind "custom" :input (truthy input) :output (truthy output)
 		     :encoding (cond ((stringp encoding) encoding)
-				     ((and (symbolp encoding) (not (eq encoding ps:false)))
-				      (ps:scheme-symbol-name encoding))
+				     ((and (symbolp encoding) (not (eq encoding qs:false)))
+				      (qs:scheme-symbol-name encoding))
 				     (t "UTF-8"))
 		     :data data
 		     :buffering :full
@@ -1420,7 +1420,7 @@ those bytes begin one, or :INVALID."
 			      (funcall (custom-dispatcher "custom-port-close") port data))
 		     :truncate (lambda (length)
 				 (funcall (custom-dispatcher "custom-port-truncate") port data length))))
-    (when (and (symbolp strategy) (not (eq strategy ps:false))) (setf (port-strategy port) strategy))
+    (when (and (symbolp strategy) (not (eq strategy qs:false))) (setf (port-strategy port) strategy))
     ;; the buffer sizes the port's get-natural-buffer-sizes asks for (a soft
     ;; port's write size is 1: each write reaches it at once)
     (let ((sizes (custom-dispatcher "custom-port-get-natural-buffer-sizes")))
@@ -1445,12 +1445,12 @@ those bytes begin one, or :INVALID."
 end of file, or END: (delimiter-or-eof . count)."
   (loop for i from start below end
 	do (let ((c (port-read-char port)))
-	     (cond ((eq c :eof) (return-from read-delimited-into (cons ps:eof-object (- i start))))
+	     (cond ((eq c :eof) (return-from read-delimited-into (cons qs:eof-object (- i start))))
 		   ((find c delims)
 		    (if (truthy gobble) (track-char port c) (port-unread-char port c))
 		    (return-from read-delimited-into (cons c (- i start))))
 		   (t (track-char port c) (setf (char buf i) c)))))
-  (cons ps:false (- end start)))
+  (cons qs:false (- end start)))
 
 (defguile "%init-rdelim-builtins" ()
   (flet ((def (name value) (define-in-module *current-module* (ssym name) value)))
@@ -1464,7 +1464,7 @@ end of file, or END: (delimiter-or-eof . count)."
 	    (loop (let ((c (port-read-char p)))
 		    (cond ((eq c :eof)
 			   (let ((s (get-output-stream-string out)))
-			     (return (cons (if (zerop (length s)) ps:eof-object s) ps:eof-object))))
+			     (return (cons (if (zerop (length s)) qs:eof-object s) qs:eof-object))))
 			  (t (track-char p c)
 			     (if (char= c #\Newline)
 				 (return (cons (get-output-stream-string out) c))
@@ -1486,7 +1486,7 @@ end of file, or END: (delimiter-or-eof . count)."
 			  until (eq c :eof)
 			  do (setf (char buf i) c)
 			  finally (return (- i start)))))
-	    (if (and (zerop n) (< start end)) ps:false n))))
+	    (if (and (zerop n) (< start end)) qs:false n))))
     (def "write-string/partial"
 	(lambda (s &optional port (start 0) (end (length s)))
 	  (port-write-string (out-port port "write-string/partial") s start end) (- end start))))

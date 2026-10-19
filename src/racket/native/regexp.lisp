@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Regular expressions, natively, on CL-PPCRE: strategy B's stand-in for
 ;;;; Racket's regexp layer.  The layer's own linklet replaces these
@@ -17,7 +17,7 @@
 ;;;; Not yet: \p{..} properties, (?mode:...) beyond i and s, ports as
 ;;;; inputs, regexp-match with an output prefix, lookbehind limits.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (rregexp (:constructor %make-rregexp (source px bytes scanner)))
   source px bytes scanner)
@@ -251,7 +251,7 @@ groups (vectors), or NIL."
 (defun result-substring (text bytes s e)
   (if (and s e)
       (if bytes (map '(simple-array (unsigned-byte 8) (*)) #'char-code (subseq text s e)) (subseq text s e))
-      ps:false))
+      qs:false))
 
 (defnative "regexp-match" (pattern input &optional (start 0) (end nil) out prefix) ()
   (declare (ignore out prefix))
@@ -260,7 +260,7 @@ groups (vectors), or NIL."
     (if s
 	(cons (result-substring text bytes s e)
 	      (loop for g across gs for h across ge collect (result-substring text bytes g h)))
-	ps:false)))
+	qs:false)))
 
 (defnative "regexp-match?" (pattern input &optional (start 0) (end nil) out prefix) ()
   (declare (ignore out prefix))
@@ -271,8 +271,8 @@ groups (vectors), or NIL."
   (multiple-value-bind (r text bytes s e gs ge) (match-positions pattern input start end)
     (declare (ignore r text bytes))
     (if s
-	(cons (cons s e) (loop for g across gs for h across ge collect (if g (cons g h) ps:false)))
-	ps:false)))
+	(cons (cons s e) (loop for g across gs for h across ge collect (if g (cons g h) qs:false)))
+	qs:false)))
 
 (defun last-bytes (text bytes e count)
   "The COUNT (at most) bytes of TEXT before position E, as a byte string:
@@ -288,9 +288,9 @@ the /end variants' second value."
   (multiple-value-bind (r text bytes s e gs ge) (match-positions pattern input start end)
     (declare (ignore r))
     (if s
-	(values (cons (cons s e) (loop for g across gs for h across ge collect (if g (cons g h) ps:false)))
+	(values (cons (cons s e) (loop for g across gs for h across ge collect (if g (cons g h) qs:false)))
 		(last-bytes text bytes e count))
-	(values ps:false ps:false))))
+	(values qs:false qs:false))))
 
 (defnative "regexp-match/end" (pattern input &optional (start 0) (end nil) out prefix (count 1)) ()
   (declare (ignore out prefix))
@@ -300,7 +300,7 @@ the /end variants' second value."
 	(values (cons (result-substring text bytes s e)
 		      (loop for g across gs for h across ge collect (result-substring text bytes g h)))
 		(last-bytes text bytes e count))
-	(values ps:false ps:false))))
+	(values qs:false qs:false))))
 
 (defun replacement (insert text bytes s e gs ge)
   "INSERT for one match: a procedure of the matched strings, or a string
@@ -415,11 +415,11 @@ the match and of its groups (vectors), or NIL."
 
 (defun peek-match-groups (raw s e gs ge)
   (cons (subseq raw s e)
-	(loop for g across gs for h across ge collect (if g (subseq raw g h) ps:false))))
+	(loop for g across gs for h across ge collect (if g (subseq raw g h) qs:false))))
 
 (defun peek-match-positions (start s e gs ge)
   (cons (cons (+ start s) (+ start e))
-	(loop for g across gs for h across ge collect (if g (cons (+ start g) (+ start h)) ps:false))))
+	(loop for g across gs for h across ge collect (if g (cons (+ start g) (+ start h)) qs:false))))
 
 (defmacro define-peek-match (name immediate positions)
   `(progn
@@ -430,7 +430,7 @@ the match and of its groups (vectors), or NIL."
 	     ,(if positions
 		  `(peek-match-positions start s e gs ge)
 		  `(peek-match-groups raw s e gs ge))
-	     ps:false)))
+	     qs:false)))
      (defnative ,(concatenate 'string name "/end") (pattern in &optional (start 0) (end nil) out prefix (count 1)) ()
        (declare (ignore out prefix))
        (multiple-value-bind (raw s e gs ge) (peek-match ,(concatenate 'string name "/end") pattern in start end ,immediate)
@@ -439,7 +439,7 @@ the match and of its groups (vectors), or NIL."
 			  `(peek-match-positions start s e gs ge)
 			  `(peek-match-groups raw s e gs ge))
 		     (subseq raw (max 0 (- e count)) e))
-	     (values ps:false ps:false))))))
+	     (values qs:false qs:false))))))
 
 (define-peek-match "regexp-match-peek" nil nil)
 (define-peek-match "regexp-match-peek-positions" nil t)

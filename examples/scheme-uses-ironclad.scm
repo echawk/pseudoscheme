@@ -1,6 +1,6 @@
 ;;; Cryptography from Scheme with Ironclad, a Common Lisp library.
 ;;;
-;;;   bin/pseudoscheme --quicklisp examples/scheme-uses-ironclad.scm
+;;;   bin/quasischeme --quicklisp examples/scheme-uses-ironclad.scm
 ;;;
 ;;; (cl ironclad) loads the system on first import (through Quicklisp
 ;;; here, which fetches it if need be).  Ironclad's byte arrays are
@@ -12,7 +12,7 @@
 (import (scheme base) (scheme write)
         (prefix (cl ironclad) ic:)
         (prefix (cl common-lisp) cl:)
-        (pseudoscheme lisp))
+        (quasischeme lisp))
 
 (define (show label value)
   (display label) (display ": ") (write value) (newline))

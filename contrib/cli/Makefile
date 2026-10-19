@@ -1,4 +1,4 @@
-# Build bin/pseudoscheme, the command-line Scheme.
+# Build bin/quasischeme, the command-line Scheme.
 #
 #   make              build with SBCL
 #   make LISP=ccl     ... or another Common Lisp: sbcl, ccl, ecl, clisp
@@ -12,7 +12,7 @@
 # mperm benchmarks) exhaust 2GB.
 #
 # SRFI 22's script interpreters, bin/scheme-r5rs and the rest, and SRFI
-# 138's bin/compile-r7rs are links to bin/pseudoscheme, which looks at
+# 138's bin/compile-r7rs are links to bin/quasischeme, which looks at
 # the name it's run as.
 
 LISP ?= sbcl
@@ -36,17 +36,17 @@ endif
 SCRIPT_INTERPRETERS = scheme-r4rs scheme-r5rs scheme-ieee-1178-1990 scheme-srfi-0 scheme-r6rs scheme-r7rs scheme-script
 # chez: Chez Scheme's own command line (cli.lisp, PARSE-CHEZ-ARGUMENTS)
 
-all: $(ROOT)/bin/pseudoscheme
+all: $(ROOT)/bin/quasischeme
 
-$(ROOT)/bin/pseudoscheme: FORCE
+$(ROOT)/bin/quasischeme: FORCE
 	mkdir -p $(ROOT)/bin
-	rm -f $(ROOT)/bin/pseudoscheme.new  # else ASDF thinks it's up to date after a Makefile-only change
+	rm -f $(ROOT)/bin/quasischeme.new  # else ASDF thinks it's up to date after a Makefile-only change
 	$(RUN) build.lisp
-	mv -f $(ROOT)/bin/pseudoscheme.new $(ROOT)/bin/pseudoscheme  # atomically, for programs running the old one
-	for name in $(SCRIPT_INTERPRETERS) compile-r7rs chez; do ln -sf pseudoscheme $(ROOT)/bin/$$name; done
+	mv -f $(ROOT)/bin/quasischeme.new $(ROOT)/bin/quasischeme  # atomically, for programs running the old one
+	for name in $(SCRIPT_INTERPRETERS) compile-r7rs chez; do ln -sf quasischeme $(ROOT)/bin/$$name; done
 
-test: $(ROOT)/bin/pseudoscheme
-	sh ./test.sh $(ROOT)/bin/pseudoscheme
+test: $(ROOT)/bin/quasischeme
+	sh ./test.sh $(ROOT)/bin/quasischeme
 
 FORCE:
 .PHONY: all test FORCE

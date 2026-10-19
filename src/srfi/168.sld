@@ -1,7 +1,7 @@
 ;;; SRFI 168: generic tuple store database.  Amirouche Boubekki's sample
 ;;; implementation, srfi/168.sld (a copy is in reference/srfi-168/; MIT
 ;;; licence, below and in reference/srfi-168/LICENSE), but for a
-;;; misplaced parenthesis in nstore-add!, corrected (marked PSEUDOSCHEME).  It works on any SRFI 167 engine; Pseudoscheme's
+;;; misplaced parenthesis in nstore-add!, corrected (marked QUASISCHEME).  It works on any SRFI 167 engine; Quasischeme's
 ;;; is the in-memory one, (make-default-engine) from (srfi 167).
 ;; Copyright © 2019 Amirouche BOUBEKKI <amirouche at hyper dev>
 ;;
@@ -197,7 +197,7 @@
 
     (define nstore-add!
       (lambda (transaction nstore items)
-        ;; PSEUDOSCHEME: was (define true (engine-pack (nstore-engine nstore)) #t),
+        ;; QUASISCHEME: was (define true (engine-pack (nstore-engine nstore)) #t),
         ;; a misplaced parenthesis that chibi accepts
         (define true (engine-pack (nstore-engine nstore) #t))
         (assume (= (length items) (nstore-n nstore)))

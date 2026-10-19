@@ -18,11 +18,11 @@ and is used here under the BSD-style terms. Only `src/`, `inputs/`, the
 `outputs/` and a `.gitignore` for the results). ecraven's
 published results, graphs and HTML are not.
 
-**Local changes** to `bench` (the first four are marked `PSEUDOSCHEME:`
+**Local changes** to `bench` (the first four are marked `QUASISCHEME:`
 there):
 
-- `pseudoscheme`, run as `bin/pseudoscheme prog.scm < input`; its
-  implementation name is defined in `src/Pseudoscheme-postlude.scm`.
+- `quasischeme`, run as `bin/quasischeme prog.scm < input`; its
+  implementation name is defined in `src/Quasischeme-postlude.scm`.
 - `chez-akku`: Chez Scheme with Akku's `akku-r7rs` libraries on
   `CHEZ_LIBDIRS`, and no prelude. Chez 10 has no R7RS libraries of its
   own, and allows only one `import` per program.
@@ -40,26 +40,26 @@ continuations (the default) and escape-only, and tables both in its
 summary. Locally:
 
 ```sh
-make -C contrib/cli                               # build bin/pseudoscheme
-bench/run.sh                                      # Pseudoscheme, every benchmark
-bench/run.sh pseudoscheme chez-akku guile -- fib tak nqueens
-bench/run.sh modes                                # each of Pseudoscheme's modes
+make -C contrib/cli                               # build bin/quasischeme
+bench/run.sh                                      # Quasischeme, every benchmark
+bench/run.sh quasischeme chez-akku guile -- fib tak nqueens
+bench/run.sh modes                                # each of Quasischeme's modes
 python3 bench/summarize.py                        # table of results.* so far
 ```
 
 Each benchmark is one program: the benchmark, `common.scm` (the timing
 harness) and a postlude. Its input is read from stdin. The time reported
 is that of the benchmark's own loop, measured with `current-jiffy`, so
-the time Pseudoscheme spends expanding, translating and compiling the
+the time Quasischeme spends expanding, translating and compiling the
 program with SBCL is not included. That time *is* charged against
 `CPU_LIMIT` (300 s by default), however.
 
-`modes` runs the programs in each of `bin/pseudoscheme`'s modes:
-`pseudoscheme` (R7RS), and `pseudoscheme-r6rs`, `-r5rs`, `-chez`,
+`modes` runs the programs in each of `bin/quasischeme`'s modes:
+`quasischeme` (R7RS), and `quasischeme-r6rs`, `-r5rs`, `-chez`,
 `-guile` and `-racket` (`--racket=linklet`), each its own column. R6RS,
 Chez and Guile mode take the programs as they are. Racket mode's
 programs are `racket/base` modules with a prelude of the R7RS names it
-lacks (`src/PseudoschemeRacket-prelude.scm`); `racket-base` runs
+lacks (`src/QuasischemeRacket-prelude.scm`); `racket-base` runs
 Racket itself on the same modules. R5RS mode's prelude defines R7RS
 names in R5RS, so the programs that need more than R5RS can provide
 (bytevectors, `let-values`, string ports) crash; and as R5RS has no

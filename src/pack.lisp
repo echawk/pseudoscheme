@@ -1,4 +1,4 @@
-; Package definitions for Pseudoscheme.
+; Package definitions for Quasischeme.
 
 ; If your Common Lisp doesn't have DEFPACKAGE, you'll have to translate
 ; this file manually into appropriate IN-PACKAGE and EXPORT forms.
@@ -11,10 +11,10 @@
   (:use )
   (:export ))
 
-; Define the Pseudoscheme package.
+; Define the Quasischeme package.
 
-(defpackage "PS"
-  (:nicknames "PS-LISP" "PSEUDOSCHEME")
+(defpackage "QS"
+  (:nicknames "QS-LISP" "QUASISCHEME")
   (:use "COMMON-LISP")
   (:export "SET!-AUX"
 	   "SET-FUNCTION-FROM-VALUE"
@@ -398,5 +398,5 @@
 
 ;++ ABCL lossage
 
-(let ((*package* (find-package "PS")))
+(let ((*package* (find-package "QS")))
   (export (intern "INTERN")))

@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's threads and synchronization, natively: threads, events and
 ;;;; sync, semaphores, channels, thread mailboxes, custodians, thread
@@ -58,7 +58,7 @@
 ;;;; check points only).  A host call that blocks (a read from a
 ;;;; terminal) keeps the baton; our own ports should wait with WAIT-FOR.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Time
@@ -209,7 +209,7 @@
 	       (rthread-cells th)))
     new))
 
-(defnative "make-thread-cell" (v &optional (preserved? ps:false)) (:leaf t)
+(defnative "make-thread-cell" (v &optional (preserved? qs:false)) (:leaf t)
   (make-thread-cell* v (truthy preserved?)))
 (defnative "thread-cell?" (x) (:leaf t) (bool (thread-cell-p x)))
 (defnative "thread-cell-ref" (c) (:leaf t)
@@ -235,7 +235,7 @@
 ;;; ------------------------------------------------------------------
 ;;; Breaks
 
-(defvar *break-default-cell* (make-thread-cell* ps:true nil))
+(defvar *break-default-cell* (make-thread-cell* qs:true nil))
 
 (defun current-break-cell ()
   (let ((c (first-mark *break-enabled-key* (current-marks) *break-default-cell*)))
@@ -264,7 +264,7 @@
 	   (when (truthy on?) (check-pending-break))
 	   *void*)))
 
-(defnative "break-thread" (th &optional (kind ps:false)) ()
+(defnative "break-thread" (th &optional (kind qs:false)) ()
   (unless (rthread-p th) (arg-error "break-thread" "thread?" th))
   (let ((k (cond ((not (truthy kind)) :break)
 		 ((and (racket-symbol-p kind) (string= (rname kind) "hang-up")) :hang-up)
@@ -472,7 +472,7 @@ ready one.  True if it's complete."
 
 (defun exit-thread-unwinding ()
   "Leave the current thread without running its dynamic-winds' posts."
-  (setf psx::*shared-winders* psx::*winders*)
+  (setf qsx::*shared-winders* qsx::*winders*)
   (throw 'rthread-exit nil))
 
 (defun reschedule (self)
@@ -537,7 +537,7 @@ ready one.  True if it's complete."
     (setq *scheduler-started* t)
     (setf (rthread-lisp *main-thread*) sb-thread:*current-thread*)
     ;; the stacks of threads: the main one's is huge
-    (ps:limit-thread-stack-size (* 64 1024 1024))
+    (qs:limit-thread-stack-size (* 64 1024 1024))
     (pushnew 'exit-hook sb-ext:*exit-hooks*)
     (setq *ticker* (sb-thread:make-thread #'ticker-main :name "racket ticker"))))
 
@@ -583,16 +583,16 @@ ready one.  True if it's complete."
 
 (defun run-thread (me thunk values marks)
   "The body of a Racket thread's SBCL thread."
-  (ps:disable-float-traps)
+  (qs:disable-float-traps)
   (progv *thread-specials* values
-    (let ((*self* me) (*in-sched* nil) (*uncaught* nil) (ps-r6rs::*marks* marks))
+    (let ((*self* me) (*in-sched* nil) (*uncaught* nil) (qs-r6rs::*marks* marks))
       (let ((*in-sched* t)) (acquire-baton me))
       (unwind-protect
 	   (catch 'rthread-exit
 	     (unless (rthread-zombie me)
-	       (psx::with-thread-state
+	       (qsx::with-thread-state
 		 (with-racket-errors
-		   (psx::call-with-continuation-base
+		   (qsx::call-with-continuation-base
 		    (lambda ()
 		      (call-with-continuation-prompt
 		       (lambda () (check-pending-break) (funcall thunk))
@@ -672,7 +672,7 @@ the custodian's shutdown.  Raises if C is shut down."
 
 (defnative "thread-wait" (th) ()
   (check-thread "thread-wait" th)
-  (do-sync "thread-wait" (list th) ps:false nil)
+  (do-sync "thread-wait" (list th) qs:false nil)
   *void*)
 
 (defun kill-thread* (th)
@@ -718,7 +718,7 @@ thread is the root's)."
     (when (eq th *self*) (yield-thread)))
   *void*)
 
-(defnative "thread-resume" (th &optional (benefactor ps:false)) ()
+(defnative "thread-resume" (th &optional (benefactor qs:false)) ()
   (check-thread "thread-resume" th)
   (unless (or (rthread-dead th) (not (rthread-suspended th)))
     (setf (rthread-suspended th) nil))
@@ -735,7 +735,7 @@ thread is the root's)."
   (check-thread "thread-dead-evt" th) (make-revt :dead th))
 
 ;;; Mailboxes
-(defnative "thread-send" (th v &optional (fail ps:false)) ()
+(defnative "thread-send" (th v &optional (fail qs:false)) ()
   (check-thread "thread-send" th)
   (cond ((rthread-dead th)
 	 (cond ((truthy fail) (if (functionp fail) (funcall fail) fail))
@@ -747,11 +747,11 @@ thread is the root's)."
   (loop
     (let ((self *self*))
       (when (rthread-mailbox self) (return (pop (rthread-mailbox self))))
-      (do-sync "thread-receive" (list (make-revt :receive self)) ps:false nil))))
+      (do-sync "thread-receive" (list (make-revt :receive self)) qs:false nil))))
 
 (defnative "thread-try-receive" () (:leaf t)
   (let ((self *self*))
-    (if (rthread-mailbox self) (pop (rthread-mailbox self)) ps:false)))
+    (if (rthread-mailbox self) (pop (rthread-mailbox self)) qs:false)))
 
 (defnative "thread-rewind-receive" (lst) (:leaf t)
   (unless (listp lst) (arg-error "thread-rewind-receive" "list?" lst))
@@ -760,7 +760,7 @@ thread is the root's)."
 
 (defnative "thread-receive-evt" () (:leaf t) (make-revt :receive *self*))
 
-(defnative "call-in-nested-thread" (thunk &optional (cust ps:false)) ()
+(defnative "call-in-nested-thread" (thunk &optional (cust qs:false)) ()
   (unless (accepts-arity-p thunk 0)
     (arg-error "call-in-nested-thread" "(procedure-arity-includes/c 0)" thunk))
   (let* ((result nil) (finished nil)
@@ -770,7 +770,7 @@ thread is the root's)."
 	       (create-thread "call-in-nested-thread"
 			      (lambda ()
 				(setq result (multiple-value-list (funcall thunk)) finished t))))))
-    (do-sync "call-in-nested-thread" (list th) ps:false nil)
+    (do-sync "call-in-nested-thread" (list th) qs:false nil)
     (unless finished
       (raise-exn "exn:fail:contract"
 		 "call-in-nested-thread: the thread was killed, or it exited via the default error escape handler"))
@@ -783,7 +783,7 @@ thread is the root's)."
       (do-sync "sleep" '() secs nil))
   *void*)
 
-(defnative "threaded?" () (:leaf t) ps:true)
+(defnative "threaded?" () (:leaf t) qs:true)
 
 ;;; ------------------------------------------------------------------
 ;;; Sync
@@ -885,7 +885,7 @@ thread is the root's)."
 	     (setq results (multiple-value-list (apply (cdr w) results)))))
 	(:replace
 	 (let ((new (apply (cdr w) results)))
-	   (setq results (multiple-value-list (do-sync "sync" (list new) ps:false nil)))))))))
+	   (setq results (multiple-value-list (do-sync "sync" (list new) qs:false nil)))))))))
 
 (defun finish-sync (wait chosen results)
   (post-nacks wait chosen)
@@ -893,7 +893,7 @@ thread is the root's)."
 
 (defun finish-timeout (wait timeout)
   (post-nacks wait nil)
-  (if (functionp timeout) (funcall timeout) ps:false))
+  (if (functionp timeout) (funcall timeout) qs:false))
 
 (defun do-sync (who evts timeout enable-break)
   "sync on EVTS (a list), with TIMEOUT (#f, seconds, or a thunk)."
@@ -925,14 +925,14 @@ thread is the root's)."
 
 (defun sync-evts (evts &optional timeout)
   "sync on the Lisp list EVTS: for the Lisp code that waits."
-  (do-sync "sync" evts (or timeout ps:false) nil))
+  (do-sync "sync" evts (or timeout qs:false) nil))
 
 (defun wait-for (poll-thunk &optional timeout)
   "Block the thread until POLL-THUNK returns true, which the scheduler asks
 while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
   (let ((r (do-sync "sync"
 		    (list (make-revt :poll (lambda () (if (funcall poll-thunk) (values t t) (values nil nil)))))
-		    (or timeout ps:false) nil)))
+		    (or timeout qs:false) nil)))
     (and (truthy r) t)))
 
 (defun evt-ready (e)
@@ -943,9 +943,9 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
 	  (values (car v) t))
 	(values nil nil))))
 
-(defnative "sync" (&rest evts) () (do-sync "sync" evts ps:false nil))
+(defnative "sync" (&rest evts) () (do-sync "sync" evts qs:false nil))
 (defnative "sync/timeout" (timeout &rest evts) () (do-sync "sync/timeout" evts timeout nil))
-(defnative "sync/enable-break" (&rest evts) () (do-sync "sync/enable-break" evts ps:false t))
+(defnative "sync/enable-break" (&rest evts) () (do-sync "sync/enable-break" evts qs:false t))
 (defnative "sync/timeout/enable-break" (timeout &rest evts) ()
   (do-sync "sync/timeout/enable-break" evts timeout t))
 
@@ -1000,14 +1000,14 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
 (defnative "semaphore-try-wait?" (s) (:leaf t)
   (check-sema "semaphore-try-wait?" s)
   (if (and (plusp (rsemaphore-count s)) (null (live-waiters s)))
-      (progn (decf (rsemaphore-count s)) ps:true)
-      ps:false))
+      (progn (decf (rsemaphore-count s)) qs:true)
+      qs:false))
 
 (defun semaphore-wait* (who s enable-break)
   (check-sema who s)
   (if (and (plusp (rsemaphore-count s)) (null (live-waiters s)) (not enable-break))
       (decf (rsemaphore-count s))
-      (do-sync who (list s) ps:false enable-break))
+      (do-sync who (list s) qs:false enable-break))
   *void*)
 
 (defnative "semaphore-wait" (s) () (semaphore-wait* "semaphore-wait" s nil))
@@ -1017,7 +1017,7 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
   (check-sema who s)
   (unless (functionp proc) (arg-error who "procedure?" proc))
   (let ((got nil) (results nil))
-    (funcall (psx:host-ref "dynamic-wind")
+    (funcall (qsx:host-ref "dynamic-wind")
 	     (lambda ()
 	       (if (truthy try-fail)
 		   (when (and (plusp (rsemaphore-count s)) (null (live-waiters s)))
@@ -1029,9 +1029,9 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
 	     (lambda () (when got (incf (rsemaphore-count s)))))
     (if got (values-list results) (funcall try-fail))))
 
-(defnative "call-with-semaphore" (s proc &optional (try-fail ps:false) &rest args) ()
+(defnative "call-with-semaphore" (s proc &optional (try-fail qs:false) &rest args) ()
   (do-call-with-semaphore "call-with-semaphore" s proc try-fail args nil))
-(defnative "call-with-semaphore/enable-break" (s proc &optional (try-fail ps:false) &rest args) ()
+(defnative "call-with-semaphore/enable-break" (s proc &optional (try-fail qs:false) &rest args) ()
   (do-call-with-semaphore "call-with-semaphore/enable-break" s proc try-fail args t))
 
 ;;; ------------------------------------------------------------------
@@ -1108,14 +1108,14 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
 	  (loop for m in (custodian-managed c)
 		when (managed-live m) collect (managed-object m))))
 
-(defnative "custodian-limit-memory" (c limit &optional (stop ps:false)) (:leaf t)
+(defnative "custodian-limit-memory" (c limit &optional (stop qs:false)) (:leaf t)
   (declare (ignore limit stop))
   (unless (custodian-p c) (arg-error "custodian-limit-memory" "custodian?" c))
   *void*)
 (defnative "custodian-require-memory" (limit-cust need stop-cust) (:leaf t)
   (declare (ignore limit-cust need stop-cust))
   *void*)
-(defnative "custodian-memory-accounting-available?" () (:leaf t) ps:false)
+(defnative "custodian-memory-accounting-available?" () (:leaf t) qs:false)
 
 (defnative "make-custodian-box" (c v) (:leaf t)
   (unless (custodian-p c) (arg-error "make-custodian-box" "custodian?" c))
@@ -1123,11 +1123,11 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
 (defnative "custodian-box?" (x) (:leaf t) (bool (custodian-box-p x)))
 (defnative "custodian-box-value" (b) (:leaf t)
   (unless (custodian-box-p b) (arg-error "custodian-box-value" "custodian-box?" b))
-  (if (custodian-shutdown (custodian-box-custodian b)) ps:false (custodian-box-value b)))
+  (if (custodian-shutdown (custodian-box-custodian b)) qs:false (custodian-box-value b)))
 
 (defnative "unsafe-custodian-register" (c obj callback &optional at-exit? weak? late?) (:instance "#%unsafe" :leaf t)
   (declare (ignore at-exit? weak? late?))
-  (if (custodian-shutdown c) ps:false (custodian-register c obj callback)))
+  (if (custodian-shutdown c) qs:false (custodian-register c obj callback)))
 (defnative "unsafe-custodian-unregister" (obj ref) (:instance "#%unsafe" :leaf t)
   (declare (ignore obj))
   (when (managed-p ref) (custodian-unregister ref))
@@ -1162,7 +1162,7 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
 ;;; Plumbers: flush handles (the plumber is control.lisp's)
 
 (defnative "plumber?" (x) (:leaf t) (bool (plumber-p x)))
-(defnative "plumber-add-flush!" (p proc &optional (weak? ps:false)) (:leaf t)
+(defnative "plumber-add-flush!" (p proc &optional (weak? qs:false)) (:leaf t)
   (unless (plumber-p p) (arg-error "plumber-add-flush!" "plumber?" p))
   (unless (accepts-arity-p proc 1) (arg-error "plumber-add-flush!" "(procedure-arity-includes/c 1)" proc))
   (let ((h (make-flush-handle p proc (truthy weak?))))
@@ -1189,7 +1189,7 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
 		   (rsym "current-security-guard")))
 (define-primitive "#%kernel" "current-security-guard" *current-security-guard*)
 
-(defnative "make-security-guard" (parent file network &optional (link ps:false)) (:leaf t)
+(defnative "make-security-guard" (parent file network &optional (link qs:false)) (:leaf t)
   (unless (security-guard-p parent) (arg-error "make-security-guard" "security-guard?" parent))
   (unless (accepts-arity-p file 3) (arg-error "make-security-guard" "(procedure-arity-includes/c 3)" file))
   (unless (accepts-arity-p network 4) (arg-error "make-security-guard" "(procedure-arity-includes/c 4)" network))
@@ -1277,14 +1277,14 @@ identity; or NIL."
   (destructuring-bind (maker . proc) (pop (rwill-executor-queue e))
     (funcall proc (funcall maker))))
 
-(defnative "will-try-execute" (e &optional (default ps:false)) ()
+(defnative "will-try-execute" (e &optional (default qs:false)) ()
   (check-will-executor "will-try-execute" e)
   (if (poll-wills e) (execute-will e) default))
 (defnative "will-execute" (e) ()
   (check-will-executor "will-execute" e)
   (loop
     (when (poll-wills e) (return (execute-will e)))
-    (do-sync "will-execute" (list e) ps:false nil)))
+    (do-sync "will-execute" (list e) qs:false nil)))
 
 ;;; ------------------------------------------------------------------
 ;;; Subprocesses
@@ -1337,7 +1337,7 @@ identity; or NIL."
 
 (defnative "subprocess" (stdout stdin stderr &rest more) ()
   ;; an optional group argument, #f or 'new, comes before the command
-  (when (and more (or (eq (car more) ps:false)
+  (when (and more (or (eq (car more) qs:false)
 		      (and (racket-symbol-p (car more)) (string= (rname (car more)) "new"))))
     (pop more))
   (unless more
@@ -1379,7 +1379,7 @@ identity; or NIL."
   (or (subprocess-exit-status s) (rsym "running")))
 (defnative "subprocess-wait" (s) ()
   (unless (subprocess-p s) (arg-error "subprocess-wait" "subprocess?" s))
-  (do-sync "subprocess-wait" (list s) ps:false nil)
+  (do-sync "subprocess-wait" (list s) qs:false nil)
   *void*)
 (defnative "subprocess-kill" (s force?) (:leaf t)
   (unless (subprocess-p s) (arg-error "subprocess-kill" "subprocess?" s))
@@ -1387,7 +1387,7 @@ identity; or NIL."
     (sb-ext:process-kill (subprocess-process s) (if (truthy force?) 9 2)))
   *void*)
 (defvar *subprocess-group-enabled*
-  (make-parameter* ps:false nil (rsym "subprocess-group-enabled")))
+  (make-parameter* qs:false nil (rsym "subprocess-group-enabled")))
 (define-primitive "#%kernel" "subprocess-group-enabled" *subprocess-group-enabled*)
 
 (defnative "shell-execute" (&rest args) ()
@@ -1406,7 +1406,7 @@ identity; or NIL."
 		      (car (svref (struct-fields v) 2)))
 		     (t (arg-error "exn-classify-errno" "(or/c exn? (cons/c exact-integer? (or/c 'posix 'windows 'gai)))" v)))))
     (let ((entry (find errno #+darwin *macos-errnos* #-darwin *linux-errnos* :key #'cdr)))
-      (if entry (rsym (car entry)) ps:false))))
+      (if entry (rsym (car entry)) qs:false))))
 
 (defnative "impersonator-ephemeron" (v) (:leaf t)
   (funcall (native-function (gethash "make-ephemeron" *natives*)) v v))

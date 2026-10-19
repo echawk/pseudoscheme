@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R7RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R7RS -*-
 
 ;;;; R7RS-small standard libraries and their exports
 ;;;;
@@ -8,8 +8,8 @@
 ;;;; because several (`...', `=>', `floor/', `call/cc') are awkward Lisp
 ;;;; symbols.
 
-(defpackage "PSEUDOSCHEME-R7RS"
-  (:nicknames "PS-R7RS")
+(defpackage "QUASISCHEME-R7RS"
+  (:nicknames "QS-R7RS")
   (:use "COMMON-LISP")
   (:export "*STANDARD-LIBRARIES*" "*SYNTAX-EXPORTS*" "*IMPLEMENTATION-ENV*"
 	   "LOAD-SCHEME-FILE-FROM" "SPLIT-NAMES" "*STUBS*"
@@ -19,7 +19,7 @@
 	   "*SCRIPT-FILE*" "VERSION-ALIST"
 	   "*FOREIGN-CONDITION-CONVERTER*"))
 
-(in-package "PSEUDOSCHEME-R7RS")
+(in-package "QUASISCHEME-R7RS")
 
 (defparameter *standard-libraries*
   '(((scheme base)

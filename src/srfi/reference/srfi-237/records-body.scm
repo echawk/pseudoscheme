@@ -1,14 +1,14 @@
 ;;; The body of the library (srfi :237 records) from Marc
 ;;; Nieper-Wißkirchen's sample implementation of SRFI 237 (records.sls
-;;; here), with the changes marked PSEUDOSCHEME:
+;;; here), with the changes marked QUASISCHEME:
 ;;;   - no record-types.scm file: the uid table is in memory;
 ;;;   - no SRFI 213 identifier properties (define-property and the
-;;;     lookup procedure), which Pseudoscheme's psyntax lacks;
+;;;     lookup procedure), which Quasischeme's psyntax lacks;
 ;;;   - two bugs fixed: make-record-type-descriptor with a #f parent,
 ;;;     and record-mutator, which returned an accessor.
 ;;; Its *end* variable, which marked the end of record-types.scm, is gone.
 
-  ;; PSEUDOSCHEME: the table of record types by uid is kept in memory only.
+  ;; QUASISCHEME: the table of record types by uid is kept in memory only.
   ;; The sample implementation loads it from, and appends each new
   ;; record type with a uid to, a file record-types.scm in the current
   ;; directory, which it requires to exist.
@@ -31,7 +31,7 @@
                                    'immutable)
                                (vector-ref names i))))))
       (assert (rnrs:record-type-descriptor? rtd))
-      (let ([uid (rnrs:record-type-uid rtd)])  ; PSEUDOSCHEME: no file
+      (let ([uid (rnrs:record-type-uid rtd)])  ; QUASISCHEME: no file
         (when (and uid (not (hashtable-ref *rtd-table* uid #f)))
           (hashtable-set! *rtd-table* uid rtd)))
       rtd))
@@ -87,7 +87,7 @@
   (define make-record-type-descriptor
     (lambda (name parent uid sealed? opaque? fields)
       (register-rtd!
-        ;; PSEUDOSCHEME: was (rnrs:rtd parent), which rejects a #f parent.
+        ;; QUASISCHEME: was (rnrs:rtd parent), which rejects a #f parent.
         (rnrs:make-record-type-descriptor name (rnrs:rtd* parent) uid sealed? opaque? fields))))
 
   (define make-record-descriptor
@@ -135,7 +135,7 @@
 
   (define record-mutator
     (lambda (rtd k)
-      ;; PSEUDOSCHEME: was rnrs:record-accessor.
+      ;; QUASISCHEME: was rnrs:record-accessor.
       (rnrs:record-mutator (rnrs:rtd rtd) k)))
 
   (define record?
@@ -276,8 +276,8 @@
                          #'predicate-name))]
 	    [_
 	     (syntax-violation who "invalid name spec" stx spec)])))
-      ;; PSEUDOSCHEME: was (lambda (lookup) ...), a SRFI 213 transformer;
-      ;; Pseudoscheme has no identifier properties, so lookup finds none,
+      ;; QUASISCHEME: was (lambda (lookup) ...), a SRFI 213 transformer;
+      ;; Quasischeme has no identifier properties, so lookup finds none,
       ;; and a parent clause always becomes a parent-rtd clause.
       (let ([lookup (lambda (id key) #f)])
 	(define update-record-clauses
@@ -380,7 +380,7 @@
 	 (define rtd (register-rtd! (rnrs:record-type-descriptor tmp-name)))
 	 (define cd (rnrs:record-constructor-descriptor tmp-name))
 	 (define rd (make-rd rtd cd parent-rd))
-         (define-rn record-name rd))]))  ; PSEUDOSCHEME: no define-property
+         (define-rn record-name rd))]))  ; QUASISCHEME: no define-property
 
   (define-syntax record-type-descriptor
     (lambda (stx)

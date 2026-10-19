@@ -1,7 +1,7 @@
 ;;; Tests for SRFI 179: chibi-scheme's lib/srfi/179/test.sld
 ;;; (reference/srfi-179/test.sld; adapted by chibi from the SRFI's own
 ;;; test suite), its library body unmodified but for two changes marked
-;;; PSEUDOSCHEME, with chibi's test forms defined on SRFI 64 below.  As in chibi, the randomized tests run one
+;;; QUASISCHEME, with chibi's test forms defined on SRFI 64 below.  As in chibi, the randomized tests run one
 ;;; pass.
 (import (scheme base) (scheme cxr) (scheme complex)
         (scheme file) (scheme list) (scheme read)
@@ -2928,7 +2928,7 @@
             ;; test all the subdomain tiles are the same
             (test-assert
                 (array-every (lambda (r t)
-                               ;; PSEUDOSCHEME: was equal?, which in chibi
+                               ;; QUASISCHEME: was equal?, which in chibi
                                ;; compares records by content
                                (interval= (array-domain r) (array-domain t)))
                              result test-result))
@@ -3559,7 +3559,7 @@
           ;; ((2 2) (2 3) (2 4) (2 5) (2 6))
           ;; ((3 3) (3 4) (3 5) (3 6) (3 7))
           ;; ((4 4) (4 5) (4 6) (4 7) (4 8))
-          #t)  ; PSEUDOSCHEME: added; a body of only definitions is an error
+          #t)  ; QUASISCHEME: added; a body of only definitions is an error
 
         '(let ()
            (define (palindrome? s)

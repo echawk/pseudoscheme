@@ -7,7 +7,7 @@
 ;;; <> and <...> SRFI 26's.  The others (SRFI 190's yield and SRFI 204's
 ;;; $ ? get! *** ___ **1 =.. *.. struct object) are defined here, as in
 ;;; the sample's all-definitions.scm, as macros that are an error to use
-;;; (Pseudoscheme has no SRFI 139 syntax parameters, so they aren't
+;;; (Quasischeme has no SRFI 139 syntax parameters, so they aren't
 ;;; syntax parameters).  all-exports.scm is included unmodified.
 (define-library (srfi 206 all)
   (include-library-declarations "../reference/srfi-206/all-exports.scm")

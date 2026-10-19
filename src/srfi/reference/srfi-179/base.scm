@@ -216,7 +216,7 @@
 ;; Parameters
 
 ;; Note safety is ignored in this implementation.
-;; (PSEUDOSCHEME: but see %make-specialized.)
+;; (QUASISCHEME: but see %make-specialized.)
 (define specialized-array-default-safe?
   (make-parameter #f (lambda (x) (assert (boolean? x)) x)))
 
@@ -401,7 +401,7 @@
 
 ;; Specialized arrays
 
-;; PSEUDOSCHEME: added.  A safe array's getter and setter check their
+;; QUASISCHEME: added.  A safe array's getter and setter check their
 ;; indices: without this, an index in a dimension of width 1 (whose
 ;; coefficient is 0) was never checked at all.
 (define (%check-multi-index domain multi-index)
@@ -414,7 +414,7 @@
                            safe? mutable? adjacent?)
   (%make-array
    domain
-   ;; PSEUDOSCHEME: the safe? cases are added
+   ;; QUASISCHEME: the safe? cases are added
    (let ((getter (specialized-getter body indexer (storage-class-getter storage))))
      (if safe?
          (lambda multi-index

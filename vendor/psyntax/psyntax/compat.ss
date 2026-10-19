@@ -61,7 +61,7 @@
                    swap)))))))))
 
   ;;; we represent records as vectors for portability but this is 
-  ;;; not nice.  (PSEUDOSCHEME: no longer; see below.)  If your system supports compile-time generative
+  ;;; not nice.  (QUASISCHEME: no longer; see below.)  If your system supports compile-time generative
   ;;; records, replace the definition of define-record with your 
   ;;; system supplied definition (which you should support in the 
   ;;; expander first of course).
@@ -138,7 +138,7 @@
                           (syntax (field* ...))))
                        ((idx ...)
                         (iota 0 (length (syntax (field* ...))))))
-           ;;; PSEUDOSCHEME: R6RS records, opaque and nongenerative, not
+           ;;; QUASISCHEME: R6RS records, opaque and nongenerative, not
            ;;; vectors, so that a syntax object isn't a vector to the
            ;;; code it's handed to, and so that one in compiled code
            ;;; finds its record type again by the uid.
@@ -155,7 +155,7 @@
                (define mutator (record-mutator rtd idx))
                ...)))))))
 
-  ;; PSEUDOSCHEME: the option symbols of (file-options no-create ...),
+  ;; QUASISCHEME: the option symbols of (file-options no-create ...),
   ;; checked; the expander makes them an enum set.
   (define (file-options-spec x)
     (for-each

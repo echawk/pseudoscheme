@@ -1,4 +1,4 @@
-;;; SRFI 28: basic format strings.  Written for Pseudoscheme.
+;;; SRFI 28: basic format strings.  Written for Quasischeme.
 (define-library (srfi 28)
   (export format)
   (import (scheme base) (scheme write))

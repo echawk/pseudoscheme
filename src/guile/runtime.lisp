@@ -1,9 +1,9 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; libguile's data and primitives, in Lisp (docs/guile.md, stage 1).
 ;;;;
 ;;;; Guile's Scheme (boot-9, psyntax, ice-9) runs on what libguile, in C,
-;;;; provides.  The parts here are the ones that aren't Pseudoscheme's
+;;;; provides.  The parts here are the ones that aren't Quasischeme's
 ;;;; already:
 ;;;;
 ;;;;   structs and vtables, which Guile's records, its Tree-IL and its
@@ -19,11 +19,11 @@
 ;;;;     read boot-9's module records;
 ;;;;   errors: scm-error, and Lisp errors raised as Guile exceptions.
 ;;;;
-;;;; Every other primitive Guile and Pseudoscheme have in common (car,
-;;;; string-append, ...) is Pseudoscheme's own procedure: see
+;;;; Every other primitive Guile and Quasischeme have in common (car,
+;;;; string-append, ...) is Quasischeme's own procedure: see
 ;;;; INSTALL-ROOT-BINDINGS in src/guile/boot.lisp.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defvar *guile-primitives* (make-hash-table :test 'equal)
   "Guile's primitives defined here: name -> function.")
@@ -38,14 +38,14 @@
   `(lambda ,lambda-list ,@body))
 
 (declaim (inline bool truthy))
-(defun bool (x) (if x ps:true ps:false))
-(defun truthy (x) (not (eq x ps:false)))
+(defun bool (x) (if x qs:true qs:false))
+(defun truthy (x) (not (eq x qs:false)))
 
-(defvar *unspecified* ps:unspecific)
+(defvar *unspecified* qs:unspecific)
 
 (defvar *program-arguments* '() "What Guile's (program-arguments) returns.")
 
-(defun guile-error (key subr message args &optional (rest ps:false))
+(defun guile-error (key subr message args &optional (rest qs:false))
   "Raise Guile exception KEY as scm-error does."
   (funcall (gethash "scm-error" *guile-primitives*) key subr message args rest))
 
@@ -126,18 +126,18 @@ generic's methods are tried instead (src/guile/goops.lisp).")
 
 (defun parse-layout (layout)
   "Field count and hidden field indices of LAYOUT."
-  (let* ((s (ps:scheme-symbol-name (if (stringp layout) (layout-symbol layout) layout)))
+  (let* ((s (qs:scheme-symbol-name (if (stringp layout) (layout-symbol layout) layout)))
 	 (n (floor (length s) 2)))
     (values n (loop for i below n
 		    when (char= (char s (1+ (* 2 i))) #\h) collect i))))
 
 (defun field-default (layout-string i)
-  (if (char= (char layout-string (* 2 i)) #\u) 0 ps:false))
+  (if (char= (char layout-string (* 2 i)) #\u) 0 qs:false))
 
 (defun init-slots (vtable inits &optional (who "make-struct"))
   (let* ((n (vtable-nfields vtable))
 	 (hidden (vtable-hidden vtable))
-	 (layout (ps:scheme-symbol-name (svref (gstruct-slots vtable) 0)))
+	 (layout (qs:scheme-symbol-name (svref (gstruct-slots vtable) 0)))
 	 (slots (make-array n)))
     ;; a vtable's hidden fields (flags, size, ...) take no initializer;
     ;; other structs' fields all do, as in Guile 3
@@ -158,7 +158,7 @@ generic's methods are tried instead (src/guile/goops.lisp).")
   "The flags a vtable of LAYOUT gets from its vtable META, as Guile's
 scm_i_struct_inherit_vtable_magic computes them."
   (let ((meta-flags (vtable-flags meta))
-	(string (ps:scheme-symbol-name layout)))
+	(string (qs:scheme-symbol-name layout)))
     (logior (if (and (>= (length string) (length *standard-vtable-fields*))
 		     (string= *standard-vtable-fields* string
 			      :end2 (length *standard-vtable-fields*)))
@@ -180,7 +180,7 @@ one): it has no fields until then."
   (let ((layout (svref slots 0)))
     (when (stringp layout) (setf (svref slots 0) (setq layout (layout-symbol layout))))
     (let ((v (%make-vtable meta slots)))
-      (if (and layout (symbolp layout) (not (eq layout ps:false)) (not (keywordp layout)))
+      (if (and layout (symbolp layout) (not (eq layout qs:false)) (not (keywordp layout)))
 	  (multiple-value-bind (n hidden) (parse-layout layout)
 	    (let ((flags (logior (let ((f (svref slots +vtable-index-flags+))) (if (integerp f) f 0))
 				 (inherited-vtable-flags meta layout))))
@@ -209,8 +209,8 @@ one): it has no fields until then."
   (let* ((n (/ (length *standard-vtable-fields*) 2))
 	 (slots (make-array n :initial-element 0)))
     (setf (svref slots 0) (layout-symbol *standard-vtable-fields*)
-	  (svref slots +vtable-index-printer+) ps:false
-	  (svref slots +vtable-index-name+) ps:false)
+	  (svref slots +vtable-index-printer+) qs:false
+	  (svref slots +vtable-index-name+) qs:false)
     (let ((v (%make-vtable nil slots)))
       (multiple-value-bind (n hidden) (parse-layout (svref slots 0))
 	(setf (vtable-nfields v) n (vtable-hidden v) hidden
@@ -252,7 +252,7 @@ one): it has no fields until then."
   "An unboxed field (u) holds a 64-bit word."
   (let ((layout (svref (gstruct-slots (struct-vtable-of s)) +vtable-index-layout+)))
     (when (and (symbolp layout) (not (typep v '(unsigned-byte 64))))
-      (let ((string (ps:scheme-symbol-name layout)))
+      (let ((string (qs:scheme-symbol-name layout)))
 	(when (and (< (* 2 i) (length string)) (char= (char string (* 2 i)) #\u))
 	  (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list v) (list v)))))))
 
@@ -271,7 +271,7 @@ one): it has no fields until then."
   (declare (ignore n))
   (make-struct* vtable '() "allocate-struct"))
 (defguile "make-struct-layout" (fields) (layout-symbol (layout-string fields)))
-(defguile "make-vtable" (fields &optional (printer ps:false))
+(defguile "make-vtable" (fields &optional (printer qs:false))
   (make-struct* *standard-vtable* (list (layout-symbol (layout-string fields)) printer) "make-vtable"))
 (defguile "struct-layout" (s) (svref (gstruct-slots (struct-vtable-of s)) 0))
 (defguile "struct-vtable-name" (v) (svref (gstruct-slots v) +vtable-index-name+))
@@ -299,12 +299,12 @@ classes among them, are printed with it.")
 	  ((vtable-p s)
 	   (let ((name (svref (gstruct-slots s) +vtable-index-name+)))
 	     (format stream "#<vtable:~A ~A>"
-		     (if (symbolp name) (ps:scheme-symbol-name name) "")
-		     (ps:scheme-symbol-name (svref (gstruct-slots s) 0)))))
+		     (if (symbolp name) (qs:scheme-symbol-name name) "")
+		     (qs:scheme-symbol-name (svref (gstruct-slots s) 0)))))
 	  (t (let ((name (svref (gstruct-slots (struct-vtable-of s)) +vtable-index-name+)))
 	       (format stream "#<~A ~X>"
-		       (if (and name (symbolp name) (not (eq name ps:false)))
-			   (ps:scheme-symbol-name name) "struct")
+		       (if (and name (symbolp name) (not (eq name qs:false)))
+			   (qs:scheme-symbol-name name) "struct")
 		       (logand (sb-kernel:get-lisp-obj-address s) #xffffffffff)))))))
 
 (defmethod print-object ((s gstruct) stream) (print-struct s stream))
@@ -326,7 +326,7 @@ classes among them, are printed with it.")
 ;;; ------------------------------------------------------------------
 ;;; Variables
 
-(defvar +unbound+ (ps::make-photon "#<unbound>"))
+(defvar +unbound+ (qs::make-photon "#<unbound>"))
 
 (defstruct (gvariable (:constructor make-gvariable (&optional (value +unbound+))) (:copier nil))
   value)
@@ -363,7 +363,7 @@ classes among them, are printed with it.")
 ;;; (key . value) pairs, which hash-get-handle returns and the caller may
 ;;; change.
 
-(sb-ext:define-hash-table-test ps:scheme-equal-p ps-r6rs::sxhash-scheme)
+(sb-ext:define-hash-table-test qs:scheme-equal-p qs-r6rs::sxhash-scheme)
 
 (defstruct (ghash (:constructor %make-ghash (weakness &optional (initial-size 31))) (:copier nil))
   (table nil)
@@ -398,12 +398,12 @@ classes among them, are printed with it.")
     (cond ((null table)
 	   (setf (ghash-kind h) kind
 		 (ghash-table h) (apply #'make-hash-table
-					:test (if (eq kind :eql) 'eql 'ps:scheme-equal-p)
+					:test (if (eq kind :eql) 'eql 'qs:scheme-equal-p)
 					:synchronized t
 					(and (ghash-weakness h) (list :weakness (ghash-weakness h))))))
 	  ((and (eq kind :equal) (eq (ghash-kind h) :eql))
 	   ;; used with hash- after hashq-: make it an equal? table
-	   (let ((new (make-hash-table :test 'ps:scheme-equal-p :synchronized t)))
+	   (let ((new (make-hash-table :test 'qs:scheme-equal-p :synchronized t)))
 	     (maphash (lambda (k v) (setf (gethash k new) v)) table)
 	     (setf (ghash-kind h) :equal (ghash-table h) new)))
 	  (t table))))
@@ -435,7 +435,7 @@ handle lives exactly as long as its value, through this.")
 (defmacro define-hash-procedures (prefix kind)
   (flet ((name (s) (format nil "~A~A" prefix s)))
     `(progn
-       (defguile ,(name "-ref") (h key &optional (default ps:false))
+       (defguile ,(name "-ref") (h key &optional (default qs:false))
 	 (check-table ,(name "-ref") h)
 	 (let ((handle (gethash key (ghash-table-for h ,kind))))
 	   (if handle (cdr handle) default)))
@@ -450,10 +450,10 @@ handle lives exactly as long as its value, through this.")
 	 (check-table ,(name "-remove!") h)
 	 (let* ((table (ghash-table-for h ,kind)) (handle (gethash key table)))
 	   (remhash key table)
-	   (or handle ps:false)))
+	   (or handle qs:false)))
        (defguile ,(name "-get-handle") (h key)
 	 (check-table ,(name "-get-handle") h)
-	 (or (gethash key (ghash-table-for h ,kind)) ps:false))
+	 (or (gethash key (ghash-table-for h ,kind)) qs:false))
        (defguile ,(name "-create-handle!") (h key init)
 	 (check-table ,(name "-create-handle!") h)
 	 (let ((table (ghash-table-for h ,kind)))
@@ -550,7 +550,7 @@ an improper tail, are skipped, as Guile's sloppy procedures do."
 	       `(progn
 		  (defguile ,ref (alist key)
 		    (let ((e (alist-entry alist key #',test)))
-		      (if e (cdr e) ps:false)))
+		      (if e (cdr e) qs:false)))
 		  (defguile ,set (alist key value)
 		    (let ((e (alist-entry alist key #',test)))
 		      (if e (progn (setf (cdr e) value) alist) (acons key value alist))))
@@ -559,7 +559,7 @@ an improper tail, are skipped, as Guile's sloppy procedures do."
 		      (if e (delete e alist :count 1 :test #'eq) alist)))))))
   (alist-procedures "assq" eq)
   (alist-procedures "assv" eql)
-  (alist-procedures "assoc" ps:scheme-equal-p))
+  (alist-procedures "assoc" qs:scheme-equal-p))
 
 ;;; hashx-: the caller's hash and assoc procedures, over an alist per
 ;;; bucket kept in an equal? table by hash value
@@ -579,7 +579,7 @@ the table's own, which hash-ref and the rest see too."
 	  return prefix))
 
 (defun check-handle (who handle)
-  (unless (or (consp handle) (eq handle ps:false) (null handle))
+  (unless (or (consp handle) (eq handle qs:false) (null handle))
     (wrong-type who 2 handle))
   handle)
 (defmacro with-standard-hashx ((hash assoc operation) call &body body)
@@ -588,7 +588,7 @@ the table's own, which hash-ref and the rest see too."
 	 (apply (gethash (concatenate 'string prefix ,operation) *guile-primitives*) ,call)
 	 (progn ,@body))))
 
-(defguile "hashx-ref" (hash assoc h key &optional (default ps:false))
+(defguile "hashx-ref" (hash assoc h key &optional (default qs:false))
   (with-standard-hashx (hash assoc "-ref") (list h key default)
     (multiple-value-bind (table n) (hashx-bucket h hash key)
       (let ((handle (check-handle "hashx-ref" (funcall assoc key (gethash n table '())))))
@@ -617,7 +617,7 @@ the table's own, which hash-ref and the rest see too."
    (multiple-value-bind (table n) (hashx-bucket h hash key)
     (let ((handle (funcall assoc key (gethash n table '()))))
       (when (consp handle) (setf (gethash n table) (remove handle (gethash n table) :test #'eq)))
-      (if (consp handle) handle ps:false)))))
+      (if (consp handle) handle qs:false)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Fluids
@@ -628,11 +628,11 @@ the table's own, which hash-ref and the rest see too."
 ;;; Its OUTER slot is the stack of values with-fluid* has shadowed,
 ;;; innermost first, which fluid-ref* reads.
 
-(defstruct (fluid (:include ps-r7rs::parameter-state)
+(defstruct (fluid (:include qs-r7rs::parameter-state)
 		  (:constructor %make-fluid (global converter))
 		  (:copier nil))
   (outer '())
-  (default ps:false)
+  (default qs:false)
   (special nil)				; a Lisp special variable that holds the value
   (thread-local nil))			; not part of dynamic states
 
@@ -643,7 +643,7 @@ the table's own, which hash-ref and the rest see too."
   "Every fluid but the thread-local ones, for the snapshots that are
 dynamic states.")
 
-(defun make-fluid* (&optional (default ps:false) thread-local)
+(defun make-fluid* (&optional (default qs:false) thread-local)
   (let ((f (%make-fluid default nil)))
     (setf (fluid-default f) default
 	  (fluid-thread-local f) thread-local)
@@ -661,11 +661,11 @@ dynamic states.")
 
 (declaim (inline fluid-value))
 (defun fluid-value (f)
-  (if (fluid-special f) (symbol-value (fluid-special f)) (ps-r7rs::parameter-state-value f)))
+  (if (fluid-special f) (symbol-value (fluid-special f)) (qs-r7rs::parameter-state-value f)))
 (defun (setf fluid-value) (v f)
   (if (fluid-special f)
       (setf (symbol-value (fluid-special f)) v)
-      (setf (ps-r7rs::parameter-state-value f) v)))
+      (setf (qs-r7rs::parameter-state-value f) v)))
 
 (defun fluid-outer-values (f)
   (if (fluid-thread-local f) (symbol-value (fluid-outer f)) (fluid-outer f)))
@@ -676,7 +676,7 @@ dynamic states.")
   ;; states do.
   (let ((symbol (fluid-special fluid)))
     (if symbol
-	(funcall ps-r7rs::*call-in-extent*
+	(funcall qs-r7rs::*call-in-extent*
 		 (lambda (inner)
 		   (multiple-value-bind (symbols values)
 		       (if (fluid-thread-local fluid)
@@ -687,7 +687,7 @@ dynamic states.")
 		       (unwind-protect (funcall inner)
 			 (setq value (symbol-value symbol))))))
 		 thunk)
-	(funcall ps-r7rs::*call-in-extent*
+	(funcall qs-r7rs::*call-in-extent*
 		 (lambda (inner)
 		   (let ((old (fluid-value fluid)))
 		     (push old (fluid-outer fluid))
@@ -701,9 +701,9 @@ dynamic states.")
 
 (defun check-fluid (who f) (unless (fluid-p f) (wrong-type who 1 f)))
 
-(defguile "make-fluid" (&optional (default ps:false)) (make-fluid* default))
+(defguile "make-fluid" (&optional (default qs:false)) (make-fluid* default))
 (defguile "make-unbound-fluid" () (make-fluid* +unbound+))
-(defguile "make-thread-local-fluid" (&optional (default ps:false)) (make-fluid* default t))
+(defguile "make-thread-local-fluid" (&optional (default qs:false)) (make-fluid* default t))
 (defguile "fluid?" (x) (bool (fluid-p x)))
 (defguile "fluid-thread-local?" (x) (check-fluid "fluid-thread-local?" x) (bool (fluid-thread-local x)))
 (defguile "fluid-ref" (f)
@@ -740,7 +740,7 @@ dynamic states.")
   values)
 
 (defun current-dynamic-state* ()
-  (let ((table (ps-r7rs::thread-parameters-snapshot)))
+  (let ((table (qs-r7rs::thread-parameters-snapshot)))
     (maphash (lambda (f _) (declare (ignore _))
 	       (unless (fluid-special f)
 		 (setf (gethash f table) (fluid-value f))))
@@ -752,12 +752,12 @@ dynamic states.")
 (defguile "set-current-dynamic-state" (s)
   (unless (dynamic-state-p s) (wrong-type "set-current-dynamic-state" 1 s))
   (prog1 (current-dynamic-state*)
-    (setq ps-r7rs::*thread-parameters* (dynamic-state-values s))))
+    (setq qs-r7rs::*thread-parameters* (dynamic-state-values s))))
 (defguile "with-dynamic-state" (state thunk)
   (unless (dynamic-state-p state) (wrong-type "with-dynamic-state" 1 state))
-  (funcall ps-r7rs::*call-in-extent*
+  (funcall qs-r7rs::*call-in-extent*
 	   (lambda (inner)
-	     (let ((ps-r7rs::*thread-parameters* (dynamic-state-values state)))
+	     (let ((qs-r7rs::*thread-parameters* (dynamic-state-values state)))
 	       (funcall inner)))
 	   thunk))
 
@@ -773,7 +773,7 @@ dynamic states.")
   (guile-write (syntax-object-expression s) stream)
   (write-string ">" stream))
 
-(defguile "make-syntax" (exp wrap module &optional (sourcev ps:false))
+(defguile "make-syntax" (exp wrap module &optional (sourcev qs:false))
   (make-syntax-object exp wrap module sourcev))
 (defguile "syntax?" (x) (bool (syntax-object-p x)))
 (defguile "syntax-expression" (s) (syntax-object-expression s))
@@ -785,15 +785,15 @@ dynamic states.")
   name type binding)
 
 (defmethod print-object ((m gmacro) stream)
-  (format stream "#<syntax-transformer ~A>" (if (symbolp (gmacro-name m)) (ps:scheme-symbol-name (gmacro-name m)) "")))
+  (format stream "#<syntax-transformer ~A>" (if (symbolp (gmacro-name m)) (qs:scheme-symbol-name (gmacro-name m)) "")))
 
 (defguile "make-syntax-transformer" (name type binding) (make-gmacro name type binding))
 (defguile "macro?" (x) (bool (gmacro-p x)))
-(defguile "macro-type" (m) (if (gmacro-p m) (gmacro-type m) ps:false))
-(defguile "macro-name" (m) (if (gmacro-p m) (gmacro-name m) ps:false))
-(defguile "macro-binding" (m) (if (gmacro-p m) (gmacro-binding m) ps:false))
+(defguile "macro-type" (m) (if (gmacro-p m) (gmacro-type m) qs:false))
+(defguile "macro-name" (m) (if (gmacro-p m) (gmacro-name m) qs:false))
+(defguile "macro-binding" (m) (if (gmacro-p m) (gmacro-binding m) qs:false))
 (defguile "macro-transformer" (m)
-  (if (and (gmacro-p m) (functionp (gmacro-binding m))) (gmacro-binding m) ps:false))
+  (if (and (gmacro-p m) (functionp (gmacro-binding m))) (gmacro-binding m) qs:false))
 
 ;;; ------------------------------------------------------------------
 ;;; Procedure properties, source properties, object properties
@@ -811,9 +811,9 @@ dynamic states.")
 	  ((and (eq key (ssym "arglist")) (functionp p) (not (typep p 'standard-object)))
 	   (let ((arity (function-arity p)))
 	     (if arity
-		 (list (first arity) (second arity) '() ps:false (if (third arity) (ssym "rest") ps:false))
-		 ps:false)))
-	  (t ps:false))))
+		 (list (first arity) (second arity) '() qs:false (if (third arity) (ssym "rest") qs:false))
+		 qs:false)))
+	  (t qs:false))))
 (defguile "set-procedure-property!" (p key value)
   (let ((entry (assoc key (gethash p *procedure-properties* '()))))
     (if entry
@@ -854,11 +854,11 @@ else the one that is its Lisp name, if one is."
 	  (when (and (gvariable-p v) (functionp (gvariable-value v)))
 	    (let* ((f (gvariable-value v))
 		   (old (gethash f table))
-		   (name (ps:scheme-symbol-name (car handle)))
+		   (name (qs:scheme-symbol-name (car handle)))
 		   (lisp-name (ignore-errors (string-downcase (string (sb-kernel:%fun-name f))))))
 	      (when (or (null old)
 			(equal (gethash f primitive-names) name)
-			(and (not (equal (gethash f primitive-names) (ps:scheme-symbol-name old)))
+			(and (not (equal (gethash f primitive-names) (qs:scheme-symbol-name old)))
 			     lisp-name (string= lisp-name name)))
 		(setf (gethash f table) (car handle)))))))
       (setq *root-procedure-names* table)))
@@ -868,17 +868,17 @@ else the one that is its Lisp name, if one is."
   (let ((entry (assoc (ssym "name") (gethash p *procedure-properties* '()))))
     (cond (entry (cdr entry))
 	  ((root-procedure-name p))
-	  (t ps:false))))
+	  (t qs:false))))
 (defguile "procedure-documentation" (p)
   (let ((entry (assoc (ssym "documentation") (gethash p *procedure-properties* '()))))
-    (if entry (cdr entry) ps:false)))
-(defguile "procedure-source" (p) (declare (ignore p)) ps:false)
+    (if entry (cdr entry) qs:false)))
+(defguile "procedure-source" (p) (declare (ignore p)) qs:false)
 
 (defvar *source-properties* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq))
 ;;; As libguile's: an immediate (a fixnum, character, boolean, () or the
 ;;; unspecified value) has no source properties and can't be given any.
 (defun guile-immediate-p (x)
-  (or (null x) (characterp x) (eq x ps:false) (eq x ps:true) (eq x *unspecified*)
+  (or (null x) (characterp x) (eq x qs:false) (eq x qs:true) (eq x *unspecified*)
       (and (integerp x) (<= (- (ash 1 61)) x (1- (ash 1 61))))))
 (defguile "source-properties" (x)
   (if (guile-immediate-p x) '() (values (gethash x *source-properties* '()))))
@@ -888,27 +888,27 @@ else the one that is its Lisp name, if one is."
   *unspecified*)
 (defguile "source-property" (x key)
   (let ((entry (and (not (guile-immediate-p x)) (assoc key (gethash x *source-properties* '())))))
-    (if entry (cdr entry) ps:false)))
+    (if entry (cdr entry) qs:false)))
 (defguile "set-source-property!" (x key value)
   (when (guile-immediate-p x) (wrong-type "set-source-property!" 1 x))
   (let* ((props (gethash x *source-properties* '()))
-	 (name (and (symbolp key) key (not (keywordp key)) (ps:scheme-symbol-name key))))
+	 (name (and (symbolp key) key (not (keywordp key)) (qs:scheme-symbol-name key))))
     (setf (gethash x *source-properties*)
 	  (if (member name '("line" "column" "filename") :test #'equal)
 	      ;; as libguile's: line, column (0 if not given) and the
 	      ;; filename (if not #f) together, before the others
 	      (flet ((old (field default)
 		       (let ((entry (find field props :key (lambda (e) (and (consp e) (symbolp (car e)) (car e)))
-						      :test (lambda (f k) (and k (not (keywordp k)) (string= f (ps:scheme-symbol-name k)))))))
+						      :test (lambda (f k) (and k (not (keywordp k)) (string= f (qs:scheme-symbol-name k)))))))
 			 (if entry (cdr entry) default))))
 		(let ((line (if (string= name "line") value (old "line" 0)))
 		      (column (if (string= name "column") value (old "column" 0)))
-		      (filename (if (string= name "filename") value (old "filename" ps:false))))
+		      (filename (if (string= name "filename") value (old "filename" qs:false))))
 		  (append (list (cons (ssym "line") line) (cons (ssym "column") column))
-			  (unless (eq filename ps:false) (list (cons (ssym "filename") filename)))
+			  (unless (eq filename qs:false) (list (cons (ssym "filename") filename)))
 			  (remove-if (lambda (e)
 				       (and (consp e) (symbolp (car e)) (car e) (not (keywordp (car e)))
-					    (member (ps:scheme-symbol-name (car e)) '("line" "column" "filename")
+					    (member (qs:scheme-symbol-name (car e)) '("line" "column" "filename")
 						    :test #'string=)))
 				     props))))
 	      (cons (cons key value) props))))
@@ -918,7 +918,7 @@ else the one that is its Lisp name, if one is."
 character, boolean, (), the unspecified value or the end-of-file object
 is an immediate)."
   (and (not (guile-immediate-p x))
-       (not (eq x ps:eof-object))
+       (not (eq x qs:eof-object))
        (or (consp x) (vectorp x) (structure-object-p* x) (numberp x))))
 
 (defun structure-object-p* (x) (typep x 'structure-object))
@@ -931,7 +931,7 @@ is an immediate)."
 (defguile "set-object-properties!" (x alist) (setf (gethash x *object-properties*) alist) *unspecified*)
 (defguile "object-property" (x key)
   (let ((entry (assoc key (gethash x *object-properties* '()))))
-    (if entry (cdr entry) ps:false)))
+    (if entry (cdr entry) qs:false)))
 (defguile "set-object-property!" (x key value)
   (let ((entry (assoc key (gethash x *object-properties* '()))))
     (if entry (setf (cdr entry) value) (push (cons key value) (gethash x *object-properties*))))
@@ -955,7 +955,7 @@ is an immediate)."
   (destructuring-bind (required optional rest) (funcall (root-value "procedure-minimum-arity") proc)
     (and (<= required n) (or (truthy rest) (<= n (+ required optional))))))
 
-(defguile "add-hook!" (h proc &optional (append ps:false))
+(defguile "add-hook!" (h proc &optional (append qs:false))
   (unless (hook-p h) (wrong-type "add-hook!" 1 h))
   (unless (and (functionp proc) (hook-accepts-p proc (hook-arity h))) (wrong-type "add-hook!" 2 proc))
   (setf (hook-procedures h)
@@ -978,15 +978,15 @@ is an immediate)."
 
 (defguile "keyword?" (x) (bool (and (keywordp x) x)))
 (defguile "symbol->keyword" (s) (intern (symbol-name s) "KEYWORD"))
-(defguile "keyword->symbol" (k) (intern (symbol-name k) ps:scheme-package))
+(defguile "keyword->symbol" (k) (intern (symbol-name k) qs:scheme-package))
 
 ;;; ------------------------------------------------------------------
-;;; Prompts: Pseudoscheme's (src/continuations.lisp)
+;;; Prompts: Quasischeme's (src/continuations.lisp)
 
 (defguile "make-prompt-tag" (&optional (stem "prompt")) (list stem))
-(defguile "call-with-prompt" (tag thunk handler) (psx::call-with-prompt tag thunk handler))
-(defguile "abort-to-prompt*" (tag args) (apply #'psx::abort-to-prompt tag args))
-(defguile "abort-to-prompt" (tag &rest args) (apply #'psx::abort-to-prompt tag args))
+(defguile "call-with-prompt" (tag thunk handler) (qsx::call-with-prompt tag thunk handler))
+(defguile "abort-to-prompt*" (tag args) (apply #'qsx::abort-to-prompt tag args))
+(defguile "abort-to-prompt" (tag &rest args) (apply #'qsx::abort-to-prompt tag args))
 
 ;;; ------------------------------------------------------------------
 ;;; Errors
@@ -1008,7 +1008,7 @@ is an immediate)."
 (defvar *throw-depth* 0)
 (defvar *trace-throws* nil
   "Print each throw to *trace-output*; :backtrace, with a Lisp backtrace.
-PSEUDOSCHEME_GUILE_TRACE_THROWS sets it when a program starts (boot.lisp,
+QUASISCHEME_GUILE_TRACE_THROWS sets it when a program starts (boot.lisp,
 ADD-ENVIRONMENT-LOAD-PATH): \"backtrace\" for :backtrace, else T.")
 (defvar *trace-throw-keys* '()
   "The keys *TRACE-THROWS* traces; all of them if ().")
@@ -1039,18 +1039,18 @@ fails over and over (boot-9 half loaded)."
   (let ((prefix prefix))
     (ssym (format nil "~A~D" prefix (incf *guile-gensym-counter*)))))
 
-(defguile "noop" (&rest args) (if args (first args) ps:false))
-(defguile "1+" (x) (ps:scheme+ x 1))
-(defguile "1-" (x) (ps:scheme- x 1))
+(defguile "noop" (&rest args) (if args (first args) qs:false))
+(defguile "1+" (x) (qs:scheme+ x 1))
+(defguile "1-" (x) (qs:scheme- x 1))
 (defguile "-" (x &rest more)
   ;; exact 0 minus a flonum zero is it negated, as Guile's: (- 0 0.0) is
   ;; -0.0, which peval folds (- 0.0) into
-  (cond ((null more) (ps:scheme- x))
+  (cond ((null more) (qs:scheme- x))
 	((and (null (cdr more)) (eql x 0) (floatp (car more)) (zerop (car more))) (- (car more)))
-	(t (apply #'ps:scheme- x more))))
+	(t (apply #'qs:scheme- x more))))
 (defguile "self-evaluating?" (x)
-  (bool (not (or (consp x) (null x) (and (symbolp x) (ps:scheme-symbol-p x) (not (keywordp x)))))))
-(defguile "nil?" (x) (bool (or (null x) (eq x ps:false) (eq x *elisp-nil*))))
+  (bool (not (or (consp x) (null x) (and (symbolp x) (qs:scheme-symbol-p x) (not (keywordp x)))))))
+(defguile "nil?" (x) (bool (or (null x) (eq x qs:false) (eq x *elisp-nil*))))
 (defguile "acons" (k v alist) (acons k v alist))
 (defguile "cons*" (x &rest more) (apply #'list* x more))
 (defguile "logbit?" (i n) (bool (logbitp i n)))
@@ -1079,8 +1079,8 @@ fails over and over (boot-9 half loaded)."
 (defconstant +guile-fixnum-max+ (1- (ash 1 61)) "Guile's most-positive-fixnum, 62 bits.")
 
 (defparameter *immediate-bits*
-  `((,ps:false . #x4) (,*elisp-nil* . #x104) (,ps:true . #x404) (nil . #x304)
-    (,ps:unspecific . #x804) (,+unbound+ . #x904) (,ps:eof-object . #xa04))
+  `((,qs:false . #x4) (,*elisp-nil* . #x104) (,qs:true . #x404) (nil . #x304)
+    (,qs:unspecific . #x804) (,+unbound+ . #x904) (,qs:eof-object . #xa04))
   "Guile's bits for the immediates other than fixnums and characters.")
 
 (defguile "object-address" (x)
@@ -1123,14 +1123,14 @@ like, compile.lisp), or else its Lisp lambda list."
 	       (or (null arity) (zerop (first arity)))))))
 (defguile "primitive-exit" (&optional (code 0))
   (finish-output *standard-output*)
-  (sb-ext:exit :code (cond ((eq code ps:false) 1) ((eq code ps:true) 0) (t code)) :abort t))
+  (sb-ext:exit :code (cond ((eq code qs:false) 1) ((eq code qs:true) 0) (t code)) :abort t))
 (setf (gethash "primitive-_exit" *guile-primitives*) (gethash "primitive-exit" *guile-primitives*))
-(defguile "include-deprecated-features" () ps:false)
+(defguile "include-deprecated-features" () qs:false)
 (defguile "issue-deprecation-warning" (&rest messages) (declare (ignore messages)) *unspecified*)
 (defguile "%warn-auto-compilation-enabled" () *unspecified*)
 (defguile "gc" ()
   (sb-ext:gc :full t)
-  (ps-r6rs::note-full-collection)
+  (qs-r6rs::note-full-collection)
   ;; the hook has run when gc returns, as in Guile
   (funcall 'run-after-gc-hook-1)
   *unspecified*)
@@ -1193,11 +1193,11 @@ like, compile.lisp), or else its Lisp lambda list."
   (if argp (options-interface *debug-options* arg) (options-interface *debug-options*)))
 
 (defun option-scheme-value (v)
-  (cond ((eq v :reader) (ssym "reader")) ((eq v t) ps:true) ((null v) ps:false) (t v)))
+  (cond ((eq v :reader) (ssym "reader")) ((eq v t) qs:true) ((null v) qs:false) (t v)))
 
 (defun option-value (options name)
   "NAME's value in OPTIONS, Lisp-style: booleans as T or NIL."
-  (let ((o (find name options :key (lambda (o) (ps:scheme-symbol-name (first o))) :test #'string=)))
+  (let ((o (find name options :key (lambda (o) (qs:scheme-symbol-name (first o))) :test #'string=)))
     (third o)))
 
 (defun options-interface (options &optional (arg nil argp))
@@ -1205,7 +1205,7 @@ like, compile.lisp), or else its Lisp lambda list."
 	 (loop for (name boolean value) in options
 	       if boolean when value collect name end
 	       else append (list name (option-scheme-value value))))
-	((eq arg ps:true)
+	((eq arg qs:true)
 	 (loop for (name boolean value doc) in options
 	       collect (list name (if boolean (bool value) (option-scheme-value value)) doc)))
 	(t (let ((old (options-interface options)))
@@ -1218,9 +1218,9 @@ like, compile.lisp), or else its Lisp lambda list."
 			      (t (setq tail (cdr tail))
 				 (setf (third o)
 				       (let ((v (car tail)))
-					 (cond ((eq v ps:false) nil)
-					       ((eq v ps:true) t)
-					       ((and (symbolp v) (string= (ps:scheme-symbol-name v) "reader")) :reader)
+					 (cond ((eq v qs:false) nil)
+					       ((eq v qs:true) t)
+					       ((and (symbolp v) (string= (qs:scheme-symbol-name v) "reader")) :reader)
 					       (t v))))))))
 	     old))))
 
@@ -1235,15 +1235,15 @@ like, compile.lisp), or else its Lisp lambda list."
   ;; a throw it doesn't catch is reported to the error port, and #f returned
   (let ((frame (vector :barrier nil "with-continuation-barrier" :escapes)))
     (declare (dynamic-extent frame))
-    (psx::with-frame (frame)
-      (funcall (root-value "catch") ps:true thunk
+    (qsx::with-frame (frame)
+      (funcall (root-value "catch") qs:true thunk
 	       (lambda (key &rest args)
 		 (let ((print (root-value "print-exception"))
 		       (port (funcall (root-value "current-error-port"))))
 		   (if print
-		       (funcall print port ps:false key args)
+		       (funcall print port qs:false key args)
 		       (format port "Throw to key ~A~%" key)))
-		 ps:false)))))
+		 qs:false)))))
 (defguile "%get-stack-size" () 0)
 (defguile "get-internal-real-time" () (get-internal-real-time))
 (defguile "get-internal-run-time" () (get-internal-run-time))
@@ -1252,17 +1252,17 @@ like, compile.lisp), or else its Lisp lambda list."
 (defguile "set-program-arguments" (args) (setq *program-arguments* args) *unspecified*)
 
 ;; Keywords are Lisp symbols, but not Scheme symbols to Guile
-(defguile "symbol?" (x) (bool (and (symbolp x) (ps:scheme-symbol-p x) (not (keywordp x)))))
+(defguile "symbol?" (x) (bool (and (symbolp x) (qs:scheme-symbol-p x) (not (keywordp x)))))
 
 (defvar *syntax-session-id* (list :session))
 (defguile "syntax-session-id" () *syntax-session-id*)
 
-;; Pseudoscheme's own procedures by name, for the replacement modules in
+;; Quasischeme's own procedures by name, for the replacement modules in
 ;; src/guile/modules/
-(defguile "%host-ref" (name) (psx:host-ref (ps:scheme-symbol-name name)))
+(defguile "%host-ref" (name) (qsx:host-ref (qs:scheme-symbol-name name)))
 
 ;;; #nil, Emacs Lisp's nil: false, and the empty list, to Guile's own
 ;;; predicates (src/guile/compile.lisp makes it false to `if').
-(defguile "not" (x) (bool (or (eq x ps:false) (eq x *elisp-nil*))))
+(defguile "not" (x) (bool (or (eq x qs:false) (eq x *elisp-nil*))))
 (defguile "null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
-(defguile "boolean?" (x) (bool (or (eq x ps:false) (eq x ps:true) (eq x *elisp-nil*))))
+(defguile "boolean?" (x) (bool (or (eq x qs:false) (eq x qs:true) (eq x *elisp-nil*))))

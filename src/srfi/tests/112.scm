@@ -1,12 +1,12 @@
 ;;; Tests for SRFI 112.  The SRFI standardizes no values, only that each
 ;;; procedure returns a string or #f; the implementation's name and
-;;; version are Pseudoscheme's.
+;;; version are Quasischeme's.
 (import (scheme base) (scheme process-context) (srfi 64) (srfi 112))
 
 (define (string-or-false? x) (or (string? x) (not x)))
 
 (test-begin "srfi-112")
-(test-equal "pseudoscheme" (implementation-name))
+(test-equal "quasischeme" (implementation-name))
 (test-equal "3.0" (implementation-version))
 (test-assert (string-or-false? (cpu-architecture)))
 (test-assert (string-or-false? (machine-name)))

@@ -1,11 +1,11 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER; -*-
 
 ;;;; Runs chibi's R5RS test suite (tests/chibi/r5rs-tests.scm) against
-;;;; Pseudoscheme and reports the pass count.
+;;;; Quasischeme and reports the pass count.
 ;;;;
 ;;;; Usage:
 ;;;;   sbcl --script tests/run-r5rs-tests.lisp [--classic | --continuations=escape]
-;;;; or, from an already-running image with :pseudoscheme loaded:
+;;;; or, from an already-running image with :quasischeme loaded:
 ;;;;   (load "tests/run-r5rs-tests.lisp")
 
 (require :asdf)
@@ -26,17 +26,17 @@
 			       here)))
   (pushnew (truename root) asdf:*central-registry* :test #'equal))
 
-(load-system :pseudoscheme/r5rs)
+(load-system :quasischeme/r5rs)
 
-;;; Loading :pseudoscheme/reader (a dependency of :pseudoscheme/r5rs)
-;;; already switched ps:*scheme-read* to the dedicated Scheme48-derived
+;;; Loading :quasischeme/reader (a dependency of :quasischeme/r5rs)
+;;; already switched qs:*scheme-read* to the dedicated Scheme48-derived
 ;;; reader (read.scm's SCHEME-READ) -- the CL-reader bridge this used
 ;;; to rely on can't parse the `...' ellipsis identifier syntax-rules
 ;;; uses throughout, or Scheme string escapes like \n, both of which
 ;;; this test file needs.
 
 (defparameter *arguments* (uiop:command-line-arguments))
-;; R5RS is on psyntax ((pseudoscheme r5rs) at a top level of its own),
+;; R5RS is on psyntax ((quasischeme r5rs) at a top level of its own),
 ;; as the API's R5RS: functions are; --classic runs the suite on the
 ;; translator's own classic front end instead (what the translator is
 ;; bootstrapped with).
@@ -44,19 +44,19 @@
 (defparameter *psyntax* (not (member "--classic" *arguments* :test #'string=)))
 
 (when *psyntax*
-  (load-system :pseudoscheme/r7rs)
-  (ps:disable-float-traps)
-  (uiop:symbol-call "PSEUDOSCHEME-R7RS" "BOOT")
-  (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")) (and *full* t)))
+  (load-system :quasischeme/r7rs)
+  (qs:disable-float-traps)
+  (uiop:symbol-call "QUASISCHEME-R7RS" "BOOT")
+  (setf (symbol-value (find-symbol "*FULL-CONTINUATIONS*" "QUASISCHEME-PSYNTAX")) (and *full* t)))
 
 (defun evaluate (form)
   (if *psyntax*
-      (uiop:symbol-call "PSEUDOSCHEME-R7RS" "EVAL-AT-R5RS-REPL" form)
-      (ps:scheme-eval form ps:scheme-user-environment)))
+      (uiop:symbol-call "QUASISCHEME-R7RS" "EVAL-AT-R5RS-REPL" form)
+      (qs:scheme-eval form qs:scheme-user-environment)))
 
 (defun global-value (name)
   (if *psyntax*
-      (evaluate (ps:intern-scheme-symbol name))
+      (evaluate (qs:intern-scheme-symbol name))
       (symbol-value (intern (string-upcase name) "SCHEME"))))
 
 (defparameter *r5rs-tests-file*
@@ -75,12 +75,12 @@
 
 (with-open-file (in *r5rs-tests-file*)
   (loop
-    (let ((form (handler-case (funcall ps:*scheme-read* in)
+    (let ((form (handler-case (funcall qs:*scheme-read* in)
 		  (error (e)
 		    (format t "~&[READ ERROR] ~A~%" e)
 		    (setq *reader-stopped-early* t)
-		    ps:eof-object))))
-      (when (eq form ps:eof-object)
+		    qs:eof-object))))
+      (when (eq form qs:eof-object)
 	(return))
       (handler-case
 	  (evaluate form)

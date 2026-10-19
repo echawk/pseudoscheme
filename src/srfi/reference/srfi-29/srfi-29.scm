@@ -7,7 +7,7 @@
 ;; The current-language and current-country functions provided
 ;; here must be rewritten for each Scheme system to default to the
 ;; actual locale of the session
-;; PSEUDOSCHEME: they are, in ../../29.sld; these are commented out.
+;; QUASISCHEME: they are, in ../../29.sld; these are commented out.
 #;
 (define current-language
   (let ((current-language-value 'en))
@@ -81,7 +81,7 @@
 (define format
   (lambda (format-string . objects)
     (let ((buffer (open-output-string))
-          (all-objects objects))  ; PSEUDOSCHEME: added, for ~n@*
+          (all-objects objects))  ; QUASISCHEME: added, for ~n@*
       (let loop ((format-list (string->list format-string))
                  (objects objects)
                  (object-override #f))
@@ -101,7 +101,7 @@
                               ((and (eq? (car fl) '#\@)
                                     (eq? (cadr fl) '#\*))
                                (loop (cddr fl) objects (list-ref all-objects pos)))
-                               ;; PSEUDOSCHEME: was (list-ref objects pos),
+                               ;; QUASISCHEME: was (list-ref objects pos),
                                ;; which counts from the first unconsumed
                                ;; value, not absolutely as the SRFI says
                               (else

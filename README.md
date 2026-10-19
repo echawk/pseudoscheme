@@ -1,10 +1,11 @@
-# Pseudoscheme
+# Quasischeme
 
-Pseudoscheme 3.0 is Jonathan Rees' Scheme-to-Common-Lisp translator and
-evaluator (versions up to 2.13 date from 1991-1994, targeting CMU CL,
-Symbolics, VAX Lisp and LispWorks), brought up to date: it runs R5RS, R6RS and R7RS Scheme
+Quasischeme 1.0 grew from Jonathan Rees' Pseudoscheme, a
+Scheme-to-Common-Lisp translator and evaluator (versions up to 2.13,
+1991-1994, targeting CMU CL, Symbolics, VAX Lisp and LispWorks). It runs
+every Revised Report, R1RS through R7RS, and all the final SRFIs,
 on modern Common Lisp (developed on SBCL), as a library inside a Lisp
-image or as a standalone `pseudoscheme` command. It also runs other
+image or as a standalone `quasischeme` command. It also runs other
 Schemes' own code: Chez Scheme programs (`--chez`), GNU Guile with its
 own boot-9 and modules (`--guile`), Racket through Racket's own expander
 (`--racket`), and C programs written against libguile, LilyPond among
@@ -22,27 +23,27 @@ conditions in both.
 From the shell:
 
 ```sh
-make -C contrib/cli                 # builds bin/pseudoscheme
-bin/pseudoscheme                    # R7RS REPL: ,help, ,language chez, ,q (docs/repl.md)
-bin/pseudoscheme --r6rs prog.sps a b
-bin/pseudoscheme --chez script.ss     # a Chez Scheme script (docs/chez.md)
-bin/pseudoscheme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
-bin/pseudoscheme --racket prog.rkt    # Racket, on Racket's own expander (docs/racket.md)
-bin/pseudoscheme --r4rs prog.scm     # or --ieee, --r3rs, --r2rs, --rrs: the older reports (docs/reports.md)
-bin/pseudoscheme --guile --compile prog.scm -o prog   # a standalone executable, in any mode (docs/executables.md)
-bin/pseudoscheme -p '(exact-integer-sqrt 17)'
-bin/pseudoscheme --lisp               # a Lisp REPL with all of it, for SLY/SLIME (docs/emacs.md)
-bin/pseudoscheme --help
+make -C contrib/cli                 # builds bin/quasischeme
+bin/quasischeme                    # R7RS REPL: ,help, ,language chez, ,q (docs/repl.md)
+bin/quasischeme --r6rs prog.sps a b
+bin/quasischeme --chez script.ss     # a Chez Scheme script (docs/chez.md)
+bin/quasischeme --guile prog.scm     # GNU Guile, its own boot-9 and modules (docs/guile.md)
+bin/quasischeme --racket prog.rkt    # Racket, on Racket's own expander (docs/racket.md)
+bin/quasischeme --r4rs prog.scm     # or --ieee, --r3rs, --r2rs, --rrs: the older reports (docs/reports.md)
+bin/quasischeme --guile --compile prog.scm -o prog   # a standalone executable, in any mode (docs/executables.md)
+bin/quasischeme -p '(exact-integer-sqrt 17)'
+bin/quasischeme --lisp               # a Lisp REPL with all of it, for SLY/SLIME (docs/emacs.md)
+bin/quasischeme --help
 ```
 
 Threads a program makes get 32 MB control stacks (the main thread has
 256 MB), since SBCL takes time in proportion to make one;
-`PSEUDOSCHEME_THREAD_STACK_SIZE` (in megabytes) changes that.
+`QUASISCHEME_THREAD_STACK_SIZE` (in megabytes) changes that.
 
 From Lisp:
 
 ```lisp
-(push #P"/path/to/pseudoscheme-asdf/" asdf:*central-registry*)
+(push #P"/path/to/quasischeme-asdf/" asdf:*central-registry*)
 (asdf:load-system :r7rs)                    ; or :r6rs, :r5rs: the same system
 
 (r7rs:import (only (srfi 1) fold filter iota) (srfi 26))
@@ -63,7 +64,7 @@ And Scheme using Lisp: a Lisp package is a library, macros included.
 (import (scheme base)
         (prefix (cl common-lisp) cl:)
         (prefix (cl ironclad) ic:)          ; loaded on demand (ASDF/Quicklisp)
-        (pseudoscheme lisp))
+        (quasischeme lisp))
 
 (cl:sort (list '(b . 2) '(a . 1)) cl:< #:key cl:cdr)
 (cl:loop for x in '(1 2 3 4) when (even? x) collect (* x x))
@@ -92,7 +93,7 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 Core forms from every front end pass through an optimizer before the
 translator: cp0 (inlining, constant folding, copy propagation) and
 cptypes (type recovery), after Chez's (src/cp0.lisp, src/cptypes.lisp,
-docs/optimizations.md). `PSEUDOSCHEME_OPTIMIZE=0` turns it off, `1`
+docs/optimizations.md). `QUASISCHEME_OPTIMIZE=0` turns it off, `1`
 runs cp0 only; `2`, both, is the default.
 
 Continuations are full and re-entrant, and delimited ones (prompts) are
@@ -152,10 +153,10 @@ The other Schemes' modes:
 ## Repository layout
 
 ```
-pseudoscheme.asd     -- all ASDF systems
+quasischeme.asd     -- all ASDF systems
 src/                 -- the implementation: .lisp (hand-written Lisp),
                         .scm (the self-hosted translator and other Scheme
-                        source), .pso (that Scheme, pre-translated to
+                        source), .qso (that Scheme, pre-translated to
                         Lisp -- see "Bootstrap artifacts")
 src/numbers.lisp     -- Scheme numerics on CL numbers: syntax, printing,
                         exactness, IEEE edge cases
@@ -186,7 +187,7 @@ src/racket/          -- Racket (--racket): the linklet compiler
                         (linklet/), Racket's primitives (native/), the
                         Chez-fork layer (cs/), the module cache
                         (docs/racket.md)
-src/control.sls      -- (pseudoscheme control): delimited
+src/control.sls      -- (quasischeme control): delimited
                         continuations, as Guile has them
 src/compat/          -- (ikarus), for the Ikarus variants of Akku
                         packages
@@ -195,10 +196,10 @@ src/environments.lisp
 src/api.lisp         -- the R5RS / R6RS / R7RS packages for Lisp
 src/interop.lisp, src/interop/
                      -- the Scheme <-> Lisp bridge: (cl <package>)
-                        libraries, (pseudoscheme lisp), use-library
+                        libraries, (quasischeme lisp), use-library
 src/asdf.lisp        -- Scheme sources as ASDF components
 vendor/psyntax/      -- Ghuloum & Dybvig's psyntax, patched, and the
-                        image of it built on Pseudoscheme
+                        image of it built on Quasischeme
 vendor/guile-test-suite/ -- GNU Guile 3.0.11's test suite, unmodified
                         (LGPL), run by make test-guile
 vendor/chez-mats/    -- Chez Scheme's mats, run by make test-chez
@@ -207,7 +208,7 @@ utils/               -- setup and teardown of what the modes need from
                         layers (racket/), Chez (chez/), a Linux
                         container with Guile, Guix and LilyPond
                         (container/)
-contrib/cli/         -- the `pseudoscheme' command
+contrib/cli/         -- the `quasischeme' command
 boot/                -- making the generated files from source, with
                         other Schemes (boot/README.md)
 examples/            -- Scheme using Lisp, Lisp using Scheme, a mixed
@@ -220,33 +221,33 @@ tests/               -- test runners and the suites they run (chibi's
 docs/                -- interop (the bridge), libraries (Akku and
                         snow), continuations, the REPL, Emacs (SLY and
                         SLIME), and racket, guile and chez (designs)
-contrib/emacs/       -- pseudoscheme.el, sly-pseudoscheme.el,
-                        slime-pseudoscheme.el (docs/emacs.md)
+contrib/emacs/       -- quasischeme.el, sly-quasischeme.el,
+                        slime-quasischeme.el (docs/emacs.md)
 ```
 
 ## Systems
 
-- `pseudoscheme/rts`, `pseudoscheme/translator`, `pseudoscheme/evaluator`
+- `quasischeme/rts`, `quasischeme/translator`, `quasischeme/evaluator`
   -- the classic core: run-time, the self-hosted translator (loaded
-  pre-translated), `scheme-eval`/`scheme-load`. `pseudoscheme` is all
+  pre-translated), `scheme-eval`/`scheme-load`. `quasischeme` is all
   three.
-- `pseudoscheme/reader` -- the Scheme reader/writer (`read.scm`,
+- `quasischeme/reader` -- the Scheme reader/writer (`read.scm`,
   `write.scm`).
-- `pseudoscheme/r5rs` -- the core plus the reader.
-- `pseudoscheme/environments` -- native environments for the R5RS and
+- `quasischeme/r5rs` -- the core plus the reader.
+- `quasischeme/environments` -- native environments for the R5RS and
   R7RS implementation layers.
-- `pseudoscheme/r7rs-runtime` -- the procedures behind R7RS-small.
-- `pseudoscheme/r6rs` -- psyntax, the R6RS libraries, `(chezscheme)`,
+- `quasischeme/r7rs-runtime` -- the procedures behind R7RS-small.
+- `quasischeme/r6rs` -- psyntax, the R6RS libraries, `(chezscheme)`,
   full continuations and the compiled-library cache.
-- `pseudoscheme/r7rs` -- R7RS-small on psyntax.
-- `pseudoscheme/api` -- the `R5RS`/`R6RS`/`R7RS` packages and the
+- `quasischeme/r7rs` -- R7RS-small on psyntax.
+- `quasischeme/api` -- the `R5RS`/`R6RS`/`R7RS` packages and the
   Scheme/Lisp bridge. The systems `r5rs`, `r6rs` and `r7rs` are
   shorthands for it.
-- `pseudoscheme/asdf` -- ASDF component types for Scheme sources.
-- `pseudoscheme/repl` -- the command's REPL: a line editor, meta-commands,
+- `quasischeme/asdf` -- ASDF component types for Scheme sources.
+- `quasischeme/repl` -- the command's REPL: a line editor, meta-commands,
   every mode's language, and Guile's own REPL (docs/repl.md).
-- `pseudoscheme-cli` (`contrib/cli/`) -- the command.
-- `pseudoscheme/bootstrap` -- regenerates the `.pso` files.
+- `quasischeme-cli` (`contrib/cli/`) -- the command.
+- `quasischeme/bootstrap` -- regenerates the `.qso` files.
 
 ## psyntax: the front end
 
@@ -255,8 +256,8 @@ contrib/emacs/       -- pseudoscheme.el, sly-pseudoscheme.el,
 Chez Scheme's, with R6RS libraries, implicit phasing, identifier macros,
 `datum->syntax`, `quasisyntax`, `define-record-type`, conditions, and
 the rest of the R6RS syntax. It is written as R6RS libraries and runs
-here *expanded into core Scheme*, as `psyntax-pseudoscheme.pp`, an image
-that psyntax built of itself on Pseudoscheme (`(psx:rebuild)`; it
+here *expanded into core Scheme*, as `psyntax-quasischeme.pp`, an image
+that psyntax built of itself on Quasischeme (`(qsx:rebuild)`; it
 reproduces itself). Every R6RS library export that isn't syntax is a
 reference to a host global of the same name, which is what `src/r6rs/`
 provides.
@@ -264,23 +265,23 @@ provides.
 The 2007 code predates the final R6RS in a few places and assumed full
 continuations in one. The patches, and the hooks added for compiled
 libraries, are listed in
-`vendor/psyntax/README-pseudoscheme.md`.
+`vendor/psyntax/README-quasischeme.md`.
 
 R7RS is on psyntax too. A `define-library` is translated into an R6RS
 `library` form: `include` and `cond-expand` are handled, and integers in
 names become `(srfi :1)`-style symbols, as Akku does. The `(scheme ...)`
 libraries are generated from the R7RS export table. R5RS runs on
-psyntax as well, at a top level whose bindings are `(pseudoscheme r5rs)`
+psyntax as well, at a top level whose bindings are `(quasischeme r5rs)`
 (`(scheme r5rs)` plus string ports, `cond-expand` and `flush-output`), reading with case folding. One
 expander serves every standard; the translator's native `syntax-rules`
 remains only as its own bootstrap expander.
 
-Libraries are found on a search path (`psx:*library-path*`, or `-L` on
-the command line, or the colon-separated `PSEUDOSCHEME_LIBRARY_PATH`,
+Libraries are found on a search path (`qsx:*library-path*`, or `-L` on
+the command line, or the colon-separated `QUASISCHEME_LIBRARY_PATH`,
 searched before `-L`'s): `(foo bar)` is `foo/bar.sls`, `.ss`, `.sld` or
 `.scm`. Akku's layout also works:
 - implementation variants such as `foo.chezscheme.sls` are tried after
-  a generic file (`psx:*implementation-variants*`);
+  a generic file (`qsx:*implementation-variants*`);
 - `:1` is accepted in file names, and so are Akku's escapes for other
   characters: `(srfi :1)` is `srfi/%3a1.sls`, `let-optionals*` is
   `let-optionals%2a.sls`.
@@ -302,26 +303,26 @@ Scheme has no ASDF. The two package managers that matter are:
 - **snow-fort**: R7RS, used through `snow-chibi`.
 
 Both lay files out the way the search path expects, so pointing `-L` (or
-`psx:*library-path*`) at `.akku/lib`, or at a snow install directory,
+`qsx:*library-path*`) at `.akku/lib`, or at a snow install directory,
 is all it takes; `--akku` finds the project's `.akku/lib`. docs/libraries.md
 is a walkthrough of both, from the shell and from Lisp.
 `tests/run-library-corpus.lisp DIR` imports every portable library in
 such a tree and reports what loads.
 
 Libraries loaded from files are compiled once and cached, in
-`~/.cache/pseudoscheme/libraries/`; later imports load the compiled
+`~/.cache/quasischeme/libraries/`; later imports load the compiled
 code, unless the library or something it depends on has changed.
-`PSEUDOSCHEME_LIBRARY_CACHE=0` turns that off, and
-`PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY` puts the cache elsewhere
+`QUASISCHEME_LIBRARY_CACHE=0` turns that off, and
+`QUASISCHEME_LIBRARY_CACHE_DIRECTORY` puts the cache elsewhere
 (src/library-cache.lisp).
 
 To compile every bundled SRFI library into the cache ahead of time (359
 libraries, about half a minute per continuation mode), run
 `make precompile-srfi`, which does both modes, or
-`bin/pseudoscheme --precompile-srfi` for one (`--continuations=escape`
+`bin/quasischeme --precompile-srfi` for one (`--continuations=escape`
 before it for escape-only). `--precompile DIR` does the same for your own
 libraries (`.sld` files) under `DIR`, and from Lisp it is
-`(pseudoscheme-api:precompile-libraries :directory DIR)`. A library that
+`(quasischeme-api:precompile-libraries :directory DIR)`. A library that
 takes long to compile then loads at once (SRFI 148: 1.2 s to 0.14 s);
 one that is quick to compile but large still takes the time to load.
 
@@ -332,7 +333,7 @@ Scheme symbols are CL symbols in the `SCHEME` package named by
 `SCHEME::CAR`, `Hello` is `SCHEME::|Hello|`, `ABC` is `SCHEME::|abc|`.
 So Scheme is case-sensitive, as R6RS and R7RS require, while the
 standard names are the upper-case CL symbols the translator and every
-`.pso` file have always used, and Lisp code can write `'scheme::car`.
+`.qso` file have always used, and Lisp code can write `'scheme::car`.
 `#!fold-case` / `#!no-fold-case` switch the reader to R5RS-style
 folding and back; `--r5rs` and `r5rs:eval` fold.
 
@@ -347,49 +348,49 @@ ratios, any exponent marker, `+inf.0`, `-nan.0`, `-0.0`, `3+4i`,
 `1@2`) parsed and printed by Scheme's rules rather than the CL reader's.
 Float traps are turned off for IEEE behavior (`(/ 1. 0.)` ⇒ `+inf.0`)
 by the command line program and the test runners, via
-`ps:disable-float-traps`.
+`qs:disable-float-traps`.
 
 ## Readers
 
-- **The CL-reader bridge** (`ps:scheme-read-using-commonlisp-reader`)
+- **The CL-reader bridge** (`qs:scheme-read-using-commonlisp-reader`)
   reads with the host's reader, so package-qualified symbols like
-  `ps-lisp:setf` work. It's for the translator's own sources and is what
-  `pseudoscheme/bootstrap` always uses.
-- **The Scheme reader** (`pseudoscheme/reader`) is for Scheme: R6RS and
+  `qs-lisp:setf` work. It's for the translator's own sources and is what
+  `quasischeme/bootstrap` always uses.
+- **The Scheme reader** (`quasischeme/reader`) is for Scheme: R6RS and
   R7RS syntax including `[ ]`, `#u8(...)`/`#vu8(...)`, `#'x` `` #`x ``
   `#,x` `#,@x`, `|symbols|`, `\x41;` escapes, `#\x41`, `#true`/`#false`,
   `#!fold-case`, `#;` and `#| |#`, Unicode identifiers, the number
   syntax above, and `#:name` for Lisp keywords. (`#'x` used to be a
-  Pseudoscheme escape naming a CL function; it's R6RS's `(syntax x)`
+  Quasischeme escape naming a CL function; it's R6RS's `(syntax x)`
   now, and Lisp is reached through `(cl <package>)` libraries, see
   docs/interop.md.)
 
 ## Bootstrap artifacts
 
-The translator is Scheme, loaded pre-translated: the `.pso` file next to
+The translator is Scheme, loaded pre-translated: the `.qso` file next to
 each `.scm`. After changing a translator source, `builtin.scm`'s
 integrations, or the reader/writer:
 
 ```lisp
-(asdf:load-system :pseudoscheme/bootstrap)
-(pseudoscheme-bootstrap:regenerate-pso-files)      ; or '("builtin") etc.
-(pseudoscheme-bootstrap:regenerate-closed-pso)     ; after builtin.scm changes (fresh image)
-(pseudoscheme-bootstrap:regenerate-reader-writer)  ; after read.scm / write.scm changes
+(asdf:load-system :quasischeme/bootstrap)
+(quasischeme-bootstrap:regenerate-pso-files)      ; or '("builtin") etc.
+(quasischeme-bootstrap:regenerate-closed-pso)     ; after builtin.scm changes (fresh image)
+(quasischeme-bootstrap:regenerate-reader-writer)  ; after read.scm / write.scm changes
 ```
 
 Then clear the fasl cache (ASDF's timestamps have one-second
 resolution), reload in a fresh image and run the tests. psyntax's image
-is rebuilt with `(psx:rebuild)` or `make bootstrap-psyntax`, see
-vendor/psyntax/README-pseudoscheme.md. ASDF compiles the image to a
+is rebuilt with `(qsx:rebuild)` or `make bootstrap-psyntax`, see
+vendor/psyntax/README-quasischeme.md. ASDF compiles the image to a
 fasl like any other source (the `psyntax-image` component), so booting
 psyntax is quick; that fasl is a build product, not checked in, and a
 boot falls back to the `.pp` while the fasl is older than it.
 
 Both kinds of generated file can also be made from source alone, with
 `make bootstrap`. First the translator's sources, running in Chibi,
-Guile, Gauche, CHICKEN, Chez, Racket or Scheme 48, write the `.pso`
+Guile, Gauche, CHICKEN, Chez, Racket or Scheme 48, write the `.qso`
 files (`SCHEME=guile` to choose; an s7 adapter is there, untested).
-Then Pseudoscheme, loaded from those, builds psyntax's image from a
+Then Quasischeme, loaded from those, builds psyntax's image from a
 seed: one that Chez Scheme expands natively from psyntax's sources, or
 (`SEED=stage0`) one that any R5RS or R7RS Scheme (Chibi, Scheme 48,
 Gauche) builds through boot/stage0/. `make bootstrap-check` builds from
@@ -410,7 +411,7 @@ sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-inte
 sbcl --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-srfi-system-tests.lisp
 make -C contrib/cli test
 make test-srfi                           # src/srfi/tests/, 122 programs
-sh tests/run-program-tests.sh [bin/pseudoscheme [name ...]]   # needs Quicklisp
+sh tests/run-program-tests.sh [bin/quasischeme [name ...]]   # needs Quicklisp
 python3 tests/check-r7rs-exports.py      # export table vs. the R7RS PDF
 ```
 
@@ -448,8 +449,7 @@ suites.
 
 ## Known gaps
 
-The big ones; `ROADMAP.md` has the rest, and what is left before the
-rename to Quasischeme 1.0 (docs/rename-quasischeme.md).
+The big ones; `ROADMAP.md` has the rest, and what 1.0 left out.
 
 - **Continuations through Lisp code.** A continuation captured in a
   Scheme procedure that Lisp code called (through the bridge, or a Lisp

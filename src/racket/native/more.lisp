@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; More of #%kernel, #%unsafe and #%flfxnum, the simple ones racket/base
 ;;;; uses as it loads: unsafe operations, flonum and fixnum vectors and
@@ -6,7 +6,7 @@
 ;;;; files, time, and procedures.  Atomic sections are no-ops: there is
 ;;;; one Racket thread (control.lisp).
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defmacro defnatives (instance &body definitions)
   "Several DEFNATIVEs in INSTANCE, all leaves: (name lambda-list body...)."
@@ -54,27 +54,27 @@
   ("unsafe-end-breakable-atomic" () *void*)
   ("unsafe-start-uninterruptible" () *void*)
   ("unsafe-end-uninterruptible" () *void*)
-  ("unsafe-in-atomic?" () ps:false)
+  ("unsafe-in-atomic?" () qs:false)
   ("unsafe-add-collect-callbacks" (&rest args) (declare (ignore args)) *void*)
   ("unsafe-remove-collect-callbacks" (&rest args) (declare (ignore args)) *void*)
   ("unsafe-add-global-finalizer" (&rest args) (declare (ignore args)) *void*)
   ("unsafe-register-process-global" (key value)
    ;; the previous value (or #f); a value of #f only looks KEY up
    (let* ((k (map 'string #'code-char key))
-	  (old (gethash k *process-globals* ps:false)))
-     (when (and (not (eq value ps:false)) (eq old ps:false))
+	  (old (gethash k *process-globals* qs:false)))
+     (when (and (not (eq value qs:false)) (eq old qs:false))
        (setf (gethash k *process-globals*) value))
      old))
   ;; a poller: a prop:evt value whose event is never ready here (no fd polling)
   ("unsafe-poller" (proc) (declare (ignore proc)) (lambda (self) (declare (ignore self)) (make-revt :never)))
   ("unsafe-assert-unreachable" () (racket-error "unsafe-assert-unreachable" "reached"))
-  ("unsafe-make-struct-type-property/guard-calls-no-arguments" (name &optional (guard ps:false) (supers '()) &rest more)
+  ("unsafe-make-struct-type-property/guard-calls-no-arguments" (name &optional (guard qs:false) (supers '()) &rest more)
    (declare (ignore more))
    (funcall (native-function (gethash "make-struct-type-property" *natives*)) name guard supers)))
 
 (defnatives "#%kernel"
   ("quotient/remainder" (n m)
-   (values (funcall (psx:host-ref "quotient") n m) (funcall (psx:host-ref "remainder") n m)))
+   (values (funcall (qsx:host-ref "quotient") n m) (funcall (qsx:host-ref "remainder") n m)))
   ("list-pair?" (x) (bool (and (consp x) (handler-case (list-length x) (error () nil)))))
   ("bytes->list" (b) (coerce b 'list))
   ("list->bytes" (l) (make-array (length l) :element-type '(unsigned-byte 8) :initial-contents l))
@@ -198,18 +198,18 @@
   ("integer-sqrt/remainder" (n) (let ((r (isqrt n))) (values r (- n (* r r)))))
   ("bitwise-bit-field" (n start end) (ldb (byte (- end start) start) n))
   ("bitwise-first-bit-set" (n) (if (zerop n) -1 (1- (integer-length (logand n (- n))))))
-  ("integer->integer-bytes" (n size signed? &optional (big-endian? ps:false) dest (start 0))
+  ("integer->integer-bytes" (n size signed? &optional (big-endian? qs:false) dest (start 0))
    (let ((b (or dest (make-array size :element-type '(unsigned-byte 8))))
 	 (u (ldb (byte (* 8 size) 0) n)))
      (declare (ignore signed?))
      (dotimes (i size b)
        (setf (aref b (+ start (if (truthy big-endian?) (- size 1 i) i))) (ldb (byte 8 (* 8 i)) u)))))
-  ("integer-bytes->integer" (b signed? &optional (big-endian? ps:false) (start 0) end)
+  ("integer-bytes->integer" (b signed? &optional (big-endian? qs:false) (start 0) end)
    (let* ((end (or end (length b))) (size (- end start)) (u 0))
      (dotimes (i size)
        (setf (ldb (byte 8 (* 8 i)) u) (aref b (+ start (if (truthy big-endian?) (- size 1 i) i)))))
      (if (and (truthy signed?) (logbitp (1- (* 8 size)) u)) (- u (ash 1 (* 8 size))) u)))
-  ("real->floating-point-bytes" (x size &optional (big-endian? ps:false) dest (start 0))
+  ("real->floating-point-bytes" (x size &optional (big-endian? qs:false) dest (start 0))
    (let ((bits (if (= size 4)
 		   (ldb (byte 32 0) (sb-kernel:single-float-bits (coerce x 'single-float)))
 		   (let ((d (fl x)))
@@ -218,7 +218,7 @@
 	 (b (or dest (make-array size :element-type '(unsigned-byte 8)))))
      (dotimes (i size b)
        (setf (aref b (+ start (if (truthy big-endian?) (- size 1 i) i))) (ldb (byte 8 (* 8 i)) bits)))))
-  ("floating-point-bytes->real" (b &optional (big-endian? ps:false) (start 0) end)
+  ("floating-point-bytes->real" (b &optional (big-endian? qs:false) (start 0) end)
    (let* ((end (or end (length b))) (size (- end start)) (u 0))
      (dotimes (i size)
        (setf (ldb (byte 8 (* 8 i)) u) (aref b (+ start (if (truthy big-endian?) (- size 1 i) i)))))
@@ -284,9 +284,9 @@
    (sb-posix:rename (path-string "rename-file-or-directory" from) (path-string "rename-file-or-directory" to)) *void*)
   ("file-or-directory-type" (p &optional must-exist?)
    (let ((st (ignore-errors (sb-posix:lstat (path-string "file-or-directory-type" p)))))
-     (cond ((null st) (if (truthy (or must-exist? ps:false))
+     (cond ((null st) (if (truthy (or must-exist? qs:false))
 			  (racket-error "file-or-directory-type" "access failed~%  path: ~A" (path-string "" p))
-			  ps:false))
+			  qs:false))
 	   ((sb-posix:s-islnk (sb-posix:stat-mode st)) (rsym "link"))
 	   ((sb-posix:s-isdir (sb-posix:stat-mode st)) (rsym "directory"))
 	   (t (rsym "file")))))
@@ -300,8 +300,8 @@
 ;;; Procedures
 
 (defnatives "#%kernel"
-  ("primitive?" (x) (declare (ignore x)) ps:false)
-  ("primitive-closure?" (x) (declare (ignore x)) ps:false)
+  ("primitive?" (x) (declare (ignore x)) qs:false)
+  ("primitive-closure?" (x) (declare (ignore x)) qs:false)
   ("procedure-realm" (f) (declare (ignore f)) (rsym "racket"))
   ("procedure->method" (f) f)
   ("procedure-closure-contents-eq?" (a b) (bool (eq a b)))
@@ -329,7 +329,7 @@
 (defnative "call-with-current-continuation" (proc &optional prompt-tag) ()
   ;; full, re-entrant: linklets are compiled for them (api.lisp)
   (declare (ignore prompt-tag))
-  (psx::full-call/cc proc))
+  (qsx::full-call/cc proc))
 
 ;;; ------------------------------------------------------------------
 ;;; Load forms for the rest of the values compiled code may hold as
@@ -362,7 +362,7 @@
 (defnative "system-big-endian?" () (:leaf t) (bool (eq sb-c::*backend-byte-order* :big-endian)))
 
 ;;; The locale's encoding is UTF-8 here
-(defnative "bytes->string/locale" (b &optional (err-char ps:false) (start 0) end) (:leaf t)
+(defnative "bytes->string/locale" (b &optional (err-char qs:false) (start 0) end) (:leaf t)
   (declare (ignore err-char))
   (sb-ext:octets-to-string b :external-format '(:utf-8 :replacement #\?) :start start :end end))
 (defnative "locale-string-encoding" () (:leaf t) "UTF-8")
@@ -380,10 +380,10 @@
 (defstruct (place-channel-end (:constructor make-place-channel-end (in out)))
   in out)				; conses whose cdr is a queue's list
 
-(defnative "place-enabled?" () (:instance "#%place" :leaf t) ps:false)
-(defnative "place?" (x) (:instance "#%place" :leaf t) (declare (ignore x)) ps:false)
+(defnative "place-enabled?" () (:instance "#%place" :leaf t) qs:false)
+(defnative "place?" (x) (:instance "#%place" :leaf t) (declare (ignore x)) qs:false)
 (defnative "place-channel?" (x) (:instance "#%place" :leaf t) (bool (place-channel-end-p x)))
-(defnative "place-shared?" (x) (:instance "#%place" :leaf t) (declare (ignore x)) ps:false)
+(defnative "place-shared?" (x) (:instance "#%place" :leaf t) (declare (ignore x)) qs:false)
 (defnative "place-channel" () (:instance "#%place" :leaf t)
   (let ((a (list :queue)) (b (list :queue)))
     (values (make-place-channel-end a b) (make-place-channel-end b a))))
@@ -400,7 +400,7 @@
   (labels ((ok (x)
 	     (or (numberp x) (characterp x) (symbolp x) (stringp x) (null x)
 		 (typep x '(simple-array (unsigned-byte 8) (*)))
-		 (eq x ps:true) (eq x ps:false) (eq x *void*)
+		 (eq x qs:true) (eq x qs:false) (eq x *void*)
 		 (place-channel-end-p x)
 		 (and (consp x) (ok (car x)) (ok (cdr x)))
 		 (and (simple-vector-p x) (every #'ok x)))))
@@ -415,9 +415,9 @@
 
 (defstruct (rfuture (:constructor make-rfuture (thunk))) thunk (values nil) (done nil))
 
-(defnative "futures-enabled?" () (:instance "#%futures" :leaf t) ps:false)
+(defnative "futures-enabled?" () (:instance "#%futures" :leaf t) qs:false)
 (defnative "future?" (x) (:instance "#%futures" :leaf t) (bool (rfuture-p x)))
-(defnative "current-future" () (:instance "#%futures" :leaf t) ps:false)
+(defnative "current-future" () (:instance "#%futures" :leaf t) qs:false)
 (defnative "future" (thunk) (:instance "#%futures" :leaf t)
   (unless (functionp thunk)
     (racket-error "future" "contract violation~%  expected: (-> any)~%  given: ~A" (written thunk)))
@@ -439,8 +439,8 @@
   ("fsemaphore-count" (s) (fsemaphore-count s))
   ("fsemaphore-post" (s) (incf (fsemaphore-count s)) *void*)
   ("fsemaphore-try-wait?" (s) (if (plusp (fsemaphore-count s))
-				  (progn (decf (fsemaphore-count s)) ps:true)
-				  ps:false))
+				  (progn (decf (fsemaphore-count s)) qs:true)
+				  qs:false))
   ("fsemaphore-wait" (s) (if (plusp (fsemaphore-count s))
 			     (progn (decf (fsemaphore-count s)) *void*)
 			     (racket-error "fsemaphore-wait" "would block forever (one thread)")))
@@ -448,7 +448,7 @@
   ("mark-future-trace-end!" () *void*)
   ("reset-future-logs-for-tracing!" () *void*)
   ("make-parallel-thread-pool" (&optional n) (declare (ignore n)) (unsupported "make-parallel-thread-pool" "parallel threads"))
-  ("parallel-thread-pool?" (x) (declare (ignore x)) ps:false)
+  ("parallel-thread-pool?" (x) (declare (ignore x)) qs:false)
   ("parallel-thread-pool-close" (p) (declare (ignore p)) (unsupported "parallel-thread-pool-close" "parallel threads"))
   ("thread/parallel" (&rest args) (declare (ignore args)) (unsupported "thread/parallel" "parallel threads")))
 
@@ -475,7 +475,7 @@
      (racket-error "will-register" "contract violation~%  expected: will-executor?~%  given: ~A" (written e)))
    (push (cons (sb-ext:make-weak-pointer v) proc) (will-executor-wills e))
    *void*)
-  ("will-try-execute" (e &optional (none ps:false))
+  ("will-try-execute" (e &optional (none qs:false))
    (declare (ignore e))
    none)
   ("will-execute" (e)

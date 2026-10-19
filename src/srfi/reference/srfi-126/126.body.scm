@@ -7,7 +7,7 @@
     (() (make-eq-hashtable #f #f))
     ((capacity) (make-eq-hashtable capacity #f))
     ((capacity weakness)
-     ;; PSEUDOSCHEME: weak and ephemeral tables, from (srfi 126 private weak).
+     ;; QUASISCHEME: weak and ephemeral tables, from (srfi 126 private weak).
      (cond
       (weakness (make-weak-hashtable 'eq weakness))
       (capacity (rnrs-make-eq-hashtable capacity))
@@ -18,7 +18,7 @@
     (() (make-eqv-hashtable #f #f))
     ((capacity) (make-eqv-hashtable capacity #f))
     ((capacity weakness)
-     ;; PSEUDOSCHEME: weak and ephemeral tables, from (srfi 126 private weak).
+     ;; QUASISCHEME: weak and ephemeral tables, from (srfi 126 private weak).
      (cond
       (weakness (make-weak-hashtable 'eqv weakness))
       (capacity (rnrs-make-eqv-hashtable capacity))
@@ -128,7 +128,7 @@
     ((hashtable) (hashtable-copy hashtable #f #f))
     ((hashtable mutable) (hashtable-copy hashtable mutable #f))
     ((hashtable mutable weakness)
-     ;; PSEUDOSCHEME: a weak copy, if WEAKNESS (eq and eqv tables only).
+     ;; QUASISCHEME: a weak copy, if WEAKNESS (eq and eqv tables only).
      (if weakness
          (let ((copy (make-hashtable (hashtable-hash-function hashtable)
                                      (hashtable-equivalence-function hashtable)
@@ -256,7 +256,7 @@
 
 (define hashtable-hash-function rnrs-hashtable-hash-function)
 
-;; PSEUDOSCHEME: weak tables record their weakness in (srfi 126 private weak).
+;; QUASISCHEME: weak tables record their weakness in (srfi 126 private weak).
 (define (hashtable-weakness hashtable) (weak-hashtable-weakness hashtable))
 
 (define hashtable-mutable? rnrs-hashtable-mutable?)

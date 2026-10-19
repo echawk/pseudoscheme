@@ -1,19 +1,19 @@
-;;; SRFI 96: SLIB prerequisites.  Written for Pseudoscheme, after the
+;;; SRFI 96: SLIB prerequisites.  Written for Quasischeme, after the
 ;;; specification (each SLIB .init file is an implementation for one
 ;;; Scheme, and the SRFI has no portable one).  SRFI 59's vicinities,
 ;;; which SRFI 96 requires, are re-exported from (srfi 59); with-load-
 ;;; pathname binds the pathname program-vicinity reads.
 ;;;
-;;; How it maps onto Pseudoscheme:
+;;; How it maps onto Quasischeme:
 ;;;   - software-type is unix (ms-dos on Windows), scheme-implementation-
-;;;     type pseudoscheme, scheme-implementation-version "3.0".
+;;;     type quasischeme, scheme-implementation-version "3.0".
 ;;;     scheme-implementation-home-page is #f.
 ;;;   - slib:eval, macro:eval, defmacro:eval and the loaders evaluate at
-;;;     the R7RS REPL's top level (Lisp's pseudoscheme-r7rs::eval-at-repl),
+;;;     the R7RS REPL's top level (Lisp's quasischeme-r7rs::eval-at-repl),
 ;;;     where definitions, define-syntax and import work.  The first use
 ;;;     imports (srfi 96) there, so loaded SLIB code sees these bindings.
 ;;;   - The loaders read and evaluate a file form by form (R7RS load, in
-;;;     Pseudoscheme, runs a file as a program, which must begin with an
+;;;     Quasischeme, runs a file as a program, which must begin with an
 ;;;     import).  slib:load-compiled is an error: there is no separately
 ;;;     loadable compiled code.
 ;;;   - defmacro defines a non-hygienic macro on syntax-case, and also
@@ -67,13 +67,13 @@
           (only (srfi 1) last-pair)
           (srfi 59)
           (srfi private srfi-59-support)
-          (only (pseudoscheme chez host) chez:system)
-          (only (pseudoscheme lisp) lisp-function)
+          (only (quasischeme chez host) chez:system)
+          (only (quasischeme lisp) lisp-function)
           (prefix (only (cl common-lisp) char-code-limit) cl:))
   (begin
     ;; Configuration
 
-    (define (scheme-implementation-type) 'pseudoscheme)
+    (define (scheme-implementation-type) 'quasischeme)
     (define (scheme-implementation-version) "3.0")
     (define (scheme-implementation-home-page) #f)
     (define (scheme-file-suffix) ".scm")
@@ -148,7 +148,7 @@
 
     ;; System
 
-    (define repl-eval (lisp-function "eval-at-repl" "pseudoscheme-r7rs"))
+    (define repl-eval (lisp-function "eval-at-repl" "quasischeme-r7rs"))
     (define repl-ready? #f)
 
     (define (slib:eval obj)
@@ -176,7 +176,7 @@
 
     (define (slib:load-source name) (slib:eval-load (source-file name) slib:eval))
     (define (slib:load-compiled name)
-      (slib:error "slib:load-compiled: Pseudoscheme has no separately loadable compiled code" name))
+      (slib:error "slib:load-compiled: Quasischeme has no separately loadable compiled code" name))
     (define (slib:load name) (slib:load-source name))
 
     (define (slib:exit . n)

@@ -1,7 +1,7 @@
 ;;; SRFI 274 tests: the SRFI's tests.scm (Peter McGoron; MIT licence),
 ;;; with its cond-expanded imports made plain (every sublibrary is
 ;;; available here), and its circular list literals ('#1=(1 2 . #1#))
-;;; built at run time instead: Pseudoscheme's compiler loops on a
+;;; built at run time instead: Quasischeme's compiler loops on a
 ;;; circular quoted datum.
 (import (except (scheme base) list-copy list->string list->vector)
         (scheme process-context)

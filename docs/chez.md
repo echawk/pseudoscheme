@@ -1,9 +1,9 @@
-# Chez Scheme on Pseudoscheme: `--chez`
+# Chez Scheme on Quasischeme: `--chez`
 
-`pseudoscheme --chez prog.ss` runs programs written for Chez Scheme 10.
+`quasischeme --chez prog.ss` runs programs written for Chez Scheme 10.
 Scripts run at Chez's top level, R6RS programs and libraries can import
 `(chezscheme)`, and so can the libraries written for Chez. Run as
-`scheme-script` (a link to bin/pseudoscheme, as Chez's is), the program
+`scheme-script` (a link to bin/quasischeme, as Chez's is), the program
 is `--chez`.
 
 The test program is [e](https://github.com/paveluv/e), a terminal
@@ -130,7 +130,7 @@ What the fixes since the first run were:
 
   The translator still open-codes the standard arities: an extended
   primitive is closed only for calls whose argument counts it doesn't
-  share with the built-in (`psx::*extended-primitives*`).
+  share with the built-in (`qsx::*extended-primitives*`).
 - **New exports:**
   - stencil vectors;
   - the `r6rs:` versions of the comparisons and of `fx+`, `fx-` and
@@ -205,7 +205,7 @@ internals.
 
 A Chez script runs in the interaction environment: every `(chezscheme)`
 name visible, definitions redefinable, `import` allowed anywhere. That
-is a psyntax interaction library, `(pseudoscheme chez interaction)`,
+is a psyntax interaction library, `(quasischeme chez interaction)`,
 whose source library is `(chezscheme)`. `eval-at-chez-top-level`
 (chez.lisp) binds psyntax's two parameters and evaluates:
 
@@ -303,7 +303,7 @@ a plain lock. `condition-wait` releases the whole count while it waits.
 ### The FFI
 
 The FFI is the foreign-function layer the Chez and Guile modes share
-(src/ffi.lisp, system `pseudoscheme/cffi`). `foreign-procedure` compiles
+(src/ffi.lisp, system `quasischeme/cffi`). `foreign-procedure` compiles
 a Lisp function that calls the entry point through
 `cffi:foreign-funcall-pointer`, with Chez's types translated:
 `int`, `unsigned`, `uptr`, `void*`, `double`, `boolean`, `string`,
@@ -359,7 +359,7 @@ These are R6RS record types, so the two interfaces mix. Typed fields
 constructors and mutators; host.lisp keeps each type's field types.
 `record-type-equal-procedure` and `record-type-hash-procedure` give
 `equal?` and `equal-hash` their per-type procedures, through hooks in
-`equal?` (`ps::*record-equal-hook*`, which joins records to its
+`equal?` (`qs::*record-equal-hook*`, which joins records to its
 cycle-safe pass) and in `equal-hash`.
 
 Records are written `#[name field ...]`, with datum labels when one is
@@ -439,7 +439,7 @@ the environment so that its code generator uses this Chez too:
 - **A program:** the self-built compiler, running here, compiles
   `Hello.idr` in about 3 s (`IDRIS2_PREFIX=bootstrap-build`, where the
   bootstrap installed the libraries), and the program runs here:
-  `Hello from Idris 2 on Pseudoscheme`. The compiler starts in 0.8 s.
+  `Hello from Idris 2 on Quasischeme`. The compiler starts in 0.8 s.
 
 What Idris needed:
 - **Hoisting through `(let () ...)`**: psyntax expands it to
@@ -462,7 +462,7 @@ as `host-eval` would, and compiles it with `compile-file`, in chunks of
 about 500,000 conses, into one SBCL fasl after the source's `#!` line
 (src/chez/compile.lisp, src/compiled-files.lisp). `load`,
 `load-program`, `--program` and `--script` load such a file. Its first
-form checks that it was compiled by this build of Pseudoscheme and that
+form checks that it was compiled by this build of Quasischeme and that
 each library it was expanded against still has the same id (the
 built-in ones and those of the compiled-library cache keep theirs), as
 Chez refuses object files of another version. A program that imports a
@@ -586,7 +586,7 @@ here).
 
 ## Behaviour that still differs
 
-| | Chez 10.4.1 | Pseudoscheme |
+| | Chez 10.4.1 | Quasischeme |
 |---|---|---|
 | `(greatest-fixnum)` | 2⁶⁰ − 1 | 2⁶² − 1 (SBCL's fixnums, allowed by R6RS) |
 | `(number->string 1e21)` | `"1e21"` | `"1.0e21"` (`write` and `display` print `1e21`) |

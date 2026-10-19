@@ -1,7 +1,7 @@
 ;;; (srfi 126 private weak): weak and ephemeral eq?/eqv? hashtables for
 ;;; (srfi 126), made with trivial-garbage's make-weak-hash-table.
 ;;;
-;;; A Pseudoscheme R6RS hashtable is a Lisp struct around a CL hash
+;;; A Quasischeme R6RS hashtable is a Lisp struct around a CL hash
 ;;; table (src/r6rs/hashtables.lisp); an eq or eqv one keys the CL table
 ;;; by the Scheme objects themselves.  So a weak eq/eqv hashtable is that
 ;;; struct around a weak CL table, and every (rnrs hashtables) operation
@@ -20,13 +20,13 @@
 ;;; when this library is imported, so (srfi 126) works without it.
 ;;;
 ;;; This reaches into the struct's internal constructor and accessors
-;;; (pseudoscheme-r6rs::%make-hashtable, hashtable-table, hashtable-kind),
+;;; (quasischeme-r6rs::%make-hashtable, hashtable-table, hashtable-kind),
 ;;; so it has to follow src/r6rs/hashtables.lisp.  lisp-funcall passes
 ;;; its arguments unconverted, so Lisp's NIL is written '() here.
 
 (define-library (srfi 126 private weak)
   (export make-weak-hashtable weak-hashtable-weakness freeze-hashtable)
-  (import (scheme base) (pseudoscheme lisp))
+  (import (scheme base) (quasischeme lisp))
   (begin
     (define tg-make-weak-hash-table #f)
     ;; hashtable -> the SRFI 126 weakness it was made with (weak keys)
@@ -60,7 +60,7 @@
                                             "common-lisp")
                                     #:weakness lisp-weakness))
                (hashtable (lisp-funcall
-                           (lisp-function "%make-hashtable" "pseudoscheme-r6rs")
+                           (lisp-function "%make-hashtable" "quasischeme-r6rs")
                            table
                            (if (eq? kind 'eq) #:eq #:eqv)
                            '() '() #t)))
@@ -81,10 +81,10 @@
     ;; immutable weak copy.
     (define (freeze-hashtable hashtable)
       (let ((frozen (lisp-funcall
-                     (lisp-function "%make-hashtable" "pseudoscheme-r6rs")
-                     (lisp-funcall (lisp-function "hashtable-table" "pseudoscheme-r6rs")
+                     (lisp-function "%make-hashtable" "quasischeme-r6rs")
+                     (lisp-funcall (lisp-function "hashtable-table" "quasischeme-r6rs")
                                    hashtable)
-                     (lisp-funcall (lisp-function "hashtable-kind" "pseudoscheme-r6rs")
+                     (lisp-funcall (lisp-function "hashtable-kind" "quasischeme-r6rs")
                                    hashtable)
                      '() '() '())))
         (register! frozen (weak-hashtable-weakness hashtable))

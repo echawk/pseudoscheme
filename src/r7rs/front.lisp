@@ -1,18 +1,18 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R7RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R7RS -*-
 
 ;;;; R7RS on psyntax
 ;;;;
 ;;;; R7RS libraries are R6RS libraries with a different surface, and
 ;;;; psyntax has the library system, so R7RS runs through it too:
 ;;;;
-;;;;  * (pseudoscheme host) is a library psyntax installs at boot whose
+;;;;  * (quasischeme host) is a library psyntax installs at boot whose
 ;;;;    exports are host globals (procedures from the R7RS and R6RS layers
 ;;;;    that aren't in psyntax's own R6RS tables).
-;;;;  * (pseudoscheme r7rs syntax) -- src/r7rs/syntax.sls -- defines the
+;;;;  * (quasischeme r7rs syntax) -- src/r7rs/syntax.sls -- defines the
 ;;;;    syntax R7RS adds or spells differently.
 ;;;;  * The (scheme ...) libraries are generated from Appendix A (exports.lisp):
-;;;;    syntax from (rnrs ...) or (pseudoscheme r7rs syntax), procedures
-;;;;    from (pseudoscheme host).
+;;;;    syntax from (rnrs ...) or (quasischeme r7rs syntax), procedures
+;;;;    from (quasischeme host).
 ;;;;  * define-library is translated into an R6RS library form.  R7RS names
 ;;;;    with integers, (srfi 1), become R6RS-style (srfi :1), as Akku does,
 ;;;;    so the two naming conventions meet.
@@ -20,12 +20,12 @@
 ;;;; Programs run as psyntax top-level programs; the REPL is psyntax's
 ;;;; interaction environment with an R7RS library of its own.
 
-(in-package "PSEUDOSCHEME-R7RS")
+(in-package "QUASISCHEME-R7RS")
 
-(defun ssym (string) (ps:intern-scheme-symbol string))
-(defun sname* (x) (if (symbolp x) (ps:scheme-symbol-name x) (princ-to-string x)))
+(defun ssym (string) (qs:intern-scheme-symbol string))
+(defun sname* (x) (if (symbolp x) (qs:scheme-symbol-name x) (princ-to-string x)))
 (defun head-is (form name)
-  (and (consp form) (symbolp (car form)) (string= (ps:scheme-symbol-name (car form)) name)))
+  (and (consp form) (symbolp (car form)) (string= (qs:scheme-symbol-name (car form)) name)))
 
 ;;; ------------------------------------------------------------------
 ;;; Synthesized libraries over host globals
@@ -33,13 +33,13 @@
 (defun install-host-library (name exports)
   "Install library NAME (a list of strings) whose EXPORTS, a list of
 (external-name . host-global-name) strings, are host globals."
-  (let* ((gensym (psx:host-ref "gensym"))
+  (let* ((gensym (qsx:host-ref "gensym"))
 	 (labels (mapcar (lambda (e) (declare (ignore e)) (funcall gensym)) exports))
 	 (subst (mapcar (lambda (e l) (cons (ssym (car e)) l)) exports labels))
 	 (env (mapcar (lambda (e l) (cons l (cons (ssym "core-prim") (ssym (cdr e))))) exports labels)))
-    (funcall (psx:host-ref "psyntax:install-library")
+    (funcall (qsx:host-ref "psyntax:install-library")
 	     (funcall gensym) (mapcar #'ssym name) '() '() '() '()
-	     subst env (lambda () ps:unspecific) (lambda () ps:unspecific) t)))
+	     subst env (lambda () qs:unspecific) (lambda () qs:unspecific) t)))
 
 (defparameter *host-extras*
   '("%parameterize" "$delay-force" "cond-expand-satisfied?" "read-file-forms"
@@ -49,17 +49,17 @@
     "psyntax:environment?" "psyntax:environment-symbols"
     "r7rs:record-ref" "r7rs:record-set!" "r7rs:record?" "r7rs:make-record"
     "call-with-prompt" "abort-to-prompt")
-  "Host globals (pseudoscheme host) exports besides R7RS procedure names.")
+  "Host globals (quasischeme host) exports besides R7RS procedure names.")
 
 (defun host-library-exports ()
   (let ((names (remove-duplicates
 		(append (loop for (nil s) in *standard-libraries*
 			      append (remove-if #'syntax-export-p (split-names s)))
 			*host-extras*
-			(ps-r6rs::numeric-vector-names))
+			(qs-r6rs::numeric-vector-names))
 		:test #'string=)))
     (mapcar (lambda (n) (cons n n))
-	    (remove-if-not (lambda (n) (boundp (psx::location (ssym n)))) names))))
+	    (remove-if-not (lambda (n) (boundp (qsx::location (ssym n)))) names))))
 
 ;;; ------------------------------------------------------------------
 ;;; Names and import sets
@@ -93,24 +93,24 @@
 of the library or program being processed.")
 
 (defun read-forms (path &key fold-case)
-  (let ((ps:*fold-case* fold-case))
+  (let ((qs:*fold-case* fold-case))
     (with-open-file (in path)
-      (ps:skip-script-header in)
-      (loop for form = (funcall ps:*scheme-read* in)
-	    until (eq form ps:eof-object)
+      (qs:skip-script-header in)
+      (loop for form = (funcall qs:*scheme-read* in)
+	    until (eq form qs:eof-object)
 	    collect form))))
 
 (defun source-directory-of (syntax)
   "The directory of the file SYNTAX, a syntax object, was read from, if
 it has a source annotation (as the Chez mode reads files)."
   (let* ((annotation (and syntax
-			  (ignore-errors (funcall (psx:host-ref "psyntax:syntax->annotation") syntax))))
-	 (source (and (ps::annotation-p annotation) (ps::annotation-source annotation)))
-	 (sfd (and (ps::source-object-p source) (ps::source-object-sfd source)))
-	 (path (and (ps::sfd-p sfd) (ps::sfd-path sfd))))
+			  (ignore-errors (funcall (qsx:host-ref "psyntax:syntax->annotation") syntax))))
+	 (source (and (qs::annotation-p annotation) (qs::annotation-source annotation)))
+	 (sfd (and (qs::source-object-p source) (qs::source-object-sfd source)))
+	 (path (and (qs::sfd-p sfd) (qs::sfd-path sfd))))
     (and (stringp path)
 	 (make-pathname :name nil :type nil :version nil
-			:defaults (merge-pathnames (psx::native-path path))))))
+			:defaults (merge-pathnames (qsx::native-path path))))))
 
 (defun include-path (file)
   "FILE relative to the including file's directory, or else, if it isn't
@@ -123,10 +123,10 @@ there, to the current directory (as Chez Scheme's include finds it)."
 
 (defun feature-satisfied-p (req)
   (cond ((symbolp req)
-	 (or (member (ps:scheme-symbol-name req) psl:*scheme-features* :test #'string=)
+	 (or (member (qs:scheme-symbol-name req) qsl:*scheme-features* :test #'string=)
 	     ;; re-entrant continuations: as code is compiled now
-	     (and (string= (ps:scheme-symbol-name req) "full-continuations")
-		  psx::*full-continuations*)))
+	     (and (string= (qs:scheme-symbol-name req) "full-continuations")
+		  qsx::*full-continuations*)))
 	((head-is req "and") (every #'feature-satisfied-p (cdr req)))
 	((head-is req "or") (some #'feature-satisfied-p (cdr req)))
 	((head-is req "not") (not (feature-satisfied-p (cadr req))))
@@ -134,7 +134,7 @@ there, to the current directory (as Chez Scheme's include finds it)."
 	(t nil)))
 
 (defun library-available-p (name)
-  (or (ps:truep (funcall (psx:host-ref "psyntax:library-exists?") name))
+  (or (qs:truep (funcall (qsx:host-ref "psyntax:library-exists?") name))
       (and (locate-library-form name) t)))
 
 (defun flatten-declarations (decls)
@@ -145,7 +145,7 @@ declarations."
 		      (flatten-declarations
 		       (loop for (clause . more) on (cdr d)
 			     when (if (and (symbolp (car clause))
-					   (string= (ps:scheme-symbol-name (car clause)) "else"))
+					   (string= (qs:scheme-symbol-name (car clause)) "else"))
 				      (or (null more) (error "cond-expand: else clause is not last"))
 				      (feature-satisfied-p (car clause)))
 			       return (cdr clause))))
@@ -181,7 +181,7 @@ we no longer know which file the library came from."
 	      (or (head-is form "include") (head-is form "include-ci"))
 	      (every #'stringp (cdr form)))
 	 (cons (car form)
-	       (mapcar (lambda (f) (namestring (merge-pathnames (psx::native-path f)
+	       (mapcar (lambda (f) (namestring (merge-pathnames (qsx::native-path f)
 								(or *include-directory* *default-pathname-defaults*))))
 		       (cdr form))))
 	((consp form)
@@ -255,8 +255,8 @@ files, such as (cl <package>) (src/interop.lisp).")
 source annotations, as Chez reads a library (src/chez/chez.lisp)."
   (let ((forms (read-annotated-forms path (namestring path))))
     (find-if (lambda (f)
-	       (and (ps::annotation-p f)
-		    (equal (library-name-of (ps::annotation-stripped f)) name)))
+	       (and (qs::annotation-p f)
+		    (equal (library-name-of (qs::annotation-stripped f)) name)))
 	     forms)))
 
 ;;; Chez's object files and library search.  In the Chez mode a library
@@ -267,7 +267,7 @@ source annotations, as Chez reads a library (src/chez/chez.lisp)."
 ;;; file here holds library forms as text, and may hold several
 ;;; (compile-whole-library's): loading it installs all of them, those
 ;;; before the one asked for first.  What it doesn't find is looked for
-;;; as in other modes (Pseudoscheme's own libraries, say).
+;;; as in other modes (Quasischeme's own libraries, say).
 
 (defvar *chez-library-search* nil
   "In the Chez mode, a Scheme procedure of a library name that returns
@@ -276,10 +276,10 @@ having compiled the source to the object file if Chez would.")
 
 (defun usable-object-file-p (object source)
   (and (probe-file object)
-       (not (psx::compiled-file-p object))
+       (not (qsx::compiled-file-p object))
        (or (null source)
 	   (not (probe-file source))
-	   (>= (ps-r6rs::file-write-time-ns object) (ps-r6rs::file-write-time-ns source)))))
+	   (>= (qs-r6rs::file-write-time-ns object) (qs-r6rs::file-write-time-ns source)))))
 
 (defun object-library-form (object name)
   "Library NAME's form from object file OBJECT, the libraries before it
@@ -292,10 +292,10 @@ there installed, or NIL."
 	  (cond ((equal n name) (return (library-form-from-file object name)))
 		((and n (head-is form "library"))
 		 (when (library-installed-p n)
-		   (ps:scheme-error
+		   (qs:scheme-error
 		    (format nil "attempting to re-install compile-time part of library ~A"
-			    (with-output-to-string (s) (funcall ps:*scheme-write* n s)))))
-		 (psx::eval-library (library-form-from-file object n)))))))))
+			    (with-output-to-string (s) (funcall qs:*scheme-write* n s)))))
+		 (qsx::eval-library (library-form-from-file object n)))))))))
 
 (defun chez-library-form (name)
   (let* ((found (funcall *chez-library-search* name))
@@ -305,7 +305,7 @@ there installed, or NIL."
 	(and source (probe-file source) (library-form-from-file source name)))))
 
 (defun library-installed-p (name)
-  (member name (funcall (psx:host-ref "psyntax:library-names")) :test #'equal))
+  (member name (funcall (qsx:host-ref "psyntax:library-names")) :test #'equal))
 
 (defun library-form-from-file (path name)
   "Library NAME's form, if file PATH has one, as an R6RS library."
@@ -313,11 +313,11 @@ there installed, or NIL."
 		       (handler-case (read-forms path)
 			 ;; reported, not taken for a missing library
 			 (error (e)
-			   (ps:scheme-error (format nil "~A: ~A" (namestring path)
+			   (qs:scheme-error (format nil "~A: ~A" (namestring path)
 						    (remove #\Newline (princ-to-string e)))))))))
     (when form
       (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path))))
-	(or (and ps:*chez-reader* (head-is form "library") (annotated-library-form path name))
+	(or (and qs:*chez-reader* (head-is form "library") (annotated-library-form path name))
 	    (resolve-includes (library-form form)))))))
 
 (defun locate-library-form (name)
@@ -327,11 +327,11 @@ form, translated to an R6RS library, or NIL."
     (dolist (hook *virtual-libraries*)
       (let ((form (funcall hook name)))
 	(when form (return-from locate-library-form form))))
-    (when (and ps:*chez-reader* *chez-library-search*)
+    (when (and qs:*chez-reader* *chez-library-search*)
       (let ((form (chez-library-form name)))
 	(when form (return-from locate-library-form form))))
     (dolist (stem (stems name))
-      (dolist (path (psx:candidate-files stem))
+      (dolist (path (qsx:candidate-files stem))
 	(when (probe-file path)
 	  (let ((form (library-form-from-file path name)))
 	    (when form (return-from locate-library-form form))))))
@@ -421,11 +421,11 @@ environments.")
   '(("environment" . "r7rs-environment")
     ("interaction-environment" . "r7rs-interaction-environment")
     ("eval" . "r7rs-eval"))
-  "Procedures the generated libraries take from (pseudoscheme r7rs
+  "Procedures the generated libraries take from (quasischeme r7rs
 environments) (src/r7rs/syntax.sls), under these names.")
 
 (defun host-bound-p (name)
-  (boundp (psx::location (ssym name))))
+  (boundp (qsx::location (ssym name))))
 
 (defvar *missing* '()
   "(library . procedure) pairs left out of the generated libraries because
@@ -449,20 +449,20 @@ the host has no such procedure.")
                     (import (except (rnrs) define-record-type case let-syntax letrec-syntax)
                             (only (rnrs r5rs) delay null-environment scheme-report-environment)
                             (only (rnrs eval) eval environment)
-                            (pseudoscheme r7rs syntax)
-                            (pseudoscheme r7rs environments)
-                            (prefix (pseudoscheme host) %)))"
+                            (quasischeme r7rs syntax)
+                            (quasischeme r7rs environments)
+                            (prefix (quasischeme host) %)))"
 	     (mapcar #'sname* name) (nreverse exports)))))
 
 (defun write-scheme-to-string (x)
-  (with-output-to-string (s) (funcall ps:*scheme-write* x s)))
+  (with-output-to-string (s) (funcall qs:*scheme-write* x s)))
 
 (defun read-scheme (string)
   (with-input-from-string (in string)
-    (funcall ps:*scheme-read* in)))
+    (funcall qs:*scheme-read* in)))
 
-(defparameter *pseudoscheme-r5rs-library*
-  (format nil "(library (pseudoscheme r5rs)
+(defparameter *quasischeme-r5rs-library*
+  (format nil "(library (quasischeme r5rs)
      (export ~A
              open-output-string open-input-string get-output-string
              call-with-output-string with-output-to-string flush-output
@@ -486,17 +486,17 @@ string ports R5RS mode's classic environment has and SRFI 0's
 cond-expand.")
 
 (defun install-standard-libraries ()
-  (install-host-library '("pseudoscheme" "host") (host-library-exports))
+  (install-host-library '("quasischeme" "host") (host-library-exports))
   (dolist (file '("src/r7rs/syntax.sls" "src/control.sls"))
-    (dolist (form (read-forms (asdf:system-relative-pathname :pseudoscheme file)))
-      (psx:eval-library form)))
+    (dolist (form (read-forms (asdf:system-relative-pathname :quasischeme file)))
+      (qsx:eval-library form)))
   (loop for (name export-string) in *standard-libraries*
-	do (psx:eval-library (standard-library-form name (split-names export-string))))
-  ;; (pseudoscheme r7rs): all of them but (scheme r5rs), for the REPL
-  (psx:eval-library
+	do (qsx:eval-library (standard-library-form name (split-names export-string))))
+  ;; (quasischeme r7rs): all of them but (scheme r5rs), for the REPL
+  (qsx:eval-library
    (read-scheme
     ;; ... plus import, so (import ...) works at the REPL
-    (format nil "(library (pseudoscheme r7rs) (export import ~{~A~^ ~}) (import (only (pseudoscheme) import) ~{~A~^ ~}))"
+    (format nil "(library (quasischeme r7rs) (export import ~{~A~^ ~}) (import (only (quasischeme) import) ~{~A~^ ~}))"
 	    (remove-duplicates
 	     (loop for (name s) in *standard-libraries*
 		   unless (equal (mapcar #'sname* name) '("scheme" "r5rs"))
@@ -508,13 +508,13 @@ cond-expand.")
   (install-chez-libraries)		; src/chez/chez.lisp
   (install-report-libraries)		; src/reports/reports.lisp
   (install-ikarus-library)
-  (psx:eval-library (read-scheme *pseudoscheme-r5rs-library*))
+  (qsx:eval-library (read-scheme *quasischeme-r5rs-library*))
   ;; the interaction libraries of the R7RS REPL, and of R5RS on psyntax
-  (dolist (name '(("pseudoscheme" "r7rs" "interaction") ("pseudoscheme" "r5rs" "interaction")))
-    (funcall (psx:host-ref "psyntax:install-library")
-	     (funcall (psx:host-ref "gensym"))
+  (dolist (name '(("quasischeme" "r7rs" "interaction") ("quasischeme" "r5rs" "interaction")))
+    (funcall (qsx:host-ref "psyntax:install-library")
+	     (funcall (qsx:host-ref "gensym"))
 	     (mapcar #'ssym name)
-	     '() '() '() '() '() '() (lambda () ps:unspecific) (lambda () ps:unspecific) t)))
+	     '() '() '() '() '() '() (lambda () qs:unspecific) (lambda () qs:unspecific) t)))
 
 ;;; (ikarus): what Ikarus variants of libraries (foo.ikarus.sls) import.
 ;;; R6RS, the extensions Ikarus shares with Chez, from (chezscheme), and
@@ -534,9 +534,9 @@ cond-expand.")
     "read-annotated" "environment?" "environment-symbols" "print-condition"))
 
 (defun install-ikarus-library ()
-  (let ((r6rs (remove-duplicates (psx:table-exports '("r" "mp" "ms" "r5" "ev")) :test #'string=))
+  (let ((r6rs (remove-duplicates (qsx:table-exports '("r" "mp" "ms" "r5" "ev")) :test #'string=))
 	(own (append *ikarus-from-chezscheme* *ikarus-extras*)))
-    (psx:eval-library
+    (qsx:eval-library
      (list* (ssym "library") (list (ssym "ikarus"))
 	    (cons (ssym "export")
 		  (mapcar #'ssym (append (remove-if (lambda (n) (member n own :test #'string=)) r6rs)
@@ -544,8 +544,8 @@ cond-expand.")
 	    (list* (ssym "import")
 		   (list* (ssym "only") (list (ssym "chezscheme")) (mapcar #'ssym *ikarus-from-chezscheme*))
 		   (read-scheme "((rnrs) (rnrs mutable-pairs) (rnrs mutable-strings) (rnrs r5rs) (rnrs eval)
-                                  (prefix (pseudoscheme host) %))"))
-	    (read-forms (asdf:system-relative-pathname :pseudoscheme "src/compat/ikarus.scm"))))))
+                                  (prefix (quasischeme host) %))"))
+	    (read-forms (asdf:system-relative-pathname :quasischeme "src/compat/ikarus.scm"))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Host procedures the libraries above need
@@ -553,24 +553,24 @@ cond-expand.")
 (defun install-front-primitives ()
   ;; R7RS-layer internals the generated libraries use
   (dolist (name '("%parameterize"))
-    (psx:host-set! name (primitive name)))
-  (psx:defhost "cond-expand-satisfied?" (req) (ps:true? (feature-satisfied-p req)))
-  (psx:defhost "read-file-forms" (file fold-case &optional form)
+    (qsx:host-set! name (primitive name)))
+  (qsx:defhost "cond-expand-satisfied?" (req) (qs:true? (feature-satisfied-p req)))
+  (qsx:defhost "read-file-forms" (file fold-case &optional form)
     (let ((*include-directory* (or (source-directory-of form) *include-directory*)))
-      (read-forms (include-path file) :fold-case (ps:truep fold-case))))
-  (psx:defhost "r7rs:translate-import-set" (spec) (translate-import-set spec))
+      (read-forms (include-path file) :fold-case (qs:truep fold-case))))
+  (qsx:defhost "r7rs:translate-import-set" (spec) (translate-import-set spec))
   ;; R7RS's load: the file's forms, one by one, at the REPL (in the
   ;; interaction environment), whatever the environment; at R5RS's top
   ;; level if called from there
-  (psx:defhost "r7rs:load" (file &optional env)
+  (qsx:defhost "r7rs:load" (file &optional env)
     (declare (ignore env))
     (load-file-at-repl file)
-    ps:unspecific)
-  (psx:defhost "r7rs:interaction-environment" () *interaction-environment*)
-  (psx:defhost "r7rs:eval-at-repl" (form) (eval-at-current-repl form))
+    qs:unspecific)
+  (qsx:defhost "r7rs:interaction-environment" () *interaction-environment*)
+  (qsx:defhost "r7rs:eval-at-repl" (form) (eval-at-current-repl form))
   ;; Promises: R7RS's, built natively in the host (delay-force is the
   ;; R7RS layer's own macro there).
-  (psx::host-eval (read-scheme "(define ($delay-force thunk) (delay-force (thunk)))")))
+  (qsx::host-eval (read-scheme "(define ($delay-force thunk) (delay-force (thunk)))")))
 
 ;;; ------------------------------------------------------------------
 ;;; Programs, files, the REPL
@@ -600,7 +600,7 @@ then the rest."
   "The forms of the clause of cond-expand FORM whose requirement holds."
   (loop for (clause . more) on (cdr form)
 	when (if (and (symbolp (car clause))
-		      (string= (ps:scheme-symbol-name (car clause)) "else"))
+		      (string= (qs:scheme-symbol-name (car clause)) "else"))
 		 (or (null more) (error "cond-expand: else clause is not last"))
 		 (feature-satisfied-p (car clause)))
 	  return (cdr clause)))
@@ -608,11 +608,11 @@ then the rest."
 (defun eval-forms (forms)
   "Install any libraries in FORMS, then run the program after them."
   (multiple-value-bind (libraries imports body) (split-program forms)
-    (dolist (l libraries) (psx:eval-library (library-form l)))
+    (dolist (l libraries) (qsx:eval-library (library-form l)))
     (if (or imports body)
-	(psx:eval-program (cons (cons (ssym "import") (mapcar #'translate-import-set imports))
+	(qsx:eval-program (cons (cons (ssym "import") (mapcar #'translate-import-set imports))
 				body))
-	ps:unspecific)))
+	qs:unspecific)))
 
 (defvar *interaction-environment* (list 'interaction-environment)
   "What R7RS's interaction-environment returns: eval evaluates in the
@@ -624,7 +624,7 @@ called from there, Chez's (src/chez/chez.lisp) if from there, else the
 R7RS REPL's."
   (let ((*include-directory* (make-pathname :name nil :type nil :defaults (pathname path)))
 	(top-level (current-top-level))
-	(value ps:unspecific))
+	(value qs:unspecific))
     (dolist (form (read-forms path :fold-case (or (eq top-level :r5rs) (report-keyword-p top-level)))
 		  value)
       (setq value (eval-at-top-level top-level form)))))
@@ -634,29 +634,29 @@ R7RS REPL's."
     (eval-forms (read-forms path))))
 
 (defmacro with-psyntax-parameter ((name value) &body body)
-  `(let* ((param (psx:host-ref ,name))
+  `(let* ((param (qsx:host-ref ,name))
 	  (old (funcall param)))
      (funcall param ,value)
      (unwind-protect (progn ,@body) (funcall param old))))
 
 (defun eval-at-r5rs-repl (form)
   "Evaluate FORM at an R5RS top level on psyntax: the bindings of
-(pseudoscheme r5rs), in an interaction library of its own.  Unlike R5RS mode's classic
+(quasischeme r5rs), in an interaction library of its own.  Unlike R5RS mode's classic
 translator, this goes through psyntax, so it can be compiled with full
 continuations (src/continuations.lisp)."
   (boot)
   (with-psyntax-parameter ("psyntax:interaction-library-name"
-			   (mapcar #'ssym '("pseudoscheme" "r5rs" "interaction")))
+			   (mapcar #'ssym '("quasischeme" "r5rs" "interaction")))
     (with-psyntax-parameter ("psyntax:interaction-source-name"
-			     (mapcar #'ssym '("pseudoscheme" "r5rs")))
-      (psx:eval-top-level form))))
+			     (mapcar #'ssym '("quasischeme" "r5rs")))
+      (qsx:eval-top-level form))))
 
 (defun at-r5rs-repl-p ()
   "Is what's running being evaluated at R5RS's top level (so its load
 and eval in the interaction environment should be too)?"
-  (and psx:*host*
-       (equal (mapcar #'sname* (funcall (psx:host-ref "psyntax:interaction-library-name")))
-	      '("pseudoscheme" "r5rs" "interaction"))))
+  (and qsx:*host*
+       (equal (mapcar #'sname* (funcall (qsx:host-ref "psyntax:interaction-library-name")))
+	      '("quasischeme" "r5rs" "interaction"))))
 
 (defun current-top-level ()
   "Which top level is running: :R5RS, :CHEZ or :R7RS (the R7RS REPL's,
@@ -689,13 +689,13 @@ import or a begin of forms that may be."
 (defun eval-at-repl (form)
   "Evaluate FORM in the R7RS REPL's environment.  (import ...) works."
   (with-psyntax-parameter ("psyntax:interaction-library-name"
-			   (mapcar #'ssym '("pseudoscheme" "r7rs" "interaction")))
+			   (mapcar #'ssym '("quasischeme" "r7rs" "interaction")))
     (with-psyntax-parameter ("psyntax:interaction-source-name"
-			     (mapcar #'ssym '("pseudoscheme" "r7rs")))
+			     (mapcar #'ssym '("quasischeme" "r7rs")))
       (let ((form (translate-repl-imports form)))
 	(if (head-is form "define-library")
-	    (progn (psx:eval-library (library-form form)) ps:unspecific)
-	    (psx:eval-top-level form))))))
+	    (progn (qsx:eval-library (library-form form)) qs:unspecific)
+	    (qsx:eval-top-level form))))))
 
 (defvar *booted-host* nil
   "The psyntax host the R7RS libraries were installed in.")
@@ -703,11 +703,11 @@ import or a begin of forms that may be."
 (defun boot ()
   "Bring up psyntax (if needed) and install the R7RS libraries in it,
 once per host."
-  (unless psx:*host* (psx::boot))
-  (unless (eq *booted-host* psx:*host*)
-    (let ((psx::*full-continuations* nil))	; re-exports, syntax, two definitions
+  (unless qsx:*host* (qsx::boot))
+  (unless (eq *booted-host* qsx:*host*)
+    (let ((qsx::*full-continuations* nil))	; re-exports, syntax, two definitions
       (boot-libraries))
-    (setq *booted-host* psx:*host*))
+    (setq *booted-host* qsx:*host*))
   t)
 
 (defun boot-libraries ()
@@ -716,13 +716,13 @@ once per host."
 	(loop for (name . var) in '(("current-input-port" . *standard-input*)
 				    ("current-output-port" . *standard-output*)
 				    ("current-error-port" . *error-output*))
-	      when (boundp (psx:location (ssym name)))
-		collect (cons (psx:host-ref name) var)))
-  (setf psx:*library-form-hook* #'locate-library-form)
+	      when (boundp (qsx:location (ssym name)))
+		collect (cons (qsx:host-ref name) var)))
+  (setf qsx:*library-form-hook* #'locate-library-form)
   ;; the same ids every session, for compiled libraries
-  (psx::with-boot-gensyms (install-standard-libraries)))
+  (qsx::with-boot-gensyms (install-standard-libraries)))
 
-;;; Alternative readers (ps:reader-directive): the directive, the
+;;; Alternative readers (qs:reader-directive): the directive, the
 ;;; library and its procedure of a port that reads a datum.
 
 (defparameter *alternative-readers*
@@ -735,10 +735,10 @@ once per host."
   (eval-forms (list (read-scheme (format nil "(import (only ~A ~A))" library name))
 		    (ssym name))))
 
-(setf ps:*array-literal-loader*
+(setf qs:*array-literal-loader*
       (lambda () (library-procedure "(srfi 163)" "array-literal")))
 
-(setf ps:*reader-directives*
+(setf qs:*reader-directives*
       (loop for (directive library name) in *alternative-readers*
 	    collect (let ((library library) (name name))
 		      (cons directive (lambda () (library-procedure library name))))))
@@ -763,13 +763,13 @@ sources kept for provenance, src/srfi/reference/)."
 						 directory)))
 	  #'string< :key #'key)))
 
-(defun precompile-libraries (&key (directory (asdf:system-relative-pathname :pseudoscheme "src/srfi/"))
+(defun precompile-libraries (&key (directory (asdf:system-relative-pathname :quasischeme "src/srfi/"))
 				  (output *standard-output*))
   "Expand and compile every library in the .sld files under DIRECTORY
 into the compiled-library cache, printing a line for each to OUTPUT (or
 nothing if it is NIL).  Returns how many compiled and how many failed."
   (boot)
-  (unless (psx::library-cache-p)
+  (unless (qsx::library-cache-p)
     (error "precompile-libraries: the library cache is off"))
   (let* ((names (loop for file in (library-files directory)
 		      append (loop for form in (ignore-errors (read-forms file))
@@ -778,7 +778,7 @@ nothing if it is NIL).  Returns how many compiled and how many failed."
 	 (total (length names))
 	 (ok 0) (failed '())
 	 ;; found there, as well as where libraries are looked for
-	 (psx:*library-path* (append psx:*library-path*
+	 (qsx:*library-path* (append qsx:*library-path*
 				     (list (namestring (uiop:ensure-directory-pathname directory))))))
     (loop for name in names
 	  for i from 1
@@ -791,7 +791,7 @@ nothing if it is NIL).  Returns how many compiled and how many failed."
 		   (let ((*standard-output* (make-broadcast-stream)))
 		     ;; installs it: expanded and compiled, or loaded from
 		     ;; the cache; not run
-		     (funcall (psx:host-ref "psyntax:environment") name)
+		     (funcall (qsx:host-ref "psyntax:environment") name)
 		     (incf ok)
 		     (when output
 		       (format output "ok   ~5,1Fs~%"
@@ -803,7 +803,7 @@ nothing if it is NIL).  Returns how many compiled and how many failed."
 		       (format output "FAIL ~A~%" (subseq message 0 (min 100 (length message))))))))))
     (when output
       (format output "~&~%Libraries: ~D of ~D compiled into ~A~@[; failed: ~{~A~^ ~}~]~%"
-	      ok total (namestring (psx::library-cache-directory)) (reverse failed)))
+	      ok total (namestring (qsx::library-cache-directory)) (reverse failed)))
     (values ok (length failed))))
 
 ;;; SRFI 176
@@ -817,17 +817,17 @@ nothing if it is NIL).  Returns how many compiled and how many failed."
 (defun version-alist ()
   "SRFI 176's version properties, as Scheme data."
   (let ((translator (uiop:symbol-call "SCHEME-TRANSLATOR" "TRANSLATOR-VERSION")))
-    `((,(sym "command") "pseudoscheme")
-      (,(sym "scheme.id") ,(sym "pseudoscheme"))
+    `((,(sym "command") "quasischeme")
+      (,(sym "scheme.id") ,(sym "quasischeme"))
       (,(sym "languages") ,@(mapcar #'sym '("scheme" "r5rs" "r6rs" "r7rs")))
       (,(sym "encodings") ,(sym "utf-8"))
       (,(sym "version") ,(subseq translator (1+ (position #\Space translator :from-end t))))
-      (,(sym "install-dir") ,(namestring (asdf:system-source-directory :pseudoscheme)))
+      (,(sym "install-dir") ,(namestring (asdf:system-source-directory :quasischeme)))
       (,(sym "scheme.srfi")
-       ,@(sort (remove nil (mapcar #'srfi-feature-number psl:*scheme-features*)) #'<))
+       ,@(sort (remove nil (mapcar #'srfi-feature-number qsl:*scheme-features*)) #'<))
       (,(sym "scheme.features")
-       ,@(mapcar #'sym (remove-if #'srfi-feature-number psl:*scheme-features*)))
-      (,(sym "scheme.path") ,@(copy-list psx:*library-path*))
+       ,@(mapcar #'sym (remove-if #'srfi-feature-number qsl:*scheme-features*)))
+      (,(sym "scheme.path") ,@(copy-list qsx:*library-path*))
       (,(sym "build.platform")
        ,(format nil "~A ~A ~A ~A" (lisp-implementation-type) (lisp-implementation-version)
 		(machine-type) (software-type))))))

@@ -1,5 +1,5 @@
 ;;; SRFI 118 tests, after the SRFI document's specification and example
-;;; (the SRFI has no test suite).  Only uses that Pseudoscheme's
+;;; (the SRFI has no test suite).  Only uses that Quasischeme's
 ;;; approximation supports: the string being resized is in a variable.
 (import (scheme base) (scheme process-context) (srfi 64) (srfi 118))
 

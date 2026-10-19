@@ -1,16 +1,16 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategy B: the #%linklet primitive instance, the interface between
 ;;;; Racket's expander and a backend (docs/racket.md, "Linklets"):
 ;;;; linklets, instances and variable objects, correlated objects, and
 ;;;; the functions over them.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Instances and variables
 
-(defstruct (linklet-instance (:constructor make-linklet-instance (name &optional (data ps:false))))
+(defstruct (linklet-instance (:constructor make-linklet-instance (name &optional (data qs:false))))
   name data
   (variables (make-hash-table :test 'eq)))	; symbol -> LINKLET-VARIABLE
 
@@ -69,14 +69,14 @@ MESSAGE's reason."
 
 (defun install-letrec-check ()
   "Replace the host's %letrec-check, unless this process already has."
-  (unless (and *racket-letrec-check* (eq (psx:host-ref "%letrec-check") *racket-letrec-check*))
-    (let* ((old (psx:host-ref "%letrec-check"))
+  (unless (and *racket-letrec-check* (eq (qsx:host-ref "%letrec-check") *racket-letrec-check*))
+    (let* ((old (qsx:host-ref "%letrec-check"))
 	   (new (lambda (flag value name)
-		  (let ((racket-name (and (eq flag ps:false) (racket-lexical-name name))))
+		  (let ((racket-name (and (eq flag qs:false) (racket-lexical-name name))))
 		    (if racket-name
 			(raise-variable-error (rsym racket-name) "cannot use before initialization")
 			(funcall old flag value name))))))
-      (psx:host-set! "%letrec-check" new)
+      (qsx:host-set! "%letrec-check" new)
       (setq *racket-letrec-check* new))))
 
 (defun variable-set (v value)
@@ -133,7 +133,7 @@ hash tables and prefab structs too; what holds none is returned as is."
 
 (defvar *stats* (list :lower 0 :compile 0 :linklets 0)
   "Time spent lowering linklets and compiling them to Lisp (internal
-time units), and how many: PSEUDOSCHEME_RACKET_STATS prints them.")
+time units), and how many: QUASISCHEME_RACKET_STATS prints them.")
 
 (defmacro timing ((key) &body body)
   `(let ((t0 (get-internal-real-time)))
@@ -141,7 +141,7 @@ time units), and how many: PSEUDOSCHEME_RACKET_STATS prints them.")
        (incf (getf *stats* ,key) (- (get-internal-real-time) t0)))))
 
 (defun print-stats ()
-  (when (uiop:getenv "PSEUDOSCHEME_RACKET_STATS")
+  (when (uiop:getenv "QUASISCHEME_RACKET_STATS")
     (format *error-output* "~&;; ~D linklets: lowered in ~,1Fs, compiled to Lisp in ~,1Fs~%"
 	    (getf *stats* :linklets)
 	    (/ (getf *stats* :lower) internal-time-units-per-second)
@@ -226,11 +226,11 @@ objects: compiled now if need be."
 		(linklet-function-1 compiled))))))
 
 (defun linklet-function-1 (compiled)
-  (let ((psx::*full-continuations* t)
+  (let ((qsx::*full-continuations* t)
 	(form (compiled-linklet-form compiled)))
     (call-with-safe-cells
      (lambda ()
-       (if (and (consp form) (eq (car form) (psx::sym "racket:split")))
+       (if (and (consp form) (eq (car form) (qsx::sym "racket:split")))
 	   (split-function (cadr form) (split-functions compiled))
 	   (whole-function compiled))))))
 
@@ -278,7 +278,7 @@ with one, the body's result, the exports defined in TARGET."
 	 (result (multiple-value-list
 		  ;; the frames a continuation captured in the body can reach:
 		  ;; the body's (inside an enclosing base, all of that one's)
-		  (psx::call-with-continuation-base
+		  (qsx::call-with-continuation-base
 		   (lambda () (apply (linklet-function compiled) instance (append imports exports)))))))
     (if target (values-list result) instance)))
 
@@ -312,7 +312,7 @@ it with (primitive-table '#%linklet) of the pinned release.")
 
 (defparameter *linklet-functions*
   `(("linklet?" ,(lambda (x) (bool (compiled-linklet-p x))))
-    ("compile-linklet" ,(lambda (form &optional (name ps:false) (import-keys ps:false) get-import options)
+    ("compile-linklet" ,(lambda (form &optional (name qs:false) (import-keys qs:false) get-import options)
 			  (declare (ignore get-import options))
 			  ;; with import keys, they come back too (we use no
 			  ;; cross-linklet knowledge yet, so unchanged)
@@ -320,13 +320,13 @@ it with (primitive-table '#%linklet) of the pinned release.")
 			      (values (compile-linklet form name) import-keys)
 			      (compile-linklet form name))))
     ("eval-linklet" ,#'identity)
-    ("instantiate-linklet" ,(lambda (linklet imports &optional (target ps:false) use-prompt)
+    ("instantiate-linklet" ,(lambda (linklet imports &optional (target qs:false) use-prompt)
 			      (declare (ignore use-prompt))
 			      (instantiate-linklet linklet imports (and (truthy target) target))))
     ("linklet-import-variables" ,(lambda (l) (compiled-linklet-imports l)))
     ("linklet-export-variables" ,(lambda (l) (compiled-linklet-exports l)))
     ("instance?" ,(lambda (x) (bool (linklet-instance-p x))))
-    ("make-instance" ,(lambda (name &optional (data ps:false) mode &rest pairs)
+    ("make-instance" ,(lambda (name &optional (data qs:false) mode &rest pairs)
 			(declare (ignore mode))
 			(let ((i (make-linklet-instance name data)))
 			  (loop for (n v) on pairs by #'cddr
@@ -359,20 +359,20 @@ it with (primitive-table '#%linklet) of the pinned release.")
 	  *void*)))
     ("variable-reference?" ,(lambda (x) (bool (variable-reference-p x))))
     ("variable-reference->instance"
-     ,(lambda (r &optional (ref-site ps:false))
+     ,(lambda (r &optional (ref-site qs:false))
 	;; an anonymous reference, (#%variable-reference), has no
 	;; variable's instance; the instance it occurs in is REF-SITE's
 	(if (or (truthy ref-site) (truthy (variable-reference-name r)))
 	    (variable-reference-instance r)
-	    ps:false)))
-    ("variable-reference-from-unsafe?" ,(lambda (r) (declare (ignore r)) ps:false))
+	    qs:false)))
+    ("variable-reference-from-unsafe?" ,(lambda (r) (declare (ignore r)) qs:false))
     ("correlated?" ,(lambda (x) (bool (correlated-p x))))
     ("correlated-e" ,#'correlated-e)
-    ("correlated-source" ,(lambda (c) (or (correlated-source c) ps:false)))
-    ("correlated-line" ,(lambda (c) (or (correlated-line c) ps:false)))
-    ("correlated-column" ,(lambda (c) (or (correlated-column c) ps:false)))
-    ("correlated-position" ,(lambda (c) (or (correlated-position c) ps:false)))
-    ("correlated-span" ,(lambda (c) (or (correlated-span c) ps:false)))
+    ("correlated-source" ,(lambda (c) (or (correlated-source c) qs:false)))
+    ("correlated-line" ,(lambda (c) (or (correlated-line c) qs:false)))
+    ("correlated-column" ,(lambda (c) (or (correlated-column c) qs:false)))
+    ("correlated-position" ,(lambda (c) (or (correlated-position c) qs:false)))
+    ("correlated-span" ,(lambda (c) (or (correlated-span c) qs:false)))
     ("correlated->datum" ,#'correlated->datum)
     ("datum->correlated"
      ,(lambda (d &optional srcloc prop)
@@ -385,7 +385,7 @@ it with (primitive-table '#%linklet) of the pinned release.")
 			     :column (correlated-column c) :position (correlated-position c)
 			     :span (correlated-span c)
 			     :props (acons key value (remove key (correlated-props c) :key #'car)))
-	    (let ((p (assoc key (correlated-props c)))) (if p (cdr p) ps:false)))))
+	    (let ((p (assoc key (correlated-props c)))) (if p (cdr p) qs:false)))))
     ;; the interned symbols
     ("correlated-property-symbol-keys"
      ,(lambda (c) (loop for (k) in (correlated-props c) when (and (symbolp k) (symbol-package k)) collect k)))
@@ -397,9 +397,9 @@ it with (primitive-table '#%linklet) of the pinned release.")
 	      (let ((h (empty-ihash :eq)))
 		(maphash (lambda (k v) (setq h (ihash-set h (rsym k) v))) instance)
 		h)
-	      ps:false))))
+	      qs:false))))
     ("primitive-lookup" ,(lambda (name) (multiple-value-bind (v found) (primitive (rname name))
-					  (if found v ps:false))))
+					  (if found v qs:false))))
     ("instance-describe-variable!"
      ,(lambda (i name desc)
 	(declare (ignore desc))
@@ -423,11 +423,11 @@ it with (primitive-table '#%linklet) of the pinned release.")
     ("linklet-directory->hash" ,(lambda (d) (linklet-directory-table d)))
     ("linklet-directory?" ,(lambda (x) (bool (linklet-directory-p x))))
     ;; one machine: no cross-compilation, and no machine-specific info
-    ("linklet-cross-machine-type" ,(lambda (&optional target) (declare (ignore target)) ps:false))
+    ("linklet-cross-machine-type" ,(lambda (&optional target) (declare (ignore target)) qs:false))
     ("linklet-add-target-machine-info" ,(lambda (linklet info) (declare (ignore info)) linklet))
-    ("linklet-summarize-target-machine-info" ,(lambda (linklet) (declare (ignore linklet)) ps:false))
-    ("primitive->compiled-position" ,(lambda (p) (declare (ignore p)) ps:false))
-    ("compiled-position->primitive" ,(lambda (i) (declare (ignore i)) ps:false)))
+    ("linklet-summarize-target-machine-info" ,(lambda (linklet) (declare (ignore linklet)) qs:false))
+    ("primitive->compiled-position" ,(lambda (p) (declare (ignore p)) qs:false))
+    ("compiled-position->primitive" ,(lambda (i) (declare (ignore i)) qs:false)))
   "#%linklet's functions written so far, as (name function).")
 
 (defun install-linklet-primitives ()
@@ -447,16 +447,16 @@ it with (primitive-table '#%linklet) of the pinned release.")
 (defnative "datum->syntax" (ctx d &optional srcloc prop ignored) (:leaf t)
   (declare (ignore ctx srcloc prop ignored))
   (if (correlated-p d) d (make-correlated d)))
-(defnative "syntax-source" (c) (:leaf t) (or (correlated-source c) ps:false))
-(defnative "syntax-line" (c) (:leaf t) (or (correlated-line c) ps:false))
-(defnative "syntax-column" (c) (:leaf t) (or (correlated-column c) ps:false))
-(defnative "syntax-position" (c) (:leaf t) (or (correlated-position c) ps:false))
-(defnative "syntax-span" (c) (:leaf t) (or (correlated-span c) ps:false))
+(defnative "syntax-source" (c) (:leaf t) (or (correlated-source c) qs:false))
+(defnative "syntax-line" (c) (:leaf t) (or (correlated-line c) qs:false))
+(defnative "syntax-column" (c) (:leaf t) (or (correlated-column c) qs:false))
+(defnative "syntax-position" (c) (:leaf t) (or (correlated-position c) qs:false))
+(defnative "syntax-span" (c) (:leaf t) (or (correlated-span c) qs:false))
 (defnative "syntax-property" (c key &optional (value nil value-p) preserved?) (:leaf t)
   (declare (ignore preserved?))
   (if value-p
       (funcall (second (assoc "correlated-property" *linklet-functions* :test #'string=)) c key value)
-      (let ((p (assoc key (correlated-props c)))) (if p (cdr p) ps:false))))
+      (let ((p (assoc key (correlated-props c)))) (if p (cdr p) qs:false))))
 (defnative "syntax-property-symbol-keys" (c) (:leaf t) (mapcar #'car (correlated-props c)))
 
 (defmethod make-load-form ((x correlated) &optional environment)

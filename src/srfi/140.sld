@@ -1,6 +1,6 @@
 ;;; SRFI 140: immutable strings.  The SRFI says a portable implementation
 ;;; is not possible, and its repository has only the test suite; this
-;;; one is written for Pseudoscheme, with most procedures taken from
+;;; one is written for Quasischeme, with most procedures taken from
 ;;; William D Clinger's SRFI 135 sample implementation (texts) running on
 ;;; a kernel whose texts are plain strings: see
 ;;; private/srfi-140-strings.sld, private/srfi-140-texts.sld and
@@ -10,7 +10,7 @@
 ;;; this library exports R7RS's binding.
 ;;;
 ;;; What is not immutable in practice: istrings are ordinary, mutable
-;;; Pseudoscheme strings.  string-set!, string-fill! and string-copy!
+;;; Quasischeme strings.  string-set!, string-fill! and string-copy!
 ;;; work on any string, string literals and istrings included; nothing
 ;;; is enforced.  istring? reports provenance instead: it is false for
 ;;; the strings made by this library's make-string and string-copy (and

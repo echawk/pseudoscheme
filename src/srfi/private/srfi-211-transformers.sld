@@ -1,7 +1,7 @@
 ;;; (srfi private srfi-211-transformers): explicit-renaming, implicitly
 ;;; renaming, Lisp and syntactic-closure transformers on psyntax's
 ;;; syntax-case, for SRFI 211's sublibraries (and SRFI 147's
-;;; er-macro-transformer).  Written for Pseudoscheme, after SRFI 211's
+;;; er-macro-transformer).  Written for Quasischeme, after SRFI 211's
 ;;; operational semantics:
 ;;;
 ;;;   - The input form is fully unwrapped: pairs, vectors and constants,

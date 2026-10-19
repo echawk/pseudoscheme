@@ -1,10 +1,10 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; The three strategies (docs/racket.md, "Three strategies", decision 8),
 ;;;; each selectable with --racket=NAME.  A and C share rumble and
 ;;;; schemify; B and C share the native runtime.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (define-strategy "cs" "A: Racket CS's layers on --chez"
   :boot 'cs-boot :eval 'cs-eval :load 'cs-load)

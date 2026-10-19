@@ -1,4 +1,4 @@
-;;; SRFI 60: integers as bits.  Written for Pseudoscheme on (srfi 151)
+;;; SRFI 60: integers as bits.  Written for Quasischeme on (srfi 151)
 ;;; (the SRFI's own implementation, SLIB's logical.scm, computes in
 ;;; 4-bit nibbles); the SRFI 33 names that SRFI 151 shares with SRFI 60
 ;;; under the same contract are SRFI 151's very bindings.  The

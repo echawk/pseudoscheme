@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategy C: strategy A, with rumble's hot procedures replaced by the
 ;;;; native runtime's (src/racket/native/) after rumble loads
@@ -9,7 +9,7 @@
 ;;;; candidates are struct operations, attachments and marks, wrapper
 ;;;; procedures, and hash tables.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defvar *overrides* '()
   "The rumble names C replaces, each with a native procedure (a NATIVE

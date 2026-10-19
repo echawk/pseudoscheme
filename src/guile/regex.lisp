@@ -1,11 +1,11 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Guile's regular expressions are POSIX's, and so are these: libc's
 ;;;; regcomp and regexec, through CFFI, which (ice-9 regex) builds on.
 ;;;; Matching is done on the UTF-8 bytes of the string; the match's byte
 ;;;; offsets are turned back into character indices.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 ;;; The flag values and regoff_t's size are the platform's.
 (defconstant +reg-extended+ 1)
@@ -120,7 +120,7 @@ counted from START."
       (let ((code (cffi:foreign-funcall "regexec" :pointer (regexp-pointer rx) :pointer buf
 						  :size n :pointer matches :int eflags :int)))
 	(if (/= code 0)
-	    ps:false
+	    qs:false
 	    (let ((v (make-array (1+ n) :initial-element (cons -1 -1)))
 		  (count 0))
 	      (setf (svref v 0) string)

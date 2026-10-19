@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; Chez Scheme's foreign-function interface, on CFFI: load-shared-object,
 ;;;; foreign-procedure, and foreign memory as integer addresses
@@ -10,13 +10,13 @@
 ;;;; types translated from Chez's.  Not here: ftypes, and the types
 ;;;; scheme-object, wchar_t and the u16*/u32* buffers.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defun chez-ffi-type (type)
   "The CFFI type for Chez's foreign type TYPE (a Scheme symbol), and how
 values cross: :int, :pointer for u8* (a bytevector's data), :string, :address
 (an integer, as Chez gives pointers), :boolean, :void."
-  (let ((name (ps:scheme-symbol-name type)))
+  (let ((name (qs:scheme-symbol-name type)))
     (cond ((member name '("int" "integer-32") :test #'string=) (values :int :number))
 	  ((member name '("unsigned" "unsigned-int" "unsigned-32") :test #'string=) (values :unsigned-int :number))
 	  ((member name '("long") :test #'string=) (values :long :number))
@@ -39,42 +39,42 @@ values cross: :int, :pointer for u8* (a bytevector's data), :string, :address
 	  ((member name '("string" "utf-8") :test #'string=) (values :pointer :string))
 	  ((member name '("u8*") :test #'string=) (values :pointer :bytes))
 	  ((member name '("void") :test #'string=) (values :void :void))
-	  (t (ps:scheme-error "foreign-procedure: unsupported type ~A" name)))))
+	  (t (qs:scheme-error "foreign-procedure: unsupported type ~A" name)))))
 
 (defun chez-type (type)
   "Chez's foreign TYPE as a type of the shared layer (src/ffi.lisp)."
   (multiple-value-list (chez-ffi-type type)))
 
 (defprim "chez:load-shared-object" (path)
-  (psffi:load-library path)
-  ps:unspecific)
+  (qsffi:load-library path)
+  qs:unspecific)
 
 (defprim "chez:foreign-procedure" (entry params result)
-  (let ((address (if (integerp entry) entry (psffi:symbol-address entry))))
+  (let ((address (if (integerp entry) entry (qsffi:symbol-address entry))))
     (unless address
-      (ps:scheme-error "foreign-procedure: no entry for ~S" entry))
-    (psffi:foreign-function address (mapcar #'chez-type params) (chez-type result))))
+      (qs:scheme-error "foreign-procedure: no entry for ~S" entry))
+    (qsffi:foreign-function address (mapcar #'chez-type params) (chez-type result))))
 
 (defprim "chez:foreign-callable" (procedure params result)
-  (psffi:foreign-callback procedure (mapcar #'chez-type params) (chez-type result)))
+  (qsffi:foreign-callback procedure (mapcar #'chez-type params) (chez-type result)))
 
 (defprim "chez:foreign-entry?" (name)
-  (bool (psffi:symbol-address name)))
+  (bool (qsffi:symbol-address name)))
 
 (defprim "chez:foreign-entry" (name)
-  (or (psffi:symbol-address name)
-      (ps:scheme-error "foreign-entry: no entry for ~S" name)))
+  (or (qsffi:symbol-address name)
+      (qs:scheme-error "foreign-entry: no entry for ~S" name)))
 
 ;;; Memory, addressed by integers
 
-(defprim "chez:foreign-alloc" (n) (psffi:allocate n))
+(defprim "chez:foreign-alloc" (n) (qsffi:allocate n))
 
 (defprim "chez:foreign-free" (address)
-  (psffi:free address)
-  ps:unspecific)
+  (qsffi:free address)
+  qs:unspecific)
 
 (defprim "chez:foreign-sizeof" (type)
-  (psffi:type-size (chez-ffi-type type)))
+  (qsffi:type-size (chez-ffi-type type)))
 
 (defun memory-ctype (type)
   (multiple-value-bind (ctype kind) (chez-ffi-type type)
@@ -82,19 +82,19 @@ values cross: :int, :pointer for u8* (a bytevector's data), :string, :address
 
 (defprim "chez:foreign-ref" (type address offset)
   (multiple-value-bind (ctype kind) (memory-ctype type)
-    (let ((v (psffi:mem-ref ctype address offset)))
+    (let ((v (qsffi:mem-ref ctype address offset)))
       (case kind
 	(:char (code-char v))
-	(:boolean (if (zerop v) ps:false t))
+	(:boolean (if (zerop v) qs:false t))
 	(:float (coerce v 'double-float))
 	(t v)))))
 
 (defprim "chez:foreign-set!" (type address offset value)
   (multiple-value-bind (ctype kind) (memory-ctype type)
-    (psffi:mem-set ctype address offset
+    (qsffi:mem-set ctype address offset
 		   (case kind
 		     (:char (char-code value))
-		     (:boolean (if (eq value ps:false) 0 1))
+		     (:boolean (if (eq value qs:false) 0 1))
 		     (:float (coerce value (if (eq ctype :double) 'double-float 'single-float)))
 		     (t value))))
-  ps:unspecific)
+  qs:unspecific)

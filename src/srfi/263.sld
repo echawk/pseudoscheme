@@ -6,7 +6,7 @@
 ;;;   - its (import ...) line is this library's import declaration;
 ;;;   - recursive-lookup was defined twice (Chicken keeps the second
 ;;;     definition; a library can't): only the second is kept;
-;;;   - the internal message '##srfi-263#obj-data, which Pseudoscheme's
+;;;   - the internal message '##srfi-263#obj-data, which Quasischeme's
 ;;;     reader rejects, is a private message (a fresh string), as the
 ;;;     SRFI's "Private Messages" suggests;
 ;;;   - a message no parent understands (or more than one does) is sent
@@ -170,7 +170,7 @@
                       (get-slot-list ((class 'mirror) obj-data-message)))
                     parents))))
 
-    ;; PSEUDOSCHEME: the ancestors and slots of the object whose data is
+    ;; QUASISCHEME: the ancestors and slots of the object whose data is
     ;; OBJ-DATA, for its mirror (the collectors above work on the mirror).
     (define (object-data-of object) ((object 'mirror) obj-data-message))
 

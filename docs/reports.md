@@ -1,6 +1,6 @@
 # The older Revised Reports
 
-`bin/pseudoscheme` has a language mode for each report before R5RS
+`bin/quasischeme` has a language mode for each report before R5RS
 whose text is available: each is an environment with exactly that
 report's names (plus what the report lists as optional, where that was
 practical), reading case-folded, as the reports say identifiers are.
@@ -14,13 +14,13 @@ practical), reading case-folded, as the reports say identifiers are.
 | `--rrs` | The Revised Report, AI Memo 452, 1978 | MacLISP's Scheme: `labels`, `aset'`, `fluidbind`, `catch`, `prog`, `macro` ... |
 
 `scheme-r4rs` and `scheme-ieee-1178-1990` (SRFI 22's script
-interpreters, links to `bin/pseudoscheme`) are `--r4rs` and `--ieee`.
+interpreters, links to `bin/quasischeme`) are `--r4rs` and `--ieee`.
 Everything else works as it does in R5RS mode: `-e`, `-p`, files,
 the REPL (`r4rs> `), `load` (which loads at the report's top level).
 R0RS, AI Memo 349 (1975), is not done: it is MacLISP-dependent (see
 the end).
 
-Each report is a library, `(pseudoscheme reports r4rs)` and so on,
+Each report is a library, `(quasischeme reports r4rs)` and so on,
 built by `src/reports/reports.lisp` from R5RS's bindings
 (`(scheme r5rs)`), the helpers of `src/reports/reports.sls`, and the
 report's name list; the Revised Report's is `src/reports/rrs.sls`.

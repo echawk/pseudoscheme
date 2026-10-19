@@ -1,7 +1,7 @@
 ;;; The sample implementation from the SRFI 190 document
 ;;; (https://srfi.schemers.org/srfi-190/srfi-190.html), verbatim.
 ;;; Copyright (C) Marc Nieper-Wißkirchen (2020); MIT licence, see LICENSE.
-;;; It needs SRFI 139 syntax parameters, which Pseudoscheme lacks, so
+;;; It needs SRFI 139 syntax parameters, which Quasischeme lacks, so
 ;;; (srfi 190) does not include it; see 190.sld.
 
 (define-syntax-parameter yield

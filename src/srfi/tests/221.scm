@@ -1,6 +1,6 @@
 ;;; Tests for SRFI 221: the sample implementation's test suite
 ;;; (reference/srfi-221/srfi-221-test.scm), with its import header
-;;; replaced by Pseudoscheme's libraries and its test-end by the exit
+;;; replaced by Quasischeme's libraries and its test-end by the exit
 ;;; below; the rest is unchanged.
 (import (scheme base)
         (scheme case-lambda)

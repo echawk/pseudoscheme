@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Where an addition goes: --chez stays faithful to upstream Chez.  A
 ;;;; name upstream Chez also has is implemented in src/chez/, as upstream
@@ -11,7 +11,7 @@
 ;;;; keeps the list, so that milestone 0's inventory (FORK-INVENTORY) can
 ;;;; say what's still missing.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defparameter *fork-additions*
   '((:attachments "$call-setting-continuation-attachment" "$call-getting-continuation-attachment"
@@ -74,12 +74,12 @@ primitive reference #%name, #2%name, #3%name."
 (defun chez-bound-p (name)
   "Is NAME bound at the Chez top level, or, as #%NAME says it, a name of
 the (chezscheme) library's body (the $-names it doesn't export)?"
-  (pseudoscheme-api::ensure-psyntax)
-  (or (truthy (ps-r7rs::eval-at-chez-top-level
-	       (list (ps:intern-scheme-symbol "top-level-bound?")
-		     (list (ps:intern-scheme-symbol "quote") (ps:intern-scheme-symbol name)))))
-      (handler-case (progn (ps-r7rs::eval-at-chez-top-level
-			    (list (ps:intern-scheme-symbol "$primitive") (ps:intern-scheme-symbol name)))
+  (quasischeme-api::ensure-psyntax)
+  (or (truthy (qs-r7rs::eval-at-chez-top-level
+	       (list (qs:intern-scheme-symbol "top-level-bound?")
+		     (list (qs:intern-scheme-symbol "quote") (qs:intern-scheme-symbol name)))))
+      (handler-case (progn (qs-r7rs::eval-at-chez-top-level
+			    (list (qs:intern-scheme-symbol "$primitive") (qs:intern-scheme-symbol name)))
 			   t)
 	(error () nil))))
 
@@ -87,7 +87,7 @@ the (chezscheme) library's body (the $-names it doesn't export)?"
   "The names upstream Chez Scheme has (build/external/chezscheme/, as
 utils/chez/setup.sh fetches it): those s/primdata.ss declares, and those
 its s/*.ss files define; or NIL without the source."
-  (let ((dir (asdf:system-relative-pathname :pseudoscheme "build/external/chezscheme/s/")))
+  (let ((dir (asdf:system-relative-pathname :quasischeme "build/external/chezscheme/s/")))
     (when (probe-file dir)
       (let ((names (make-hash-table :test 'equal)))
 	(dolist (file (directory (merge-pathnames "*.ss" dir)) names)

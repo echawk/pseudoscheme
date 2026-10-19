@@ -1,4 +1,4 @@
-# Pseudoscheme's continuous integration: the bootstrap chain from other
+# Quasischeme's continuous integration: the bootstrap chain from other
 # Schemes, and every test suite (full continuations, the default, and
 # escape-only).
 # See boot/README.md and ROADMAP.md.  The benchmarks are a separate
@@ -18,10 +18,10 @@ concurrency:
 
 jobs:
   # The generated files from source alone, with two fast Schemes from
-  # Ubuntu: Chez Scheme (R6RS) and Scheme 48 (R5RS).  Both write the .pso
+  # Ubuntu: Chez Scheme (R6RS) and Scheme 48 (R5RS).  Both write the .qso
   # files, which must agree; then psyntax's image is rebuilt from a seed
   # each of them builds (Chez natively, Scheme 48 through boot/stage0/),
-  # with Pseudoscheme loaded from those .pso files.  Everything must come
+  # with Quasischeme loaded from those .qso files.  Everything must come
   # out as checked in.
   bootstrap:
     runs-on: ubuntu-24.04
@@ -44,12 +44,12 @@ jobs:
           echo '(display (scheme-version))' | chez -q; echo
           echo ',exit' | scheme48 | head -1
 
-      - name: The .pso files, from Chez and from Scheme 48
+      - name: The .qso files, from Chez and from Scheme 48
         # They must agree with each other and, form for form, with
-        # Pseudoscheme's own translation (--check).  Installed in src/.
+        # Quasischeme's own translation (--check).  Installed in src/.
         run: BOOT_HOSTS="chez scheme48" boot/bootstrap.sh --all --check
 
-      - name: The .pso files match what's checked in
+      - name: The .qso files match what's checked in
         # apart from the header comment naming the Scheme that wrote them
         run: git diff --exit-code -I '^;' -- src
 
@@ -57,14 +57,14 @@ jobs:
         run: boot/psyntax.sh --seed=chez
 
       - name: psyntax's image matches what's checked in
-        run: git diff --exit-code -- vendor/psyntax/psyntax-pseudoscheme.pp
+        run: git diff --exit-code -- vendor/psyntax/psyntax-quasischeme.pp
 
       - name: psyntax's image, from stage0's seed on Scheme 48
         # An unrelated expander's seed, on an R5RS Scheme, must end in
         # the same image.
         run: |
           STAGE0_HOST=scheme48 boot/psyntax.sh --no-install --seed=stage0
-          cmp boot/build/psyntax/psyntax-pseudoscheme.pp vendor/psyntax/psyntax-pseudoscheme.pp
+          cmp boot/build/psyntax/psyntax-quasischeme.pp vendor/psyntax/psyntax-quasischeme.pp
 
       - name: Logs
         if: failure()
@@ -95,7 +95,7 @@ jobs:
 
       - name: The shipped SRFIs as a library corpus
         run: |
-          PSEUDOSCHEME_LIBRARY_CACHE=0 sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
+          QUASISCHEME_LIBRARY_CACHE=0 sbcl --dynamic-space-size 4GB --control-stack-size 500MB \
             --script tests/run-library-corpus.lisp src/srfi --skip reference | tee /tmp/corpus.txt
           # "N of M libraries load.": all of them must
           awk '/libraries load/ { found = 1; ok = ($1 == $3) } END { exit !(found && ok) }' /tmp/corpus.txt
@@ -111,4 +111,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs
-          path: /tmp/pseudoscheme-test-*.log
+          path: /tmp/quasischeme-test-*.log

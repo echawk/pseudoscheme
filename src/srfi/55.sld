@@ -1,4 +1,4 @@
-;;; SRFI 55: require-extension.  Written for Pseudoscheme: the SRFI's
+;;; SRFI 55: require-extension.  Written for Quasischeme: the SRFI's
 ;;; implementation is a sketch on LOAD, while here an extension is a
 ;;; library, so (require-extension (srfi 1 13)) is (import (srfi 1)
 ;;; (srfi 13)).  A clause other than (srfi N ...) is taken to be a
@@ -13,7 +13,7 @@
   (export require-extension)
   (import (scheme base)
           (rnrs syntax-case)
-          (rename (only (pseudoscheme) import) (import %import)))
+          (rename (only (quasischeme) import) (import %import)))
   (begin
     (define-syntax require-extension
       (lambda (stx)

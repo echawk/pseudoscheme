@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's datum syntax, for linklets and other S-expressions the
 ;;;; strategies read before the expander's own reader runs (BC's
@@ -11,7 +11,7 @@
 ;;;; tables), #&boxes, #rx"..." #px"..." (regexps), #s(prefab ...) and
 ;;;; #%symbols.  Symbols are case-sensitive.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (rkeyword (:constructor %make-rkeyword (name))) name)
 (defvar *keywords* (make-hash-table :test 'equal :synchronized t))
@@ -73,7 +73,7 @@ were quoted (then it's a symbol whatever it looks like)."
 (defun parse-number (token)
   (and (plusp (length token))
        (or (digit-char-p (char token 0)) (find (char token 0) "+-.#"))
-       (let ((n (ignore-errors (ps::parse-scheme-number token))))
+       (let ((n (ignore-errors (qs::parse-scheme-number token))))
 	 (and n (numberp n) n))))
 
 (defun read-datum (in)
@@ -181,8 +181,8 @@ were quoted (then it's a symbol whatever it looks like)."
 	  ((char= c #\%) (rsym (read-token in "#")))
 	  (t
 	   (let ((token (read-token in)))
-	     (cond ((member token '("t" "true") :test #'string=) ps:true)
-		   ((member token '("f" "false") :test #'string=) ps:false)
+	     (cond ((member token '("t" "true") :test #'string=) qs:true)
+		   ((member token '("f" "false") :test #'string=) qs:false)
 		   ((member token '("hash" "hasheq" "hasheqv") :test #'string=)
 		    (let ((kind (cond ((string= token "hasheq") :eq) ((string= token "hasheqv") :eqv) (t :equal))))
 		      (skip-atmosphere in)

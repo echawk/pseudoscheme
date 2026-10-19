@@ -18,7 +18,7 @@
 ;;;; builtin.scm's integrations and rts.lisp's STRING->NUMBER /
 ;;;; NUMBER->STRING call these.
 
-(in-package "PS")
+(in-package "QS")
 
 (defconstant +inf+ float-features:double-float-positive-infinity)
 (defconstant -inf+ float-features:double-float-negative-infinity)

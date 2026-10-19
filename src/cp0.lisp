@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-PSYNTAX -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-PSYNTAX -*-
 
 ;;;; cp0: a source-level optimizer for core forms (docs/optimizations.md,
 ;;;; "Plan (2026-10-18)", item 1), after the model of Chez Scheme's cp0
@@ -37,11 +37,11 @@
 ;;;; they are.  Letrec bindings are inlined only when every init is a
 ;;;; lambda, so no init can run before a variable it calls is defined.
 ;;;;
-;;;; PSEUDOSCHEME_OPTIMIZE=0 turns the pass off, =1 runs cp0 only, and
+;;;; QUASISCHEME_OPTIMIZE=0 turns the pass off, =1 runs cp0 only, and
 ;;;; anything else (the default) runs cp0 and cptypes.  The level is part
 ;;;; of BUILD-SIGNATURE, so compiled-library caches don't mix levels.
 
-(in-package "PSEUDOSCHEME-PSYNTAX")
+(in-package "QUASISCHEME-PSYNTAX")
 
 ;;; ------------------------------------------------------------------
 ;;; The switch
@@ -50,10 +50,10 @@
   "True to skip OPTIMIZE-CORE (compiling psyntax's own image).")
 
 (defun optimize-level ()
-  "0: no optimization; 1: cp0; 2: cp0 and cptypes (PSEUDOSCHEME_OPTIMIZE)."
+  "0: no optimization; 1: cp0; 2: cp0 and cptypes (QUASISCHEME_OPTIMIZE)."
   (if *optimize-off*
       0
-      (let ((v (uiop:getenv "PSEUDOSCHEME_OPTIMIZE")))
+      (let ((v (uiop:getenv "QUASISCHEME_OPTIMIZE")))
 	(cond ((or (null v) (string= v "")) 2)
 	      ((string= v "0") 0)
 	      ((string= v "1") 1)
@@ -61,7 +61,7 @@
 
 (defparameter *cp0-trace* nil
   "True to print each form before and after optimization (for debugging;
-PSEUDOSCHEME_OPTIMIZE_TRACE=1).")
+QUASISCHEME_OPTIMIZE_TRACE=1).")
 
 (defvar *cp0-stats* (list 0 0 0 0 nil)
   "Forms optimized, forms given up on, calls inlined, calls folded, and
@@ -93,12 +93,12 @@ keyword (a macro or special form of the translator's)."
   (let ((entry (gethash x *cp-variable-cache*)))
     (if (and entry (eq (car entry) *host*))
 	(cdr entry)
-	(let ((v (psl:variable-node-p (psl:tr "PROGRAM-ENV-LOOKUP" *host* x))))
+	(let ((v (qsl:variable-node-p (qsl:tr "PROGRAM-ENV-LOOKUP" *host* x))))
 	  (setf (gethash x *cp-variable-cache*) (cons *host* v))
 	  v))))
 
 (defun cp-quote (datum) (list (sym "quote") datum))
-(defun cp-void () (cp-quote ps:unspecific))
+(defun cp-void () (cp-quote qs:unspecific))
 (defun quote-p (e) (and (consp e) (eq (cp-keyword (car e)) :quote)))
 (defun cp-lambda-p (e) (and (consp e) (eq (cp-keyword (car e)) :lambda)))
 
@@ -108,7 +108,7 @@ keyword (a macro or special form of the translator's)."
 	((and (atom e) (not (symbolp e))) (values t e))
 	(t (values nil nil))))
 
-(defun scheme-true-p (datum) (not (eq datum ps:false)))
+(defun scheme-true-p (datum) (not (eq datum qs:false)))
 
 (defun formals-list (formals)
   "The variables of lambda FORMALS, a proper or dotted list or a symbol."
@@ -212,7 +212,7 @@ bind that names one."
 
 (defun primitive-call-name (e)
   "The name (a string) of the primitive E calls, or NIL."
-  (and (consp e) (cp-primitive-p (car e)) (ps:scheme-symbol-name (car e))))
+  (and (consp e) (cp-primitive-p (car e)) (qs:scheme-symbol-name (car e))))
 
 (defparameter *foldable-primitives*
   '("+" "-" "*" "/" "=" "<" ">" "<=" ">=" "zero?" "positive?" "negative?" "odd?" "even?"
@@ -260,11 +260,11 @@ arguments' effects kept).")
     (ratio (and (<= (integer-length (numerator x)) 128) (<= (integer-length (denominator x)) 128)))
     (double-float (and (not (sb-ext:float-infinity-p x)) (not (sb-ext:float-nan-p x))))
     (character t)
-    (t (or (eq x t) (eq x ps:false) (null x)))))
+    (t (or (eq x t) (eq x qs:false) (null x)))))
 
 (defun eq-comparable-datum-p (x)
-  (or (typep x 'fixnum) (characterp x) (eq x t) (eq x ps:false) (null x)
-      (and (symbolp x) (ps:scheme-symbol-p x))))
+  (or (typep x 'fixnum) (characterp x) (eq x t) (eq x qs:false) (null x)
+      (and (symbolp x) (qs:scheme-symbol-p x))))
 
 (defun try-fold (name args)
   "The constant form of NAME's call on the constant forms ARGS, or NIL."
@@ -272,8 +272,8 @@ arguments' effects kept).")
     (when (and (primitive-in-p name :fold)
 	       (if (primitive-in-p name :type)
 		   t
-		   (every (lambda (v) (or (numberp v) (characterp v) (eq v t) (eq v ps:false)
-					  (and (symbolp v) (ps:scheme-symbol-p v))))
+		   (every (lambda (v) (or (numberp v) (characterp v) (eq v t) (eq v qs:false)
+					  (and (symbolp v) (qs:scheme-symbol-p v))))
 			  values))
 	       (or (not (member name '("eq?" "eqv?") :test #'string=))
 		   (every #'eq-comparable-datum-p values))
@@ -327,7 +327,7 @@ terminate)."
 
 (defun fresh-variable (v)
   (let ((new (make-lexical (format nil "~A_~D" (if (symbol-package v)
-						   (ps:scheme-symbol-name v)
+						   (qs:scheme-symbol-name v)
 						   (symbol-name v))
 				   (incf *cp-counter*)))))
     (setf (gethash new *vi*) (gethash v *vi*))
@@ -569,7 +569,7 @@ with NARGS arguments, if it takes exactly NARGS fixed arguments."
 
 (defun cp-primitive-call (op args ctx)
   "The call (OP . ARGS), its parts optimized."
-  (let ((name (and (cp-primitive-p op) (ps:scheme-symbol-name op))))
+  (let ((name (and (cp-primitive-p op) (qs:scheme-symbol-name op))))
     (or (and name (every #'constant-p args) (try-fold name args))
 	(and name (string= name "values") (= (length args) 1) (not (eq ctx :effect)) (car args))
 	(and name (string= name "call-with-values") (= (length args) 2)
@@ -680,7 +680,7 @@ pass doesn't know."
 			    (setq out (cptypes out)))
 			  (incf (first *cp0-stats*))
 			  (list :ok out))))))
-	    (when (or *cp0-trace* (uiop:getenv "PSEUDOSCHEME_OPTIMIZE_TRACE"))
+	    (when (or *cp0-trace* (uiop:getenv "QUASISCHEME_OPTIMIZE_TRACE"))
 	      (let ((*print-right-margin* 110) (*package* (find-package "SCHEME")))
 		(format *trace-output* "~&;; cp0 in:~%~S~%;; cp0 out:~%~S~%" form result)))
 	    (if (and (consp result) (eq (car result) :ok))

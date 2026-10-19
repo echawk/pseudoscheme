@@ -1,5 +1,5 @@
 ;;; SRFI 181: custom ports (including transcoded ports).  Written for
-;;; Pseudoscheme on its R6RS ports, rather than Shiro Kawai's sample
+;;; Quasischeme on its R6RS ports, rather than Shiro Kawai's sample
 ;;; implementation, which (as its README says) can't extend a host's
 ;;; ports and instead replaces the R7RS I/O procedures.  Here custom and
 ;;; transcoded ports are ordinary ports: read-char, write-string, read,

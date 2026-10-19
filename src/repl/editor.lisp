@@ -1,4 +1,4 @@
-;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-REPL -*-
+;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-REPL -*-
 
 ;;;; The REPL's line editor, in Lisp over the raw terminal
 ;;;; (terminal.lisp): multi-line input that Enter submits once its
@@ -7,7 +7,7 @@
 ;;;; search, completion, Emacs's editing keys, undo, and bracketed
 ;;;; paste.  READ-INPUT is the entry point.
 
-(in-package "PSEUDOSCHEME-REPL")
+(in-package "QUASISCHEME-REPL")
 
 ;;; ------------------------------------------------------------------
 ;;; Options, shared with the REPL (,option)
@@ -28,7 +28,7 @@
    (file :initarg :file :initform nil :reader history-file)))
 
 (defun history-directory ()
-  (merge-pathnames "pseudoscheme/"
+  (merge-pathnames "quasischeme/"
 		   (uiop:ensure-directory-pathname
 		    (or (uiop:getenv-absolute-directory "XDG_STATE_HOME")
 			(merge-pathnames ".local/state/" (user-homedir-pathname))))))
@@ -50,7 +50,7 @@
 
 (defun load-history (name)
   "The history saved for language NAME (a file in
-$XDG_STATE_HOME/pseudoscheme/), or an empty one."
+$XDG_STATE_HOME/quasischeme/), or an empty one."
   (let* ((file (merge-pathnames (format nil "history-~(~A~)" name) (history-directory)))
 	 (h (make-instance 'history :file file)))
     (ignore-errors

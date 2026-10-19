@@ -7,7 +7,7 @@
 
 ;; Configuration
 (test-equal 'unix (software-type))
-(test-equal 'pseudoscheme (scheme-implementation-type))
+(test-equal 'quasischeme (scheme-implementation-type))
 (test-equal "3.0" (scheme-implementation-version))
 (test-assert (let ((h (scheme-implementation-home-page))) (or (not h) (string? h))))
 (test-equal ".scm" (scheme-file-suffix))

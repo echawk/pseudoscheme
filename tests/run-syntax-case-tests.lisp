@@ -28,10 +28,10 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (load-system :pseudoscheme/api)))
+    (load-system :quasischeme/api)))
 
 (defun rd (string)
-  (with-input-from-string (s string) (funcall ps:*scheme-read* s)))
+  (with-input-from-string (s string) (funcall qs:*scheme-read* s)))
 
 (defvar *run* 0)
 (defvar *passed* 0)

@@ -1,6 +1,6 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER; -*-
 
-;;;; Rebuilds psyntax's image on Pseudoscheme, from a seed image, until
+;;;; Rebuilds psyntax's image on Quasischeme, from a seed image, until
 ;;;; it reproduces itself.  Run by boot/psyntax.sh, from the repository
 ;;;; root:
 ;;;;
@@ -22,8 +22,8 @@
 (pushnew (truename "./") asdf:*central-registry* :test #'equal)
 
 (if (find-package "QL")
-    (uiop:symbol-call "QL" "QUICKLOAD" :pseudoscheme/r6rs :silent t)
-    (asdf:load-system :pseudoscheme/r6rs))
+    (uiop:symbol-call "QL" "QUICKLOAD" :quasischeme/r6rs :silent t)
+    (asdf:load-system :quasischeme/r6rs))
 
 (defun stage-directory (n)
   (let ((dir (merge-pathnames (format nil "boot/build/psyntax/stage~D/" n)
@@ -45,10 +45,10 @@
   (loop for n from 1 to 3
 	for previous = nil then image
 	for dir = (stage-directory n)
-	for image = (merge-pathnames "psyntax-pseudoscheme.pp" dir)
+	for image = (merge-pathnames "psyntax-quasischeme.pp" dir)
 	do (format t "~&Stage ~D: building psyntax with ~A~%" n
 			   (enough-namestring seed (truename "./")))
-	   (psx:rebuild :seed seed :directory dir)
+	   (qsx:rebuild :seed seed :directory dir)
 	   (when (and previous (same-file-p previous image))
 	     (format t "~&Stage ~D reproduced stage ~D: ~A~%" n (1- n)
 		     (enough-namestring image (truename "./")))

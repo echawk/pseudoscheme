@@ -8,7 +8,7 @@
 ;;; this library and 240/define-record-type.sld.
 ;;;
 ;;; The SRFI suggests providing this define-record-type from
-;;; (scheme base); Pseudoscheme doesn't, so it is a different binding
+;;; (scheme base); Quasischeme doesn't, so it is a different binding
 ;;; from (scheme base)'s: import (except (scheme base)
 ;;; define-record-type) with this library.
 (define-library (srfi 240)

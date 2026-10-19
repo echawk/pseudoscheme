@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs enums (6)), library report chapter 14, and the Unicode
 ;;;; procedures of (rnrs unicode (6)) missing from the R7RS layer
@@ -7,7 +7,7 @@
 ;;;; An enum set is a universe -- a vector of distinct symbols, shared by
 ;;;; every set made from it -- and a bitmask of members.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defstruct (universe (:constructor make-universe (symbols)))
   symbols)			; simple-vector
@@ -17,7 +17,7 @@
 
 (defmethod print-object ((s enum-set) stream)
   (print-unreadable-object (s stream)
-    (format stream "Enum-set~{ ~A~}" (mapcar #'ps:scheme-symbol-name (enum-members s)))))
+    (format stream "Enum-set~{ ~A~}" (mapcar #'qs:scheme-symbol-name (enum-members s)))))
 
 (defun enum-members (set)
   (let ((symbols (universe-symbols (enum-set-universe set))))
@@ -49,7 +49,7 @@
 (defprim "enum-set-indexer" (set)
   (check-enum "enum-set-indexer" set)
   (let ((u (enum-set-universe set)))
-    (lambda (symbol) (or (enum-index u symbol) ps:false))))
+    (lambda (symbol) (or (enum-index u symbol) qs:false))))
 
 (defprim "enum-set-constructor" (set)
   (check-enum "enum-set-constructor" set)
@@ -121,7 +121,7 @@
   "C's general category as a string: \"Lu\", \"Ll\", ..."
   (values (cl-unicode:general-category c)))
 
-(setq ps:*char-category-function* #'unicode-category-name)
+(setq qs:*char-category-function* #'unicode-category-name)
 
 (defun cased-p (c)
   (member (unicode-category-name c) '("Lu" "Ll" "Lt") :test #'string=))
@@ -191,7 +191,7 @@ apostrophe or the like between letters (Unicode word breaks, roughly)."
   (bool (string= (unicode-category-name c) "Lt")))
 
 (defprim "char-general-category" (c)
-  (ps:intern-scheme-symbol (unicode-category-name c)))
+  (qs:intern-scheme-symbol (unicode-category-name c)))
 
 (defprim "string-titlecase" (s) (full-titlecase s))
 

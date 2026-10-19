@@ -1,4 +1,4 @@
-;;; SRFI 170: POSIX API.  Written for Pseudoscheme, on osicat
+;;; SRFI 170: POSIX API.  Written for Quasischeme, on osicat
 ;;; (OSICAT-POSIX, its thin CFFI layer over libc), which is loaded from
 ;;; Quicklisp or ASDF the first time this library is imported.  Building
 ;;; osicat needs a C compiler: CFFI's groveller compiles a small program
@@ -75,7 +75,7 @@
           (only (rnrs io ports (6))
                 make-custom-binary-input-port
                 make-custom-binary-input/output-port)
-          (pseudoscheme lisp)
+          (quasischeme lisp)
           ;; Loads the osicat system; its other packages come with it.
           (prefix (only (cl osicat) get-monotonic-time) osicat:)
           (prefix (cl osicat-posix) nix:)

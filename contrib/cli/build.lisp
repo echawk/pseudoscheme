@@ -1,4 +1,4 @@
-;;;; Build bin/pseudoscheme: (load "build.lisp") from any Common Lisp
+;;;; Build bin/quasischeme: (load "build.lisp") from any Common Lisp
 ;;;; with ASDF.  contrib/cli/Makefile does this.
 
 (require :asdf)
@@ -14,7 +14,7 @@
 (let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
   (when (probe-file setup)
     (load setup)
-    (uiop:symbol-call "QL" "QUICKLOAD" :pseudoscheme-cli :silent t)))
+    (uiop:symbol-call "QL" "QUICKLOAD" :quasischeme-cli :silent t)))
 
 (handler-bind ((warning #'muffle-warning))
-  (asdf:make :pseudoscheme-cli))
+  (asdf:make :quasischeme-cli))

@@ -2,7 +2,7 @@
 ;;; (reference/srfi-206/srfi-206-tests.sch).  The tests that need two
 ;;; separately defined auxiliary keywords to share a binding are marked
 ;;; as expected failures: psyntax can't do that (see 206.sld).  The
-;;; sample's syntax-parameterize test needs SRFI 139, which Pseudoscheme
+;;; sample's syntax-parameterize test needs SRFI 139, which Quasischeme
 ;;; lacks, and is left out.
 (import (scheme base) (scheme process-context) (srfi 64)
         (srfi 206)

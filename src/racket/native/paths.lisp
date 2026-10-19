@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Paths, the filesystem and environment variables, natively: in Racket
 ;;;; CS these are the io layer's, over rktio; strategy B has no io layer
@@ -9,7 +9,7 @@
 ;;;; these are UTF-8 strings, which is the same for every path a Unix
 ;;;; system gives us in practice.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (rpath (:constructor make-rpath (string))) (string "" :type string))
 
@@ -74,7 +74,7 @@
 	 (slash (position #\/ trimmed :from-end t)))
     (flet ((name (n)
 	     (cond ((string= n "..") (rsym "up")) ((string= n ".") (rsym "same")) (t (make-rpath n)))))
-      (cond ((string= trimmed "/") (values ps:false (make-rpath "/") ps:true))
+      (cond ((string= trimmed "/") (values qs:false (make-rpath "/") qs:true))
 	    ((null slash) (values (rsym "relative") (name trimmed) (bool dir)))
 	    (t (values (make-rpath (subseq trimmed 0 (1+ slash)))
 		       (name (subseq trimmed (1+ slash)))
@@ -135,8 +135,8 @@
 					     (if (directory-string-p s) s (concatenate 'string s "/")))))))
 (define-primitive "#%kernel" "current-directory" *current-directory*)
 (define-primitive "#%kernel" "current-directory-for-user" *current-directory*)
-(define-primitive "#%kernel" "current-load-relative-directory" (make-parameter* ps:false))
-(define-primitive "#%kernel" "current-write-relative-directory" (make-parameter* ps:false))
+(define-primitive "#%kernel" "current-load-relative-directory" (make-parameter* qs:false))
+(define-primitive "#%kernel" "current-write-relative-directory" (make-parameter* qs:false))
 
 (defnative "path->complete-path" (p &optional (base nil base-p)) (:leaf t)
   (let ((s (path-string "path->complete-path" p)))
@@ -222,7 +222,7 @@
 	 (v (if (environment-variables-table env)
 		(gethash n (environment-variables-table env))
 		(sb-posix:getenv n))))
-    (if v (utf8-bytes v) ps:false)))
+    (if v (utf8-bytes v) qs:false)))
 (defnative "environment-variables-set!" (env name value &optional fail) ()
   (declare (ignore fail))
   (let ((n (utf8 name)))

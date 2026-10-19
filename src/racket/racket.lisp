@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; --racket: what the three strategies share (docs/racket.md).
 ;;;;
@@ -8,17 +8,17 @@
 ;;;;                replaced by native/'s
 ;;;;
 ;;;; Each strategy is a STRATEGY, selected by --racket=NAME or
-;;;; PSEUDOSCHEME_RACKET_STRATEGY (decision 8).  This file has the
+;;;; QUASISCHEME_RACKET_STRATEGY (decision 8).  This file has the
 ;;;; registry, where Racket's sources and collections are, and the entry
 ;;;; points the command line calls.  Status: skeleton; nothing runs yet.
 
-(defpackage "PSEUDOSCHEME-RACKET"
-  (:nicknames "PSR")
+(defpackage "QUASISCHEME-RACKET"
+  (:nicknames "QSR")
   (:use "COMMON-LISP")
   (:export "*STRATEGY*" "SELECT-STRATEGY" "STRATEGY-NAMES"
 	   "EVAL-STRING" "LOAD-FILE" "NOT-YET"))
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Strategies
@@ -49,9 +49,9 @@
 (defun not-yet (what) (error 'not-yet :what what))
 
 (defun select-strategy (&optional name)
-  "The strategy NAME names (else PSEUDOSCHEME_RACKET_STRATEGY's, else
+  "The strategy NAME names (else QUASISCHEME_RACKET_STRATEGY's, else
 linklet, the one that runs), made current."
-  (let* ((name (or name (uiop:getenv "PSEUDOSCHEME_RACKET_STRATEGY") "linklet"))
+  (let* ((name (or name (uiop:getenv "QUASISCHEME_RACKET_STRATEGY") "linklet"))
 	 (s (cdr (assoc name *strategies* :test #'string=))))
     (unless s
       (error "--racket=~A: the strategies are ~{~A~^, ~}" name (strategy-names)))
@@ -86,12 +86,12 @@ of which INTERN-SCHEME-SYMBOL would case-convert (allocating) and hash.")
 (defun rsym (name)
   "The Racket symbol named NAME."
   (or (gethash name *rsym-cache*)
-      (setf (gethash (copy-seq name) *rsym-cache*) (ps:intern-scheme-symbol name))))
-(defun rname (symbol) "SYMBOL's Racket name." (ps:scheme-symbol-name symbol))
-(defun bool (x) (if x ps:true ps:false))
-(defun truthy (x) (not (eq x ps:false)))
+      (setf (gethash (copy-seq name) *rsym-cache*) (qs:intern-scheme-symbol name))))
+(defun rname (symbol) "SYMBOL's Racket name." (qs:scheme-symbol-name symbol))
+(defun bool (x) (if x qs:true qs:false))
+(defun truthy (x) (not (eq x qs:false)))
 
-(defvar *void* ps:unspecific "Racket's #<void>.")
+(defvar *void* qs:unspecific "Racket's #<void>.")
 
 (define-condition racket-error (error)
   ((who :initarg :who :reader racket-error-who)
@@ -116,9 +116,9 @@ exceptions are written; a Lisp condition until then)."
 
 (defun racket-source-directory ()
   "Racket's source tree: build/external/racket/ as utils/racket/setup.sh
-fetches it, or PSEUDOSCHEME_RACKET_SOURCE."
-  (let ((dir (or (uiop:getenv "PSEUDOSCHEME_RACKET_SOURCE")
-		 (namestring (asdf:system-relative-pathname :pseudoscheme "build/external/racket/")))))
+fetches it, or QUASISCHEME_RACKET_SOURCE."
+  (let ((dir (or (uiop:getenv "QUASISCHEME_RACKET_SOURCE")
+		 (namestring (asdf:system-relative-pathname :quasischeme "build/external/racket/")))))
     (or (probe-file (uiop:ensure-directory-pathname dir))
 	(error "--racket: Racket's source isn't at ~A: run sh utils/racket/setup.sh" dir))))
 
@@ -136,6 +136,6 @@ tree's other packages (pkgs/) are linked by a links file
 	(remove "" (uiop:split-string env :separator ":") :test #'string=)
 	(list (namestring (racket-source "racket/collects/"))))))
 
-;;; Compiled code goes in compiled/pseudoscheme/ beside Racket's own
+;;; Compiled code goes in compiled/quasischeme/ beside Racket's own
 ;;; compiled/ directories (cache.lisp), never in them.
-(defparameter *compiled-subdirectory* "compiled/pseudoscheme")
+(defparameter *compiled-subdirectory* "compiled/quasischeme")

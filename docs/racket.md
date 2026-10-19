@@ -1,7 +1,7 @@
-# Racket on Pseudoscheme: a `--racket` mode
+# Racket on Quasischeme: a `--racket` mode
 
 Status: **running, on strategy B** (October 2026).
-`pseudoscheme --racket prog.rkt` runs `#lang racket/base` and
+`quasischeme --racket prog.rkt` runs `#lang racket/base` and
 `#lang racket` programs on Racket's own expander. Strategy A, Racket
 CS's layers on the Chez mode (the plan this document describes), has
 its pieces in src/racket/cs/ but doesn't get past booting rumble yet; strategy C, its hybrid,
@@ -38,7 +38,7 @@ linklets to Lisp, with Racket's primitives written natively in Lisp.
   `#%foreign` on CFFI, `#%network`, extflonum stubs, places, futures
   and will executors as stand-ins. Regexps are Racket's own regexp
   layer; the old cl-ppcre natives remain as the fallback
-  (`PSEUDOSCHEME_RACKET_REGEXP=native`).
+  (`QUASISCHEME_RACKET_REGEXP=native`).
 - **Modules** load from the collections in Racket's source tree, and
   from collection links; `.zo` files are written and read, and each
   compiled linklet is cached as a fasl (src/racket/cache.lisp). With a
@@ -50,8 +50,8 @@ linklets to Lisp, with Racket's primitives written natively in Lisp.
   that wrote it compiled.
 - **Saved image.** The first run saves an executable of the program
   with the expander instantiated, in the Racket cache (190 MB, kept
-  only for the current build of `bin/pseudoscheme`), and each run
-  after execs it; `PSEUDOSCHEME_RACKET_CORE=0` turns it off.
+  only for the current build of `bin/quasischeme`), and each run
+  after execs it; `QUASISCHEME_RACKET_CORE=0` turns it off.
 - **Tests** (tests/racket/run.sh linklet): 6 hand-written linklet
   programs, 14 expressions through the expander, and 18 `#lang
   racket/base` programs in tests/racket/programs/, each checked
@@ -72,7 +72,7 @@ procedure arities), real places and futures, the thread and io layers themselves
 crashes Racket's suite still finds. `--racket` is strategy B,
 `--racket=linklet`; `--racket=cs` (A) reports "not implemented yet".
 
-The goal: `pseudoscheme --racket prog.rkt` runs Racket programs with
+The goal: `quasischeme --racket prog.rkt` runs Racket programs with
 `racket/base` and the packages on the package server, by reusing as much
 of Racket's own implementation as possible. Racket code then becomes one
 more thing a Common Lisp program can call, as Scheme is today
@@ -80,7 +80,7 @@ more thing a Common Lisp program can call, as Scheme is today
 
 ## The REPL
 
-`bin/pseudoscheme --racket` with no file starts Racket's REPL as `racket`
+`bin/quasischeme --racket` with no file starts Racket's REPL as `racket`
 with no arguments does (strategy B only). src/racket/linklet/repl.lisp
 follows Racket CS's main.sps: print the banner (`Welcome to Racket v9.3
 [cs].`), `namespace-require` the init library `racket/init` (`racket`,
@@ -335,7 +335,7 @@ and compile `racket/base`, and bench/'s programs as Racket modules.
 8. **The strategies stay separate and selectable** ("Three
    strategies"), so that they can be compared on the same programs:
    - `--racket=cs` (A), `--racket=linklet` (B) and `--racket=hybrid`
-     (C), or `PSEUDOSCHEME_RACKET_STRATEGY`;
+     (C), or `QUASISCHEME_RACKET_STRATEGY`;
    - A and C share rumble and schemify; C only adds overrides;
    - B shares everything above rumble.
 
@@ -352,7 +352,7 @@ implemented yet.
 utils/racket/
   setup.sh              shallow clone of racket/racket at v9.3 (commit pinned) -> build/external/racket/
   teardown.sh           removes it
-src/racket/             (ASDF system pseudoscheme/racket)
+src/racket/             (ASDF system quasischeme/racket)
   racket.lisp           shared: the strategy registry, Racket's sources and collections, entry points
   instances.lisp        shared: the primitive instances (#%kernel, ...)
   cache.lisp            shared: compiled linklets, the .zo format, the fasl cache
@@ -383,7 +383,7 @@ tests/racket/
 
 In the command line (contrib/cli/cli.lisp):
 - `--racket[=cs|linklet|hybrid]` selects the mode and the strategy;
-- `PSEUDOSCHEME_RACKET_STRATEGY` selects the strategy otherwise;
+- `QUASISCHEME_RACKET_STRATEGY` selects the strategy otherwise;
 - `--precompile COLLECTION` will compile a collection into the cache,
   as `--precompile-srfi` does for the SRFIs.
 
@@ -405,14 +405,14 @@ In the command line (contrib/cli/cli.lisp):
 
 ## Run time
 
-`pseudoscheme --racket prog.rkt`:
+`quasischeme --racket prog.rkt`:
 1. Initialize rumble. Instantiate the primitive instances (`#%kernel`,
    `#%unsafe`, `#%flfxnum`, `#%paramz`, `#%foreign`, …, built by rumble
    and the layers above it as in Racket CS), then the io, thread and
    expander instances.
 2. Set the collection paths from `PLTCOLLECTS` or the installed `racket`
    executable (decision 3). Set `use-compiled-file-paths` to our own
-   `compiled/pseudoscheme/` directories, so that we never read or
+   `compiled/quasischeme/` directories, so that we never read or
    overwrite Racket's.
 3. Run `(dynamic-require 'racket/base)`, then the program. A module with
    no compiled form of ours is compiled from its `.rkt` source and
@@ -421,7 +421,7 @@ In the command line (contrib/cli/cli.lisp):
 
 The first run of a collection is slow. `racket/base` is a few hundred
 modules, and SBCL compiles much more slowly than Chez. So:
-- `pseudoscheme --racket --precompile racket/base` compiles them ahead
+- `quasischeme --racket --precompile racket/base` compiles them ahead
   of time;
 - stage B (decision 4) is the main lever on this cost.
 
@@ -434,12 +434,12 @@ objects. SBCL code doesn't belong in Racket's byte stream, so:
   compilation manager, its dependency hashes and `raco make` work
   unchanged.
 - **The SBCL fasl for a linklet is in the library cache**
-  (src/library-cache.lisp, `~/.cache/pseudoscheme/`). Its key is a hash
+  (src/library-cache.lisp, `~/.cache/quasischeme/`). Its key is a hash
   of the S-expression, the build signature and the continuations mode,
   as the cache's keys are now.
 - **Loading a linklet** finds its fasl by hash, or else translates and
   compiles it and writes the fasl.
-- `(system-type 'vm)` answers `pseudoscheme`, so code that checks for
+- `(system-type 'vm)` answers `quasischeme`, so code that checks for
   `chez-scheme` doesn't take paths meant for Racket CS's machine code.
 
 ## The Chez fork's additions
@@ -629,7 +629,7 @@ loads, cached) and 7 (Racket's suite runs, file by file); A stops at
   that captures continuations.
 - **Size of the image.** The expander and the layers under it are large
   compiled code. `--racket` may want an image of its own, built by
-  `make racket`, rather than growing bin/pseudoscheme for every mode.
+  `make racket`, rather than growing bin/quasischeme for every mode.
 
 ## Alternatives considered
 

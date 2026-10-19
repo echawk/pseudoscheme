@@ -8,7 +8,7 @@
   (import (scheme base)
           (scheme write)
           (scheme process-context)
-          (only (pseudoscheme lisp) lisp-value lisp-symbol)
+          (only (quasischeme lisp) lisp-value lisp-symbol)
           (prefix (only (cl common-lisp) namestring pathnamep) cl:))
   (begin
     ;; SRFI 96: "The software-type of Linux is unix.  The software-type
@@ -36,12 +36,12 @@
 
     ;; The pathname with-load-pathname binds; failing that, the directory
     ;; of the program or library file the R7RS front end is running
-    ;; (Lisp's pseudoscheme-r7rs::*include-directory*); failing that, #f.
+    ;; (Lisp's quasischeme-r7rs::*include-directory*); failing that, #f.
     (define load-pathname (make-parameter #f))
 
     (define (current-load-pathname)
       (or (load-pathname)
-          (let ((dir (lisp-value (lisp-symbol "*include-directory*" "pseudoscheme-r7rs"))))
+          (let ((dir (lisp-value (lisp-symbol "*include-directory*" "quasischeme-r7rs"))))
             (and (cl:pathnamep dir) (cl:namestring dir)))))
 
     (define (with-load-pathname path thunk)

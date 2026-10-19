@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's exceptions, natively: the exn struct types of #%kernel,
 ;;;; the uncaught-exception handler, and Lisp errors as Racket
@@ -15,7 +15,7 @@
 ;;;; division by zero) with Racket's raise, so that with-handlers sees
 ;;;; it.  Racket's messages are "who: message".
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defparameter *exn-types*
   '(("exn" nil ("message" "continuation-marks"))
@@ -52,8 +52,8 @@
 (defun define-exn-types ()
   (loop for (name parent fields) in *exn-types*
 	do (multiple-value-bind (type constructor predicate accessor)
-	       (make-struct-type* (rsym name) (if parent (gethash parent *exn-struct-types*) ps:false)
-				  (length fields) 0 ps:false '() ps:false ps:false
+	       (make-struct-type* (rsym name) (if parent (gethash parent *exn-struct-types*) qs:false)
+				  (length fields) 0 qs:false '() qs:false qs:false
 				  (loop for i below (length fields) collect i))
 	     (setf (gethash name *exn-struct-types*) type
 		   (gethash name *exn-constructors*) constructor)
@@ -71,7 +71,7 @@
   "An exn of TYPE (its name, as \"exn:fail\"), with the current marks."
   (apply (gethash type *exn-constructors*)
 	 (coerce message 'simple-string)
-	 (ps-r6rs::make-mark-set (current-marks))
+	 (qs-r6rs::make-mark-set (current-marks))
 	 more-fields))
 
 (defun exn-message (exn)
@@ -107,7 +107,7 @@ from, if it says (there is no context to show: no traces of the calls)."
 
 (defun default-error-escape-handler ()
   "Racket's: abort to the default prompt."
-  (psx::abort-to-prompt *default-prompt-tag* (lambda () *void*)))
+  (qsx::abort-to-prompt *default-prompt-tag* (lambda () *void*)))
 
 (defvar *error-display-handler* (make-parameter* #'default-error-display-handler))
 (defvar *error-escape-handler* (make-parameter* #'default-error-escape-handler))
@@ -256,14 +256,14 @@ checks of the pattern string and of the number of arguments first."
 			  (format nil "contract violation~%  expected: ~A~%  given: ~A"
 				  (racket-type-name (type-error-expected-type e))
 				  (with-output-to-string (s)
-				    (funcall (psx:host-ref "write") (type-error-datum e) s)))))
+				    (funcall (qsx:host-ref "write") (type-error-datum e) s)))))
     (t (make-exn "exn:fail" (princ-to-string e)))))
 
 (defun note-lisp-error (e)
-  "With PSEUDOSCHEME_RACKET_BACKTRACE set, Lisp error E and where it was
+  "With QUASISCHEME_RACKET_BACKTRACE set, Lisp error E and where it was
 signalled, on the error output: for finding what a Racket program ran
 into that isn't written yet."
-  (when (uiop:getenv "PSEUDOSCHEME_RACKET_BACKTRACE")
+  (when (uiop:getenv "QUASISCHEME_RACKET_BACKTRACE")
     (format *error-output* "~&;; Lisp error: ~A~%" e)
     (let ((*print-length* 5) (*print-level* 3))
       (sb-debug:print-backtrace :count 25 :stream *error-output*))))

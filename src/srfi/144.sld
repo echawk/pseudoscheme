@@ -1,6 +1,6 @@
 ;;; SRFI 144: flonums.  William D Clinger's portable sample
 ;;; implementation (reference/srfi-144/, MIT licence, unmodified), on
-;;; R6RS's (rnrs arithmetic flonums), which Pseudoscheme implements
+;;; R6RS's (rnrs arithmetic flonums), which Quasischeme implements
 ;;; natively.  A flonum is a Common Lisp double-float.
 ;;;
 ;;; The sample implementation finds a float's exponent and neighbours

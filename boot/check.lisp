@@ -1,11 +1,11 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER; -*-
 
-;;;; Checks a bootstrap against Pseudoscheme itself.
+;;;; Checks a bootstrap against Quasischeme itself.
 ;;;;
 ;;;; Usage, from the repository root:
 ;;;;   sbcl --script boot/check.lisp [DIR ...]
 ;;;;
-;;;; Has the translator, as currently loaded from src/*.pso, translate
+;;;; Has the translator, as currently loaded from src/*.qso, translate
 ;;;; everything boot/bootstrap.scm translates, into boot/build/sbcl/.
 ;;;; Then reads each file there, and the file of the same name in each
 ;;;; DIR (default boot/build/out/), with the CL reader, and compares
@@ -21,11 +21,11 @@
 (pushnew (truename "./") asdf:*central-registry* :test #'equal)
 
 (if (find-package "QL")
-    (uiop:symbol-call "QL" "QUICKLOAD" :pseudoscheme :silent t)
-    (asdf:load-system :pseudoscheme))
+    (uiop:symbol-call "QL" "QUICKLOAD" :quasischeme :silent t)
+    (asdf:load-system :quasischeme))
 
-(defpackage :pseudoscheme-boot-check (:use :common-lisp))
-(in-package :pseudoscheme-boot-check)
+(defpackage :quasischeme-boot-check (:use :common-lisp))
+(in-package :quasischeme-boot-check)
 
 (defun st (name) (intern name "SCHEME-TRANSLATOR"))
 (defun st-call (name &rest args) (apply (symbol-function (st name)) args))
@@ -41,15 +41,15 @@
 
 (defun make-reference ()
   (ensure-directories-exist *reference-dir*)
-  (let ((ps:*scheme-read* #'ps:scheme-read-using-commonlisp-reader)
+  (let ((qs:*scheme-read* #'qs:scheme-read-using-commonlisp-reader)
 	(*standard-output* (make-broadcast-stream)))
     (st-call "WRITE-CLOSED-DEFINITIONS" (st-value "REVISED^4-SCHEME-STRUCTURE")
-	     (ref "closed" "pso"))
+	     (ref "closed" "qso"))
     (dolist (f '("read" "write"))
-      (st-call "REALLY-TRANSLATE-FILE" (src f "scm") (ref f "pso")
+      (st-call "REALLY-TRANSLATE-FILE" (src f "scm") (ref f "qso")
 	       (st-value "REVISED^4-SCHEME-ENV")))
     (dolist (f (translator-files))
-      (st-call "REALLY-TRANSLATE-FILE" (src f "scm") (ref f "pso")
+      (st-call "REALLY-TRANSLATE-FILE" (src f "scm") (ref f "qso")
 	       (st-value "SCHEME-TRANSLATOR-ENV")))
     (st-call "WRITE-DEFPACKAGES"
 	     (list (st-value "REVISED^4-SCHEME-STRUCTURE")
@@ -57,7 +57,7 @@
 	     (ref "spack" "lisp"))))
 
 (defun read-forms (file)
-  ;; As LOAD would read it: (ps:in-package ...) changes *PACKAGE*.
+  ;; As LOAD would read it: (qs:in-package ...) changes *PACKAGE*.
   (with-open-file (s file)
     (let ((*package* (find-package "CL-USER"))
 	  (*readtable* (copy-readtable nil))
@@ -65,7 +65,7 @@
       (loop for form = (read s nil eof)
 	    until (eq form eof)
 	    do (when (and (consp form)
-			  (member (car form) '(ps::in-package in-package)))
+			  (member (car form) '(qs::in-package in-package)))
 		 (setq *package* (find-package (second form))))
 	    collect form))))
 
@@ -102,7 +102,7 @@
       (let ((dir (merge-pathnames (if (char= (char dir (1- (length dir))) #\/) dir
 				      (concatenate 'string dir "/"))
 				  (truename "./"))))
-	(format t "~&Checking ~A against Pseudoscheme's own translation~%" dir)
+	(format t "~&Checking ~A against Quasischeme's own translation~%" dir)
 	(let ((bad (remove-if (lambda (name) (compare-file name dir)) names)))
 	  (if bad
 	      (setq ok nil)

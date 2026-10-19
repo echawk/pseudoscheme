@@ -7,8 +7,8 @@
 (test-assert "every property is a list headed by a symbol"
   (let loop ((ps alist))
     (or (null? ps) (and (pair? (car ps)) (symbol? (caar ps)) (list? (car ps)) (loop (cdr ps))))))
-(test-equal '(command "pseudoscheme") (assq 'command alist))
-(test-equal '(scheme.id pseudoscheme) (assq 'scheme.id alist))
+(test-equal '(command "quasischeme") (assq 'command alist))
+(test-equal '(scheme.id quasischeme) (assq 'scheme.id alist))
 (test-assert (memq 'r7rs (cdr (assq 'languages alist))))
 (test-assert (string? (cadr (assq 'version alist))))
 (test-assert "scheme.srfi lists this SRFI" (memv 176 (cdr (assq 'scheme.srfi alist))))

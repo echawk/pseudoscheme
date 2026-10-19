@@ -2,7 +2,7 @@
 
 ;;;; Runs Racket's R6RS test suite (tests/r6rs/, from
 ;;;; github.com/racket/r6rs, MIT/Apache-2.0 -- see LICENSE-racket.txt)
-;;;; under psyntax + Pseudoscheme.  Each tests/r6rs/run/**/*.sps program
+;;;; under psyntax + Quasischeme.  Each tests/r6rs/run/**/*.sps program
 ;;;; runs in a freshly booted host, and the "N tests passed" / "F of N
 ;;;; tests failed" line it prints is tallied.
 ;;;;
@@ -31,11 +31,11 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (load-system :pseudoscheme/r6rs)
+    (load-system :quasischeme/r6rs)
     (load-system :bordeaux-threads)))
 
 ;; IEEE inexact arithmetic: (/ 1. 0.) => +inf.0, as R6RS/R7RS expect.
-(ps:disable-float-traps)
+(qs:disable-float-traps)
 
 (defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
 ;; --continuations=escape: compile the programs and the libraries they load
@@ -55,7 +55,7 @@
 
 (defvar *scratch*
   (uiop:ensure-directory-pathname
-   (merge-pathnames (format nil "pseudoscheme-r6rs-~D/" (random 1000000 (make-random-state t)))
+   (merge-pathnames (format nil "quasischeme-r6rs-~D/" (random 1000000 (make-random-state t)))
 		    (uiop:temporary-directory))))
 (ensure-directories-exist *scratch*)
 
@@ -72,12 +72,12 @@
 	       ;; deadline only covers blocking operations).
 	       (bt:with-timeout (60)
 		 (let ((*standard-output* out)
-		       (psx:*library-path* (list (namestring *root*)))
+		       (qsx:*library-path* (list (namestring *root*)))
 		       ;; The io tests create files: keep them out of the repo.
 		       (*default-pathname-defaults* *scratch*))
-		   (psx::boot)
-		   (let ((psx::*full-continuations* (and *full* t)))
-		     (psx:load-file path))
+		   (qsx::boot)
+		   (let ((qsx::*full-continuations* (and *full* t)))
+		     (qsx:load-file path))
 		   :ok))
 	     (bt:timeout () :timeout)
 	     (serious-condition (e)

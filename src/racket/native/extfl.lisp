@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Extflonums, as Racket CS has them (rumble/extfl.ss): unsupported.
 ;;;; The reader still makes pseudo-extflonums of literals like 1.0t0
@@ -10,7 +10,7 @@
 ;;;; This file loads after basics.lisp, whose extflonum? and
 ;;;; extflonum-available? it replaces.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (extflonum (:constructor make-extflonum (str)) (:predicate extflonum-p))
   str)
@@ -42,7 +42,7 @@ in 'read mode (MORE: its remaining arguments, radix then mode), or NIL."
        (make-extflonum s)))
 
 (defnative "extflonum?" (x) (:instance "#%extfl" :leaf t) (bool (extflonum-p x)))
-(defnative "extflonum-available?" () (:instance "#%extfl" :leaf t) ps:false)
+(defnative "extflonum-available?" () (:instance "#%extfl" :leaf t) qs:false)
 
 (defun extfl-unsupported (who)
   (raise-exn "exn:fail:unsupported" (format nil "~A: unsupported" who)))
@@ -111,7 +111,7 @@ arguments are extflonums and says it's unsupported."
 
 ;;; extflvectors can't be made, so nothing is one
 
-(defnative "extflvector?" (x) (:instance "#%extfl" :leaf t) (declare (ignore x)) ps:false)
+(defnative "extflvector?" (x) (:instance "#%extfl" :leaf t) (declare (ignore x)) qs:false)
 
 (macrolet ((define-makers (&rest names)
 	     `(progn

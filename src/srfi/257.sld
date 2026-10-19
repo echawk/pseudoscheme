@@ -3,7 +3,7 @@
 ;;; this comment (reference/srfi-257/257.sld; MIT licence per its SPDX header, in
 ;;; reference/srfi-257/LICENSE).
 ;;; The (srfi 257 rx) sublibrary is not provided: it needs SRFI 264
-;;; (string syntax for SREs), which Pseudoscheme lacks, and the SRFI
+;;; (string syntax for SREs), which Quasischeme lacks, and the SRFI
 ;;; makes it conditional on SRFIs 115 and 264.
 ;;; SPDX-FileCopyrightText: 2024 Sergei Egorov
 ;;; SPDX-License-Identifier: MIT

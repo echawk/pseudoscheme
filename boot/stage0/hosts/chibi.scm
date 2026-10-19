@@ -2,7 +2,7 @@
 ;;;
 ;;; Run in a directory holding psyntax's sources (psyntax/*.ss and
 ;;; psyntax-buildscript.ss):  chibi-scheme .../boot/stage0/hosts/chibi.scm
-;;; It writes psyntax-pseudoscheme.pp there.  See boot/stage0/README.md.
+;;; It writes psyntax-quasischeme.pp there.  See boot/stage0/README.md.
 ;;;
 ;;; stage0 evaluates what it expands with (s0:host-eval form), so it and
 ;;; this adapter's definitions are loaded into the interaction

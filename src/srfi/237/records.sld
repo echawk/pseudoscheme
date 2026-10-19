@@ -1,13 +1,13 @@
 ;;; (srfi 237 records), also (srfi :237 records): SRFI 237, R6RS records
 ;;; (refined).  Marc Nieper-Wißkirchen's sample implementation
 ;;; (reference/srfi-237/; MIT licence in reference/srfi-237/LICENSE), on
-;;; Pseudoscheme's R6RS records.  This library includes the body of its
+;;; Quasischeme's R6RS records.  This library includes the body of its
 ;;; (srfi :237 records), reference/srfi-237/records-body.scm, which has
-;;; these changes, marked PSEUDOSCHEME there:
+;;; these changes, marked QUASISCHEME there:
 ;;;   - The uid -> record-type table (record-uid->rtd) is kept in
 ;;;     memory.  The sample implementation reads it from, and appends to,
 ;;;     a file record-types.scm in the current directory.
-;;;   - Pseudoscheme's psyntax has no SRFI 213 identifier properties, so
+;;;   - Quasischeme's psyntax has no SRFI 213 identifier properties, so
 ;;;     a parent clause naming a record name always becomes a parent-rtd
 ;;;     clause with that name's record descriptor, as it does in the
 ;;;     sample implementation for a parent given by an expression.

@@ -1,4 +1,4 @@
-;;; SRFI 211: Scheme macro libraries.  Written for Pseudoscheme.  The
+;;; SRFI 211: Scheme macro libraries.  Written for Quasischeme.  The
 ;;; SRFI's implementation is "necessarily distinct for every Scheme
 ;;; implementation": re-exports of what the system has.  psyntax has
 ;;; syntax-case, identifier syntax and variable transformers; the rest

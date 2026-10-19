@@ -6,7 +6,7 @@
 ;;; seconds->date, date-time-zone-offset, exact->inexact, eof, ...) are
 ;;; supplied below, on top of R7RS (scheme time).
 ;;;
-;;; Modifications to the reference code, each marked "Pseudoscheme:":
+;;; Modifications to the reference code, each marked "Quasischeme:":
 ;;; - MzScheme's (define-struct time ...) and (define-struct date ...)
 ;;;   are written as define-record-type.  For date, the record's setters
 ;;;   are named tm:set-date-X! directly, since the original's

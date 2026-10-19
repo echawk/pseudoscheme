@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; More of Racket's ports, natively (ports.lisp has the ports and the
 ;;;; common operations): custom ports (make-input-port,
@@ -10,7 +10,7 @@
 ;;;; again" if it isn't ready (a blocking operation on it is an error),
 ;;;; and a file lock always succeeds.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Checking arguments
@@ -23,10 +23,10 @@
        (truthy (funcall (native-function (gethash "procedure-arity-includes?" *natives*)) f k))))
 
 (defun check-proc (who f k contract &optional or-false)
-  (unless (or (and or-false (eq f ps:false)) (arity-includes-p f k))
+  (unless (or (and or-false (eq f qs:false)) (arity-includes-p f k))
     (contract-error who (if or-false (format nil "(or/c ~A #f)" contract) contract) f)))
 
-(defun false-to-nil (x) (if (eq x ps:false) nil x))
+(defun false-to-nil (x) (if (eq x qs:false) nil x))
 
 (defun check-range (who start end len what value)
   (when (> start len)
@@ -52,13 +52,13 @@
 (defun need-in (who port)
   "PORT, which must be an input port, as one of ours."
   (setq port (unwrap-in port))
-  (unless (or (null port) (rinport-p port) (truthy (funcall (psx:host-ref "input-port?") port)))
+  (unless (or (null port) (rinport-p port) (truthy (funcall (qsx:host-ref "input-port?") port)))
     (contract-error who "input-port?" port))
   (in-port who port))
 
 (defun need-out (who port)
   (setq port (unwrap-out port))
-  (unless (or (null port) (routport-p port) (truthy (funcall (psx:host-ref "output-port?") port)))
+  (unless (or (null port) (routport-p port) (truthy (funcall (qsx:host-ref "output-port?") port)))
     (contract-error who "output-port?" port))
   (output-port port who))
 
@@ -73,23 +73,23 @@
 ;;; Custom ports
 
 (defun check-init-position (who x)
-  (unless (or (and (integerp x) (plusp x)) (rinport-p x) (routport-p x) (eq x ps:false)
+  (unless (or (and (integerp x) (plusp x)) (rinport-p x) (routport-p x) (eq x qs:false)
 	      (arity-includes-p x 0))
     (contract-error who "(or/c exact-positive-integer? port? #f (procedure-arity-includes/c 0))" x)))
 
 (defun check-buffer-mode-proc (who x)
-  (unless (or (eq x ps:false) (and (arity-includes-p x 0) (arity-includes-p x 1)))
+  (unless (or (eq x qs:false) (and (arity-includes-p x 0) (arity-includes-p x 1)))
     (contract-error who "(or/c #f (and/c (procedure-arity-includes/c 0)\n                (procedure-arity-includes/c 1)))" x)))
 
 (defun void-procedure () (lambda (&rest args) (declare (ignore args)) *void*))
 
-(defnative "make-input-port" (name read-in peek-in close &optional (progress ps:false) (commit ps:false)
-				   (location ps:false) (count-lines nil) (init-position 1) (buffer-mode ps:false)) ()
+(defnative "make-input-port" (name read-in peek-in close &optional (progress qs:false) (commit qs:false)
+				   (location qs:false) (count-lines nil) (init-position 1) (buffer-mode qs:false)) ()
   (let ((who "make-input-port")
 	(count-lines (if (null count-lines) (void-procedure) count-lines)))
     (unless (or (rinport-p read-in) (arity-includes-p read-in 1))
       (contract-error who "(or/c (procedure-arity-includes/c 1) input-port?)" read-in))
-    (unless (or (eq peek-in ps:false) (rinport-p peek-in) (arity-includes-p peek-in 3))
+    (unless (or (eq peek-in qs:false) (rinport-p peek-in) (arity-includes-p peek-in 3))
       (contract-error who "(or/c (procedure-arity-includes/c 3) input-port? #f)" peek-in))
     (check-proc who close 0 "(procedure-arity-includes/c 0)")
     (check-proc who progress 0 "(procedure-arity-includes/c 0)" t)
@@ -104,13 +104,13 @@
 			"read argument is an input port, but peek argument is not a port"
 			"read argument is not an input port, but peek argument is a port")
 		    (written read-in) (written peek-in)))
-    (when (and (eq peek-in ps:false) (truthy progress))
+    (when (and (eq peek-in qs:false) (truthy progress))
       (racket-error who "peek argument is #f, but progress-evt argument is not~%  progress-evt argument: ~A"
 		    (written progress)))
-    (when (and (eq progress ps:false) (truthy commit))
+    (when (and (eq progress qs:false) (truthy commit))
       (racket-error who "progress-evt argument is #f, but commit argument is not~%  commit argument: ~A"
 		    (written commit)))
-    (when (and (eq commit ps:false) (truthy progress))
+    (when (and (eq commit qs:false) (truthy progress))
       (racket-error who "commit argument is #f, but progress-evt argument is not~%  progress-evt argument: ~A"
 		    (written progress)))
     (let* ((init (false-to-nil init-position))
@@ -118,14 +118,14 @@
 			      :progress (false-to-nil progress) :commit (false-to-nil commit)
 			      :location (false-to-nil location) :count-lines (false-to-nil count-lines)
 			      :init-position init :buffer-mode (false-to-nil buffer-mode)))
-	   (p (new-lazy-inport name :custom (if (eq peek-in ps:false) #'custom-fill nil) :custom c)))
+	   (p (new-lazy-inport name :custom (if (eq peek-in qs:false) #'custom-fill nil) :custom c)))
       (setf (rinport-base p) (init-position-offset init))
       (when (integerp init) (setf (rinport-position p) init))
       p)))
 
-(defnative "make-output-port" (name evt write-out close &optional (write-out-special ps:false)
-				    (get-write-evt ps:false) (get-write-special-evt ps:false)
-				    (location ps:false) (count-lines nil) (init-position 1) (buffer-mode ps:false)) ()
+(defnative "make-output-port" (name evt write-out close &optional (write-out-special qs:false)
+				    (get-write-evt qs:false) (get-write-special-evt qs:false)
+				    (location qs:false) (count-lines nil) (init-position 1) (buffer-mode qs:false)) ()
   (let ((who "make-output-port")
 	(count-lines (if (null count-lines) (void-procedure) count-lines)))
     (unless (evt-value-p evt) (contract-error who "evt?" evt))
@@ -134,7 +134,7 @@
 		(arity-includes-p write-out 5))
       (contract-error who "(or/c output-port? (procedure-arity-includes/c 5))" write-out))
     (check-proc who close 0 "(procedure-arity-includes/c 0)")
-    (unless (or (eq write-out-special ps:false) (routport-p write-out-special) (arity-includes-p write-out-special 3))
+    (unless (or (eq write-out-special qs:false) (routport-p write-out-special) (arity-includes-p write-out-special 3))
       (contract-error who "(or/c #f output-port? (procedure-arity-includes/c 3))" write-out-special))
     (check-proc who get-write-evt 3 "(procedure-arity-includes/c 3)" t)
     (check-proc who get-write-special-evt 1 "(procedure-arity-includes/c 1)" t)
@@ -142,13 +142,13 @@
     (check-proc who count-lines 0 "(procedure-arity-includes/c 0)" t)
     (check-init-position who init-position)
     (check-buffer-mode-proc who buffer-mode)
-    (when (and (eq write-out-special ps:false) (truthy get-write-special-evt))
+    (when (and (eq write-out-special qs:false) (truthy get-write-special-evt))
       (racket-error who "write-special argument is #f, but get-write-special-evt argument is not~%  get-write-special-evt argument: ~A"
 		    (written get-write-special-evt)))
-    (when (and (eq get-write-evt ps:false) (truthy get-write-special-evt))
+    (when (and (eq get-write-evt qs:false) (truthy get-write-special-evt))
       (racket-error who "get-write-evt argument is #f, but get-write-special-evt argument is not~%  get-write-special-evt argument: ~A"
 		    (written get-write-special-evt)))
-    (when (and (eq get-write-special-evt ps:false) (truthy get-write-evt) (truthy write-out-special))
+    (when (and (eq get-write-special-evt qs:false) (truthy get-write-evt) (truthy write-out-special))
       (racket-error who "get-write-special-evt argument is #f, but get-write-evt argument is not, and write-special argument is not~%  get-write-evt argument: ~A~%  get-write-special-evt argument: ~A"
 		    (written get-write-evt) (written get-write-special-evt)))
     (let* ((init (false-to-nil init-position))
@@ -170,11 +170,11 @@
   (declare (ignore need blocking))
   (if (rinport-writer-closed p) :eof :block))
 
-(defnative "make-pipe" (&optional (limit ps:false) (in-name (rsym "pipe")) (out-name (rsym "pipe"))) ()
-  (unless (or (eq limit ps:false) (and (integerp limit) (plusp limit)))
+(defnative "make-pipe" (&optional (limit qs:false) (in-name (rsym "pipe")) (out-name (rsym "pipe"))) ()
+  (unless (or (eq limit qs:false) (and (integerp limit) (plusp limit)))
     (contract-error "make-pipe" "(or/c exact-positive-integer? #f)" limit))
-  (let ((in (new-lazy-inport (if (eq in-name ps:false) (rsym "pipe") in-name) :pipe #'pipe-fill))
-	(out (finish-outport (make-routport (if (eq out-name ps:false) (rsym "pipe") out-name)))))
+  (let ((in (new-lazy-inport (if (eq in-name qs:false) (rsym "pipe") in-name) :pipe #'pipe-fill))
+	(out (finish-outport (make-routport (if (eq out-name qs:false) (rsym "pipe") out-name)))))
     (setf (rinport-limit in) (false-to-nil limit)
 	  (rinport-peer in) out
 	  (routport-kind out) :pipe
@@ -211,7 +211,7 @@ for all of it; the count, or eof if there was none."
 		 (cond ((integerp r) (incf got r))
 		       ((functionp r) (special-error who p))
 		       (t (return)))))
-      (if (and (zerop got) (plusp n)) ps:eof-object got))))
+      (if (and (zerop got) (plusp n)) qs:eof-object got))))
 
 (defnative "read-bytes!" (bstr &optional port (start 0) end) ()
   (transfer-exact "read-bytes!" bstr port start end nil))
@@ -234,7 +234,7 @@ count, eof or a special); 0 for none yet."
 			       (custom-peek p skip bstr start end blocking progress))
 			      (skip (ip-peek-bytes p skip bstr start end blocking))
 			      (t (ip-read-bytes p bstr start end blocking)))))
-		 (cond ((eq r :eof) ps:eof-object)
+		 (cond ((eq r :eof) qs:eof-object)
 		       ((member r '(:block :progress)) 0)
 		       (t r))))))))
 
@@ -272,10 +272,10 @@ count, eof or a special); 0 for none yet."
 		     (incf offset len)
 		     (incf got))
 		   (let ((c (inport-read-char p who)))
-		     (when (eq c ps:eof-object) (return))
+		     (when (eq c qs:eof-object) (return))
 		     (setf (char str (+ start got)) c)
 		     (incf got))))
-      (if (and (zerop got) (plusp n)) ps:eof-object got))))
+      (if (and (zerop got) (plusp n)) qs:eof-object got))))
 
 (defnative "read-string!" (str &optional port (start 0) end) ()
   (chars-into "read-string!" str port start end nil))
@@ -294,18 +294,18 @@ count, eof or a special); 0 for none yet."
 	       (write-char c out)
 	       (incf offset len)
 	       (incf got)))
-    (if (and (zerop got) (plusp amt)) ps:eof-object (get-output-stream-string out))))
+    (if (and (zerop got) (plusp amt)) qs:eof-object (get-output-stream-string out))))
 
-(defnative "read-byte-or-special" (&optional port special-wrap (source-name ps:false)) ()
+(defnative "read-byte-or-special" (&optional port special-wrap (source-name qs:false)) ()
   (let* ((p (need-in "read-byte-or-special" port))
 	 (b (inport-read-byte p "read-byte-or-special" t)))
     (if (functionp b) (wrap-special p b source-name -1 special-wrap) b)))
 
-(defnative "peek-byte-or-special" (&optional port (skip 0) progress special-wrap (source-name ps:false)) ()
+(defnative "peek-byte-or-special" (&optional port (skip 0) progress special-wrap (source-name qs:false)) ()
   (check-skip "peek-byte-or-special" skip)
   (let ((p (need-in "peek-byte-or-special" port)))
     (if (and progress (truthy progress) (evt-ready-p progress))
-	ps:false
+	qs:false
 	(let ((b (inport-peek-byte p skip "peek-byte-or-special" t)))
 	  (if (functionp b) (wrap-special p b source-name skip special-wrap) b)))))
 
@@ -354,19 +354,19 @@ count, eof or a special); 0 for none yet."
     (let ((c (rinport-custom p)))
       (cond ((and c (custom-in-commit c))
 	     (let ((r (funcall (custom-in-commit c) amt progress evt)))
-	       (cond ((eq r ps:false) ps:false)
+	       (cond ((eq r qs:false) qs:false)
 		     (t (let ((vec (if (typep r 'octets) r (make-array amt :element-type '(unsigned-byte 8)
 									 :initial-element (char-code #\x)))))
 			  (note-bytes p vec 0 (length vec))
 			  (ip-progress p)
-			  ps:true)))))
-	    ((peek-proc-port-p p) ps:false)
-	    ((not (eq (rinport-progress p) (revt-target progress))) ps:false)
-	    ((not (evt-ready-p evt)) ps:false)
+			  qs:true)))))
+	    ((peek-proc-port-p p) qs:false)
+	    ((not (eq (rinport-progress p) (revt-target progress))) qs:false)
+	    ((not (evt-ready-p evt)) qs:false)
 	    (t (let ((n (min amt (- (ip-end p) (rinport-pos p)))))
 		 (note-bytes p (rinport-bytes p) (rinport-pos p) (+ (rinport-pos p) n))
 		 (ip-advance p n)
-		 ps:true))))))
+		 qs:true))))))
 
 (defnative "port-closed-evt" (p) ()
   (setq p (unwrap-out (unwrap-in p)))
@@ -376,11 +376,11 @@ count, eof or a special); 0 for none yet."
 	((routport-p p)
 	 (make-revt :peek (or (routport-closed-sema p)
 			      (setf (routport-closed-sema p) (make-rsemaphore (if (routport-closed p) 1 0))))))
-	((or (truthy (funcall (psx:host-ref "input-port?") p)) (truthy (funcall (psx:host-ref "output-port?") p)))
+	((or (truthy (funcall (qsx:host-ref "input-port?") p)) (truthy (funcall (qsx:host-ref "output-port?") p)))
 	 *never-evt*)
 	(t (contract-error "port-closed-evt" "port?" p))))
 
-(defnative "port-waiting-peer?" (p) (:leaf t) (declare (ignore p)) ps:false)
+(defnative "port-waiting-peer?" (p) (:leaf t) (declare (ignore p)) qs:false)
 
 ;;; ------------------------------------------------------------------
 ;;; Writing
@@ -433,14 +433,14 @@ count, eof or a special); 0 for none yet."
 	   (racket-error who "port does not support special values~%  port: ~A" (port-desc p)))
 	  ((routport-p proc) (write-special-to who v proc nonblock))
 	  (t (loop repeat 100000
-		   do (let ((r (funcall proc v (bool nonblock) ps:false)))
-			(cond ((eq r ps:false) (when nonblock (return ps:false)))
+		   do (let ((r (funcall proc v (bool nonblock) qs:false)))
+			(cond ((eq r qs:false) (when nonblock (return qs:false)))
 			      ((evt-p r)
 			       (if nonblock
-				   (return ps:false)
+				   (return qs:false)
 				   (unless (nth-value 1 (evt-ready r))
 				     (racket-error "sync" "would block forever (one thread)"))))
-			      (t (return ps:true))))
+			      (t (return qs:true))))
 		   finally (racket-error who "would block forever (one thread)"))))))
 
 (defnative "write-special" (v &optional port) ()
@@ -459,21 +459,21 @@ count, eof or a special); 0 for none yet."
   (cond ((routport-p p)
 	 (let ((c (routport-custom p)))
 	   (bool (or (null c) (custom-out-get-write-evt c)))))
-	((truthy (funcall (psx:host-ref "output-port?") p)) ps:true)
+	((truthy (funcall (qsx:host-ref "output-port?") p)) qs:true)
 	(t (contract-error "port-writes-atomic?" "output-port?" p))))
 (defnative "port-writes-special?" (p) (:leaf t)
   (setq p (unwrap-out p))
   (cond ((routport-p p)
 	 (let ((c (routport-custom p)))
 	   (bool (and c (custom-out-write-out-special c)))))
-	((truthy (funcall (psx:host-ref "output-port?") p)) ps:false)
+	((truthy (funcall (qsx:host-ref "output-port?") p)) qs:false)
 	(t (contract-error "port-writes-special?" "output-port?" p))))
 
 ;;; ------------------------------------------------------------------
 ;;; Files
 
 (defun mode-name (m)
-  (and m (symbolp m) (not (eq m ps:false)) (not (eq m ps:true)) (rname m)))
+  (and m (symbolp m) (not (eq m qs:false)) (not (eq m qs:true)) (rname m)))
 
 (defun exists-mode (m1 m2)
   (dolist (m (list m1 m2) "error")
@@ -565,7 +565,7 @@ count, eof or a special); 0 for none yet."
   (path-string "with-input-from-file" path)
   (check-proc "with-input-from-file" proc 0 "(procedure-arity-includes/c 0)")
   (let ((in (funcall (native-function (gethash "open-input-file" *natives*)) path mode)))
-    (funcall (psx:host-ref "dynamic-wind")
+    (funcall (qsx:host-ref "dynamic-wind")
 	     (lambda () *void*)
 	     (lambda () (call-with-parameter *current-input-port* in proc))
 	     (lambda () (close-inport in)))))
@@ -575,7 +575,7 @@ count, eof or a special); 0 for none yet."
   (path-string "with-output-to-file" path)
   (check-proc "with-output-to-file" proc 0 "(procedure-arity-includes/c 0)")
   (let ((out (open-output "with-output-to-file" path m1 m2 perms nil)))
-    (funcall (psx:host-ref "dynamic-wind")
+    (funcall (qsx:host-ref "dynamic-wind")
 	     (lambda () *void*)
 	     (lambda () (call-with-parameter *current-output-port* out proc))
 	     (lambda () (close-outport out)))))
@@ -602,9 +602,9 @@ count, eof or a special); 0 for none yet."
 	       (racket-error "file-stream-buffer-mode" "buffering not supported for ~A port~%  mode: ~A~%  ~A port: ~A"
 			     (if (rinport-p port) "input" "output") (written mode)
 			     (if (rinport-p port) "input" "output") (port-desc port))
-	       ps:false))
-	  ((or (truthy (funcall (psx:host-ref "input-port?") port))
-	       (truthy (funcall (psx:host-ref "output-port?") port)))
+	       qs:false))
+	  ((or (truthy (funcall (qsx:host-ref "input-port?") port))
+	       (truthy (funcall (qsx:host-ref "output-port?") port)))
 	   (if mode-p *void* (rsym "block")))
 	  (t (contract-error "file-stream-buffer-mode" "port?" port)))))
 
@@ -685,7 +685,7 @@ count, eof or a special); 0 for none yet."
   (handler-case (progn (sb-posix:access name flag) t)
     (sb-posix:syscall-error () nil)))
 
-(defnative "file-or-directory-permissions" (path &optional (mode ps:false)) ()
+(defnative "file-or-directory-permissions" (path &optional (mode qs:false)) ()
   (let* ((name (path-string "file-or-directory-permissions" path))
 	 (st (stat-of "file-or-directory-permissions" "access failed" name nil))
 	 (m (mode-name mode)))
@@ -719,7 +719,7 @@ count, eof or a special); 0 for none yet."
 (defnative "port-try-file-lock?" (port mode) ()
   (declare (ignore mode))
   (file-port-stat "port-try-file-lock?" port)
-  ps:true)
+  qs:true)
 (defnative "port-file-unlock" (port) ()
   (file-port-stat "port-file-unlock" port)
   *void*)
@@ -737,7 +737,7 @@ count, eof or a special); 0 for none yet."
 
 ;;; Filesystem change events: with no other process to change anything
 ;;; while we wait, such an event never becomes ready.
-(defnative "filesystem-change-evt" (path &optional (fail ps:false)) ()
+(defnative "filesystem-change-evt" (path &optional (fail qs:false)) ()
   (let ((name (path-string "filesystem-change-evt" path)))
     (handler-case (progn (sb-posix:stat name) (make-revt :never (list :fs name)))
       (sb-posix:syscall-error (e)
@@ -754,4 +754,4 @@ count, eof or a special); 0 for none yet."
   *void*)
 (defnative "filesystem-change-evt-ready?" (e) (:leaf t)
   (unless (fs-evt-p e) (contract-error "filesystem-change-evt-ready?" "filesystem-change-evt?" e))
-  ps:false)
+  qs:false)

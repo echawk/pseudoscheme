@@ -1,6 +1,6 @@
-;;; SRFI 70: numbers.  Written for Pseudoscheme from the SRFI document
+;;; SRFI 70: numbers.  Written for Quasischeme from the SRFI document
 ;;; (there is no reference implementation).  SRFI 70 restates R5RS
-;;; section 6.2 with IEEE infinities, which Pseudoscheme's arithmetic
+;;; section 6.2 with IEEE infinities, which Quasischeme's arithmetic
 ;;; already has (+inf.0, -inf.0; +nan.0 is what SRFI 70 writes 0/0), so
 ;;; almost every binding here is R7RS's own, re-exported.  Defined here:
 ;;;
@@ -16,7 +16,7 @@
 ;;;
 ;;; gcd, lcm and expt therefore clash with (scheme base)'s; import one
 ;;; or the other with except.  SRFI 70's 0/0 notation for a NaN is not
-;;; read; Pseudoscheme reads and writes +nan.0.
+;;; read; Quasischeme reads and writes +nan.0.
 (define-library (srfi 70)
   (export
    number? complex? real? rational? integer?

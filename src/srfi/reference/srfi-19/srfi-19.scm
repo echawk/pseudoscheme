@@ -251,7 +251,7 @@
 ;;; the time structure; creates the accessors, too.
 ;;; wf: changed to match srfi documentation. uses mzscheme structures & inspectors
 
-;; Pseudoscheme: was (define-struct time (type nanosecond second) (make-inspector))
+;; Quasischeme: was (define-struct time (type nanosecond second) (make-inspector))
 (define-record-type time (make-time type nanosecond second) time?
   (type time-type set-time-type!)
   (nanosecond time-nanosecond set-time-nanosecond!)
@@ -283,13 +283,13 @@
 
 (define (tm:current-time-utc)
   (receive (seconds ms) (tm:get-time-of-day)
-	   (make-time  time-utc (* ms 1000000) ; Pseudoscheme: was (* ms 10000)
+	   (make-time  time-utc (* ms 1000000) ; Quasischeme: was (* ms 10000)
 	              seconds )))
 
 (define (tm:current-time-tai)
   (receive (seconds ms) (tm:get-time-of-day)
 	   (make-time time-tai
-		      (* ms 1000000) ; Pseudoscheme: was (* ms 10000)
+		      (* ms 1000000) ; Quasischeme: was (* ms 10000)
 		      (+ seconds (tm:leap-second-delta seconds))
 		      )))
 
@@ -298,7 +298,7 @@
 (define (tm:current-time-ms-time time-type proc)
   (let ((current-ms (proc)))
     (make-time time-type
-	       ;; Pseudoscheme: was 10000 and 10000
+	       ;; Quasischeme: was 10000 and 10000
 	       (* (remainder current-ms 1000) 1000000)
 	       (quotient current-ms 1000)
 	       )))
@@ -311,7 +311,7 @@
 (define (tm:current-time-monotonic)
   (receive (seconds ms) (tm:get-time-of-day)
 	   (make-time time-monotonic
-		      (* ms 1000000) ; Pseudoscheme: was (* ms 10000)
+		      (* ms 1000000) ; Quasischeme: was (* ms 10000)
 		      (+ seconds (tm:leap-second-delta seconds))
 		      )))
 
@@ -578,7 +578,7 @@
 
 ;; -- date structures
 
-;; Pseudoscheme: was (define-struct date (nanosecond ...) (make-inspector)),
+;; Quasischeme: was (define-struct date (nanosecond ...) (make-inspector)),
 ;; followed by (define tm:set-date-X! set-date-X!) for each field, which
 ;; would define set-date-X! twice in one library body.
 (define-record-type date
@@ -664,7 +664,7 @@
 ;; differently from MzScheme's....
 ;; This should be written to be OS specific.
 
-;; Pseudoscheme: optionally the offset in effect at a given instant (in
+;; Quasischeme: optionally the offset in effect at a given instant (in
 ;; seconds since the epoch), so that a date converted from a time gets
 ;; that time's daylight-saving offset rather than today's.
 (define (tm:local-tz-offset . seconds)
@@ -694,7 +694,7 @@
 (define (tm:time->date time tz-offset ttype)
   (if (not (eq? (time-type time) ttype))
       (tm:time-error 'time->date 'incompatible-time-types  time))
-  ;; Pseudoscheme: the local offset at TIME, not now.
+  ;; Quasischeme: the local offset at TIME, not now.
   (let* ( (offset (:optional tz-offset (tm:local-tz-offset (time-second time)))) )
     (receive (secs date month year)
 	     (tm:decode-julian-day-number
@@ -853,7 +853,7 @@
 	 (offset (date-zone-offset date)) )
     (+ (tm:encode-julian-day-number day month year)
        (- 1/2)
-       ;; Pseudoscheme: was (+ (/ (/ (+ h*3600 m*60 s ns/1e9) tm:sid)
+       ;; Quasischeme: was (+ (/ (/ (+ h*3600 m*60 s ns/1e9) tm:sid)
        ;; (- offset))), which divides by the negated zone offset (division
        ;; by zero for UTC); the offset is subtracted from the seconds.
        (/ (+ (* hour 60 60)

@@ -9,9 +9,9 @@ cd "$(dirname "$0")/.." || exit 1
 SBCL=${SBCL:-sbcl}
 JOBS=${JOBS:-6}
 LIMIT=${LIMIT:-300}
-OUT=${OUT:-/tmp/pseudoscheme-guile-tests}
+OUT=${OUT:-/tmp/quasischeme-guile-tests}
 # How Guile's compiler runs (src/guile/boot.lisp, *GUILE-COMPILER*):
-# natively, unless PSEUDOSCHEME_GUILE_COMPILER says otherwise; the files
+# natively, unless QUASISCHEME_GUILE_COMPILER says otherwise; the files
 # that test Guile's VM itself (coverage, statprof, ...) need compile's
 # code to run on the VM, so they get Guile's compiler, from its sources
 VM_TESTS="compiler coverage session statprof"
@@ -19,9 +19,9 @@ export SBCL LIMIT OUT VM_TESTS
 
 if [ "$1" = "--one" ]; then
   f=$2; name=$(basename "$f" .test)
-  mode=${PSEUDOSCHEME_GUILE_COMPILER:-native}
-  case " $VM_TESTS " in *" $name "*) mode=${PSEUDOSCHEME_GUILE_COMPILER:-vm-source} ;; esac
-  PSEUDOSCHEME_GUILE_COMPILER=$mode $SBCL --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-guile-test.lisp "$f" \
+  mode=${QUASISCHEME_GUILE_COMPILER:-native}
+  case " $VM_TESTS " in *" $name "*) mode=${QUASISCHEME_GUILE_COMPILER:-vm-source} ;; esac
+  QUASISCHEME_GUILE_COMPILER=$mode $SBCL --dynamic-space-size 4GB --control-stack-size 500MB --script tests/run-guile-test.lisp "$f" \
     > "$OUT/$name.out" 2> "$OUT/$name.err" & pid=$!
   ( sleep "$LIMIT"; kill -9 $pid 2>/dev/null ) > /dev/null 2>&1 & w=$!
   wait $pid 2>/dev/null
@@ -43,7 +43,7 @@ $SBCL --dynamic-space-size 4GB --non-interactive \
   --eval '(require :asdf)' \
   --eval '(let ((s (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname)))) (when (probe-file s) (load s)))' \
   --eval '(push (truename ".") asdf:*central-registry*)' \
-  --eval '(handler-bind ((warning (function muffle-warning))) (asdf:load-system :pseudoscheme/guile))' \
+  --eval '(handler-bind ((warning (function muffle-warning))) (asdf:load-system :quasischeme/guile))' \
   > "$OUT/build.log" 2>&1
 echo "$files" | xargs -P "$JOBS" -n 1 sh tests/run-guile-tests.sh --one | sort > "$OUT/results.txt"
 cat "$OUT/results.txt"

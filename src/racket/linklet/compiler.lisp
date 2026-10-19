@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategy B: linklets to core Scheme, then the translator
 ;;;; (docs/racket-linklet-compiler.md).  Modelled on the Tree-IL compiler
@@ -26,7 +26,7 @@
 ;;;;                   the same (native.lisp, *HOST-SHARED*), else the
 ;;;;                   native one, a host global named racket:NAME
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (linklet-info (:constructor make-linklet-info ()))
   (locations (make-hash-table :test 'eq))	; form -> source location (pass 1)
@@ -45,7 +45,7 @@
 ;;; ------------------------------------------------------------------
 ;;; Names
 
-(defun core (name) (psx::sym name))
+(defun core (name) (qsx::sym name))
 (defun quoted (x) (list (core "quote") x))
 (defun form-p (x name) (and (consp x) (symbolp (car x)) (string= (rname (car x)) name)))
 
@@ -71,8 +71,8 @@ top-level forms' lexicals become global definitions).")
 (defun fresh-lexical (&optional (stem ""))
   "A new lexical: STEM (the Racket name, so that backtraces show it), and
 a number and tag that make it unique."
-  (psx::make-lexical
-   (ps::invert-case (concatenate 'string stem "~" (write-to-string (incf *lexical-count*) :base 10 :radix nil) "." *lexical-tag*))))
+  (qsx::make-lexical
+   (qs::invert-case (concatenate 'string stem "~" (write-to-string (incf *lexical-count*) :base 10 :radix nil) "." *lexical-tag*))))
 
 ;;; ------------------------------------------------------------------
 ;;; Pass 1: correlated objects off
@@ -238,7 +238,7 @@ NAME, if the lambda is bound to a variable: its object-name."
 				  :initial-value (list (core "racket:arity-error") args)))
 		    (list (core "length") args))))
 	       ;; its name, for object-name
-	       (and name (symbolp name) (not (eq name ps:false)) (list (quoted name)))))))
+	       (and name (symbolp name) (not (eq name qs:false)) (list (quoted name)))))))
 
 (defun assigned-p (id x)
   "Does X (Racket code) hold a set! of ID?  Any one, even of another
@@ -280,7 +280,7 @@ assigned as its right-hand side returns)."
 			  (append (loop for (ids rhs) in bindings
 					collect (lower-assignment ids rhs env))
 				  (list (lower-body body env)))))
-	      (mapcar (constantly (quoted ps:false)) vars))))
+	      (mapcar (constantly (quoted qs:false)) vars))))
       (labels ((nest (bindings inner-env)
 		 (if (null bindings)
 		     (lower-body body inner-env)
@@ -305,7 +305,7 @@ by their variables."
 	(let ((f (fresh-lexical (rname id))))
 	  (list (list (core "lambda") (list f)
 		      (list (core "begin") (list (core "set!") f core) f))
-		(quoted ps:false)))
+		(quoted qs:false)))
 	core)))
 
 (defvar *self-call* nil
@@ -368,7 +368,7 @@ ID being calls of SELF."
 
 (defun lower-expr (x env)
   (cond ((symbolp x)
-	 (if (or (null x) (eq x ps:false) (eq x ps:true)) (quoted x) (lookup x env)))
+	 (if (or (null x) (eq x qs:false) (eq x qs:true)) (quoted x) (lookup x env)))
 	((atom x) (quoted x))
 	((and (symbolp (car x)) (not (assoc (car x) env)) (special-form (car x)))
 	 (let ((args (cdr x)))
@@ -399,7 +399,7 @@ ID being calls of SELF."
 		    (list (core "lambda") '() (lower-expr (third args) env))))
 	     (:variable-reference
 	      (list (core "racket:variable-reference") (core "racket:instance")
-		    (if args (quoted (car args)) (quoted ps:false))))
+		    (if args (quoted (car args)) (quoted qs:false))))
 	     (:define-values
 	      (error "compile-linklet: define-values not at a linklet's top level: ~S" x)))))
 	((and *self-call* (eq (car x) (car *self-call*)) (not (assoc (car x) env)))
@@ -457,8 +457,8 @@ one definition is a lambda."
 (defun call-with-safe-cells (thunk)
   "Call THUNK with (racket:safe-variable-ref cell) taken as safe by the
 continuation transformation."
-  (let ((psx::*safe-operator-hook*
-	  (let ((outer psx::*safe-operator-hook*))
+  (let ((qsx::*safe-operator-hook*
+	  (let ((outer qsx::*safe-operator-hook*))
 	    (lambda (form) (or (safe-variable-ref-p form) (and outer (funcall outer form)))))))
     (funcall thunk)))
 
@@ -472,12 +472,12 @@ candidates that turn out to capture made plain."
 	(when (and (consp set) (eq (car set) (core "racket:variable-set!")))
 	  (let* ((value (caddr set))
 		 (l (labels ((procedure (x)
-			       (cond ((psx::lambda-form-p x) x)
+			       (cond ((qsx::lambda-form-p x) x)
 				     ;; a case-lambda's (racket:with-arity 'mask lambda)
 				     ((and (consp x) (eq (car x) (core "racket:with-arity")))
 				      (procedure (caddr x)))
 				     ;; NAMED's ((lambda (f) (begin (set! f lambda) f)) '#f)
-				     ((and (consp x) (psx::lambda-form-p (car x)))
+				     ((and (consp x) (qsx::lambda-form-p (car x)))
 				      (let ((b (caddr (car x))))
 					(and (consp b) (consp (cdr b)) (consp (cadr b))
 					     (procedure (caddr (cadr b)))))))))
@@ -491,11 +491,11 @@ candidates that turn out to capture made plain."
 		       (setf (gethash (variable-info-cell v) safe) t)
 		       (setf (variable-info-known v) nil))))
 	       (linklet-info-variables info))
-      (let ((psx::*safe-procedures* nil) (psx::*known-procedures* nil) (psx::*downward-parameters* nil)
-	    (psx::*safe-operator-hook* (lambda (form) (and (safe-variable-ref-p form) (gethash (cadr form) safe)))))
+      (let ((qsx::*safe-procedures* nil) (qsx::*known-procedures* nil) (qsx::*downward-parameters* nil)
+	    (qsx::*safe-operator-hook* (lambda (form) (and (safe-variable-ref-p form) (gethash (cadr form) safe)))))
 	(loop while (loop with changed = nil
 			  for (cell . l) in lambdas
-			  when (and (gethash cell safe) (psx::may-capture-p (caddr l)))
+			  when (and (gethash cell safe) (qsx::may-capture-p (caddr l)))
 			    do (remhash cell safe) (setq changed t)
 			  finally (return changed))))
       (labels ((plain (x)
@@ -539,7 +539,7 @@ then exports then the rest (N cells in all)."
   "Pass 4: the linklet as a core lambda of its variable objects (imports,
 then exports), whose body is a letrec* of the definitions; or, for a big
 one, LOWER-SPLIT's form."
-  (when (> (psx::tree-size (parsed-linklet-body parsed)) *split-size*)
+  (when (> (qsx::tree-size (parsed-linklet-body parsed)) *split-size*)
     (return-from lower (lower-split parsed info)))
   (let ((*info* info))
     ;; core names: a lexical per definition, a variable object per
@@ -571,7 +571,7 @@ one, LOWER-SPLIT's form."
       (list (core "lambda") (list* (core "racket:instance") (append imports exports))
 	    (if defined
 		(cons (list (core "lambda") defined (cons (core "begin") body))
-		      (mapcar (constantly (quoted ps:unassigned)) defined))
+		      (mapcar (constantly (quoted qs:unassigned)) defined))
 		(cons (core "begin") body))))))
 
 (defun compile-linklet-form (form &key name imports-known options)

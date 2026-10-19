@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-FFI -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-FFI -*-
 
 ;;;; The foreign-function layer the Schemes share, on CFFI: calling the C
 ;;;; function at an address with its arguments and result converted,
@@ -24,8 +24,8 @@
 ;;;; Pinning is SBCL's, so C may keep a bytevector's address only for
 ;;;; the length of the call, as with Chez's u8*.
 
-(defpackage "PSEUDOSCHEME-FFI"
-  (:nicknames "PSFFI")
+(defpackage "QUASISCHEME-FFI"
+  (:nicknames "QSFFI")
   (:use "CL")
   (:export "FOREIGN-FUNCTION" "FOREIGN-CALLBACK"
 	   "DLOPEN" "DLSYM" "+RTLD-LAZY+" "+RTLD-NOW+" "+RTLD-GLOBAL+" "+RTLD-LOCAL+"
@@ -33,9 +33,9 @@
 	   "MEM-REF" "MEM-SET" "TYPE-SIZE" "TYPE-ALIGNMENT" "ALLOCATE" "FREE"
 	   "VECTOR-ADDRESS" "CALL-WITH-ADDRESS" "READ-C-STRING"))
 
-(in-package "PSEUDOSCHEME-FFI")
+(in-package "QUASISCHEME-FFI")
 
-(defun false-p (x) (eq x ps:false))
+(defun false-p (x) (eq x qs:false))
 
 (defun type-ctype (type) (first type))
 (defun type-kind (type) (second type))
@@ -98,13 +98,13 @@ to pin and point into."
 
 (defun result-value (type raw)
   (ecase (type-kind type)
-    (:void ps:unspecific)
+    (:void qs:unspecific)
     (:number raw)
     (:float (coerce raw 'double-float))
-    (:boolean (if (zerop raw) ps:false t))
+    (:boolean (if (zerop raw) qs:false t))
     (:char (code-char raw))
     (:string (let ((a (cffi:pointer-address raw)))
-	       (if (zerop a) ps:false
+	       (if (zerop a) qs:false
 		   (read-c-string a :encoding (first (type-options type))))))
     (:pointer (funcall (second (type-options type)) (cffi:pointer-address raw)))))
 
@@ -154,10 +154,10 @@ after the call as a second value."
   (ecase (type-kind type)
     ((:number) raw)
     (:float (coerce raw 'double-float))
-    (:boolean (if (zerop raw) ps:false t))
+    (:boolean (if (zerop raw) qs:false t))
     (:char (code-char raw))
     (:string (let ((a (cffi:pointer-address raw)))
-	       (if (zerop a) ps:false (read-c-string a :encoding (first (type-options type))))))
+	       (if (zerop a) qs:false (read-c-string a :encoding (first (type-options type))))))
     (:pointer (funcall (second (type-options type)) (cffi:pointer-address raw)))))
 
 (defun callback-result (type value)

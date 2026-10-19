@@ -5,16 +5,16 @@
 
 ; Fudged, using a Common Lisp readtable.
 
-(in-package "PS")
+(in-package "QS")
 
 (defparameter scheme-readtable (copy-readtable nil))
 
 (defun scheme-read-using-commonlisp-reader (port)
   (let ((*package* scheme-package)
 	(*readtable* scheme-readtable))
-    (read-preserving-whitespace port nil ps:eof-object)))
+    (read-preserving-whitespace port nil qs:eof-object)))
 
-(setq ps:*scheme-read* #'scheme-read-using-commonlisp-reader)  ;Yow
+(setq qs:*scheme-read* #'scheme-read-using-commonlisp-reader)  ;Yow
 
 (defun skip-script-header (stream)
   "Skip a first line #! /... or #!/... -- SRFI 22's script prelude, R6RS's
@@ -33,8 +33,8 @@ start."
 (defun scheme-display-using-commonlisp-printer (obj port)
   (write-internal obj port nil))
 
-(setq ps:*scheme-write* #'scheme-write-using-commonlisp-printer)
-(setq ps:*scheme-display* #'scheme-display-using-commonlisp-printer)
+(setq qs:*scheme-write* #'scheme-write-using-commonlisp-printer)
+(setq qs:*scheme-display* #'scheme-display-using-commonlisp-printer)
 
 (defvar *non-scheme-readtable* (copy-readtable nil))
 
@@ -62,11 +62,11 @@ start."
 
 (defun sharp-F-read-macro (stream subchar arg)
   (declare (ignore stream subchar arg))
-  ps:false)
+  qs:false)
 
 (defun sharp-T-read-macro (stream subchar arg)
   (declare (ignore stream subchar arg))
-  ps:true)
+  qs:true)
 
 (defun sharp-D-read-macro (stream subchar arg)
   (declare (ignore subchar arg))
@@ -122,16 +122,16 @@ start."
 
 
 (defun write-internal (obj port escapep)
-  (let ((*package* ps:scheme-package)
-	(*readtable* ps:scheme-readtable))
+  (let ((*package* qs:scheme-package)
+	(*readtable* qs:scheme-readtable))
     (cond ((null obj)
 	   (princ "()" port))
-	  ((eq obj ps:false)
+	  ((eq obj qs:false)
 	   (write-char #\# port)
 	   ;; Respect *print-case*
 	   (let ((*package* (symbol-package 'f)))
 	     (prin1 'f port)))
-	  ((eq obj ps:true)
+	  ((eq obj qs:true)
 	   (write-char #\# port)
 	   ;; Respect *print-case*
 	   (let ((*package* (symbol-package 't)))
@@ -144,4 +144,4 @@ start."
 	   (write (cadr obj) :stream port :escape escapep :array t))
 	  (t
 	   (write obj :stream port :escape escapep :array t)))
-    ps:unspecific))
+    qs:unspecific))

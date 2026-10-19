@@ -1,10 +1,10 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; The C half of (ice-9 threads): threads are SBCL's threads; mutexes
 ;;;; and condition variables are Guile's, made of SBCL's locks and wait
 ;;;; queues.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 ;;; A Guile mutex is its own state (an owner, a level) under an SBCL
 ;;; lock, with a queue of the threads waiting for it: Guile's kinds lock
@@ -31,7 +31,7 @@
 (defun timeout-seconds (timeout)
   "A Guile absolute timeout (seconds since the epoch, or (seconds .
 microseconds)) as seconds from now, or NIL for none."
-  (cond ((or (null timeout) (eq timeout ps:false)) nil)
+  (cond ((or (null timeout) (eq timeout qs:false)) nil)
 	(t (let* ((abs (if (consp timeout) (+ (car timeout) (/ (cdr timeout) 1000000)) timeout))
 		  (now (multiple-value-bind (s us) (sb-ext:get-time-of-day) (+ s (/ us 1000000)))))
 	     (max 0 (float (- abs now) 1d0))))))
@@ -49,14 +49,14 @@ microseconds)) as seconds from now, or NIL for none."
       (loop
 	(cond ((null (gmutex-owner m))
 	       (setf (gmutex-owner m) self (gmutex-level m) 1)
-	       (return ps:true))
+	       (return qs:true))
 	      ((and (eq (gmutex-owner m) self) (eq (gmutex-kind m) :recursive))
 	       (incf (gmutex-level m))
-	       (return ps:true))
+	       (return qs:true))
 	      ((and (eq (gmutex-owner m) self) (eq (gmutex-kind m) :plain))
 	       (guile-error (ssym "misc-error") "lock-mutex" "mutex already locked by thread" '()))
 	      ((and deadline (zerop (seconds-left deadline)))
-	       (return ps:false))
+	       (return qs:false))
 	      (t (sb-thread:condition-wait (gmutex-queue m) (gmutex-lock m)
 					   :timeout (seconds-left deadline))))))))
 
@@ -72,7 +72,7 @@ microseconds)) as seconds from now, or NIL for none."
 
 (defun unlock-gmutex (m)
   (sb-thread:with-mutex ((gmutex-lock m)) (release-gmutex m))
-  ps:true)
+  qs:true)
 
 (defun wait-gcondvar (c m &optional timeout)
   ;; C's lock is taken before M is released, and a signal takes it, so a
@@ -93,7 +93,7 @@ microseconds)) as seconds from now, or NIL for none."
     (if broadcast
 	(sb-thread:condition-broadcast (gcondvar-queue c))
 	(sb-thread:condition-notify (gcondvar-queue c))))
-  ps:true)
+  qs:true)
 
 (defvar *vm*)				; vm.lisp: each thread's VM
 
@@ -109,13 +109,13 @@ element).")
 	     (sb-alien:extern-alien "thread_control_stack_size" sb-alien:unsigned)))
   (let ((out *standard-output*) (in *standard-input*) (err *error-output*)
 	(module *current-module*)
-	(params (ps-r7rs::thread-parameters-snapshot)))
+	(params (qs-r7rs::thread-parameters-snapshot)))
     (sb-thread:make-thread
      (lambda ()
-       (psx::with-thread-state
+       (qsx::with-thread-state
        (let ((*standard-output* out) (*standard-input* in) (*error-output* err)
 	     (*current-module* module)
-	     (ps-r7rs::*thread-parameters* params)
+	     (qs-r7rs::*thread-parameters* params)
 	     ;; a VM of its own (vm.lisp), made when first needed
 	     (*vm* nil))
 	 ;; an exhausted stack (SBCL's binding stack is of fixed size) is a
@@ -126,25 +126,25 @@ element).")
 		  (ignore-errors
 		   (format *error-output* "~&In thread:~%~A~%" (error-text c))
 		   (finish-output *error-output*))
-		  ps:false))
+		  qs:false))
 	   (handler-case
 	       (handler-case (with-guile-errors (funcall thunk))
 		 (storage-condition ()
 		   (with-guile-errors
-		     (guile-error (ssym "stack-overflow") ps:false "Stack overflow" '()))))
+		     (guile-error (ssym "stack-overflow") qs:false "Stack overflow" '()))))
 	     (error (c) (uncaught c)))))))
      :name "guile thread")))
 
 (defextension "scm_init_ice_9_threads"
   (list
    (cons "%call-with-new-thread" #'new-thread)
-   (cons "yield" (lambda () (sb-thread:thread-yield) ps:true))
+   (cons "yield" (lambda () (sb-thread:thread-yield) qs:true))
    (cons "thread?" (lambda (x) (bool (typep x 'sb-thread:thread))))
    (cons "current-thread" (lambda () sb-thread:*current-thread*))
    (cons "all-threads" (lambda () (sb-thread:list-all-threads)))
    (cons "thread-exited?" (lambda (th) (bool (not (sb-thread:thread-alive-p th)))))
    (cons "make-mutex" (lambda (&optional kind)
-			(let ((name (and kind (symbolp kind) (ps:scheme-symbol-name kind))))
+			(let ((name (and kind (symbolp kind) (qs:scheme-symbol-name kind))))
 			  (make-gmutex (cond ((equal name "recursive") :recursive)
 					     ((equal name "allow-external-unlock") :unowned)
 					     (t :plain))))))
@@ -155,7 +155,7 @@ element).")
 			      (wait-gcondvar cv m timeout)
 			      (unlock-gmutex m))))
    (cons "mutex?" (lambda (x) (bool (gmutex-p x))))
-   (cons "mutex-owner" (lambda (m) (or (gmutex-owner m) ps:false)))
+   (cons "mutex-owner" (lambda (m) (or (gmutex-owner m) qs:false)))
    (cons "mutex-level" (lambda (m) (gmutex-level m)))
    (cons "mutex-locked?" (lambda (m) (bool (plusp (gmutex-level m)))))
    (cons "make-condition-variable" #'make-gcondvar)

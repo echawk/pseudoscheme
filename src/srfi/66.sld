@@ -1,4 +1,4 @@
-;;; SRFI 66: octet vectors.  Written for Pseudoscheme, as a thin layer
+;;; SRFI 66: octet vectors.  Written for Quasischeme, as a thin layer
 ;;; over bytevectors (the SRFI's reference implementation wraps a vector
 ;;; in a record instead).  An octet vector is a bytevector, which is
 ;;; also SRFI 4's u8vector, so the procedures SRFI 4 has too are SRFI 4's

@@ -1,4 +1,4 @@
-;;; SRFI 163: Enhanced array literals.  Written for Pseudoscheme.  The
+;;; SRFI 163: Enhanced array literals.  Written for Quasischeme.  The
 ;;; reader reads #2a((1 2) (3 4)), #2u32@2@3((1 2) (2 3)), #0a sym and
 ;;; SRFI 58's #2A:fixZ32b(...) (src/read.scm), and makes the array with
 ;;; array-literal, which it takes from this library the first time.

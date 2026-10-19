@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Ports, natively: strategy B's stand-in for the io layer's ports,
 ;;;; enough for the expander to read modules (docs/racket.md, "How Racket
@@ -23,14 +23,14 @@
 ;;;; error, as sync's is.
 ;;;; Not yet: encodings other than UTF-8, progress events of the host's ports.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (deftype octets () '(simple-array (unsigned-byte 8) (*)))
 
 (defun make-octets (n) (make-array n :element-type '(unsigned-byte 8)))
 
 ;;; port-count-lines-enabled: new ports count lines when it is true
-(defvar *port-count-lines-enabled* (make-parameter* ps:false))
+(defvar *port-count-lines-enabled* (make-parameter* qs:false))
 (define-primitive "#%kernel" "port-count-lines-enabled" *port-count-lines-enabled*)
 
 (defun auto-count-lines () (truthy (funcall *port-count-lines-enabled*)))
@@ -246,7 +246,7 @@ byte string), for some of the bytes the caller asked for: the count
 					  (ip-peek-bytes proc skip buf 0 (length buf) blocking)
 					  (ip-read-bytes proc buf 0 (length buf) blocking))))
 			       (if (functionp n) (return (cons :special n)) n)))
-			    (peek (funcall proc buf skip (or progress-evt ps:false)))
+			    (peek (funcall proc buf skip (or progress-evt qs:false)))
 			    (t (funcall proc buf)))))
 	       (cond ((integerp r)
 		      (when (> r (length buf))
@@ -254,7 +254,7 @@ byte string), for some of the bytes the caller asked for: the count
 				      r (length buf)))
 		      (when (plusp r) (return r))
 		      (unless blocking (return :block)))
-		     ((eq r ps:eof-object) (return :eof))
+		     ((eq r qs:eof-object) (return :eof))
 		     ((member r '(:eof :block :progress)) (return r))
 		     ((rinport-p r)
 		      (unless (eq (rinport-kind r) :pipe)
@@ -265,7 +265,7 @@ byte string), for some of the bytes the caller asked for: the count
 			  (unless (nth-value 1 (evt-ready r))
 			    (racket-error "sync" "would block forever (one thread)"))
 			  (return :block)))
-		     ((eq r ps:false)
+		     ((eq r qs:false)
 		      (if progress-evt
 			  (return :progress)
 			  (racket-error who "returned #f when no progress evt was supplied")))
@@ -375,17 +375,17 @@ procedure, a special."
   "The byte SKIP bytes after P's position, or eof (or a special)."
   (if (and (null (rinport-fill p)) (null (rinport-custom p)))
       (let ((pos (+ (rinport-pos p) skip)))
-	(if (< pos (ip-end p)) (aref (rinport-bytes p) pos) ps:eof-object))
+	(if (< pos (ip-end p)) (aref (rinport-bytes p) pos) qs:eof-object))
       (let* ((tmp (make-octets 1))
 	     (r (ip-peek-bytes p skip tmp 0 1 t)))
 	(cond ((eql r 1) (aref tmp 0))
 	      ((functionp r) (if special-ok r (special-error who p)))
-	      (t ps:eof-object)))))
+	      (t qs:eof-object)))))
 
 (defun inport-read-byte (p &optional (who "read-byte") special-ok)
   (if (and (null (rinport-fill p)) (null (rinport-custom p)))
       (if (>= (rinport-pos p) (ip-end p))
-	  ps:eof-object
+	  qs:eof-object
 	  (let ((b (aref (rinport-bytes p) (rinport-pos p))))
 	    (ip-advance p 1)
 	    (when (rinport-count-lines p) (note-in-char p (if (< b #x80) (code-char b) #\?)))
@@ -394,7 +394,7 @@ procedure, a special."
 	     (r (ip-read-bytes p tmp 0 1 t)))
 	(cond ((eql r 1) (aref tmp 0))
 	      ((functionp r) (if special-ok r (special-error who p)))
-	      (t ps:eof-object)))))
+	      (t qs:eof-object)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Input: characters
@@ -423,7 +423,7 @@ at eof (or a special, and 1)."
 
 (defun inport-read-char (p &optional (who "read-char") special-ok)
   (multiple-value-bind (c n) (inport-peek-char p 0 who special-ok)
-    (cond ((null c) ps:eof-object)
+    (cond ((null c) qs:eof-object)
 	  ((functionp c) (ip-skip p 1) (note-special p) c)
 	  (t (ip-skip p n) (note-in-char p c) c))))
 
@@ -432,10 +432,10 @@ at eof (or a special, and 1)."
   (let ((out (make-string-output-stream)) (count 0))
     (loop while (< count n)
 	  do (let ((c (inport-read-char p who)))
-	       (when (eq c ps:eof-object) (return))
+	       (when (eq c qs:eof-object) (return))
 	       (write-char c out)
 	       (incf count)))
-    (if (and (zerop count) (plusp n)) ps:eof-object (get-output-stream-string out))))
+    (if (and (zerop count) (plusp n)) qs:eof-object (get-output-stream-string out))))
 
 (defun read-line-bytes (p mode who)
   "The bytes of P up to the next line separator of MODE (a string), which is consumed; or eof."
@@ -444,7 +444,7 @@ at eof (or a special, and 1)."
     (flet ((result () (coerce out 'octets)))
       (loop
 	(let ((b (inport-read-byte p who)))
-	  (cond ((eq b ps:eof-object) (return (if seen (result) ps:eof-object)))
+	  (cond ((eq b qs:eof-object) (return (if seen (result) qs:eof-object)))
 		(t (setq seen t)
 		   (cond ((and (= b 10) (member mode '("linefeed" "any" "any-one") :test #'string=))
 			  (return (result)))
@@ -462,7 +462,7 @@ at eof (or a special, and 1)."
 			 (t (vector-push-extend b out))))))))))
 
 (defun line-mode-name (who mode)
-  (let ((name (and (symbolp mode) (not (eq mode ps:false)) (not (eq mode ps:true)) (rname mode))))
+  (let ((name (and (symbolp mode) (not (eq mode qs:false)) (not (eq mode qs:true)) (rname mode))))
     (unless (member name '("linefeed" "return" "return-linefeed" "any" "any-one") :test #'equal)
       (racket-error who "contract violation~%  expected: (or/c 'linefeed 'return 'return-linefeed 'any 'any-one)~%  given: ~A"
 		    (written mode)))
@@ -520,10 +520,10 @@ at eof (or a special, and 1)."
 (defun host-fill (p need blocking)
   (declare (ignore need))
   (let ((host (rinport-host p)))
-    (if (and (not blocking) (not (truthy (funcall (psx:host-ref "char-ready?") host))))
+    (if (and (not blocking) (not (truthy (funcall (qsx:host-ref "char-ready?") host))))
 	:block
-	(let ((b (funcall (psx:host-ref "read-u8") host)))
-	  (if (eq b ps:eof-object)
+	(let ((b (funcall (qsx:host-ref "read-u8") host)))
+	  (if (eq b qs:eof-object)
 	      :eof
 	      (let ((v (make-octets 1)))
 		(setf (aref v 0) b)
@@ -533,7 +533,7 @@ at eof (or a special, and 1)."
 (defun host-adapter (who port)
   (or (gethash port *host-adapters*)
       (progn
-	(unless (truthy (funcall (psx:host-ref "input-port?") port))
+	(unless (truthy (funcall (qsx:host-ref "input-port?") port))
 	  (racket-error who "contract violation~%  expected: input-port?~%  given: ~A" (written port)))
 	(let ((p (new-lazy-inport (rsym "host") :host #'host-fill)))
 	  (setf (rinport-host p) port)
@@ -552,7 +552,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 				     finally (return ty))))
 		    (svref (struct-fields x) (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
 		  value)))
-	(and target (not (eq target ps:false)) target)))))
+	(and target (not (eq target qs:false)) target)))))
 
 (defun unwrap-port (x property)
   "X, or the port it stands for if it is a struct with PROPERTY."
@@ -581,12 +581,12 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 
 (defnative "read-char" (&optional port) ()
   (let ((p (input-port "read-char" port)))
-    (if (rinport-p p) (inport-read-char p "read-char") (funcall (psx:host-ref "read-char") p))))
+    (if (rinport-p p) (inport-read-char p "read-char") (funcall (qsx:host-ref "read-char") p))))
 (defnative "peek-char" (&optional port (skip 0)) ()
   (let ((p (input-port "peek-char" port)))
     (if (rinport-p p)
-	(or (inport-peek-char p skip "peek-char") ps:eof-object)
-	(funcall (psx:host-ref "peek-char") p))))
+	(or (inport-peek-char p skip "peek-char") qs:eof-object)
+	(funcall (qsx:host-ref "peek-char") p))))
 (defun wrap-special (p special source-name delta special-wrap)
   "A special SPECIAL that P produced, as read-char-or-special and the like return it."
   (if (eq special-wrap (rsym "special"))
@@ -595,29 +595,29 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 	(let ((v (funcall special source-name line (if (integerp col) (+ col delta) col)
 			  (if (integerp pos) (+ pos delta) pos))))
 	  (if (and special-wrap (truthy special-wrap)) (funcall special-wrap v) v)))))
-(defnative "read-char-or-special" (&optional port special-wrap (source-name ps:false)) ()
+(defnative "read-char-or-special" (&optional port special-wrap (source-name qs:false)) ()
   (let ((p (input-port "read-char-or-special" port)))
     (if (rinport-p p)
 	(let ((c (inport-read-char p "read-char-or-special" t)))
 	  (if (functionp c) (wrap-special p c source-name -1 special-wrap) c))
-	(funcall (psx:host-ref "read-char") p))))
-(defnative "peek-char-or-special" (&optional port (skip 0) special-wrap (source-name ps:false)) ()
+	(funcall (qsx:host-ref "read-char") p))))
+(defnative "peek-char-or-special" (&optional port (skip 0) special-wrap (source-name qs:false)) ()
   (let ((p (input-port "peek-char-or-special" port)))
     (if (rinport-p p)
 	(multiple-value-bind (c n) (inport-peek-char p skip "peek-char-or-special" t)
 	  (declare (ignore n))
-	  (cond ((null c) ps:eof-object)
+	  (cond ((null c) qs:eof-object)
 		((functionp c) (wrap-special p c source-name skip special-wrap))
 		(t c)))
-	(funcall (psx:host-ref "peek-char") p))))
+	(funcall (qsx:host-ref "peek-char") p))))
 (defnative "read-byte" (&optional port) ()
   (let ((p (input-port "read-byte" port)))
-    (if (rinport-p p) (inport-read-byte p "read-byte") (funcall (psx:host-ref "read-u8") p))))
+    (if (rinport-p p) (inport-read-byte p "read-byte") (funcall (qsx:host-ref "read-u8") p))))
 (defnative "peek-byte" (&optional port (skip 0)) ()
   (let ((p (input-port "peek-byte" port)))
     (if (rinport-p p)
 	(inport-peek-byte p skip "peek-byte")
-	(funcall (psx:host-ref "peek-u8") p))))
+	(funcall (qsx:host-ref "peek-u8") p))))
 
 (defun check-count (who n)
   (unless (and (integerp n) (>= n 0))
@@ -633,7 +633,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 	       (cond ((integerp r) (incf got r))
 		     ((functionp r) (special-error "read-bytes" p))
 		     (t (return)))))
-    (cond ((and (zerop got) (plusp n)) ps:eof-object)
+    (cond ((and (zerop got) (plusp n)) qs:eof-object)
 	  ((= got n) buf)
 	  (t (subseq buf 0 got)))))
 (defnative "peek-bytes" (n skip &optional port) ()
@@ -646,7 +646,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 	       (cond ((integerp r) (incf got r))
 		     ((functionp r) (special-error "peek-bytes" p))
 		     (t (return)))))
-    (cond ((and (zerop got) (plusp n)) ps:eof-object)
+    (cond ((and (zerop got) (plusp n)) qs:eof-object)
 	  ((= got n) buf)
 	  (t (subseq buf 0 got)))))
 (defnative "read-string" (n &optional port) ()
@@ -655,9 +655,9 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 (defnative "read-line" (&optional port (mode (rsym "linefeed"))) ()
   (let ((p (input-port "read-line" port)))
     (if (not (rinport-p p))
-	(funcall (psx:host-ref "read-line") p)
+	(funcall (qsx:host-ref "read-line") p)
 	(let ((line (read-line-bytes p (line-mode-name "read-line" mode) "read-line")))
-	  (if (eq line ps:eof-object) line (decode-utf-8 line))))))
+	  (if (eq line qs:eof-object) line (decode-utf-8 line))))))
 (defnative "read-bytes-line" (&optional port (mode (rsym "linefeed"))) ()
   (read-line-bytes (in-port "read-bytes-line" port) (line-mode-name "read-bytes-line" mode) "read-bytes-line"))
 
@@ -668,7 +668,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
       (funcall (custom-in-location (rinport-custom p)))
       (if (rinport-count-lines p)
 	  (values (rinport-line p) (rinport-column p) (rinport-position p))
-	  (values ps:false ps:false (1+ (+ (rinport-base p) (rinport-pos p)))))))
+	  (values qs:false qs:false (1+ (+ (rinport-base p) (rinport-pos p)))))))
 
 (defun outport-location (p)
   (if (and (routport-count-lines p)
@@ -677,7 +677,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
       (funcall (custom-out-location (routport-custom p)))
       (if (routport-count-lines p)
 	  (values (routport-line p) (routport-column p) (routport-position p))
-	  (values ps:false ps:false (1+ (out-position p))))))
+	  (values qs:false qs:false (1+ (out-position p))))))
 
 (defnative "port-count-lines!" (p) ()
   (setq p (unwrap-out (unwrap-in p)))
@@ -699,7 +699,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (setq p (unwrap-out (unwrap-in p)))
   (cond ((rinport-p p) (inport-location p))
 	((routport-p p) (outport-location p))
-	(t (values ps:false ps:false ps:false))))
+	(t (values qs:false qs:false qs:false))))
 
 (defun init-position-offset (init)
   "The bytes already read or written, for a custom port made with init-position INIT."
@@ -717,12 +717,12 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 (defnative "file-position" (p &optional (pos nil pos-p)) ()
   (setq p (unwrap-out (unwrap-in p)))
   (cond ((and pos-p (rinport-p p))
-	 (setf (rinport-pos p) (if (eq pos ps:eof-object) (ip-end p) (- pos (rinport-base p))))
+	 (setf (rinport-pos p) (if (eq pos qs:eof-object) (ip-end p) (- pos (rinport-base p))))
 	 *void*)
 	((and pos-p (routport-p p))
 	 (when (eq (routport-kind p) :file)
 	   (finish-output (routport-stream p))
-	   (file-position (routport-stream p) (if (eq pos ps:eof-object) (file-length (routport-stream p)) pos)))
+	   (file-position (routport-stream p) (if (eq pos qs:eof-object) (file-length (routport-stream p)) pos)))
 	 *void*)
 	((rinport-p p)
 	 (let ((c (rinport-custom p)))
@@ -735,7 +735,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (setq p (unwrap-out (unwrap-in p)))
   (cond ((rinport-p p) (+ (rinport-base p) (rinport-pos p)))
 	((routport-p p) (out-position p))
-	(t ps:false)))
+	(t qs:false)))
 
 (defun ip-ready (p)
   (let ((tmp (make-octets 1)))
@@ -743,10 +743,10 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 
 (defnative "char-ready?" (&optional port) ()
   (let ((p (input-port "char-ready?" port)))
-    (if (rinport-p p) (bool (ip-ready p)) (funcall (psx:host-ref "char-ready?") p))))
+    (if (rinport-p p) (bool (ip-ready p)) (funcall (qsx:host-ref "char-ready?") p))))
 (defnative "byte-ready?" (&optional port) ()
   (let ((p (input-port "byte-ready?" port)))
-    (if (rinport-p p) (bool (ip-ready p)) (funcall (psx:host-ref "char-ready?") p))))
+    (if (rinport-p p) (bool (ip-ready p)) (funcall (qsx:host-ref "char-ready?") p))))
 
 ;;; ------------------------------------------------------------------
 ;;; Closing
@@ -769,9 +769,9 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 
 (defnative "close-input-port" (p) ()
   (setq p (unwrap-in p))
-  (unless (or (rinport-p p) (truthy (funcall (psx:host-ref "input-port?") p)))
+  (unless (or (rinport-p p) (truthy (funcall (qsx:host-ref "input-port?") p)))
     (contract-error "close-input-port" "input-port?" p))
-  (if (rinport-p p) (close-inport p) (funcall (psx:host-ref "close-input-port") p))
+  (if (rinport-p p) (close-inport p) (funcall (qsx:host-ref "close-input-port") p))
   *void*)
 
 ;;; ------------------------------------------------------------------
@@ -818,14 +818,14 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
        n)
       (t
 	(loop repeat 100000
-	      do (let ((r (funcall w (subseq vec start end) 0 n (bool nonblock) ps:false)))
+	      do (let ((r (funcall w (subseq vec start end) 0 n (bool nonblock) qs:false)))
 		   (cond ((integerp r)
 			  (when (> r n)
 			    (racket-error "user port write" "result integer is larger than the supplied byte string~%  result: ~D~%  byte string length: ~D" r n))
 			  (if (plusp r)
 			      (return r)
 			      (racket-error "user port write" "bad result for non-flush write~%  result: ~A" r)))
-			 ((eq r ps:false) (when nonblock (return :block)))
+			 ((eq r qs:false) (when nonblock (return :block)))
 			 ((routport-p r)
 			  (return (out-write-some r vec start end nonblock)))
 			 ((evt-p r)
@@ -869,14 +869,14 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (out-emit port bytes))
 
 (defun host-write-bytes (p bytes start end)
-  (funcall (psx:host-ref "write-string") (decode-utf-8 bytes start end) p))
+  (funcall (qsx:host-ref "write-string") (decode-utf-8 bytes start end) p))
 
 (defun port-write-string (string port &optional (who "write-string"))
   "STRING to PORT, ours or the host's."
   (let ((p (output-port port who)))
     (if (routport-p p)
 	(out-emit p (bytes-of string))
-	(funcall (psx:host-ref "write-string") string p))))
+	(funcall (qsx:host-ref "write-string") string p))))
 
 (defnative "open-output-bytes" (&optional (name (rsym "string"))) ()
   (finish-outport (make-routport name)))
@@ -907,7 +907,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (let ((p (output-port port "write-byte")))
     (if (routport-p p)
 	(out-emit p (make-array 1 :element-type '(unsigned-byte 8) :initial-element byte))
-	(funcall (psx:host-ref "write-char") (code-char byte) p))
+	(funcall (qsx:host-ref "write-char") (code-char byte) p))
     *void*))
 
 (defun flush-outport (p)
@@ -919,14 +919,14 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
      (let ((w (custom-out-write-out (routport-custom p))))
        (cond
 	 ((routport-p w) (flush-outport w))
-	 ((streamp w) (funcall (psx:host-ref "flush-output-port") w))
+	 ((streamp w) (funcall (qsx:host-ref "flush-output-port") w))
 	 (t
 	   (loop repeat 100000
-		 do (let ((r (funcall w (make-octets 0) 0 0 ps:false ps:false)))
+		 do (let ((r (funcall w (make-octets 0) 0 0 qs:false qs:false)))
 		      (cond ((eql r 0) (return))
 			    ((evt-p r) (unless (nth-value 1 (evt-ready r))
 					 (racket-error "sync" "would block forever (one thread)")))
-			    ((eq r ps:false))
+			    ((eq r qs:false))
 			    (t (racket-error "flush-output" "weird result"))))
 		 finally (racket-error "flush-output" "would block forever (one thread)"))))))))
 
@@ -934,7 +934,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (let ((p (output-port port "flush-output")))
     (if (routport-p p)
 	(flush-outport p)
-	(funcall (psx:host-ref "flush-output-port") p))
+	(funcall (qsx:host-ref "flush-output-port") p))
     *void*))
 
 (defun close-outport (p)
@@ -949,9 +949,9 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 
 (defnative "close-output-port" (p) ()
   (setq p (unwrap-out p))
-  (unless (or (routport-p p) (truthy (funcall (psx:host-ref "output-port?") p)))
+  (unless (or (routport-p p) (truthy (funcall (qsx:host-ref "output-port?") p)))
     (contract-error "close-output-port" "output-port?" p))
-  (if (routport-p p) (close-outport p) (funcall (psx:host-ref "close-output-port") p))
+  (if (routport-p p) (close-outport p) (funcall (qsx:host-ref "close-output-port") p))
   *void*)
 
 ;;; ------------------------------------------------------------------
@@ -959,13 +959,13 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 
 (defnative "input-port?" (x) (:leaf t)
   (setq x (unwrap-in x))
-  (bool (or (rinport-p x) (truthy (funcall (psx:host-ref "input-port?") x)))))
+  (bool (or (rinport-p x) (truthy (funcall (qsx:host-ref "input-port?") x)))))
 (defnative "output-port?" (x) (:leaf t)
   (setq x (unwrap-out x))
-  (bool (or (routport-p x) (truthy (funcall (psx:host-ref "output-port?") x)))))
+  (bool (or (routport-p x) (truthy (funcall (qsx:host-ref "output-port?") x)))))
 (defnative "port?" (x) (:leaf t)
   (setq x (unwrap-out (unwrap-in x)))
-  (bool (or (rinport-p x) (routport-p x) (truthy (funcall (psx:host-ref "port?") x)))))
+  (bool (or (rinport-p x) (routport-p x) (truthy (funcall (qsx:host-ref "port?") x)))))
 (defnative "port-closed?" (p) (:leaf t)
   (setq p (unwrap-out (unwrap-in p)))
   (bool (cond ((rinport-p p) (rinport-closed p)) ((routport-p p) (routport-closed p)))))

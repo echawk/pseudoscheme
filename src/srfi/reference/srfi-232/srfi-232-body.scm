@@ -2,7 +2,7 @@
 ;;; SPDX-FileCopyrightText: 2024 Wolfgang Corcoran-Mathe
 ;;; (C) 2022 Wolfgang Corcoran-Mathe
 
-;; PSEUDOSCHEME: the (import (scheme base) (scheme case-lambda)) that
+;; QUASISCHEME: the (import (scheme base) (scheme case-lambda)) that
 ;; was here is in 232.sld; an import can't be included in a library body.
 
 (define-syntax curried

@@ -52,7 +52,7 @@
 
 ;; The sample tests this with SRFI 36's &read-error, which this SRFI 64
 ;; does not accept as an error type (it takes predicates) and which
-;; Pseudoscheme's reader does not raise (it raises R6RS &lexical); so
+;; Quasischeme's reader does not raise (it raises R6RS &lexical); so
 ;; the type here is R7RS's read-error? predicate instead.
 (test-group "test-property-error-type"
             (test-property-error-type read-error? make-read-error-property

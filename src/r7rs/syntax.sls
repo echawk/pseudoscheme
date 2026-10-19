@@ -3,15 +3,15 @@
 ;;;;
 ;;;; The (scheme ...) libraries that src/r7rs/front.lisp generates take
 ;;;; these from here and everything else from (rnrs ...) or the host.
-;;;; (pseudoscheme host) is the library of host procedures front.lisp
+;;;; (quasischeme host) is the library of host procedures front.lisp
 ;;;; installs at boot; it is imported with a % prefix.
 
-(library (pseudoscheme r7rs syntax)
+(library (quasischeme r7rs syntax)
   (export define-record-type parameterize define-values case cond-expand
           syntax-error delay-force include include-ci let-syntax letrec-syntax)
   (import (except (rnrs) define-record-type case let-syntax letrec-syntax)
           (prefix (only (rnrs) let-syntax letrec-syntax) rnrs:)
-          (prefix (pseudoscheme host) %))
+          (prefix (quasischeme host) %))
 
   ;; (define-record-type <name> (<constructor> <field> ...) <predicate>
   ;;   (<field> <accessor> [<modifier>]) ...)       R7RS 5.5
@@ -237,9 +237,9 @@
 ;;; (scheme repl) and (scheme r5rs) export the same bindings.  The
 ;;; interaction environment is the REPL's: eval of a definition or an
 ;;; import there works as at the REPL.
-(library (pseudoscheme r7rs environments)
+(library (quasischeme r7rs environments)
   (export r7rs-environment r7rs-interaction-environment r7rs-eval)
-  (import (rnrs) (rnrs eval) (prefix (pseudoscheme host) %))
+  (import (rnrs) (rnrs eval) (prefix (quasischeme host) %))
   (define (r7rs-environment . specs)
     (apply environment (map %r7rs:translate-import-set specs)))
   (define (r7rs-interaction-environment)

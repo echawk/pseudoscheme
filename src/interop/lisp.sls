@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; (pseudoscheme lisp): Scheme's side of the Lisp bridge
+;;;; (quasischeme lisp): Scheme's side of the Lisp bridge
 ;;;;
 ;;;; Lisp packages themselves are imported as (cl <package>) libraries
 ;;;; (src/interop.lisp); this library has what's left over: Lisp truth,
@@ -35,11 +35,11 @@
 
 ;;; The transformers of the (cl ...) libraries' macros, variables and
 ;;; other symbols (src/interop.lisp), in a library of their own so that
-;;; (pseudoscheme lisp) can use them in its own macros.
-(library (pseudoscheme lisp transformers)
+;;; (quasischeme lisp) can use them in its own macros.
+(library (quasischeme lisp transformers)
   (export lisp-macro-transformer lisp-variable-transformer
           lisp-symbol-transformer %%lisp-symbol)
-  (import (rnrs) (pseudoscheme lisp primitives))
+  (import (rnrs) (quasischeme lisp primitives))
 
   ;; A keyword the (cl ...) libraries' variable macros recognize:
   ;; (*print-base* %%lisp-symbol) is the symbol *PRINT-BASE*.
@@ -121,14 +121,14 @@
          (id (identifier? #'id) (with-syntax ((s (datum->syntax #'id symbol))) #''s))))
      symbol)))
 
-(library (pseudoscheme lisp)
+(library (quasischeme lisp)
   (export lisp-true? lisp-false? lisp-symbol lisp-keyword lisp-function
           lisp-funcall lisp-apply lisp-value set-lisp-value!
           call-with-lisp-bindings lisp-require lisp-eval-string verbatim
           lisp-let lisp-symbol-of lisp-set! %%lisp-symbol
           lisp-macro-transformer lisp-variable-transformer
           lisp-symbol-transformer lisp)
-  (import (rnrs) (pseudoscheme lisp primitives) (pseudoscheme lisp transformers))
+  (import (rnrs) (quasischeme lisp primitives) (quasischeme lisp transformers))
 
 
   (define-syntax lisp-symbol-of

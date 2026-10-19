@@ -1,4 +1,4 @@
-# Our libguile: Guile's C API on Pseudoscheme
+# Our libguile: Guile's C API on Quasischeme
 
 `--guile` runs Guile's Scheme (docs/guile.md). Much of the Guile
 world is also C written against **libguile**, Guile's C library:
@@ -9,11 +9,11 @@ world is also C written against **libguile**, Guile's C library:
 `src/libguile/` is a libguile of our own. It is
 `libguile-3.0.so.1`, **ABI-compatible with GNU Guile 3.0.11**: code
 compiled against Guile's own headers runs on it unchanged, with
-Pseudoscheme's Guile mode in place of Guile's VM. It is a thin C layer
+Quasischeme's Guile mode in place of Guile's VM. It is a thin C layer
 over the Guile mode, which is Lisp.
 
 Status (October 2026):
-- **Extensions under `pseudoscheme --guile`: working.**
+- **Extensions under `quasischeme --guile`: working.**
   tests/libguile/ext-basic.c is built against Guile 3.0.11's headers. It
   exercises the inline macros, in-place mutation from C, errors,
   callbacks, smobs, foreign objects and dynwind. Its output is the
@@ -52,7 +52,7 @@ Nothing changes in how it's called:
 (load-extension "/path/to/guile-foo.so" "scm_init_foo")
 ```
 
-Under `pseudoscheme --guile`, `load-extension` first looks for one of
+Under `quasischeme --guile`, `load-extension` first looks for one of
 the Guile mode's built-in extensions. If there is none and the library
 is a file it can find, it:
 1. loads our libguile into the process;
@@ -65,7 +65,7 @@ The extension is found:
 - or in the directories of `GUILE_EXTENSIONS_PATH`.
 
 Our libguile itself is `build/libguile/libguile-3.0.so.1`.
-`PSEUDOSCHEME_LIBGUILE` names another copy.
+`QUASISCHEME_LIBGUILE` names another copy.
 
 Build it with:
 
@@ -86,7 +86,7 @@ To link against our library instead of an installed Guile, point the
 linker at it. Both have the soname `libguile-3.0.so.1`:
 
 ```sh
-cc ... -L/path/to/pseudoscheme/build/libguile -lguile-3.0
+cc ... -L/path/to/quasischeme/build/libguile -lguile-3.0
 ```
 
 The headers are Guile's (LGPL), from a Guile installation or its
@@ -235,7 +235,7 @@ before). A C loop that calls only readers is the fast path; one that
 calls anything else (`scm_call_n`, `scm_primitive_eval`) pays the walk
 the first time it passes each structure after that.
 
-`PSEUDOSCHEME_LIBGUILE_PROFILE=1` prints, at exit and every 20,000
+`QUASISCHEME_LIBGUILE_PROFILE=1` prints, at exit and every 20,000
 calls, each function's own time (what it calls into isn't counted), its
 calls, and the entries it wrote to and read from mirrors;
 `=sprof` runs SBCL's statistical profiler (`SBCL_HOME` must name its
@@ -246,15 +246,15 @@ contrib). `PROFILE=1` in tests/lilypond/time.sh runs one score so.
 For a C `main` that calls `scm_with_guile` or `scm_boot_guile`, the
 library starts Lisp itself, at its first call:
 - SBCL is built as a shared library, `libsbcl.so`; the container has one.
-- `make -C src/libguile core` saves `build/libguile/pseudoscheme-guile.core`
+- `make -C src/libguile core` saves `build/libguile/quasischeme-guile.core`
   (build-core.lisp): the command line's system, which has the Guile mode
   booted, with `start-embedded` (impl.lisp) on `*init-hooks*` and
   `psg-entry` as a callable export. SBCL's start-up then returns to C,
   and writes the export's address into core.c's `psg_entry`.
 - core.c's `boot_entry` is the entry point until then. It `dlopen`s
-  `libsbcl.so` (`PSEUDOSCHEME_LIBSBCL`) and calls `initialize_lisp` on the
-  core, which is beside the library or named by `PSEUDOSCHEME_GUILE_CORE`
-  (`PSEUDOSCHEME_HEAP` is the heap limit, 8GB).
+  `libsbcl.so` (`QUASISCHEME_LIBSBCL`) and calls `initialize_lisp` on the
+  core, which is beside the library or named by `QUASISCHEME_GUILE_CORE`
+  (`QUASISCHEME_HEAP` is the heap limit, 8GB).
 - A call from the C main thread then arrives as a callback on a foreign
   thread; errors become Guile exceptions (`with-guile-errors`) from the
   first call on, and `scm_boot_guile` and `scm_shell` are in api.lisp.
@@ -282,10 +282,10 @@ What embedding needed beyond the extension case:
 - Scheme procedures that change their arguments (`reverse!`, `append!`)
   are written back to the mirrors C holds.
 
-Debugging: `PSEUDOSCHEME_LIBGUILE_PROFILE` (see "Dirty tracking"),
-`PSEUDOSCHEME_LIBGUILE_TRACE=1` prints each libguile function
+Debugging: `QUASISCHEME_LIBGUILE_PROFILE` (see "Dirty tracking"),
+`QUASISCHEME_LIBGUILE_TRACE=1` prints each libguile function
 C calls; `=2` also their arguments, from the call number in
-`PSEUDOSCHEME_LIBGUILE_TRACE_AFTER` on.
+`QUASISCHEME_LIBGUILE_TRACE_AFTER` on.
 
 ## LilyPond
 

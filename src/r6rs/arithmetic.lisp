@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs arithmetic fixnums (6)), (rnrs arithmetic flonums (6)) and
 ;;;; (rnrs arithmetic bitwise (6)): library report chapter 11.
@@ -9,10 +9,10 @@
 ;;;; operations are CL's LOGxxx on integers, which already use the
 ;;;; two's-complement view R6RS specifies.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defun implementation-restriction (who message &rest irritants)
-  (ps-r7rs:raise-object
+  (qs-r7rs:raise-object
    (funcall (prim "condition")
 	    (funcall (prim "make-implementation-restriction-violation"))
 	    (funcall (prim "make-who-condition") who)
@@ -233,12 +233,12 @@
        ,@body)))
 
 (defmacro ieee (&body body)
-  `(ps:call-with-ieee-arithmetic (lambda () ,@body)))
+  `(qs:call-with-ieee-arithmetic (lambda () ,@body)))
 
 (defprim "flonum?" (x) (bool (typep x 'double-float)))
 (defprim "real->flonum" (x)
   (unless (realp x) (r6rs-assertion-violation "real->flonum" "not a real number" x))
-  (ps:inexact x))
+  (qs:inexact x))
 (defprim "fixnum->flonum" (x) (check-fx "fixnum->flonum" x) (coerce x 'double-float))
 
 (defmacro def-fl-compare (name op)
@@ -252,7 +252,7 @@
 (def-fl-compare "fl<=?" <=)
 (def-fl-compare "fl>=?" >=)
 
-(defun fl-finite-p (x) (not (or (ps:nan-p x) (ps:infinite-p x))))
+(defun fl-finite-p (x) (not (or (qs:nan-p x) (qs:infinite-p x))))
 (def-fl "flinteger?" (x) (bool (and (fl-finite-p x) (= x (ffloor x)))))
 (def-fl "flzero?" (x) (bool (zerop x)))
 (def-fl "flpositive?" (x) (bool (plusp x)))
@@ -264,12 +264,12 @@
   (unless (and (fl-finite-p x) (= x (ffloor x))) (r6rs-assertion-violation "fleven?" "not an integer" x))
   (bool (evenp (truncate x))))
 (def-fl "flfinite?" (x) (bool (fl-finite-p x)))
-(def-fl "flinfinite?" (x) (bool (ps:infinite-p x)))
-(def-fl "flnan?" (x) (bool (ps:nan-p x)))
+(def-fl "flinfinite?" (x) (bool (qs:infinite-p x)))
+(def-fl "flnan?" (x) (bool (qs:nan-p x)))
 
 (defun fl-extreme (pred x more)
-  (if (or (ps:nan-p x) (some #'ps:nan-p more))
-      ps::+nan+
+  (if (or (qs:nan-p x) (some #'qs:nan-p more))
+      qs::+nan+
       (reduce (lambda (a b) (if (funcall pred b a) b a)) more :initial-value x)))
 (def-fl "flmax" (x &rest more) (dolist (m more) (check-fl "flmax" m)) (fl-extreme #'> x more))
 (def-fl "flmin" (x &rest more) (dolist (m more) (check-fl "flmin" m)) (fl-extreme #'< x more))
@@ -299,7 +299,7 @@
   (if (and (fl-finite-p x) (not (zerop x))) (coerce (numerator (rational x)) 'double-float) x))
 (def-fl "fldenominator" (x)
   (cond ((fl-finite-p x) (coerce (denominator (rational x)) 'double-float))
-	((ps:nan-p x) x)
+	((qs:nan-p x) x)
 	(t 1d0)))
 
 ;; (VALUES ...): CL's FFLOOR and friends also return the remainder.
@@ -310,13 +310,13 @@
 
 (defun real-result (z)
   "CL returns complexes where R6RS flonum operations want NaN."
-  (if (complexp z) ps::+nan+ z))
+  (if (complexp z) qs::+nan+ z))
 
 (def-fl "flexp" (x) (ieee (exp x)))
 (defprim "fllog" (x &optional (base nil base-p))
   (check-fl "fllog" x)
-  (ieee (cond ((and (zerop x) (not base-p)) ps::-inf+)
-	      ((< x 0) ps::+nan+)
+  (ieee (cond ((and (zerop x) (not base-p)) qs::-inf+)
+	      ((< x 0) qs::+nan+)
 	      (base-p (check-fl "fllog" base) (real-result (/ (log x) (log base))))
 	      (t (log x)))))
 (def-fl "flsin" (x) (ieee (sin x)))
@@ -327,7 +327,7 @@
 (defprim "flatan" (y &optional (x nil x-p))
   (check-fl "flatan" y)
   (ieee (if x-p (progn (check-fl "flatan" x) (atan y x)) (atan y))))
-(def-fl "flsqrt" (x) (ieee (if (minusp x) (if (eql x -0d0) x ps::+nan+) (sqrt x))))
+(def-fl "flsqrt" (x) (ieee (if (minusp x) (if (eql x -0d0) x qs::+nan+) (sqrt x))))
 (def-fl "flexpt" (x y) (ieee (real-result (expt x y))))
 ;;; ------------------------------------------------------------------
 ;;; Generic arithmetic where R6RS asks more than R7RS (11.7.4.3, 11.7.4.4)
@@ -335,21 +335,21 @@
 (defprim "log" (x &optional (base nil base-p))
   (when (or (eql x 0) (and base-p (eql base 0)))
     (r6rs-assertion-violation "log" "undefined for exact zero" x))
-  (if base-p (ps:scheme-log x base) (ps:scheme-log x)))
+  (if base-p (qs:scheme-log x base) (qs:scheme-log x)))
 
 (defprim "expt" (base power)
   (if (and (eql base 0) (numberp power) (minusp (realpart power)))
-      (ps-r7rs:raise-object
+      (qs-r7rs:raise-object
        (make-standard-condition "make-implementation-restriction-violation" "expt"
 				"exact zero to a negative power" (list base power))
        nil)
-      (ps:scheme-expt base power)))
+      (qs:scheme-expt base power)))
 
 ;; The precision, a mantissa width, may be ignored: a flonum's shortest
 ;; representation reads back as the same flonum.
 (defprim "number->string" (z &optional (radix 10) precision)
   (declare (ignore precision))
-  (ps:format-scheme-number z radix))
+  (qs:format-scheme-number z radix))
 
 (defprim "integer->char" (n)
   (unless (and (integerp n) (or (<= 0 n #xD7FF) (<= #xE000 n #x10FFFF)))

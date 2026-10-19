@@ -1,4 +1,4 @@
-;;; SRFI 109: Extended string quasi-literals.  Written for Pseudoscheme.
+;;; SRFI 109: Extended string quasi-literals.  Written for Quasischeme.
 ;;; The reader reads &{text} (src/quasi.lisp) as ($string$ part ...),
 ;;; the parts strings, entity references ($entity$:name, for an entity
 ;;; it doesn't know) and enclosed expressions between $<<$ and $>>$.

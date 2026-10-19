@@ -4,7 +4,7 @@
 ;;;; library path, the compiler's entry points and parameters, and
 ;;;; Chez's extra syntax.  Part of the library's body
 ;;;; (src/chez/chez.lisp), whose host procedures run at Chez's top level
-;;;; (pseudoscheme --chez).
+;;;; (quasischeme --chez).
 
 ;;; eval: in the interaction environment by default, the top level a
 ;;; Chez script or the REPL runs at
@@ -674,7 +674,7 @@
 (define get-process-id %chez:get-process-id)
 (define char-ready? %char-ready?)
 (define putenv %chez:putenv)
-(define (scheme-version) "Pseudoscheme (as Chez Scheme Version 10.4.1)")
+(define (scheme-version) "Quasischeme (as Chez Scheme Version 10.4.1)")
 (define (scheme-version-number) (values 10 4 1))
 (define (petite?) #f)
 (define (interactive?) #f)

@@ -3,20 +3,20 @@
 # each src/srfi/tests/N.scm is an R7RS program that exits 0 when its
 # tests pass (SRFI 64, mostly).
 #
-#   sh tests/run-srfi-tests.sh [PSEUDOSCHEME [N ...]]
+#   sh tests/run-srfi-tests.sh [QUASISCHEME [N ...]]
 #
-# PSEUDOSCHEME is the command-line program (default bin/pseudoscheme);
+# QUASISCHEME is the command-line program (default bin/quasischeme);
 # N ... the SRFIs to test (default: all).  Each test runs in a scratch
 # directory of its own (SRFI 64 writes a log file in the current one),
 # at most $SRFI_TEST_TIMEOUT seconds (default 120); a failure's output
 # is kept there, as N.out.
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-ps=${1:-$root/bin/pseudoscheme}
+ps=${1:-$root/bin/quasischeme}
 case $ps in /*) ;; *) ps=$(pwd)/$ps ;; esac
 [ $# -gt 0 ] && shift
 limit=${SRFI_TEST_TIMEOUT:-120}
-work=$(mktemp -d "${TMPDIR:-/tmp}/pseudoscheme-srfi-tests.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/quasischeme-srfi-tests.XXXXXX")
 
 if [ -t 1 ]; then
   green=$(printf '\033[32m'); red=$(printf '\033[31m'); dim=$(printf '\033[2m'); off=$(printf '\033[0m')

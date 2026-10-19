@@ -1,6 +1,6 @@
-;;; SRFI 254: Ephemerons and guardians.  Written for Pseudoscheme, on
+;;; SRFI 254: Ephemerons and guardians.  Written for Quasischeme, on
 ;;; SBCL's weak pointers, weak hash tables and finalizers; the Lisp is
-;;; in a package of its own, PSEUDOSCHEME-SRFI-254, made when the
+;;; in a package of its own, QUASISCHEME-SRFI-254, made when the
 ;;; library is loaded.  (The SRFI's sample implementation is for Chez
 ;;; Scheme.)
 ;;;
@@ -30,13 +30,13 @@
           transport-cell? transport-cell-key transport-cell-value
           transport-cell-broken?)
   (import (scheme base) (scheme case-lambda)
-          (only (pseudoscheme lisp) lisp-eval-string))
+          (only (quasischeme lisp) lisp-eval-string))
   (begin
     (lisp-eval-string
-     "(defpackage \"PSEUDOSCHEME-SRFI-254\" (:use \"COMMON-LISP\"))")
+     "(defpackage \"QUASISCHEME-SRFI-254\" (:use \"COMMON-LISP\"))")
     (lisp-eval-string
      ;; read in the package, so that defstruct's accessors are made there
-     "(let ((*package* (find-package \"PSEUDOSCHEME-SRFI-254\")))
+     "(let ((*package* (find-package \"QUASISCHEME-SRFI-254\")))
        (eval (read-from-string \"(progn
         (defstruct (ephemeron (:constructor %make-ephemeron (pointer))) pointer)
         (defvar *values* (make-hash-table :test 'eq :weakness :key :synchronized t))
@@ -52,32 +52,32 @@
     (define %make-ephemeron
       (lisp-eval-string
        "(lambda (key value)
-          (let ((e (pseudoscheme-srfi-254::%make-ephemeron (sb-ext:make-weak-pointer key))))
-            (let ((inner (or (gethash key pseudoscheme-srfi-254::*values*)
-                             (setf (gethash key pseudoscheme-srfi-254::*values*)
+          (let ((e (quasischeme-srfi-254::%make-ephemeron (sb-ext:make-weak-pointer key))))
+            (let ((inner (or (gethash key quasischeme-srfi-254::*values*)
+                             (setf (gethash key quasischeme-srfi-254::*values*)
                                    (make-hash-table :test 'eq :weakness :key :synchronized t)))))
               (setf (gethash e inner) value))
             e))"))
     (define %ephemeron?
       (lisp-eval-string
-       "(lambda (x) (if (pseudoscheme-srfi-254::ephemeron-p x) t ps:false))"))
+       "(lambda (x) (if (quasischeme-srfi-254::ephemeron-p x) t qs:false))"))
     ;; the key, and whether the ephemeron is unbroken
     (define %ephemeron-key
       (lisp-eval-string
        "(lambda (e)
           (multiple-value-bind (key alive)
-              (sb-ext:weak-pointer-value (pseudoscheme-srfi-254::ephemeron-pointer e))
-            (values (if alive key ps:false) (if alive t ps:false))))"))
+              (sb-ext:weak-pointer-value (quasischeme-srfi-254::ephemeron-pointer e))
+            (values (if alive key qs:false) (if alive t qs:false))))"))
     (define %ephemeron-value
       (lisp-eval-string
        "(lambda (e)
           (multiple-value-bind (key alive)
-              (sb-ext:weak-pointer-value (pseudoscheme-srfi-254::ephemeron-pointer e))
-            (let ((inner (and alive (gethash key pseudoscheme-srfi-254::*values*))))
-              (if inner (gethash e inner ps:false) ps:false))))"))
+              (sb-ext:weak-pointer-value (quasischeme-srfi-254::ephemeron-pointer e))
+            (let ((inner (and alive (gethash key quasischeme-srfi-254::*values*))))
+              (if inner (gethash e inner qs:false) qs:false))))"))
     (define reference-barrier
       (lisp-eval-string
-       "(lambda (x) (sb-sys:with-pinned-objects (x) (values)) ps:unspecific)"))
+       "(lambda (x) (sb-sys:with-pinned-objects (x) (values)) qs:unspecific)"))
 
     (define (check-ephemeron who e)
       (unless (%ephemeron? e) (error (string-append who ": not an ephemeron") e)))
@@ -106,28 +106,28 @@
     (define %make-guardian
       (lisp-eval-string
        "(lambda ()
-          (let* ((state (pseudoscheme-srfi-254::make-guardian-state))
+          (let* ((state (quasischeme-srfi-254::make-guardian-state))
                  (guardian
                    (lambda (&rest args)
                      (cond ((= (length args) 2)
                             (let ((rep (second args)))
                               (sb-ext:finalize (first args)
                                                (lambda ()
-                                                 (sb-thread:with-mutex ((pseudoscheme-srfi-254::guardian-state-lock state))
-                                                   (push rep (pseudoscheme-srfi-254::guardian-state-queue state))))
+                                                 (sb-thread:with-mutex ((quasischeme-srfi-254::guardian-state-lock state))
+                                                   (push rep (quasischeme-srfi-254::guardian-state-queue state))))
                                                :dont-save t))
-                            ps:unspecific)
+                            qs:unspecific)
                            ((null args)
-                            (sb-thread:with-mutex ((pseudoscheme-srfi-254::guardian-state-lock state))
-                              (if (pseudoscheme-srfi-254::guardian-state-queue state)
-                                  (pop (pseudoscheme-srfi-254::guardian-state-queue state))
-                                  ps:false)))
+                            (sb-thread:with-mutex ((quasischeme-srfi-254::guardian-state-lock state))
+                              (if (quasischeme-srfi-254::guardian-state-queue state)
+                                  (pop (quasischeme-srfi-254::guardian-state-queue state))
+                                  qs:false)))
                            (t (error \"guardian: takes an object and its representative, or nothing\"))))))
-            (setf (gethash guardian pseudoscheme-srfi-254::*guardians*) t)
+            (setf (gethash guardian quasischeme-srfi-254::*guardians*) t)
             guardian))"))
     (define %guardian?
       (lisp-eval-string
-       "(lambda (x) (if (and (functionp x) (gethash x pseudoscheme-srfi-254::*guardians*)) t ps:false))"))
+       "(lambda (x) (if (and (functionp x) (gethash x quasischeme-srfi-254::*guardians*)) t qs:false))"))
     (define (make-guardian) (%make-guardian))
     (define (guardian? x) (%guardian? x))
 
@@ -142,37 +142,37 @@
                  (guardian
                    (lambda (&rest args)
                      (cond ((= (length args) 2)
-                            (let ((cell (pseudoscheme-srfi-254::%make-transport-cell
+                            (let ((cell (quasischeme-srfi-254::%make-transport-cell
                                          (sb-ext:make-weak-pointer (first args)) (second args)
-                                         pseudoscheme-srfi-254::*gc-epoch*)))
+                                         quasischeme-srfi-254::*gc-epoch*)))
                               (sb-thread:with-mutex (lock) (push cell cells))
                               cell))
                            ((null args)
                             (sb-thread:with-mutex (lock)
                               (let ((moved (find-if (lambda (c)
-                                                      (< (pseudoscheme-srfi-254::transport-cell-epoch c)
-                                                         pseudoscheme-srfi-254::*gc-epoch*))
+                                                      (< (quasischeme-srfi-254::transport-cell-epoch c)
+                                                         quasischeme-srfi-254::*gc-epoch*))
                                                     cells)))
                                 (if moved
                                     (progn (setq cells (delete moved cells)) moved)
-                                    ps:false))))
+                                    qs:false))))
                            (t (error \"transport cell guardian: takes a key and a value, or nothing\"))))))
-            (setf (gethash guardian pseudoscheme-srfi-254::*cell-guardians*) t)
+            (setf (gethash guardian quasischeme-srfi-254::*cell-guardians*) t)
             guardian))"))
     (define %transport-cell-guardian?
       (lisp-eval-string
-       "(lambda (x) (if (and (functionp x) (gethash x pseudoscheme-srfi-254::*cell-guardians*)) t ps:false))"))
+       "(lambda (x) (if (and (functionp x) (gethash x quasischeme-srfi-254::*cell-guardians*)) t qs:false))"))
     (define %transport-cell?
       (lisp-eval-string
-       "(lambda (x) (if (pseudoscheme-srfi-254::transport-cell-p x) t ps:false))"))
+       "(lambda (x) (if (quasischeme-srfi-254::transport-cell-p x) t qs:false))"))
     (define %transport-cell-key
       (lisp-eval-string
        "(lambda (c)
           (multiple-value-bind (key alive)
-              (sb-ext:weak-pointer-value (pseudoscheme-srfi-254::transport-cell-pointer c))
-            (values (if alive key ps:false) (if alive t ps:false))))"))
+              (sb-ext:weak-pointer-value (quasischeme-srfi-254::transport-cell-pointer c))
+            (values (if alive key qs:false) (if alive t qs:false))))"))
     (define %transport-cell-value
-      (lisp-eval-string "(lambda (c) (pseudoscheme-srfi-254::transport-cell-value c))"))
+      (lisp-eval-string "(lambda (c) (quasischeme-srfi-254::transport-cell-value c))"))
 
     (define (check-cell who c)
       (unless (%transport-cell? c) (error (string-append who ": not a transport cell") c)))

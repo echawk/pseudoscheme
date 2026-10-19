@@ -1,7 +1,7 @@
 # Standalone executables
 
 ```sh
-bin/pseudoscheme [MODE-FLAG] [-L DIR] [-D FEATURE] --compile FILE [-o OUT]
+bin/quasischeme [MODE-FLAG] [-L DIR] [-D FEATURE] --compile FILE [-o OUT]
 ./OUT ARGUMENT ...
 ```
 
@@ -9,17 +9,17 @@ bin/pseudoscheme [MODE-FLAG] [-L DIR] [-D FEATURE] --compile FILE [-o OUT]
 `--r5rs`, `--r4rs`, `--ieee`, `--r3rs`, `--r2rs`, `--rrs`, `--chez`,
 `--guile`, `--racket`).  OUT is FILE without its extension if `-o` is not
 given.  SRFI 138's `compile-r7rs [-I dir] [-A dir] [-D feature] [-o out] FILE`
-(a link to `bin/pseudoscheme`) is the same as `--compile` in R7RS mode.
+(a link to `bin/quasischeme`) is the same as `--compile` in R7RS mode.
 
-The executable is an image of `bin/pseudoscheme` with FILE's work done at
+The executable is an image of `bin/quasischeme` with FILE's work done at
 build time, so it starts in about 0.05 s (0.15 s for a Racket program of
 `#lang racket`).  It needs no repository, no caches, no source files and
-not `bin/pseudoscheme`, and it ignores `~/.sbclrc`.  Its arguments are the
+not `bin/quasischeme`, and it ignores `~/.sbclrc`.  Its arguments are the
 program's: `(command-line)` (R6RS, R7RS, Chez; the first element is the
 executable's name), Guile's `(program-arguments)`, Racket's
 `(current-command-line-arguments)`.  Its exit status, the flushing of
 output and the reporting of errors are those of running the program
-(`bin/pseudoscheme FILE`); an uncaught error exits with 70 (Guile and
+(`bin/quasischeme FILE`); an uncaught error exits with 70 (Guile and
 Racket: 1), `(exit n)` with n.  Control-C exits with 130.
 
 | mode | at build time | at start-up |
@@ -51,13 +51,13 @@ Differences from running the program:
 ## Sizes and the runtime options
 
 The executable is 140 MB (Racket: 200 MB for `racket/base`, 500 MB for
-`#lang racket`).  It keeps the heap limit of `bin/pseudoscheme` (8 GB, see
+`#lang racket`).  It keeps the heap limit of `bin/quasischeme` (8 GB, see
 `contrib/cli/Makefile`) and its 256 MB main-thread control stack: SBCL
 saves the thread stack size with the image (UIOP saves the runtime's
 options), and by the time of the build `limit-thread-stacks` had lowered it
 for threads to 32 MB, so `build-executable` sets it back to the main
 thread's own size before saving, and the executable lowers it for its
-threads again at start-up.  `PSEUDOSCHEME_THREAD_STACK_SIZE` works in the
+threads again at start-up.  `QUASISCHEME_THREAD_STACK_SIZE` works in the
 executable.  Racket's `current-directory` is set from the real one at
 start-up (a saved image's is the build's).
 

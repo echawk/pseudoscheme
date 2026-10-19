@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strings, vectors, bytes, dates and the rest of #%kernel's data
 ;;;; primitives, natively: comparisons that take one or more arguments,
@@ -12,7 +12,7 @@
 ;;;; native.lisp's *HOST-SHARED* name some of the same procedures and win
 ;;;; over a native: those entries must go for these to be used.)
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Argument checks, as Racket's messages go
@@ -32,7 +32,7 @@
   (unless (typep x '(integer 0)) (contract-error who "exact-nonnegative-integer?" x))
   x)
 
-(defun absent-p (x) (or (null x) (eq x ps:false)))
+(defun absent-p (x) (or (null x) (eq x qs:false)))
 
 (defun check-range (who start end len kind value)
   "START and END (absent: the ends) as indices into VALUE, of length LEN
@@ -305,7 +305,7 @@ its character (an error as ERR-CHAR if given), or NIL."
 
 (defnative "bytes-utf-8-index" (b skip &optional err-char start end) (:leaf t)
   (multiple-value-bind (i end) (utf8-skip "bytes-utf-8-index" b skip err-char start end)
-    (if (and i (< i end)) i ps:false)))
+    (if (and i (< i end)) i qs:false)))
 
 (defnative "bytes-utf-8-ref" (b skip &optional err-char start end) (:leaf t)
   (multiple-value-bind (i end) (utf8-skip "bytes-utf-8-ref" b skip err-char start end)
@@ -314,8 +314,8 @@ its character (an error as ERR-CHAR if given), or NIL."
 	  (declare (ignore next))
 	  (cond ((eq status :ok) (code-char code))
 		((characterp err-char) err-char)
-		(t ps:false)))
-	ps:false)))
+		(t qs:false)))
+	qs:false)))
 
 ;;; Grapheme clusters (UAX #29), from Racket's own tables: the break
 ;;; property of each character that isn't Other or a Hangul syllable,
@@ -754,7 +754,7 @@ of the square roots of the first (or the ninth to sixteenth) primes."
       (let ((read-bytes (native-function (gethash "read-bytes" *natives*)))
 	    (chunks '()))
 	(loop for chunk = (funcall read-bytes 65536 b)
-	      until (eq chunk ps:eof-object)
+	      until (eq chunk qs:eof-object)
 	      do (push chunk chunks))
 	(apply #'concatenate 'octets (nreverse chunks)))))
 
@@ -1026,7 +1026,7 @@ of the square roots of the first (or the ninth to sixteenth) primes."
 	      (let ((c (make-bconv f k)))
 		(setf (bconv-bom-pending c) (and (member k '(:utf16 :utf32)) t))
 		c)
-	      ps:false)))))
+	      qs:false)))))
 
 (defnative "bytes-converter?" (x) (:leaf t) (bool (bconv-p x)))
 
@@ -1328,7 +1328,7 @@ of the square roots of the first (or the ninth to sixteenth) primes."
   (cond ((zerop (length s)) (racket-error "string->path-element" "path string is empty"))
 	((or (find #\/ s) (find (code-char 0) s) (string= s ".") (string= s ".."))
 	 (if (and false-on-non-element? (truthy false-on-non-element?))
-	     ps:false
+	     qs:false
 	     (racket-error "string->path-element"
 			   "cannot be converted to a path element~%  path: ~A~%  explanation: path can be split, is not relative, or names a special element"
 			   (written s))))
@@ -1364,7 +1364,7 @@ of the square roots of the first (or the ninth to sixteenth) primes."
     (contract-error who (format nil "(integer-in ~D ~D)" lo hi) x)))
 
 (defun check-boolean (who x)
-  (unless (or (eq x ps:true) (eq x ps:false)) (contract-error who "boolean?" x)))
+  (unless (or (eq x qs:true) (eq x qs:false)) (contract-error who "boolean?" x)))
 
 (defun date-guard (&rest args)
   (destructuring-bind (second minute hour day month year week-day year-day dst? offset who) args
@@ -1396,14 +1396,14 @@ of the square roots of the first (or the ninth to sixteenth) primes."
 
 (defun define-date-types ()
   (multiple-value-bind (type constructor predicate)
-      (make-struct-type* (rsym "date") ps:false 10 0 ps:false '() ps:false ps:false
+      (make-struct-type* (rsym "date") qs:false 10 0 qs:false '() qs:false qs:false
 			 '(0 1 2 3 4 5 6 7 8 9) #'date-guard)
     (setq *date-type* type *date-constructor* constructor)
     (define-primitive "#%kernel" "struct:date" type)
     (define-primitive "#%kernel" "date" constructor)
     (define-primitive "#%kernel" "date?" predicate))
   (multiple-value-bind (type constructor predicate)
-      (make-struct-type* (rsym "date*") *date-type* 2 0 ps:false '() ps:false ps:false
+      (make-struct-type* (rsym "date*") *date-type* 2 0 qs:false '() qs:false qs:false
 			 '(0 1) #'date*-guard)
     (setq *date*-type* type *date*-constructor* constructor)
     (define-primitive "#%kernel" "struct:date*" type)
@@ -1480,7 +1480,7 @@ day, month, year, week day, year day, dst?, offset and zone name; or NIL."
 		  (sb-sys::signed-sap-ref-64 result 40)
 		  (c-string-at (sb-sys::sap-ref-sap result 48))))))))
 
-(defnative "seconds->date" (secs &optional (local-time? ps:true)) (:leaf t)
+(defnative "seconds->date" (secs &optional (local-time? qs:true)) (:leaf t)
   (unless (realp secs) (contract-error "seconds->date" "real?" secs))
   (when (and (floatp secs) (or (sb-ext:float-infinity-p secs) (sb-ext:float-nan-p secs)))
     (racket-error "seconds->date" "integer is out-of-range~%  integer: ~A" (written secs)))
@@ -1521,7 +1521,7 @@ day, month, year, week day, year day, dst?, offset and zone name; or NIL."
   (cond ((extflonum-from-string s more))
 	(*expander-string->number* (apply *expander-string->number* s more))
 	(t (let ((radix (if more (car more) 10)))
-	     (funcall (psx:host-ref "string->number") s radix)))))
+	     (funcall (qsx:host-ref "string->number") s radix)))))
 
 ;;; ------------------------------------------------------------------
 ;;; list-ref, list-tail, make-vector and eq-hash-code, with Racket's checks

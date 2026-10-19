@@ -70,7 +70,7 @@
 ;;; of x's values).  The form is matched, and the expansion made, as
 ;;; plain data, with environments of (variable depth . value).
 
-;; The helpers are in (pseudoscheme chez extend-syntax),
+;; The helpers are in (quasischeme chez extend-syntax),
 ;; src/chez/extend-syntax.sls: a transformer can't use definitions of
 ;; the library it is defined in.
 

@@ -1,4 +1,4 @@
-;;; SRFI 211: old-style Lisp macros.  Written for Pseudoscheme (the SRFI's implementation is
+;;; SRFI 211: old-style Lisp macros.  Written for Quasischeme (the SRFI's implementation is
 ;;; necessarily per-implementation); see 211.sld.
 ;;; A Lisp transformer gets the datum of the macro use and its result is
 ;;; injected (datum->syntax with the use's keyword): not hygienic.

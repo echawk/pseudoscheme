@@ -1,5 +1,5 @@
 
-; Scheme48's WRITE module, adapted for use in Pseudoscheme.
+; Scheme48's WRITE module, adapted for use in Quasischeme.
 ; (compile-file "~/pseudo/write" scheme-translator::revised^4-scheme-env)
 ; (load "~/pseudo/write" scheme-translator::revised^4-scheme-env)
 ; (define write revised^4-scheme:.write)
@@ -11,7 +11,7 @@
 (define (output-port-option port-option)
   (cond ((null? port-option) (current-output-port))
 	((null? (cdr port-option)) (car port-option))
-	(else (ps:scheme-error "write-mumble: too many arguments"
+	(else (qs:scheme-error "write-mumble: too many arguments"
 				 port-option))))
 
 (define (disclose obj)
@@ -19,7 +19,7 @@
   #f)
 
 (define (write-string string port)
-  (ps-lisp:princ string port))
+  (qs-lisp:princ string port))
 
 
 ; -*- Mode: Scheme; Syntax: Scheme; Package: Scheme; -*-
@@ -45,23 +45,23 @@
   (write-labelled obj (output-port-option port-option) 0))
 
 ; Datum labels, #n= and #n# (R7RS 6.13.3): which objects get them is
-; worked out beforehand (ps:call-with-write-labels).  MODE is 0 for
+; worked out beforehand (qs:call-with-write-labels).  MODE is 0 for
 ; none, 1 for those on a cycle, 2 for every shared one.
 
 (define (write-labelled obj port mode)
-  (ps:call-with-write-labels obj mode
+  (qs:call-with-write-labels obj mode
     (lambda ()
       (let recur ((obj obj))
 	(write-with-label obj port recur
 	  (lambda () (recurring-write obj port recur)))))))
 
 (define (write-with-label obj port recur write-it)
-  (cond ((ps:write-label-reference obj)
+  (cond ((qs:write-label-reference obj)
 	 => (lambda (n)
 	      (write-char #\# port)
 	      (write-number n port)
 	      (write-char #\# port)))
-	((ps:write-label-definition obj)
+	((qs:write-label-definition obj)
 	 => (lambda (n)
 	      (write-char #\# port)
 	      (write-number n port)
@@ -81,10 +81,10 @@
 	(else (write-other obj port recur))))
 
 (define (write-symbol obj port)
-  (cond ((ps:true? (ps-lisp:keywordp obj))     ;#:name, see read.scm
+  (cond ((qs:true? (qs-lisp:keywordp obj))     ;#:name, see read.scm
          (write-string "#:" port)
-         (write-string (ps:scheme-symbol-name obj) port))
-        ((ps:true? (ps:symbol-needs-bars-p (symbol->string obj)))
+         (write-string (qs:scheme-symbol-name obj) port))
+        ((qs:true? (qs:symbol-needs-bars-p (symbol->string obj)))
 	 (write-barred-symbol (symbol->string obj) port))
         (else (write-string (symbol->string obj) port))))
 
@@ -134,7 +134,7 @@
 	       (write-char #\\ port)
 	       (write-char c port))
 	      ;; Chez Scheme's write escapes control characters: "a\nb"
-	      ((and (< (char->integer c) 32) (ps:true? (ps:chez-reader-p)))
+	      ((and (< (char->integer c) 32) (qs:true? (qs:chez-reader-p)))
 	       (write-string (chez-string-escape c) port))
 	      (else (write-char c port)))))))
 
@@ -146,7 +146,7 @@
 
 (define (write-list obj port recur)
   (cond ((and (quotation? obj)
-	      (not (ps:true? (ps:write-labelled-p (cdr obj)))))
+	      (not (qs:true? (qs:write-labelled-p (cdr obj)))))
          (write-char #\' port)
          (recur (cadr obj)))
         (else
@@ -156,7 +156,7 @@
                     (n 1))
               (cond ((or (not (pair? l))
 			 ;; a labelled tail is written as a datum
-			 (ps:true? (ps:write-labelled-p l)))
+			 (qs:true? (qs:write-labelled-p l)))
                      (cond ((not (null? l))
                             (write-string " . " port)
                             (recur l))))
@@ -206,38 +206,38 @@
 	((eof-object? obj) (write-string "#{End-of-file}" port))
 	((vector? obj) (write-vector obj port recur))
 	;; Chez Scheme's boxes and fxvectors (src/chez/)
-	((ps:true? (ps:box-p obj))
+	((qs:true? (qs:box-p obj))
 	 (write-string "#&" port)
-	 (recur (ps:box-contents obj)))
-	((ps:true? (ps:stencil-vector-p obj))
+	 (recur (qs:box-contents obj)))
+	((qs:true? (qs:stencil-vector-p obj))
 	 (write-string "#" port)
-	 (write-string (number->string (ps:stencil-vector-mask obj)) port)
+	 (write-string (number->string (qs:stencil-vector-mask obj)) port)
 	 (write-string "vs" port)
-	 (let ((elements (vector->list (ps:stencil-vector-elements obj))))
+	 (let ((elements (vector->list (qs:stencil-vector-elements obj))))
 	   (if (null? elements)
 	       (write-string "()" port)
 	       (write-list elements port recur))))
-	((ps:true? (ps:fxvector-p obj))
+	((qs:true? (qs:fxvector-p obj))
 	 (write-string "#vfx" port)
-	 (let ((elements (ps:numeric-vector-elements obj)))
+	 (let ((elements (qs:numeric-vector-elements obj)))
 	   (if (null? elements)
 	       (write-string "()" port)
 	       (write-list elements port recur))))
-	((ps:true? (ps:numeric-vector-tag obj))  ;bytevectors, SRFI 4 vectors
+	((qs:true? (qs:numeric-vector-tag obj))  ;bytevectors, SRFI 4 vectors
 	 => (lambda (tag)
 	      (write-string "#" port)
 	      ;; Chez's flvectors are f64vectors
-	      (write-string (if (and (equal? tag "f64") (ps:true? (ps:chez-reader-p))) "vfl" tag) port)
-	      (let ((elements (ps:numeric-vector-elements obj)))
+	      (write-string (if (and (equal? tag "f64") (qs:true? (qs:chez-reader-p))) "vfl" tag) port)
+	      (let ((elements (qs:numeric-vector-elements obj)))
 		(if (null? elements)
 		    (write-string "()" port)
 		    (write-list elements port recur)))))
 	((eq? obj (if #f #f)) (write-string "#{Unspecific}" port))
 	;; Chez's records, written #[name field ...] (src/chez/host.lisp)
-	((ps:true? (ps:write-extension obj port recur)))
+	((qs:true? (qs:write-extension obj port recur)))
 	(else
 	 ;; (write-string "#{Random object}" port)
-	 (ps-lisp:prin1 obj port)
+	 (qs-lisp:prin1 obj port)
 	 )))
 
 ; Display the symbol WHO-CARES as Who-cares.
@@ -266,18 +266,18 @@
 
 (define (scheme-display obj . port-option)
   (let ((port (output-port-option port-option)))
-    (ps:call-with-write-labels obj 1
+    (qs:call-with-write-labels obj 1
       (lambda ()
 	(let recur ((obj obj))
 	  (cond ((string? obj) (write-string obj port))
 		((char? obj) (write-char obj port))
-		((and (symbol? obj) (not (ps:true? (ps-lisp:keywordp obj))))
+		((and (symbol? obj) (not (qs:true? (qs-lisp:keywordp obj))))
 		 (write-string (symbol->string obj) port))
 		(else
 		 (write-with-label obj port recur
 		   (lambda () (recurring-write obj port recur))))))))))
 
-(ps-lisp:setq ps:*scheme-write* scheme-write)
-(ps-lisp:setq ps:*scheme-write-shared* scheme-write-shared)
-(ps-lisp:setq ps:*scheme-write-simple* scheme-write-simple)
-(ps-lisp:setq ps:*scheme-display* scheme-display)
+(qs-lisp:setq qs:*scheme-write* scheme-write)
+(qs-lisp:setq qs:*scheme-write-shared* scheme-write-shared)
+(qs-lisp:setq qs:*scheme-write-simple* scheme-write-simple)
+(qs-lisp:setq qs:*scheme-display* scheme-display)

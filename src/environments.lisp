@@ -1,8 +1,8 @@
-;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-ENVIRONMENTS -*-
+;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-ENVIRONMENTS -*-
 
 ;;;; Program environments, from Lisp
 ;;;;
-;;;; Helpers for building and filling Pseudoscheme program environments
+;;;; Helpers for building and filling Quasischeme program environments
 ;;;; (module.scm's PROGRAM-ENV: a CL package plus a table from names to
 ;;;; binding nodes) from Common Lisp: the R7RS runtime builds its
 ;;;; implementation environment with these, and psyntax's host
@@ -11,15 +11,15 @@
 ;;;; This was src/library.lisp, which also implemented define-library and
 ;;;; import natively; psyntax does that now (src/r7rs/front.lisp).
 
-(defpackage "PSEUDOSCHEME-ENVIRONMENTS"
-  (:nicknames "PSL")
+(defpackage "QUASISCHEME-ENVIRONMENTS"
+  (:nicknames "QSL")
   (:use "COMMON-LISP")
   (:export "TR" "BASE-STRUCTURE" "SCHEME-SYMBOL" "SNAME" "KEYWORD-HEAD-P"
 	   "NEW-LIBRARY-ENV" "BINDING-DEFINED-P" "INSTALL-VARIABLE!"
 	   "COPY-ALL!" "COPY-BINDINGS!" "ALIAS-ALL!" "VARIABLE-NODE-P"
 	   "READ-FORMS-FROM-FILE" "*SCHEME-FEATURES*"))
 
-(in-package "PSEUDOSCHEME-ENVIRONMENTS")
+(in-package "QUASISCHEME-ENVIRONMENTS")
 
 ;;; ------------------------------------------------------------------
 ;;; Reaching into the translator
@@ -40,12 +40,12 @@
 ;;; Scheme symbols live in the SCHEME package, upcased by the reader.
 (defun scheme-symbol (string)
   "The Scheme symbol named STRING."
-  (ps:intern-scheme-symbol string))
+  (qs:intern-scheme-symbol string))
 
 (defun sname (symbol)
   "The Scheme name of a symbol (or the printed form of a number)."
   (typecase symbol
-    (symbol (ps:scheme-symbol-name symbol))
+    (symbol (qs:scheme-symbol-name symbol))
     (t (princ-to-string symbol))))
 
 (defun keyword-head-p (form word)
@@ -66,9 +66,9 @@
 
 (defun variable-node-p (node)
   ;; (Translator predicates return Scheme booleans, and #f is the
-  ;; symbol PS:FALSE -- truthy to Lisp -- hence PS:TRUEP.)
-  (and (ps:truep (tr "NODE?" node))
-       (ps:truep (tr "PROGRAM-VARIABLE?" node))))
+  ;; symbol QS:FALSE -- truthy to Lisp -- hence QS:TRUEP.)
+  (and (qs:truep (tr "NODE?" node))
+       (qs:truep (tr "PROGRAM-VARIABLE?" node))))
 
 (defun binding-defined-p (env name)
   "Is NAME bound in ENV to something real (a macro/special form, or a
@@ -88,7 +88,7 @@ name was copied or imported from."
 	 (loc (tr "PROGRAM-VARIABLE-LOCATION" node)))
     (setf (symbol-value loc) value)
     (when (functionp value)
-      (funcall (symbol-function (find-symbol "SET-FUNCTION-FROM-VALUE" "PS")) loc))
+      (funcall (symbol-function (find-symbol "SET-FUNCTION-FROM-VALUE" "QS")) loc))
     node))
 
 (defun copy-all! (env structure)
@@ -160,13 +160,13 @@ in numbers)."
   (let ((numbers (append '(0 22 30 46 62 97 105 138 169)
 			 (loop for path in (directory (merge-pathnames
 						       (make-pathname :name :wild :type "sld")
-						       (asdf:system-relative-pathname :pseudoscheme "src/srfi/")))
+						       (asdf:system-relative-pathname :quasischeme "src/srfi/")))
 			       for n = (ignore-errors (parse-integer (pathname-name path)))
 			       when n collect n)
 			 ;; SRFIs made only of sub-libraries: src/srfi/160/u8.sld
 			 (loop for dir in (directory (merge-pathnames
 						      (make-pathname :directory '(:relative :wild))
-						      (asdf:system-relative-pathname :pseudoscheme "src/srfi/")))
+						      (asdf:system-relative-pathname :quasischeme "src/srfi/")))
 			       for n = (ignore-errors (parse-integer (car (last (pathname-directory dir)))))
 			       when n collect n))))
     (mapcar (lambda (n) (format nil "srfi-~D" n))
@@ -175,7 +175,7 @@ in numbers)."
 (defparameter *scheme-features*
   (remove-duplicates
    (append '("r7rs" "r6rs" "exact-closed" "exact-complex" "complex" "ieee-float" "ratios"
-	     "pseudoscheme" "common-lisp")
+	     "quasischeme" "common-lisp")
 	   (when (> char-code-limit 255) '("full-unicode"))
 	   (platform-features)
 	   (srfi-features)
@@ -186,8 +186,8 @@ in numbers)."
 
 (defun read-forms-from-file (name)
   (with-open-file (in name)
-    (ps:skip-script-header in)
-    (loop for form = (funcall ps:*scheme-read* in)
-	  until (eq form ps:eof-object)
+    (qs:skip-script-header in)
+    (loop for form = (funcall qs:*scheme-read* in)
+	  until (eq form qs:eof-object)
 	  collect form)))
 

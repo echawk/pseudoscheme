@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Booting Guile (docs/guile.md, stage 3): the module system's C half,
 ;;;; evaluation and loading, the root module's bindings, and loading an
@@ -11,7 +11,7 @@
 ;;;; replacement is written afresh in src/guile/modules/, which comes
 ;;;; first on %load-path.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 ;;; ------------------------------------------------------------------
 ;;; Modules
@@ -32,7 +32,7 @@
 (defconstant +module-public-interface+ 14)
 
 (defvar *obarray* (make-ghash) "The pre-modules obarray.")
-(defvar *current-module* ps:false)
+(defvar *current-module* qs:false)
 
 (defun obarray-variable (name)
   (let ((handle (gethash name (ghash-table-for *obarray* :eql))))
@@ -64,14 +64,14 @@
   "libguile's scm_module_variable: MODULE's own variable for NAME, else
 an imported one, else its binder's.  MODULE :root is (guile)."
   (when (eq module :root)
-    (setq module (or (root-value "the-root-module") ps:false)))
+    (setq module (or (root-value "the-root-module") qs:false)))
   (if (not (module-p* module))
       (obarray-variable name)
       (or (ghash-lookup (module-slot module +module-obarray+) name)
 	  (imported-variable module name)
 	  (let ((binder (module-slot module +module-binder+)))
 	    (and (functionp binder)
-		 (let ((v (funcall binder module name ps:false)))
+		 (let ((v (funcall binder module name qs:false)))
 		   (and (gvariable-p v) v)))))))
 
 (defun module-local-variable* (module name)
@@ -80,7 +80,7 @@ an imported one, else its binder's.  MODULE :root is (guile)."
       (or (ghash-lookup (module-slot module +module-obarray+) name)
 	  (let ((binder (module-slot module +module-binder+)))
 	    (and (functionp binder)
-		 (let ((v (funcall binder module name ps:false)))
+		 (let ((v (funcall binder module name qs:false)))
 		   (and (gvariable-p v) v)))))))
 
 (defun imported-variable (module name)
@@ -107,9 +107,9 @@ an imported one, else its binder's.  MODULE :root is (guile)."
 	(unless (consp handlers)
 	  (let ((default (root-value "default-duplicate-binding-procedures")))
 	    (setq handlers (and default (funcall default)))))
-	(flet ((val (v) (if (eq (gvariable-value v) +unbound+) ps:false (gvariable-value v))))
+	(flet ((val (v) (if (eq (gvariable-value v) +unbound+) qs:false (gvariable-value v))))
 	  (dolist (h (if (listp handlers) handlers '()) var2)
-	    (let ((r (funcall h module name iface1 (val var1) iface2 (val var2) ps:false ps:false)))
+	    (let ((r (funcall h module name iface1 (val var1) iface2 (val var2) qs:false qs:false)))
 	      (when (gvariable-p r) (return r))))))))
 
 (defun resolve-module* (name)
@@ -133,7 +133,7 @@ an imported one, else its binder's.  MODULE :root is (guile)."
     ("apply" . apply-value)
     ("call-with-prompt" . call-with-prompt-value))
   "Procedures boot-9 defines on libguile's internal primitives (wind,
-push-fluid, ...), which are Pseudoscheme's own procedures instead: the
+push-fluid, ...), which are Quasischeme's own procedures instead: the
 name, and a function returning the replacement.")
 
 (defparameter *boot-wrappers*
@@ -180,9 +180,9 @@ Anything else, and so every error, is the original's."
 (defun host-procedure (name)
   "The host's procedure NAME, or with full continuations its frame-aware
 version (src/continuations.lisp)."
-  (let ((full (and psx::*full-continuations*
-		   (cdr (assoc name psx::*full-replacements* :test #'string=)))))
-    (psx:host-ref (or full name))))
+  (let ((full (and qsx::*full-continuations*
+		   (cdr (assoc name qsx::*full-replacements* :test #'string=)))))
+    (qsx:host-ref (or full name))))
 
 (defun dynamic-wind-value () (host-procedure "dynamic-wind"))
 (defun with-fluid-value () (gethash "with-fluid*" *guile-primitives*))
@@ -191,7 +191,7 @@ version (src/continuations.lisp)."
 (defun call-with-values-value () (host-procedure "call-with-values"))
 (defun apply-value ()
   ;; #nil ends a list as () does, for Emacs Lisp's sake
-  (let ((apply (psx:host-ref "apply")))
+  (let ((apply (qsx:host-ref "apply")))
     ;; a procedure and a list at least, as Guile's
     (lambda (f arg &rest more &aux (args (cons arg more)))
       (let ((tail (last args)))
@@ -221,9 +221,9 @@ version (src/continuations.lisp)."
   (let ((root (not (module-p* module))))
     (when root
       ;; before the module system: boot-9's own definitions
-      (let ((override (cdr (assoc (ps:scheme-symbol-name name) *boot-overrides* :test #'string=))))
+      (let ((override (cdr (assoc (qs:scheme-symbol-name name) *boot-overrides* :test #'string=))))
 	(when override (setq value (funcall override)))
-	(let ((wrapper (cdr (assoc (ps:scheme-symbol-name name) *boot-wrappers* :test #'string=))))
+	(let ((wrapper (cdr (assoc (qs:scheme-symbol-name name) *boot-wrappers* :test #'string=))))
 	  (when (and wrapper (functionp value)) (setq value (funcall wrapper value))))))
     ;; named after its definition, unless it's a primitive, which has its
     ;; own name ((define module-gensym gensym) doesn't rename gensym)
@@ -234,7 +234,7 @@ version (src/continuations.lisp)."
 	(obarray-define name value)
 	(funcall (root-value "module-define!") module name value))
     (when (or root (eq module (root-value "the-root-module")))
-      (let ((s (ps:scheme-symbol-name name)))
+      (let ((s (qs:scheme-symbol-name name)))
 	(cond ((string= s "throw") (setq *throw* value))
 	      ((string= s "raise-exception") (setq *raise-exception* value)))))
     *unspecified*))
@@ -287,14 +287,14 @@ constructs of *INTERPRETABLE-HEADS* or functions."
   (let* ((*lexicals* (make-hash-table :test 'eq))
 	 (*compile-module* *current-module*)
 	 (core (compile-tree-il tree))
-	 (core (if (> (psx::tree-size core) psx::*letrec-definitions-limit*)
+	 (core (if (> (qsx::tree-size core) qsx::*letrec-definitions-limit*)
 		   (flatten-top-level-lets core)
 		   core)))
     ;; bound either way: what this form loads is its own
     (let ((sb-ext:*evaluator-mode* (if (and *interpret-trivial-forms* (trivial-core-p core))
 				       :interpret
 				       :compile)))
-      (psx:host-eval core))))
+      (qsx:host-eval core))))
 
 ;;; A big top-level form is compiled in pieces: src/psyntax.lisp hoists
 ;;; the definitions of a top-level letrec* (each procedure its own
@@ -305,7 +305,7 @@ constructs of *INTERPRETABLE-HEADS* or functions."
 
 (defun flatten-top-level-lets (form)
   (labels ((kw (x name) (and (symbolp x) (string= (symbol-name x) name)))
-	   (false-p (x) (and (consp x) (kw (car x) "QUOTE") (eq (cadr x) ps:false)))
+	   (false-p (x) (and (consp x) (kw (car x) "QUOTE") (eq (cadr x) qs:false)))
 	   (let-p (x)
 	     (and (consp x) (consp (car x)) (kw (caar x) "LAMBDA")
 		  (listp (cadar x)) (null (cdr (last (cadar x))))
@@ -342,7 +342,7 @@ constructs of *INTERPRETABLE-HEADS* or functions."
   (let ((hi (cond ((and (consp type) (eq (car type) 'mod)) (1- (second type)))
 		  ((and (consp type) (eq (car type) 'unsigned-byte)) (1- (ash 1 (second type))))
 		  ((and (consp type) (eq (car type) 'integer))
-		   (let ((h (third type))) (cond ((consp h) (1- (car h))) ((integerp h) h) (t ps:false))))
+		   (let ((h (third type))) (cond ((consp h) (1- (car h))) ((integerp h) h) (t qs:false))))
 		  (t most-positive-fixnum))))
     (list 0 hi)))
 
@@ -356,12 +356,12 @@ Lisp's message TEXT about keyword arguments."
     (if at
 	(let ((key (string-trim " " (subseq text (+ at 23)))))
 	  (values (ssym "keyword-argument-error")
-		  (list ps:false "Unrecognized keyword" '()
+		  (list qs:false "Unrecognized keyword" '()
 			(list (if (and (plusp (length key)) (char= (char key 0) #\:))
 				  (intern (string-upcase (subseq key 1)) "KEYWORD")
 				  (ssym (string-downcase (subseq key (1+ (or (position #\: key :from-end t) -1))))))))))
 	(values (ssym "keyword-argument-error")
-		(list ps:false "Keyword argument has no value" '() ps:false)))))
+		(list qs:false "Keyword argument has no value" '() qs:false)))))
 
 (defun apply-type-error-p (c)
   "Whether type error C is that of calling what isn't a function."
@@ -370,24 +370,24 @@ Lisp's message TEXT about keyword arguments."
 (defun condition-throw-arguments (c)
   "The key and throw arguments for Lisp condition C."
   (flet ((message (key subr message args)
-	   (values (ssym key) (list subr message args ps:false))))
+	   (values (ssym key) (list subr message args qs:false))))
     (typecase c
       (guile-throw (values (guile-throw-key c) (guile-throw-args c)))
       ;; applying what isn't a procedure: Lisp's FUNCALL of a symbol (#t
       ;; is T) or of anything else
       (undefined-function
-       (message "wrong-type-arg" ps:false "Wrong type to apply: ~S" (list (cell-error-name c))))
+       (message "wrong-type-arg" qs:false "Wrong type to apply: ~S" (list (cell-error-name c))))
       ((and type-error (satisfies apply-type-error-p))
-       (message "wrong-type-arg" ps:false "Wrong type to apply: ~S" (list (type-error-datum c))))
+       (message "wrong-type-arg" qs:false "Wrong type to apply: ~S" (list (type-error-datum c))))
       (type-error
        (if (index-type-p (type-error-expected-type c))
 	   ;; a negative or huge index: Guile's arguments are the bounds and the index
-	   (message "out-of-range" ps:false "Value out of range ~S to ~S: ~S"
+	   (message "out-of-range" qs:false "Value out of range ~S to ~S: ~S"
 		    (append (index-type-bounds (type-error-expected-type c))
 			    (list (type-error-datum c))))
-	   (message "wrong-type-arg" ps:false "Wrong type argument: ~S"
+	   (message "wrong-type-arg" qs:false "Wrong type argument: ~S"
 		    (list (type-error-datum c)))))
-      (division-by-zero (message "numerical-overflow" ps:false "Numerical overflow" '()))
+      (division-by-zero (message "numerical-overflow" qs:false "Numerical overflow" '()))
       ;; a failed system call, as libguile's are: system-error with its errno
       (sb-posix:syscall-error
        (let ((errno (sb-posix:syscall-errno c)))
@@ -400,21 +400,21 @@ Lisp's message TEXT about keyword arguments."
 	 (cond
 	   ((keyword-error-p text) (keyword-error-arguments text))
 	   ((search "number of arguments" text)
-	    (message "wrong-number-of-args" ps:false "Wrong number of arguments (~A)" (list text)))
-	   (t (message "wrong-number-of-args" ps:false "~A" (list text))))))
+	    (message "wrong-number-of-args" qs:false "Wrong number of arguments (~A)" (list text)))
+	   (t (message "wrong-number-of-args" qs:false "~A" (list text))))))
       (t (let ((text (remove #\Newline (princ-to-string c))))
 	   (cond
 	     ((keyword-error-p text) (keyword-error-arguments text))
 	     ((search "no prompt with tag" text)
-	      (message "misc-error" ps:false "Abort to unknown prompt" '()))
+	      (message "misc-error" qs:false "Abort to unknown prompt" '()))
 	     ((search "out of range" text)
-	      (message "out-of-range" ps:false "Value out of range: ~A" (list text)))
+	      (message "out-of-range" qs:false "Value out of range: ~A" (list text)))
 	     ((some (lambda (pattern) (search pattern text))
-		     ;; the type errors of Pseudoscheme's own libraries
+		     ;; the type errors of Quasischeme's own libraries
 		     '("isn't a pair" ": not a " ": not an " "neither char-set" "not predicate, char or char-set"
 		       "bad argument" "Non-string value"))
-	      (message "wrong-type-arg" ps:false "Wrong type argument: ~A" (list text)))
-	     (t (message "misc-error" ps:false "~A" (list text)))))))))
+	      (message "wrong-type-arg" qs:false "Wrong type argument: ~A" (list text)))
+	     (t (message "misc-error" qs:false "~A" (list text)))))))))
 
 (defvar *trace-lisp-errors* nil "Print a backtrace of each Lisp error raised in Guile code.")
 
@@ -436,7 +436,7 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
   `(sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow)
      (handler-bind ((error #'lisp-error->guile))
        (call-with-guile-ports
-	(lambda () (psx::call-with-continuation-base (lambda () ,@body)))))))
+	(lambda () (qsx::call-with-continuation-base (lambda () ,@body)))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Loading
@@ -459,7 +459,7 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 	(error "Guile's Scheme sources weren't found: set GUILE_SOURCE_DIR to the directory with ice-9/boot-9.scm"))))
 
 (defun our-modules-directory ()
-  (asdf:system-relative-pathname :pseudoscheme "src/guile/modules/"))
+  (asdf:system-relative-pathname :quasischeme "src/guile/modules/"))
 
 (declaim (ftype function vm-settings-from-environment)) ; vm-jit.lisp
 
@@ -472,7 +472,7 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 ;;; starts, not when the image is built (contrib/cli/cli.lisp).
 (defun add-environment-load-path ()
   (vm-settings-from-environment)
-  (let ((trace (uiop:getenv "PSEUDOSCHEME_GUILE_TRACE_THROWS")))
+  (let ((trace (uiop:getenv "QUASISCHEME_GUILE_TRACE_THROWS")))
     ;; [backtrace][:KEY,...]: "1", "backtrace", "system-error",
     ;; "backtrace:system-error,wrong-type-arg"
     (when (and trace (plusp (length trace)))
@@ -511,7 +511,7 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 		       do (return-from search-load-path path)))))
 
 (defvar *current-load-file* nil)
-(defvar *current-reader* (make-fluid* ps:false) "Guile's current-reader fluid.")
+(defvar *current-reader* (make-fluid* qs:false) "Guile's current-reader fluid.")
 
 (defvar *trace-loads* nil)
 
@@ -568,7 +568,7 @@ primitive-load, written in Scheme, does)."
 		       (setq scanned start)
 		       (let ((reader (fluid-value *current-reader*)))
 			 (if (functionp reader) (funcall reader stream) (guile-read stream))))
-	  until (eq form ps:eof-object)
+	  until (eq form qs:eof-object)
 	  do (when (and (consp form) (not (gethash form *source-properties*)))
 	       ;; as Guile's reader records them: define-module takes the
 	       ;; module's file name from them
@@ -582,7 +582,7 @@ primitive-load, written in Scheme, does)."
 		   (let ((frame (vector :resume nil 'continue-load filename text (file-position stream)
 					start line line-start)))
 		     (declare (dynamic-extent frame))
-		     (psx::with-frame (frame)
+		     (qsx::with-frame (frame)
 		       (eval-load-form form kept text (file-position stream) filename)))))
     value))
 
@@ -615,7 +615,7 @@ primitive-load, written in Scheme, does)."
 (defun later-procedure-definition (name text position filename)
   "The definition of NAME as a procedure in TEXT after POSITION, or in a
 file it includes, in the same module: or NIL."
-  (labels ((kw (x s) (and (ps:scheme-symbol-p x) (string= (ps:scheme-symbol-name x) s)))
+  (labels ((kw (x s) (and (qs:scheme-symbol-p x) (string= (qs:scheme-symbol-name x) s)))
 	   (procedure-definition-p (f)
 	     (and (consp f) (consp (cdr f))
 		  (or (and (or (kw (car f) "define") (kw (car f) "define*") (kw (car f) "define-inlinable"))
@@ -640,8 +640,8 @@ file it includes, in the same module: or NIL."
 (defun read-text-forms (text position)
   "The forms of TEXT from POSITION, as far as they read."
   (let ((stream (make-string-input-stream text position)))
-    (loop for form = (handler-case (guile-read stream) (error () ps:eof-object))
-	  until (eq form ps:eof-object)
+    (loop for form = (handler-case (guile-read stream) (error () qs:eof-object))
+	  until (eq form qs:eof-object)
 	  collect form)))
 
 (defun read-file-forms (path)
@@ -684,7 +684,7 @@ otherwise form by form, each compiled into the cache as it runs."
 	    (finish-incremental-cache kept (and done (cache-fasl filename)))))
 	value))
       ;; its gensyms and the like are garbage now, unless kept
-      (ps::maybe-sweep-symbols))))
+      (qs::maybe-sweep-symbols))))
 
 ;;; How Guile's compiler runs, for (compile x #:to 'value) and the like
 ;;; (src/guile/modules/language/tree-il/spec.scm):
@@ -699,21 +699,21 @@ otherwise form by form, each compiled into the cache as it runs."
 ;;;   :vm-source  likewise, but the compiler is loaded from its Scheme
 ;;;               sources, compiled natively (and cached) like any module.
 ;;;
-;;; PSEUDOSCHEME_GUILE_COMPILER=native|vm|vm-source chooses; so does
+;;; QUASISCHEME_GUILE_COMPILER=native|vm|vm-source chooses; so does
 ;;; setting *GUILE-COMPILER* before Guile's compiler is first used.
 
 (defvar *guile-compiler* nil
   "How Guile's compiler runs: :native, :vm or :vm-source (see above);
-NIL for PSEUDOSCHEME_GUILE_COMPILER's choice, else :native.")
+NIL for QUASISCHEME_GUILE_COMPILER's choice, else :native.")
 
 (defun guile-compiler ()
   (or *guile-compiler*
-      (let ((env (uiop:getenv "PSEUDOSCHEME_GUILE_COMPILER")))
+      (let ((env (uiop:getenv "QUASISCHEME_GUILE_COMPILER")))
 	(cond ((member env '("vm") :test #'equal) :vm)
 	      ((member env '("vm-source") :test #'equal) :vm-source)
 	      ((member env '("native" "lisp") :test #'equal) :native)
-	      ;; the older switch: PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp
-	      ((equal (uiop:getenv "PSEUDOSCHEME_GUILE_COMPILE_VALUE") "lisp") :native)
+	      ;; the older switch: QUASISCHEME_GUILE_COMPILE_VALUE=lisp
+	      ((equal (uiop:getenv "QUASISCHEME_GUILE_COMPILE_VALUE") "lisp") :native)
 	      (t :native)))))
 
 (defun compiler-module-file-p (name)
@@ -730,10 +730,10 @@ loads from the installed Guile's .go files?"
 
 (defun go-modules ()
   "Which of Guile's own modules load from the installed Guile's .go
-files, on the VM (PSEUDOSCHEME_GUILE_GO): :compiler, Guile's compiler
+files, on the VM (QUASISCHEME_GUILE_GO): :compiler, Guile's compiler
 when the :vm compiler runs it (the default); :all, any of them that has
 a .go file."
-  (if (member (uiop:getenv "PSEUDOSCHEME_GUILE_GO") '("all" "1") :test #'equal) :all :compiler))
+  (if (member (uiop:getenv "QUASISCHEME_GUILE_GO") '("all" "1") :test #'equal) :all :compiler))
 
 (defun module-file-name (name)
   (if (and (> (length name) 4) (string= ".scm" name :start2 (- (length name) 4)))
@@ -757,7 +757,7 @@ replacements.  True if it did."
 	  (funcall (funcall 'load-go-file go))
 	  t)))))
 
-(defun primitive-load-path (name &optional (exception-on-not-found ps:true))
+(defun primitive-load-path (name &optional (exception-on-not-found qs:true))
   (let ((path (search-load-path name)))
     (cond ((and path (load-installed-compiled name path)) *unspecified*)
 	  (path (let ((*cacheable-load* t)) (primitive-load path)))
@@ -766,7 +766,7 @@ replacements.  True if it did."
 	  ((truthy exception-on-not-found)
 	   (guile-error (ssym "system-error") "primitive-load-path"
 			"Unable to find file ~S in load path" (list name)))
-	  (t ps:false))))
+	  (t qs:false))))
 
 ;;; ------------------------------------------------------------------
 ;;; The root module's bindings
@@ -779,25 +779,25 @@ replacements.  True if it did."
     "string-copy!" "vector-copy!" "string-fill!" "vector-fill!" "copy-file"
     "keyword?" "symbol->keyword" "keyword->symbol" "make-struct" "dynamic-wind"
     "call-with-prompt" "abort-to-prompt" "abort-to-prompt*" "error" "exit" "load")
-  "Root primitives Pseudoscheme has a procedure of the same name for, but
+  "Root primitives Quasischeme has a procedure of the same name for, but
 not with Guile's behaviour.")
 
 (defun root-primitive-names ()
-  (with-open-file (in (asdf:system-relative-pathname :pseudoscheme "src/guile/root-primitives.txt"))
+  (with-open-file (in (asdf:system-relative-pathname :quasischeme "src/guile/root-primitives.txt"))
     (loop for line = (read-line in nil) while line
 	  unless (zerop (length line)) collect line)))
 
 (defun host-bound-p (name)
-  (let ((loc (ignore-errors (psx:location (ssym name)))))
+  (let ((loc (ignore-errors (qsx:location (ssym name)))))
     (and loc (boundp loc))))
 
 (defun install-root-bindings ()
-  (setq *obarray* (make-ghash) *current-module* ps:false *throw* nil *raise-exception* nil)
-  ;; Pseudoscheme's own procedures, where they are Guile's
+  (setq *obarray* (make-ghash) *current-module* qs:false *throw* nil *raise-exception* nil)
+  ;; Quasischeme's own procedures, where they are Guile's
   (dolist (name (root-primitive-names))
     (when (and (not (member name *not-aliased* :test #'string=))
 	       (host-bound-p name))
-      (obarray-define (ssym name) (psx:host-ref name))))
+      (obarray-define (ssym name) (qsx:host-ref name))))
   (obarray-define (ssym "call/cc") (call/cc-value))
   (obarray-define (ssym "call-with-current-continuation") (call/cc-value))
   (obarray-define (ssym "call-with-values") (call-with-values-value))
@@ -811,7 +811,7 @@ not with Guile's behaviour.")
   (wrap-string-mutators))
 
 ;;; Root primitives that are SRFI 13's and SRFI 14's, as in Guile, taken
-;;; from Pseudoscheme's (srfi 13) and (srfi 14).
+;;; from Quasischeme's (srfi 13) and (srfi 14).
 
 (defparameter *library-bindings*
   '(("(srfi 13)" "string-null?" "string-tabulate" "reverse-list->string" "string-join"
@@ -850,8 +850,8 @@ not with Guile's behaviour.")
 
 (defun library-values (library names)
   "The values of NAMES (strings) in LIBRARY (text, as R7RS names it)."
-  (ps-r7rs::eval-forms
-   (list (ps-r7rs::read-scheme (format nil "(import (only (scheme base) list) (only ~A ~{~A ~}))" library names))
+  (qs-r7rs::eval-forms
+   (list (qs-r7rs::read-scheme (format nil "(import (only (scheme base) list) (only ~A ~{~A ~}))" library names))
 	 (cons (ssym "list") (mapcar #'ssym names)))))
 
 (defun library-value (library name)
@@ -925,14 +925,14 @@ not with Guile's behaviour.")
 	  do (def name value))
     (def "%load-compiled-path" '())
     (def "%load-compiled-extensions" (list ".go"))
-    (def "%load-should-auto-compile" ps:false)
-    (def "%fresh-auto-compile" ps:false)
-    (def "%load-verbosely" ps:false)
-    (def "%load-hook" ps:false)
-    (def "%stacks" (make-fluid* ps:false))
+    (def "%load-should-auto-compile" qs:false)
+    (def "%fresh-auto-compile" qs:false)
+    (def "%load-verbosely" qs:false)
+    (def "%load-hook" qs:false)
+    (def "%stacks" (make-fluid* qs:false))
     (def "*random-state*" *guile-random-state*)
     (def "after-gc-hook" (setq *after-gc-hook* (make-hook* 0)))
-    (def "signal-handlers" (make-array 32 :initial-element ps:false))
+    (def "signal-handlers" (make-array 32 :initial-element qs:false))
     (def "source-whash" (make-ghash :key))
     (def "%sizeof-struct-pollfd" 8)
     (loop for (name . bit) in '(("validated" . 0) ("vtable" . 1) ("applicable-vtable" . 2)
@@ -941,9 +941,9 @@ not with Guile's behaviour.")
 				("goops-indirect" . 12) ("goops-needs-migration" . 13))
 	  do (def (format nil "vtable-flag-~A" name) (ash 1 bit)))
     (def "current-reader" *current-reader*)
-    (def "%compile-fallback-path" ps:false)
+    (def "%compile-fallback-path" qs:false)
     (def "%auto-compilation-options" '())
-    (def "%file-port-name-canonicalization" (make-fluid* ps:false))
+    (def "%file-port-name-canonicalization" (make-fluid* qs:false))
     (def "%guile-build-info" '())
     (def "%host-type" (host-type))
     (def "*features*" (mapcar #'ssym '("guile" "r7rs" "srfi-0" "srfi-4" "srfi-6" "srfi-13" "srfi-14"
@@ -953,7 +953,7 @@ not with Guile's behaviour.")
 				       "array" "sort" "ITIMER_VIRTUAL" "ITIMER_PROF" "regex" "popen"
 				       "posix" "chdir-port" "inexact" "complex" "random" "i/o-extensions"
 				       "i18n" "current-time" "delay" "threads" "char-ready?" "system")))
-    (def "%exception-handler" (make-fluid* ps:false t))
+    (def "%exception-handler" (make-fluid* qs:false t))
     (def "%exception-epoch" (make-fluid* 1))
     (def "%init-exceptions!" (lambda (&rest types) (declare (ignore types)) *unspecified*))
     (def "%read-hash-procedures" (setq *read-hash-fluid* (make-fluid* '())))
@@ -965,9 +965,9 @@ not with Guile's behaviour.")
     ;; a core binding in Guile (libguile's goops.c), which C programs look up
     (def "instance?" (lambda (x) (goops-instance-p x)))
     (def "set-current-module" (lambda (m) (setq *current-module* m) *unspecified*))
-    (def "module-variable" (lambda (m name) (or (module-variable* m name) ps:false)))
-    (def "module-local-variable" (lambda (m name) (or (module-local-variable* m name) ps:false)))
-    (def "module-transformer" (lambda (m) (if (module-p* m) (module-slot m +module-transformer+) ps:false)))
+    (def "module-variable" (lambda (m name) (or (module-variable* m name) qs:false)))
+    (def "module-local-variable" (lambda (m name) (or (module-local-variable* m name) qs:false)))
+    (def "module-transformer" (lambda (m) (if (module-p* m) (module-slot m +module-transformer+) qs:false)))
     (def "define!" (lambda (name value) (define-in-module *current-module* name value)))
     (def "primitive-eval" #'primitive-eval)
     ;; compile's `value' through Guile's compiler and the VM, or natively
@@ -981,7 +981,7 @@ not with Guile's behaviour.")
     (def "eval" #'guile-eval)
     (def "primitive-load" #'primitive-load)
     (def "primitive-load-path" #'primitive-load-path)
-    (def "%search-load-path" (lambda (name) (or (search-load-path name) ps:false)))
+    (def "%search-load-path" (lambda (name) (or (search-load-path name) qs:false)))
     (def "read" (lambda (&optional (port *standard-input*)) (guile-read port)))
     (def "primitive-read" (lambda (&optional (port *standard-input*)) (guile-read port)))
     (def "write" (lambda (x &optional (port *standard-output*)) (guile-write x port) *unspecified*))
@@ -1034,8 +1034,8 @@ struct dirent layout by it)."
 		     (incf i 2))
 		   (progn (write-char c out) (incf i)))))
     (let ((string (get-output-stream-string out)))
-      (cond ((eq destination ps:false) string)
-	    ((eq destination ps:true) (write-string string *standard-output*) *unspecified*)
+      (cond ((eq destination qs:false) string)
+	    ((eq destination qs:true) (write-string string *standard-output*) *unspecified*)
 	    (t (write-string string destination) *unspecified*)))))
 
 ;;; ------------------------------------------------------------------
@@ -1046,10 +1046,10 @@ struct dirent layout by it)."
 (defun boot (&key (verbose nil))
   "Load Guile's boot-9.scm, once."
   (unless *booted*
-    (pseudoscheme-api::ensure-psyntax)
+    (quasischeme-api::ensure-psyntax)
     (setq *guile-source-directory* (find-guile-sources))
     ;; Guile's native bytevector accessors take unaligned indexes
-    (setq ps-r6rs::*native-alignment* nil)
+    (setq qs-r6rs::*native-alignment* nil)
     (install-compiler-primitives)
     (install-root-bindings)
     ;; lists ending in Emacs Lisp's nil (elisp.lisp)
@@ -1073,7 +1073,7 @@ struct dirent layout by it)."
 Lisp GUILE-THROW, rather than ending the process as Guile's uncaught
 exceptions do."
   (with-guile-errors
-    (funcall (root-value "catch") ps:true thunk
+    (funcall (root-value "catch") qs:true thunk
 	     (lambda (key &rest args) (error 'guile-throw :key key :args args)))))
 
 (defun eval-string (string)
@@ -1083,7 +1083,7 @@ boot); the last form's values."
   (with-input-from-string (in string)
     (let ((values (list *unspecified*)))
       (loop for form = (guile-read in)
-	    until (eq form ps:eof-object)
+	    until (eq form qs:eof-object)
 	    do (setq values (multiple-value-list
 			     (call-with-guile-catch (lambda () (primitive-eval form))))))
       (values-list values))))
@@ -1100,8 +1100,8 @@ boot); the last form's values."
 &quit-exception -- the exit status it asks for: (exit) and (exit #t) 0,
 (exit #f) 1, (exit n) n.  Else NIL."
   (flet ((status (x)
-	   (cond ((eq x ps:true) 0)
-		 ((eq x ps:false) 1)
+	   (cond ((eq x qs:true) 0)
+		 ((eq x qs:false) 1)
 		 ((integerp x) x)
 		 (t 0))))
     ;; (throw 'quit n), as Guile's exit does
@@ -1121,8 +1121,8 @@ boot); the last form's values."
       (let ((result (ignore-errors (funcall code exn))))
 	(when (consp result)
 	  (let ((status (car result)))
-	    (cond ((eq status ps:true) 0)
-		  ((eq status ps:false) 1)
+	    (cond ((eq status qs:true) 0)
+		  ((eq status qs:false) 1)
 		  ((integerp status) status)
 		  (t 0))))))))
 
@@ -1133,7 +1133,7 @@ boot); the last form's values."
       ;; Guile's port procedures, which a CL string stream isn't
       (let ((port (open-output-string*)))
 	(ignore-errors
-	 (funcall (root-value "print-exception") port ps:false
+	 (funcall (root-value "print-exception") port qs:false
 		  (guile-throw-key condition) (guile-throw-args condition)))
 	(port-output-string port))
       (princ-to-string condition)))
@@ -1145,12 +1145,12 @@ boot); the last form's values."
     (loop
       (format output "scheme@~A> "
 	      (with-output-to-string (s)
-		(funcall ps:*scheme-write*
+		(funcall qs:*scheme-write*
 			 (funcall (root-value "module-name") *current-module*) s)))
       (finish-output output)
       (let ((form (handler-case (guile-read input)
 		    (error (e) (format output "~&ERROR: ~A~%" e) (clear-input input) nil))))
-	(cond ((eq form ps:eof-object) (terpri output) (return))
+	(cond ((eq form qs:eof-object) (terpri output) (return))
 	      ((null form))
 	      (t (handler-case
 		     (dolist (v (multiple-value-list

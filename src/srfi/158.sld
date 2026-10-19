@@ -4,9 +4,9 @@
 ;;; document, in reference/srfi-158/LICENSE).  This library form follows
 ;;; the shipped srfi-158.sld, renamed (srfi 158).
 ;;;
-;;; Modifications to the reference file, each marked PSEUDOSCHEME there:
+;;; Modifications to the reference file, each marked QUASISCHEME there:
 ;;;   gtake and make-unfold-generator are rewritten in direct style (same
-;;;     behaviour, still lazy), from when Pseudoscheme's continuations
+;;;     behaviour, still lazy), from when Quasischeme's continuations
 ;;;     were escape-only;
 ;;;   make-coroutine-generator (and so make-for-each-generator) is the
 ;;;     sample's, resuming a continuation captured in an earlier call of

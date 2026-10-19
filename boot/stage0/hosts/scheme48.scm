@@ -4,7 +4,7 @@
 ; (psyntax/*.ss, psyntax-buildscript.ss) and a copy of boot/stage0/ as
 ; stage0/, which is how boot/psyntax.sh --seed=stage0 lays it out:
 ;   scheme48 -h 0 < stage0/hosts/scheme48.scm
-; It writes psyntax-pseudoscheme.pp there.  ,batch makes an error exit
+; It writes psyntax-quasischeme.pp there.  ,batch makes an error exit
 ; rather than enter a nested REPL.  See boot/stage0/README.md.
 
 ,batch on

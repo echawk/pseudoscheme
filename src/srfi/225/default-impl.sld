@@ -1,5 +1,5 @@
 ;;; Part of SRFI 225 (see ../225.sld): the sample implementation's
-;;; srfi/225/default-impl.sld, with one change, marked PSEUDOSCHEME:
+;;; srfi/225/default-impl.sld, with one change, marked QUASISCHEME:
 ;;; with escape-only continuations, default-dict->generator collects the
 ;;; entries up front, since the sample's coroutine needs re-entrant ones.
 
@@ -282,7 +282,7 @@
       (define (accept el)
         (and (upper el) (lower el)))
 
-      ;; PSEUDOSCHEME: the sample implementation's generator re-enters
+      ;; QUASISCHEME: the sample implementation's generator re-enters
       ;; continuations after they have returned (a yield/resume
       ;; coroutine), which needs re-entrant ones (the default); with
       ;; escape-only continuations the entries are collected by one

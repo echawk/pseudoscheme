@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Guile's VM: bytecode translated to Lisp
 ;;;;
@@ -15,20 +15,20 @@
 ;;;; interpreter (RUN-VM-1) goes on from there.
 ;;;;
 ;;;; The interpreter stays the reference: the translation runs the same
-;;;; handlers, and *VM-JIT* NIL (PSEUDOSCHEME_GUILE_JIT=0) turns it off.
+;;;; handlers, and *VM-JIT* NIL (QUASISCHEME_GUILE_JIT=0) turns it off.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defun backend-from-environment ()
-  (let ((name (uiop:getenv "PSEUDOSCHEME_GUILE_VM_BACKEND")))
-    (cond ((equal (uiop:getenv "PSEUDOSCHEME_GUILE_JIT") "0") :interpret)
+  (let ((name (uiop:getenv "QUASISCHEME_GUILE_VM_BACKEND")))
+    (cond ((equal (uiop:getenv "QUASISCHEME_GUILE_JIT") "0") :interpret)
 	  ;; the fastest backend there is here: VOPs on SBCL/arm64
 	  ((null name) #+(and sbcl arm64) :vop #-(and sbcl arm64) :jit)
 	  (t (or (find name '(:interpret :jit :aot :vop) :test #'string-equal)
 		 (error "Unknown Guile VM backend ~A" name))))))
 
 (defvar *vm-backend* (backend-from-environment)
-  "How bytecode runs (PSEUDOSCHEME_GUILE_VM_BACKEND; by default :vop where
+  "How bytecode runs (QUASISCHEME_GUILE_VM_BACKEND; by default :vop where
 SBCL's VOPs for it are there, arm64, else :jit):
   :interpret  the interpreter alone (vm.lisp), the reference;
   :jit        regions that run often translated to Lisp (below);
@@ -49,16 +49,16 @@ SBCL's VOPs for it are there, arm64, else :jit):
 	*vm-jit* (not (eq backend :interpret))))
 
 (defun threshold-from-environment ()
-  (or (ignore-errors (parse-integer (uiop:getenv "PSEUDOSCHEME_GUILE_JIT_THRESHOLD"))) 20))
+  (or (ignore-errors (parse-integer (uiop:getenv "QUASISCHEME_GUILE_JIT_THRESHOLD"))) 20))
 
 (defvar *vm-jit-threshold* (threshold-from-environment)
   "How many times an instruction is jumped to before the region from it
-is translated (PSEUDOSCHEME_GUILE_JIT_THRESHOLD; 0 translates all code
+is translated (QUASISCHEME_GUILE_JIT_THRESHOLD; 0 translates all code
 run, for testing).")
 
 (defun vm-settings-from-environment ()
   "Read the VM's settings from the environment again: when a saved image
-(bin/pseudoscheme, pseudoscheme-guile.core) starts, whose variables
+(bin/quasischeme, quasischeme-guile.core) starts, whose variables
 hold the values of the environment it was built in."
   (set-vm-backend (backend-from-environment))
   (setq *vm-jit-threshold* (threshold-from-environment)
@@ -112,7 +112,7 @@ a form better than its handler's source for them, or NIL.")
   `(setf (gethash ,name *specializers*) (lambda ,lambda-list ,@body)))
 
 (defun literal-immediate-p (x)
-  (or (typep x 'fixnum) (characterp x) (eq x ps:true) (eq x ps:false) (null x)))
+  (or (typep x 'fixnum) (characterp x) (eq x qs:true) (eq x qs:false) (null x)))
 
 ;; an immediate's bits are decoded once, here
 (macrolet ((immediates (&rest names)
@@ -129,7 +129,7 @@ a form better than its handler's source for them, or NIL.")
 (defun intrinsic-name (index)
   "The name of Guile's intrinsic INDEX, a string."
   (let ((entry (rassoc index (bytecode-table "intrinsic-list"))))
-    (and entry (ps:scheme-symbol-name (car entry)))))
+    (and entry (qs:scheme-symbol-name (car entry)))))
 
 (defun vop-backend-p () (and (eq *vm-backend* :vop) *vm-vops*))
 
@@ -280,19 +280,19 @@ jumps there until there should be."
 
 (defun aot-fasl (image)
   (merge-pathnames
-   (format nil "pseudoscheme/guile-aot/~36R-~36R.fasl"
+   (format nil "quasischeme/guile-aot/~36R-~36R.fasl"
 	   (octets-hash (vm-image-bytes image))
-	   (psx::fnv-1a (psx::build-signature)))
+	   (qsx::fnv-1a (qsx::build-signature)))
    (uiop:xdg-cache-home)))
 
 (defun write-aot-file (image lisp)
   (with-open-file (out lisp :direction :output :if-exists :supersede)
     (with-standard-io-syntax
-      (let ((*package* (find-package "PSEUDOSCHEME-GUILE"))
+      (let ((*package* (find-package "QUASISCHEME-GUILE"))
 	    (*print-circle* t)	; the tags of a region, uninterned, shared
 	    (*print-readably* t))
 	(format out ";;; Guile VM code translated to Lisp ahead of time (vm-jit.lisp)~%")
-	(prin1 '(in-package "PSEUDOSCHEME-GUILE") out)
+	(prin1 '(in-package "QUASISCHEME-GUILE") out)
 	(terpri out)
 	(dolist (region (image-regions image))
 	  (prin1 `(aot-region ,(first (first region)) ,(fourth (car (last region)))

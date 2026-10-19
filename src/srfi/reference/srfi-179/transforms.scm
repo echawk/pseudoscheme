@@ -132,7 +132,7 @@
                (vector? sizes)
                (= (array-dimension array) (vector-length sizes))
                (vector-every exact-integer? sizes)
-               ;; PSEUDOSCHEME: was (vector-every <= sizes (interval-ub
+               ;; QUASISCHEME: was (vector-every <= sizes (interval-ub
                ;; (array-domain array))), which rejects valid sizes when a
                ;; lower bound is negative; the SRFI asks only that they be
                ;; positive

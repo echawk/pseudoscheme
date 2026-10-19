@@ -1,7 +1,7 @@
 ;;; Tests for SRFI 253: the sample implementation's test suite
 ;;; (reference/srfi-253/test.scm), with each group of tests in a
 ;;; procedure: the suite redefines c at top level, which an R7RS program
-;;; can't, and Pseudoscheme compiles many top-level calls slowly (see
+;;; can't, and Quasischeme compiles many top-level calls slowly (see
 ;;; ../57.sld).  The tests themselves are unchanged.
 (import (scheme base) (scheme process-context) (srfi 64) (srfi 253))
 

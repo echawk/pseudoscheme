@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; (pseudoscheme clos): Common Lisp's object system in Scheme's syntax,
+;;;; (quasischeme clos): Common Lisp's object system in Scheme's syntax,
 ;;;; as GOOPS has it.  Classes and generic functions are CLOS's own, so
 ;;;; Lisp code sees them as it sees its own (named by the Scheme
 ;;;; symbols, as (cl:defclass ...) from Scheme names them); a method's
@@ -23,12 +23,12 @@
 ;;;; arguments, (call-next-method a ...) with others, and (next-method?)
 ;;;; says whether there is one.  A parameter without a class is <top>'s.
 
-(library (pseudoscheme clos)
+(library (quasischeme clos)
   (export define-class define-generic define-method
           make slot-ref slot-set! slot-bound? class-of class-name class? is-a? generic?
           <top> <object> <number> <real> <integer> <string> <symbol> <pair> <null>
           <list> <vector> <procedure> <char> <hashtable>)
-  (import (rnrs) (pseudoscheme clos primitives))
+  (import (rnrs) (quasischeme clos primitives))
 
   (define-syntax define-class
     (lambda (x)

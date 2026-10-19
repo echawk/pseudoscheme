@@ -1,4 +1,4 @@
-;;; SRFI 18: multithreading support.  Written for Pseudoscheme, on
+;;; SRFI 18: multithreading support.  Written for Quasischeme, on
 ;;; bordeaux-threads (its version 2 API, package BT2), which is loaded
 ;;; from Quicklisp or ASDF the first time this library is imported.
 ;;;
@@ -46,7 +46,7 @@
           terminated-thread-exception? uncaught-exception?
           uncaught-exception-reason)
   (import (scheme base) (scheme time) (scheme process-context)
-          (pseudoscheme lisp)
+          (quasischeme lisp)
           ;; Loads the system; BT2 is one of its packages.
           (only (prefix (cl bordeaux-threads) bt1:) bt1:make-thread)
           (prefix (cl bordeaux-threads-2) bt:)
@@ -112,7 +112,7 @@
       (reason uncaught-exception-reason))
 
     (define (current-exception-handler)
-      (let ((handlers (lisp-value (lisp-symbol "*handlers*" "pseudoscheme-r7rs"))))
+      (let ((handlers (lisp-value (lisp-symbol "*handlers*" "quasischeme-r7rs"))))
         (if (pair? handlers) (car handlers) raise)))
 
     ;; ------------------------------------------------------------

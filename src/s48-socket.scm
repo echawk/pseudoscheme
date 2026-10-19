@@ -72,7 +72,7 @@
 (define (force-output oport)
   (cl:finish-output oport))
 
-(define (error? x) (ps:true? (cl:typep x 'cl:error)))
+(define (error? x) (qs:true? (cl:typep x 'cl:error)))
 
 #+LispWorks
 (map 'cl:eval '(
@@ -84,7 +84,7 @@
 						  (cl:lambda () 
 						    (cl:signal condition))))))
     (cl:funcall thunk)))
-(ps:set-value-from-function 'with-handler)
+(qs:set-value-from-function 'with-handler)
 
 ));pam
 
@@ -102,7 +102,7 @@
 (cl:defun call-with-string-output-port (proc)
   (cl:with-output-to-string (str)
     (cl:funcall proc str)))
-(ps:set-value-from-function 'call-with-string-output-port)
+(qs:set-value-from-function 'call-with-string-output-port)
 
 ));pam
 

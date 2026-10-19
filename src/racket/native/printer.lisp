@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's printer, natively: write, display and print for Racket's
 ;;;; values (in Racket CS, the io layer's printer).  Numbers, strings,
@@ -16,7 +16,7 @@
 ;;;; with print-graph, shared structure too (graph.rkt's marks, below).
 ;;;; Not yet: print-syntax-width.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; The print parameters (Racket's io/print/parameter.rkt)
@@ -27,17 +27,17 @@
   `(progn (defvar ,variable (make-parameter* ,value ,guard (rsym ,name)))
 	  (define-primitive "#%kernel" ,name ,variable)))
 
-(define-print-parameter *print-as-expression* "print-as-expression" ps:true)
-(define-print-parameter *print-boolean-long-form* "print-boolean-long-form" ps:false)
-(define-print-parameter *print-box* "print-box" ps:true)
-(define-print-parameter *print-graph* "print-graph" ps:false)
-(define-print-parameter *print-hash-table* "print-hash-table" ps:true)
-(define-print-parameter *print-mpair-curly-braces* "print-mpair-curly-braces" ps:true)
-(define-print-parameter *print-pair-curly-braces* "print-pair-curly-braces" ps:false)
-(define-print-parameter *print-reader-abbreviations* "print-reader-abbreviations" ps:false)
-(define-print-parameter *print-struct* "print-struct" ps:true)
-(define-print-parameter *print-unreadable* "print-unreadable" ps:true)
-(define-print-parameter *print-vector-length* "print-vector-length" ps:false)
+(define-print-parameter *print-as-expression* "print-as-expression" qs:true)
+(define-print-parameter *print-boolean-long-form* "print-boolean-long-form" qs:false)
+(define-print-parameter *print-box* "print-box" qs:true)
+(define-print-parameter *print-graph* "print-graph" qs:false)
+(define-print-parameter *print-hash-table* "print-hash-table" qs:true)
+(define-print-parameter *print-mpair-curly-braces* "print-mpair-curly-braces" qs:true)
+(define-print-parameter *print-pair-curly-braces* "print-pair-curly-braces" qs:false)
+(define-print-parameter *print-reader-abbreviations* "print-reader-abbreviations" qs:false)
+(define-print-parameter *print-struct* "print-struct" qs:true)
+(define-print-parameter *print-unreadable* "print-unreadable" qs:true)
+(define-print-parameter *print-vector-length* "print-vector-length" qs:false)
 (define-print-parameter *print-syntax-width* "print-syntax-width" 256
   (lambda (v)
     (unless (or (eql v 0) (and (floatp v) (sb-ext:float-infinity-p v) (plusp v))
@@ -94,12 +94,12 @@
 		 (t (write-char c stream))))
   (write-char #\" stream))
 
-(defun host-write (x stream) (funcall (psx:host-ref "write") x stream))
-(defun host-display (x stream) (funcall (psx:host-ref "display") x stream))
+(defun host-write (x stream) (funcall (qsx:host-ref "write") x stream))
+(defun host-display (x stream) (funcall (qsx:host-ref "display") x stream))
 
 (defun procedure-name-string (f)
   (let ((name (funcall (native-function (gethash "object-name" *natives*)) f)))
-    (and (symbolp name) name (not (eq name ps:false)) (rname name))))
+    (and (symbolp name) name (not (eq name qs:false)) (rname name))))
 
 (defun print-value (x stream mode)
   "X on STREAM, MODE :write or :display."
@@ -219,9 +219,9 @@ the trailing ones equal to the one before."
 	     (unreadable (text) (unreadable-text x stream mode text)))
       (cond ((eq x *void*) (unreadable "#<void>"))
 	    ((eq x *eof*) (unreadable "#<eof>"))
-	    ((eq x ps:eof-object) (unreadable "#<eof>"))
-	    ((and (po-long o) (eq x ps:true)) (write-string "#true" stream))
-	    ((and (po-long o) (eq x ps:false)) (write-string "#false" stream))
+	    ((eq x qs:eof-object) (unreadable "#<eof>"))
+	    ((and (po-long o) (eq x qs:true)) (write-string "#true" stream))
+	    ((and (po-long o) (eq x qs:false)) (write-string "#false" stream))
 	    ((unquoted-ps-p x) (write-string (unquoted-ps-value x) stream))
 	    ((consp x)
 	     (let ((prefix (and (or (po-abbrev o) *print-abbreviate*) (abbreviation-prefix x))))
@@ -299,7 +299,7 @@ the trailing ones equal to the one before."
 		   (write-char #\) stream))
 		 (write-string "#<hash>" stream)))
 	    ((custom-write-procedure x)
-	     (write-string (custom-written x (custom-write-procedure x) (if (eq mode :display) ps:false ps:true))
+	     (write-string (custom-written x (custom-write-procedure x) (if (eq mode :display) qs:false qs:true))
 			   stream))
 	    ((struct-instance-p x)
 	     (let ((type (struct-of-type x)))
@@ -352,7 +352,7 @@ struct as its constructor's application, (point 1 2); a mutable pair as
 	   (print-quoted (mpair-cdr x) stream)
 	   (write-char #\) stream))
 	  (t
-	   (when (or (and (symbolp x) x (not (eq x ps:true)) (not (eq x ps:false)))
+	   (when (or (and (symbolp x) x (not (eq x qs:true)) (not (eq x qs:false)))
 		     (consp x) (null x) (simple-vector-p x) (rbox-p x) (rkeyword-p x)
 		     (ihash-p x))
 	     (write-char #\' stream))
@@ -390,8 +390,8 @@ writes straight to the port (compiled code writes its bytes so)."
   (port-write-string (with-output-to-string (s) (funcall f s)) port)
   *void*)
 
-(defnative "write" (x &optional port) () (write-with-mode x port ps:true :write))
-(defnative "display" (x &optional port) () (write-with-mode x port ps:false :display))
+(defnative "write" (x &optional port) () (write-with-mode x port qs:true :write))
+(defnative "display" (x &optional port) () (write-with-mode x port qs:false :display))
 (defnative "print" (x &optional port quote-depth) ()
   (declare (ignore quote-depth))
   (write-with-mode x port 0 :print))
@@ -419,7 +419,7 @@ evaluate IMPROPER."
 		(incf ,steps)
 		(when (eq ,tail ,tortoise) (return ,improper))
 		(when (= ,steps ,limit) (setq ,tortoise ,tail ,limit (* 2 ,limit))))
-	       ((null ,tail) (return ps:false))
+	       ((null ,tail) (return qs:false))
 	       (t (return ,improper)))))))
 
 (defun improper-list-error (who list)
@@ -476,8 +476,8 @@ evaluate IMPROPER."
 		    (progn (setf (gethash (cons ,mode port) *port-handlers*) handler) *void*)
 		    (or (gethash (cons ,mode port) *port-handlers*)
 			(lambda (v p &optional depth) (declare (ignore depth)) ,default))))))
-  (handler "port-display-handler" :display (write-with-mode v p ps:false :display))
-  (handler "port-write-handler" :write (write-with-mode v p ps:true :write))
+  (handler "port-display-handler" :display (write-with-mode v p qs:false :display))
+  (handler "port-write-handler" :write (write-with-mode v p qs:true :write))
   (handler "port-print-handler" :print (write-with-mode v p 0 :print)))
 
 (defvar *global-port-print-handler*

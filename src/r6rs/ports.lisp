@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs io ports (6)) and (rnrs io simple (6)), library report
 ;;;; chapter 8.  Ports are CL streams.
@@ -8,10 +8,10 @@
 ;;;; custom ports, and transcoded ports -- is a Gray stream class below.
 ;;;; Gray streams come from trivial-gray-streams.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defun io-error-filename (who name kind)
-  (ps-r7rs:raise-object
+  (qs-r7rs:raise-object
    (funcall (prim "condition")
 	    (funcall (prim kind) name)
 	    (funcall (prim "make-who-condition") who)
@@ -37,19 +37,19 @@
 (defprim "utf-8-codec" () *utf-8-codec*)
 (defprim "latin-1-codec" () *latin-1-codec*)
 (defprim "utf-16-codec" () *utf-16-codec*)
-(defprim "native-eol-style" () (ps:intern-scheme-symbol "lf"))
+(defprim "native-eol-style" () (qs:intern-scheme-symbol "lf"))
 (defprim "make-transcoder" (codec &optional eol handling)
   (%make-transcoder codec
-		    (or eol (ps:intern-scheme-symbol "lf"))
-		    (or handling (ps:intern-scheme-symbol "replace"))))
+		    (or eol (qs:intern-scheme-symbol "lf"))
+		    (or handling (qs:intern-scheme-symbol "replace"))))
 (defprim "native-transcoder" ()
-  (%make-transcoder *utf-8-codec* (ps:intern-scheme-symbol "lf") (ps:intern-scheme-symbol "replace")))
+  (%make-transcoder *utf-8-codec* (qs:intern-scheme-symbol "lf") (qs:intern-scheme-symbol "replace")))
 (defprim "transcoder-codec" (tc) (transcoder-codec tc))
 (defprim "transcoder-eol-style" (tc) (transcoder-eol-style tc))
 (defprim "transcoder-error-handling-mode" (tc) (transcoder-handling tc))
 
 (defun symbol-is (symbol name)
-  (and (symbolp symbol) (string= (ps:scheme-symbol-name symbol) name)))
+  (and (symbolp symbol) (string= (qs:scheme-symbol-name symbol) name)))
 
 ;;; ------------------------------------------------------------------
 ;;; Gray stream classes
@@ -238,7 +238,7 @@
   (file-position (binary s) position))
 
 (defun raise-coding-error (port constructor &rest args)
-  (ps-r7rs:raise-object
+  (qs-r7rs:raise-object
    (funcall (prim "condition")
 	    (apply (prim constructor) port args)
 	    (funcall (prim "make-message-condition")
@@ -424,14 +424,14 @@
   (or (and (typep port 'scheme-port) (port-transcoder* port))
       (if (subtypep (stream-element-type port) 'character)
 	  (funcall (prim "native-transcoder"))
-	  ps:false)))
+	  qs:false)))
 
 ;;; ------------------------------------------------------------------
 ;;; Opening ports (8.2.7 - 8.2.13)
 
 (defun options-include (options name)
   (let ((options (if (enum-set-p options) (enum-members options) options)))
-    (and (listp options) (member name options :key #'ps:scheme-symbol-name :test #'string=))))
+    (and (listp options) (member name options :key #'qs:scheme-symbol-name :test #'string=))))
 
 (defprim "open-bytevector-input-port" (bv &optional tc)
   (let ((port (make-instance 'bytevector-input-port :bytes (check-bv "open-bytevector-input-port" bv))))
@@ -537,10 +537,10 @@
   (make-instance 'standard-binary-output-port :stream (fd-stream 2 :output)))
 
 (defprim "buffer-mode?" (x)
-  (bool (and (symbolp x) (member (ps:scheme-symbol-name x) '("none" "line" "block") :test #'string=))))
+  (bool (and (symbolp x) (member (qs:scheme-symbol-name x) '("none" "line" "block") :test #'string=))))
 
 (defprim "output-port-buffer-mode" (port)
-  (values (gethash port *buffer-modes* (ps:intern-scheme-symbol "block"))))
+  (values (gethash port *buffer-modes* (qs:intern-scheme-symbol "block"))))
 
 ;;; ------------------------------------------------------------------
 ;;; Port positions, eof
@@ -581,7 +581,7 @@
 	  (custom-textual-input-port (setf (unread port) nil)))
 	(funcall (slot-value port 'set-position!) pos))
       (file-position port pos))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "port-eof?" (port)
   (bool (if (typep port 'binary-input-port)
@@ -597,7 +597,7 @@
 
 (defprim "get-u8" (port)
   (check-binary-in "get-u8" port)
-  (let ((b (read-byte port nil :eof))) (if (eq b :eof) ps:eof-object b)))
+  (let ((b (read-byte port nil :eof))) (if (eq b :eof) qs:eof-object b)))
 
 (defprim "lookahead-u8" (port)
   (check-binary-in "lookahead-u8" port)
@@ -608,7 +608,7 @@
 		 (unless (eq b :eof)
 		   (file-position port (1- (file-position port))))
 		 b))))
-    (if (eq b :eof) ps:eof-object b)))
+    (if (eq b :eof) qs:eof-object b)))
 
 (defun read-bytes (port count)
   (let ((out '()))
@@ -621,13 +621,13 @@
 (defprim "get-bytevector-n" (port count)
   (check-binary-in "get-bytevector-n" port)
   (let ((bv (read-bytes port count)))
-    (if (and (zerop (length bv)) (plusp count)) ps:eof-object bv)))
+    (if (and (zerop (length bv)) (plusp count)) qs:eof-object bv)))
 
 (defprim "get-bytevector-n!" (port bv start count)
   (check-binary-in "get-bytevector-n!" port)
   (let ((got (read-bytes port count)))
     (if (and (zerop (length got)) (plusp count))
-	ps:eof-object
+	qs:eof-object
 	(progn (replace bv got :start1 start) (length got)))))
 
 (defun byte-ready-p (port)
@@ -682,27 +682,27 @@ waiting for the first unless NONBLOCKING; the number read, or :EOF."
   (check-binary-in "get-bytevector-some" port)
   (let* ((bv (make-array 4096 :element-type '(unsigned-byte 8)))
 	 (n (read-some-bytes port bv 0 4096)))
-    (if (eq n :eof) ps:eof-object (subseq bv 0 n))))
+    (if (eq n :eof) qs:eof-object (subseq bv 0 n))))
 
 (defprim "get-bytevector-all" (port)
   (check-binary-in "get-bytevector-all" port)
   (let ((bv (read-bytes port most-positive-fixnum)))
-    (if (zerop (length bv)) ps:eof-object bv)))
+    (if (zerop (length bv)) qs:eof-object bv)))
 
-(defprim "put-u8" (port byte) (write-byte byte port) ps:unspecific)
+(defprim "put-u8" (port byte) (write-byte byte port) qs:unspecific)
 
 (defprim "put-bytevector" (port bv &optional (start 0) (count nil))
   (let ((end (if count (+ start count) (length bv))))
     (loop for i from start below end do (write-byte (aref bv i) port)))
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; Textual input/output (8.2.9, 8.2.12)
 
 (defprim "get-char" (port)
-  (let ((c (read-char port nil :eof))) (if (eq c :eof) ps:eof-object c)))
+  (let ((c (read-char port nil :eof))) (if (eq c :eof) qs:eof-object c)))
 
 (defprim "lookahead-char" (port)
-  (let ((c (peek-char nil port nil :eof))) (if (eq c :eof) ps:eof-object c)))
+  (let ((c (peek-char nil port nil :eof))) (if (eq c :eof) qs:eof-object c)))
 
 (defprim "get-string-n" (port count)
   (let* ((s (make-string count))
@@ -711,7 +711,7 @@ waiting for the first unless NONBLOCKING; the number read, or :EOF."
 		  until (eq c :eof)
 		  do (setf (char s i) c)
 		  finally (return i))))
-    (if (and (zerop n) (plusp count)) ps:eof-object (coerce (subseq s 0 n) 'simple-string))))
+    (if (and (zerop n) (plusp count)) qs:eof-object (coerce (subseq s 0 n) 'simple-string))))
 
 (defprim "get-string-n!" (port string start count)
   (let ((n (loop for i from 0 below count
@@ -719,7 +719,7 @@ waiting for the first unless NONBLOCKING; the number read, or :EOF."
 		 until (eq c :eof)
 		 do (setf (char string (+ start i)) c)
 		 finally (return i))))
-    (if (and (zerop n) (plusp count)) ps:eof-object n)))
+    (if (and (zerop n) (plusp count)) qs:eof-object n)))
 
 (defprim "get-string-all" (port)
   (let ((out (make-string-output-stream)))
@@ -727,21 +727,21 @@ waiting for the first unless NONBLOCKING; the number read, or :EOF."
 	  until (eq c :eof)
 	  do (write-char c out))
     (let ((s (get-output-stream-string out)))
-      (if (zerop (length s)) ps:eof-object (coerce s 'simple-string)))))
+      (if (zerop (length s)) qs:eof-object (coerce s 'simple-string)))))
 
 (defprim "get-line" (port)
   (let ((line (read-line port nil :eof)))
-    (if (eq line :eof) ps:eof-object (coerce line 'simple-string))))
+    (if (eq line :eof) qs:eof-object (coerce line 'simple-string))))
 
-(defprim "get-datum" (port) (funcall ps:*scheme-read* port))
+(defprim "get-datum" (port) (funcall qs:*scheme-read* port))
 
-(defprim "put-char" (port c) (write-char c port) ps:unspecific)
+(defprim "put-char" (port c) (write-char c port) qs:unspecific)
 
 (defprim "put-string" (port string &optional (start 0) (count nil))
   (write-string string port :start start :end (if count (+ start count) nil))
-  ps:unspecific)
+  qs:unspecific)
 
-(defprim "put-datum" (port datum) (funcall ps:*scheme-write* datum port) ps:unspecific)
+(defprim "put-datum" (port datum) (funcall qs:*scheme-write* datum port) qs:unspecific)
 
 ;;; String ports
 

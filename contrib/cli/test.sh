@@ -1,6 +1,6 @@
 #!/bin/sh
-# Smoke tests for the command-line program: sh test.sh path/to/pseudoscheme
-PS=${1:-../../bin/pseudoscheme}
+# Smoke tests for the command-line program: sh test.sh path/to/quasischeme
+PS=${1:-../../bin/quasischeme}
 fail=0; n=0
 check() {  # check NAME EXPECTED COMMAND...
   name=$1; expected=$2; shift 2; n=$((n+1))
@@ -9,7 +9,7 @@ check() {  # check NAME EXPECTED COMMAND...
     fail=$((fail+1)); printf 'FAIL %s\n  expected: %s\n  got:      %s\n' "$name" "$expected" "$got"
   fi
 }
-tmp=${TMPDIR:-/tmp}/pseudoscheme-test.$$; mkdir -p $tmp/lib/my
+tmp=${TMPDIR:-/tmp}/quasischeme-test.$$; mkdir -p $tmp/lib/my
 trap 'rm -rf $tmp' EXIT
 
 check "r7rs -p" "6" $PS -p '(+ 1 2 3)'
@@ -59,7 +59,7 @@ cat > $tmp/uselib.scm <<'S'
 (display (twice 21)) (newline)
 S
 check "r7rs library from -L" "42" $PS -L $tmp/lib $tmp/uselib.scm
-check "PSEUDOSCHEME_LIBRARY_PATH" "42" env PSEUDOSCHEME_LIBRARY_PATH=/nonexistent:$tmp/lib $PS $tmp/uselib.scm
+check "QUASISCHEME_LIBRARY_PATH" "42" env QUASISCHEME_LIBRARY_PATH=/nonexistent:$tmp/lib $PS $tmp/uselib.scm
 mkdir -p $tmp/proj/.akku/lib/my $tmp/proj/src && cp $tmp/lib/my/lib.sld $tmp/proj/.akku/lib/my/
 check "--akku finds .akku/lib above" "42" sh -c "cd $tmp/proj/src && $PS --akku $tmp/uselib.scm"
 
@@ -89,19 +89,19 @@ mkdir -p $tmp/home
 cat > $tmp/home/.sbclrc <<'S'
 (defun cl-user::rc-loaded-p () 42)
 S
-check "the init file is loaded" "42" env HOME=$tmp/home $PS -p '(begin (import (pseudoscheme lisp)) ((lisp-function "rc-loaded-p" "cl-user")))'
-check "--no-userinit skips it" "no" env HOME=$tmp/home sh -c "$PS --no-userinit -p '(begin (import (pseudoscheme lisp)) ((lisp-function \"rc-loaded-p\" \"cl-user\")))' >/dev/null 2>&1 && echo yes || echo no"
+check "the init file is loaded" "42" env HOME=$tmp/home $PS -p '(begin (import (quasischeme lisp)) ((lisp-function "rc-loaded-p" "cl-user")))'
+check "--no-userinit skips it" "no" env HOME=$tmp/home sh -c "$PS --no-userinit -p '(begin (import (quasischeme lisp)) ((lisp-function \"rc-loaded-p\" \"cl-user\")))' >/dev/null 2>&1 && echo yes || echo no"
 printf '(error "broken rc")\n' > $tmp/home/.sbclrc
 check "an error in it is reported, and the program runs" "3" env HOME=$tmp/home sh -c "$PS -p '(+ 1 2)' 2>/dev/null"
 
 check "error exit" "Error: not a pair 5" sh -c "$PS -e '(car 5)' 2>&1 | head -1"
-check "repl" "3" sh -c "printf '(+ 1 2)\n,q\n' | $PS | grep -v '^Pseudoscheme' | tr -d '> r7s' "
+check "repl" "3" sh -c "printf '(+ 1 2)\n,q\n' | $PS | grep -v '^Quasischeme' | tr -d '> r7s' "
 
 check "(cl common-lisp) from Scheme" "(1 2 3)" $PS -p "(begin (import (prefix (cl common-lisp) cl:)) (cl:sort (list 3 1 2) cl:<))"
 check "#:keyword arguments" "((a . 1) (b . 2))" $PS -p "(begin (import (prefix (cl common-lisp) cl:)) (cl:sort (list '(b . 2) '(a . 1)) cl:< #:key cl:cdr))"
-check "-l loads a Lisp system" "#t" $PS -l uiop -p "(begin (import (pseudoscheme lisp)) (procedure? (lisp-function \"getenv\" \"uiop\")))"
+check "-l loads a Lisp system" "#t" $PS -l uiop -p "(begin (import (quasischeme lisp)) (procedure? (lisp-function \"getenv\" \"uiop\")))"
 
-check "-V: SRFI 176" '(command "pseudoscheme")' sh -c "$PS -V | head -1"
+check "-V: SRFI 176" '(command "quasischeme")' sh -c "$PS -V | head -1"
 check "(command-line) without a program: SRFI 193" '("")' $PS -p '(command-line)'
 
 # SRFI 22: links named for the script interpreters run FILE's main
@@ -136,7 +136,7 @@ exe_check() {  # exe_check NAME EXPECTED-OUTPUT EXPECTED-STATUS SOURCE MODE-FLAG
     fail=$((fail+1)); printf 'FAIL %s: did not build\n  %s\n' "$name" "$(tail -3 $tmp/exe/build.log)"; return
   fi
   mv $tmp/exe/$src $tmp/exe/$src.moved
-  got=$(cd $tmp/exe/nowhere && HOME=$tmp/exe/nowhere PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/exe/nowhere/cache $out a "b c" --help 2>&1); code=$?
+  got=$(cd $tmp/exe/nowhere && HOME=$tmp/exe/nowhere QUASISCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/exe/nowhere/cache $out a "b c" --help 2>&1); code=$?
   mv $tmp/exe/$src.moved $tmp/exe/$src
   if [ "$got" != "$want" ] || [ $code != $wantcode ]; then
     fail=$((fail+1)); printf 'FAIL %s\n  expected: %s (status %s)\n  got:      %s (status %s)\n' "$name" "$want" "$wantcode" "$got" "$code"
@@ -158,14 +158,14 @@ fi
 
 # --precompile DIR: its libraries compiled into the cache
 mkdir -p $tmp/cache
-check "--precompile" "1 of 1 compiled" sh -c "PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS --precompile $tmp/lib | grep -o '1 of 1 compiled'"
-check "a precompiled library loads" "42" env PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS -L $tmp/lib $tmp/uselib.scm
+check "--precompile" "1 of 1 compiled" sh -c "QUASISCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS --precompile $tmp/lib | grep -o '1 of 1 compiled'"
+check "a precompiled library loads" "42" env QUASISCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $PS -L $tmp/lib $tmp/uselib.scm
 
 # Chez's command: compile-program writes a fasl, which runs as the program
 ln -s "$(cd "$(dirname "$PS")" && pwd)/$(basename "$PS")" $tmp/ib/chez
 printf '(import (chezscheme) (my lib))\n(define (f n) (if (= n 0) 1 (* n (f (- n 1)))))\n(printf "~a ~a ~a\\n" (f 20) (twice 4) (cdr (command-line)))\n' > $tmp/p.ss
-check "chez: compile-program" "# FASL" sh -c "echo '(compile-program \"$tmp/p.ss\")' | PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $tmp/ib/chez -q --libdirs $tmp/lib >/dev/null && sed -n 1p $tmp/p.so | cut -c1-6"
-check "chez: a compiled program runs" "2432902008176640000 8 (a b)" env PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $tmp/ib/chez --libdirs $tmp/lib --program $tmp/p.so a b
+check "chez: compile-program" "# FASL" sh -c "echo '(compile-program \"$tmp/p.ss\")' | QUASISCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $tmp/ib/chez -q --libdirs $tmp/lib >/dev/null && sed -n 1p $tmp/p.so | cut -c1-6"
+check "chez: a compiled program runs" "2432902008176640000 8 (a b)" env QUASISCHEME_LIBRARY_CACHE_DIRECTORY=$tmp/cache $tmp/ib/chez --libdirs $tmp/lib --program $tmp/p.so a b
 
 echo "$((n-fail)) of $n CLI tests passed"
 [ $fail = 0 ]

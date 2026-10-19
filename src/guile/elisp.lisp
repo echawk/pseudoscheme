@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Emacs Lisp's lists in Guile's list procedures.  Emacs Lisp's nil is
 ;;;; Guile's #nil (reader.lisp), so a list Emacs Lisp code conses up,
@@ -20,7 +20,7 @@
 ;;;;   means a new list: their values are right, but such an argument
 ;;;;   isn't changed as Guile would change it.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (declaim (inline list-end-p))
 (defun list-end-p (x) (or (null x) (eq x *elisp-nil*)))
@@ -90,40 +90,40 @@ entry that isn't a pair is an error, as in Guile."
   (loop for tail = list then (cdr tail)
 	while (consp tail)
 	when (eq (car tail) key) return tail
-	finally (return ps:false)))
+	finally (return qs:false)))
 
 (defun guile-assq (key alist)
   (do-alist (entry tail alist "assq")
     (when (eq (car entry) key) (return-from guile-assq entry)))
-  ps:false)
+  qs:false)
 
 (defun guile-memv (key list)
   (loop for tail = list then (cdr tail)
 	while (consp tail)
 	when (eql (car tail) key) return tail
-	finally (return ps:false)))
+	finally (return qs:false)))
 
 (defun guile-assv (key alist)
   (do-alist (entry tail alist "assv")
     (when (eql (car entry) key) (return-from guile-assv entry)))
-  ps:false)
+  qs:false)
 
 (defun guile-member (key list &optional (same nil same-p))
   (loop for tail = list then (cdr tail)
 	while (consp tail)
 	when (if same-p
 		 (truthy (funcall same key (car tail)))
-		 (ps:scheme-equal-p key (car tail)))
+		 (qs:scheme-equal-p key (car tail)))
 	  return tail
-	finally (return ps:false)))
+	finally (return qs:false)))
 
 (defun guile-assoc (key alist &optional (same nil same-p))
   (do-alist (entry tail alist "assoc")
     (when (if same-p
 	      (truthy (funcall same key (car entry)))
-	      (ps:scheme-equal-p key (car entry)))
+	      (qs:scheme-equal-p key (car entry)))
       (return-from guile-assoc entry)))
-  ps:false)
+  qs:false)
 
 (defun guile-last-pair (list)
   ;; of a dotted list too, as Guile's: (last-pair '(e . f)) is (e . f)
@@ -207,7 +207,7 @@ last argument kept as it is.  (Without a #nil, Guile's own does it.)"
   "Install the #nil-taking versions: as host procedures the compiler calls,
 and as Guile's root bindings."
   (flet ((install (name f)
-	   (psx:host-set! (format nil "%guile-nil:~A" name) f)
+	   (qsx:host-set! (format nil "%guile-nil:~A" name) f)
 	   (obarray-define (ssym name) f)
 	   ;; and for the modules whose load-extension binds them
 	   (when (gethash name *guile-primitives*)
@@ -222,6 +222,6 @@ and as Guile's root bindings."
       (let ((original (or (let ((v (obarray-variable (ssym name))))
 			    (and v (functionp (gvariable-value v)) (gvariable-value v)))
 			  (gethash name *guile-primitives*)
-			  (ignore-errors (psx:host-ref name)))))
+			  (ignore-errors (qsx:host-ref name)))))
 	(when (functionp original)
 	  (install name (nil-tolerant original)))))))

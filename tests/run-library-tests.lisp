@@ -27,15 +27,15 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (load-system :pseudoscheme/api)))
+    (load-system :quasischeme/api)))
 
 (defvar *run* 0)
 (defvar *passed* 0)
 
 (defun read-all-from-string (string)
   (with-input-from-string (in string)
-    (loop for form = (funcall ps:*scheme-read* in)
-	  until (eq form ps:eof-object)
+    (loop for form = (funcall qs:*scheme-read* in)
+	  until (eq form qs:eof-object)
 	  collect form)))
 
 (defun check (name thunk expected)
@@ -50,7 +50,7 @@
 	       (format t "~&FAIL ~A~%  expected an error, got ~S~%" name got)))
 	  (t
 	   (let ((want (car (read-all-from-string expected))))
-	     (if (ps::scheme-equal-p got want)
+	     (if (qs::scheme-equal-p got want)
 		 (incf *passed*)
 		 (format t "~&FAIL ~A~%  got:  ~S~%  want: ~S~%" name got want)))))))
 
@@ -62,8 +62,8 @@ and return the program's last value."
 (defun r6 (source)
   "Install any (library ...) forms in SOURCE, then run the (import ...)
 program after them, through psyntax; return the program's last value."
-  (unless psx:*host* (psx::boot))
-  (psx:eval-forms (read-all-from-string source)))
+  (unless qsx:*host* (qsx::boot))
+  (qsx:eval-forms (read-all-from-string source)))
 
 (defmacro deftest (name (kind) source expected)
   `(check ,name (lambda () (,kind ,source)) ,expected))
@@ -542,17 +542,17 @@ program after them, through psyntax; return the program's last value."
 ;; Akku escapes characters in file names: (lib let-optionals*) is
 ;; lib/let-optionals%2a.sls.
 (let ((dir (uiop:ensure-directory-pathname
-	    (merge-pathnames (format nil "pseudoscheme-lib-test-~D/" (random 1000000))
+	    (merge-pathnames (format nil "quasischeme-lib-test-~D/" (random 1000000))
 			     (uiop:temporary-directory)))))
   (ensure-directories-exist (merge-pathnames "lib/" dir))
   (with-open-file (out (merge-pathnames "lib/let-optionals%2a.sls" dir) :direction :output)
     (write-string "(library (lib let-optionals*) (export lo) (import (rnrs)) (define lo 'found))" out))
-  (push (namestring dir) psx:*library-path*)
+  (push (namestring dir) qsx:*library-path*)
   (unwind-protect
        (deftest "%xx escapes in library file names" (r6)
 	 "(import (rnrs) (lib let-optionals*)) lo"
 	 "found")
-    (pop psx:*library-path*)
+    (pop qsx:*library-path*)
     (uiop:delete-directory-tree dir :validate t)))
 
 (format t "~&library layer / R7RS / R6RS: ~A of ~A tests passed.~%" *passed* *run*)

@@ -3,7 +3,7 @@
 ;;; which imports it as (srfi :213) and (srfi :213 define-property).
 ;;; SRFI 213's own implementation is Chez Scheme's define-property;
 ;;; psyntax has no identifier properties, so this emulates them.
-;;; Written for Pseudoscheme.
+;;; Written for Quasischeme.
 ;;;
 ;;;   (define-property id key expr)  a definition: attaches the value of
 ;;;       EXPR (evaluated at expansion time) to the binding of ID under

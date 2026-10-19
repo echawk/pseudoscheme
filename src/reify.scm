@@ -70,12 +70,12 @@
     (if (and (node? den)
 	     (program-variable? den))
 	(let ((from-sym (program-variable-location den)))
-	  (ps-lisp:if (ps-lisp:boundp from-sym)
+	  (qs-lisp:if (qs-lisp:boundp from-sym)
 		   (let ((to-sym (program-variable-location
 				  (program-env-lookup to name))))
-		     (ps-lisp:setf (ps-lisp:symbol-value to-sym)
-				(ps-lisp:symbol-value from-sym))
-		     (ps:set-function-from-value to-sym))
+		     (qs-lisp:setf (qs-lisp:symbol-value to-sym)
+				(qs-lisp:symbol-value from-sym))
+		     (qs:set-function-from-value to-sym))
 		   ;; This case handles ELSE and =>.
 		   (program-env-define! to name den)))
 	(program-env-define! to name den))))
@@ -84,13 +84,13 @@
 ; These don't really belong anywhere
 
 (define (eval-for-syntax form env)
-  (ps-lisp:eval (translate form env)))
+  (qs-lisp:eval (translate form env)))
 
 (define (error . rest)
-  (apply #'ps:scheme-error rest))
+  (apply #'qs:scheme-error rest))
 
 
-;; NB: PS-LISP:SYMBOL-NAME throughout this file, not SYMBOL->STRING --
+;; NB: QS-LISP:SYMBOL-NAME throughout this file, not SYMBOL->STRING --
 ;; this generates real CL DEFPACKAGE forms, which must stay canonical
 ;; (fold-cased) regardless of SYMBOL->STRING's own case-preserving
 ;; behavior for Scheme-visible use (see rts.lisp).
@@ -102,26 +102,26 @@
 	(generate-program-env-defpackage env (list struct))
 	(begin
 	  (warn "multiple structures over a package NYI")
-	  `(ps-lisp:defpackage ,(ps-lisp:symbol-name (structure-id struct))
-	     (:use ,(ps-lisp:symbol-name (program-env-id env)))
+	  `(qs-lisp:defpackage ,(qs-lisp:symbol-name (structure-id struct))
+	     (:use ,(qs-lisp:symbol-name (program-env-id env)))
 	     (:export ,@(map (lambda (name)
 			       (perhaps-rename
-				(ps-lisp:symbol-name name)))
+				(qs-lisp:symbol-name name)))
 			     (interface-names
 			      (structure-interface struct)))))))))
 
 (define (generate-program-env-defpackage env structs)
-  `(ps-lisp:defpackage ,(ps-lisp:symbol-name (program-env-id env))
+  `(qs-lisp:defpackage ,(qs-lisp:symbol-name (program-env-id env))
      (:use ,(package-name lisp-package)
 	   ,@(map (lambda (struct)
-		    (ps-lisp:symbol-name (structure-id struct)))
+		    (qs-lisp:symbol-name (structure-id struct)))
 		  (program-env-use-list env)))
      (:export
       ,@(apply append
 	       (map (lambda (struct)
 		      (map (lambda (name)
 			     (perhaps-rename
-			      (ps-lisp:symbol-name name)))
+			      (qs-lisp:symbol-name name)))
 			   (interface-names
 			    (structure-interface struct))))
 		    structs)))))

@@ -1,32 +1,32 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs lists (6)), (rnrs control (6)) procedures, and the
 ;;;; base-library procedures whose R6RS signatures differ from R5RS/R7RS.
 ;;;; Library report chapters 3 and 5; language report 11.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
-(defun truthy (x) (ps:truep x))
+(defun truthy (x) (qs:truep x))
 
 (defun check-proper-list (who x)
   (unless (and (listp x) (handler-case (list-length x) (error () nil)))
-    (ps:scheme-error "~A: not a proper list: ~S" who x)))
+    (qs:scheme-error "~A: not a proper list: ~S" who x)))
 
 (defun check-procedure (who x)
   (unless (functionp x)
-    (ps:scheme-error "~A: not a procedure: ~S" who x)))
+    (qs:scheme-error "~A: not a procedure: ~S" who x)))
 
 (defun check-same-lengths (who lists)
   (mapc (lambda (l) (check-proper-list who l)) lists)
   (let ((n (length (car lists))))
     (unless (every (lambda (l) (= (length l) n)) lists)
-      (ps:scheme-error "~A: lists differ in length" who))))
+      (qs:scheme-error "~A: lists differ in length" who))))
 
 (defun check-map-arguments (who proc lists)
   "In Chez mode, check map's or for-each's arguments as Chez does: a
 procedure, and proper lists of one length.  (R7RS's stop at the
 shortest list.)"
-  (when ps:*chez-reader*
+  (when qs:*chez-reader*
     (check-procedure who proc)
     (check-same-lengths who lists)))
 
@@ -34,7 +34,7 @@ shortest list.)"
 
 (defprim "find" (proc list)
   (check-procedure "find" proc)
-  (dolist (x list ps:false)
+  (dolist (x list qs:false)
     (when (truthy (funcall proc x)) (return x))))
 
 (defprim "for-all" (proc list &rest lists)
@@ -45,7 +45,7 @@ shortest list.)"
 	t
 	(loop
 	  (let ((r (apply proc (mapcar #'car lists))))
-	    (unless (truthy r) (return ps:false))
+	    (unless (truthy r) (return qs:false))
 	    (setq lists (mapcar #'cdr lists))
 	    ;; The last call is in tail position: return its value.
 	    (when (null (car lists)) (return r)))))))
@@ -55,7 +55,7 @@ shortest list.)"
   (let ((lists (cons list lists)))
     (check-same-lengths "exists" lists)
     (loop
-      (when (null (car lists)) (return ps:false))
+      (when (null (car lists)) (return qs:false))
       (let ((r (apply proc (mapcar #'car lists))))
 	(when (truthy r) (return r))
 	(setq lists (mapcar #'cdr lists))))))
@@ -86,14 +86,14 @@ shortest list.)"
 	(setq acc (apply combine (append row (list acc))))))))
 
 (defprim "remp" (proc list) (remove-if (lambda (x) (truthy (funcall proc x))) list))
-(defprim "remove" (obj list) (remove-if (lambda (x) (ps:scheme-equal-p obj x)) list))
+(defprim "remove" (obj list) (remove-if (lambda (x) (qs:scheme-equal-p obj x)) list))
 (defprim "remv" (obj list) (remove obj list :test #'eql))
 (defprim "remq" (obj list) (remove obj list :test #'eq))
 
 (defun mem-tail (pred list)
   (loop for tail on list
 	when (funcall pred (car tail)) return tail
-	finally (return ps:false)))
+	finally (return qs:false)))
 
 (defprim "memp" (proc list) (mem-tail (lambda (x) (truthy (funcall proc x))) list))
 (defprim "member" (obj list &optional compare)
@@ -101,25 +101,25 @@ shortest list.)"
   (if compare
       (mem-tail (lambda (x) (truthy (funcall compare obj x))) list)
       (loop for tail on list
-	    when (ps:scheme-equal-p obj (car tail)) return tail
-	    finally (return ps:false))))
+	    when (qs:scheme-equal-p obj (car tail)) return tail
+	    finally (return qs:false))))
 ;; memq and memv are the translator's, open-coded as CL's MEMBER.
 
 (defun ass (pred alist)
-  (dolist (pair alist ps:false)
-    (unless (consp pair) (ps:scheme-error "assoc: not an association list"))
+  (dolist (pair alist qs:false)
+    (unless (consp pair) (qs:scheme-error "assoc: not an association list"))
     (when (funcall pred (car pair)) (return pair))))
 
 (defprim "assp" (proc alist) (ass (lambda (x) (truthy (funcall proc x))) alist))
 (defprim "assoc" (obj alist &optional compare)
   (ass (if compare
 	   (lambda (x) (truthy (funcall compare obj x)))
-	   (lambda (x) (ps:scheme-equal-p obj x)))
+	   (lambda (x) (qs:scheme-equal-p obj x)))
        alist))
 (defmacro def-ass (name test)
   `(defprim ,name (obj alist)
-     (dolist (pair alist ps:false)
-       (unless (consp pair) (ps:scheme-error "~A: not an association list" ,name))
+     (dolist (pair alist qs:false)
+       (unless (consp pair) (qs:scheme-error "~A: not an association list" ,name))
        (when (,test obj (car pair)) (return pair)))))
 (def-ass "assv" eql)
 (def-ass "assq" eq)
@@ -144,7 +144,7 @@ shortest list.)"
   (if lists
       (apply #'mapc proc list lists)
       (mapc proc list))
-  ps:unspecific)
+  qs:unspecific)
 
 ;;; 7.  Sorting (rnrs sorting)
 
@@ -157,4 +157,4 @@ shortest list.)"
 (defprim "vector-sort!" (proc vector)
   (let ((sorted (stable-sort (copy-seq vector) (lambda (a b) (truthy (funcall proc a b))))))
     (replace vector sorted)
-    ps:unspecific))
+    qs:unspecific))

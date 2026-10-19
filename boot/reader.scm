@@ -1,7 +1,7 @@
 ;;; boot/reader.scm -- a reader for the translator's sources.
 ;;;
 ;;; Under Common Lisp the translator's sources are read by the CL reader
-;;; (ps:scheme-read-using-commonlisp-reader): symbols are folded to
+;;; (qs:scheme-read-using-commonlisp-reader): symbols are folded to
 ;;; upper case and interned in SCHEME, PKG:NAME names a symbol in
 ;;; package PKG, #'X is (FUNCTION X), and #F / #T / characters / strings
 ;;; follow CL's rules.  The host Scheme's own READ can't be relied on to
@@ -227,7 +227,7 @@
 		       (boot:reader-error port "no such package" pname))
 		   (boot:cl-constant (boot:intern name package)))))))))
 
-;; Under Pseudoscheme, CL's NIL is (), T is #t and PS:FALSE is #f
+;; Under Quasischeme, CL's NIL is (), T is #t and QS:FALSE is #f
 ;; (core.lisp), so that's how the translator sees them in its sources.
 (define (boot:cl-constant sym)
   (cond ((eq? sym (boot:ps-symbol "NIL")) '())
@@ -253,7 +253,7 @@
    (lambda (form)
      (if (and (pair? form)
 	      (eq? (car form) 'defpackage)
-	      (equal? (cadr form) "PS"))
+	      (equal? (cadr form) "QS"))
 	 (for-each
 	  (lambda (clause)
 	    (if (and (pair? clause) (eq? (car clause) (boot:keyword "EXPORT")))

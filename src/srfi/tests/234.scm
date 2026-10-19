@@ -1,6 +1,6 @@
 ;;; Tests for SRFI 234: the sample implementation's test suite
 ;;; (reference/srfi-234/srfi-234-test.scm), with its cond-expand import
-;;; header replaced by Pseudoscheme's libraries and its test-end by the
+;;; header replaced by Quasischeme's libraries and its test-end by the
 ;;; exit below; the rest is unchanged.
 
 ;;; SPDX-FileCopyrightText: 2024 Shiro Kawai, John Cowan, Arne Babenhauserheide

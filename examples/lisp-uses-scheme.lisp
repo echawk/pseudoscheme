@@ -4,7 +4,7 @@
 ;;;        --load examples/lisp-uses-scheme.lisp
 ;;;
 ;;; (asdf:load-system :r7rs) -- or :r6rs, :r5rs, all the same system,
-;;; pseudoscheme/api -- gives the packages R7RS, R6RS and R5RS.
+;;; quasischeme/api -- gives the packages R7RS, R6RS and R5RS.
 
 (require :asdf)
 (asdf:load-system :r7rs)

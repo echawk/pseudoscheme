@@ -1,10 +1,10 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Guile's reader (docs/guile.md, stage 0).  Guile's own reader is in C
 ;;;; until boot-9 has loaded, and boot-9 is read with it, so it is written
 ;;;; here, after Guile 3.0's defaults:
 ;;;;
-;;;;   #:kw keywords (Lisp keywords, as Pseudoscheme's #:kw already are),
+;;;;   #:kw keywords (Lisp keywords, as Quasischeme's #:kw already are),
 ;;;;   #{odd symbol}#, #!...!# block comments and the #!fold-case
 ;;;;   directives, #; #| |#, [ ] as parentheses, #' #` #, #,@ for syntax,
 ;;;;   #nil, #*101 bit vectors, #vu8( and SRFI 4's #u8( #s16( ..., #2(...)
@@ -14,13 +14,13 @@
 ;;;; and READ-HASH-EXTEND's procedures for the # syntaxes it doesn't know.
 ;;;; Unlike R7RS, | is an ordinary constituent of symbols.
 
-(defpackage "PSEUDOSCHEME-GUILE"
-  (:nicknames "PSG")
+(defpackage "QUASISCHEME-GUILE"
+  (:nicknames "QSG")
   (:use "COMMON-LISP")
   (:export "GUILE-READ" "BOOT" "EVAL-STRING" "LOAD-FILE" "REPL" "ERROR-TEXT"
 	   "*PROGRAM-ARGUMENTS*"))
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defvar *read-hash-procedures* '()
   "READ-HASH-EXTEND's table: (char . procedure of char and port).")
@@ -47,10 +47,10 @@ sets: an alist of the same kind.")
 (defvar *bracket-lists* nil
   "True after #!curly-infix-and-bracket-lists: [a b] is ($bracket-list$ a b).")
 
-(defvar *elisp-nil* (ps::make-photon "#nil")
+(defvar *elisp-nil* (qs::make-photon "#nil")
   "#nil, Emacs Lisp's nil in Guile: its own object.")
 
-(define-condition guile-read-error (ps::scheme-reader-error) ())
+(define-condition guile-read-error (qs::scheme-reader-error) ())
 
 (defun read-error (port control &rest args)
   (error 'guile-read-error :stream port :format-control control :format-arguments args))
@@ -123,7 +123,7 @@ ending at !#.  True if handled; it always is."
   "Read one datum from PORT as Guile does; the EOF object at end of file."
   (let ((c (skip-whitespace-and-comments port)))
     (if (null c)
-	ps:eof-object
+	qs:eof-object
 	(guile-read-1 port))))
 
 (defvar *source-recorder* nil
@@ -169,7 +169,7 @@ odd number with the same operator between is (op e1 e2 ...); otherwise
 	((null (cddr items)) items)
 	((and (oddp (length items))
 	      (let ((op (second items)))
-		(loop for (nil o) on items by #'cddr while o always (ps:scheme-equal-p o op))))
+		(loop for (nil o) on items by #'cddr while o always (qs:scheme-equal-p o op))))
 	 (cons (second items) (loop for e in items by #'cddr collect e)))
 	(t (cons (ssym "$nfx$") items))))
 
@@ -222,7 +222,7 @@ odd number with the same operator between is (op e1 e2 ...); otherwise
 	  until (delimiterp c)
 	  do (write-char (readc port) s))))
 
-(defun ssym (name) (ps:intern-scheme-symbol name))
+(defun ssym (name) (qs:intern-scheme-symbol name))
 
 (defun guile-symbol (name)
   (ssym (if *guile-fold-case* (string-downcase name) name)))
@@ -235,7 +235,7 @@ odd number with the same operator between is (op e1 e2 ...); otherwise
 
 (defun read-atom (port)
   (let ((token (read-token port)))
-    (or (and (plusp (length token)) (guile-number (ps:parse-scheme-number token 10)))
+    (or (and (plusp (length token)) (guile-number (qs:parse-scheme-number token 10)))
 	(keyword-token token)
 	(guile-symbol token))))
 
@@ -244,12 +244,12 @@ odd number with the same operator between is (op e1 e2 ...); otherwise
 prefix, foo: for postfix), or NIL."
   (let ((style (option-value (symbol-value '*read-options*) "keywords"))
 	(n (length token)))
-    (when (and style (not (eq style ps:false)) (ps:scheme-symbol-p style) (> n 1))
-      (let ((name (ps:scheme-symbol-name style)))
+    (when (and style (not (eq style qs:false)) (qs:scheme-symbol-p style) (> n 1))
+      (let ((name (qs:scheme-symbol-name style)))
 	(cond ((and (string= name "prefix") (char= (char token 0) #\:))
-	       (intern (ps::invert-case (subseq token 1)) "KEYWORD"))
+	       (intern (qs::invert-case (subseq token 1)) "KEYWORD"))
 	      ((and (string= name "postfix") (char= (char token (1- n)) #\:))
-	       (intern (ps::invert-case (subseq token 0 (1- n))) "KEYWORD")))))))
+	       (intern (qs::invert-case (subseq token 0 (1- n))) "KEYWORD")))))))
 
 (defun read-hex (port digits terminator)
   "A character code from DIGITS hex digits (or up to TERMINATOR when
@@ -345,7 +345,7 @@ DIGITS is NIL)."
       (#\( (coerce (read-list port #\)) 'simple-vector))
       (#\\ (read-character port))
       (#\: (let ((name (read-token port)))
-	     (intern (ps::invert-case name) "KEYWORD")))
+	     (intern (qs::invert-case name) "KEYWORD")))
       (#\{ (read-extended-symbol port))
       (#\' (list (ssym "syntax") (guile-read-1 port)))
       (#\` (list (ssym "quasisyntax") (guile-read-1 port)))
@@ -363,12 +363,12 @@ DIGITS is NIL)."
 
 (defun read-hash-alpha (c port)
   (let* ((token (concatenate 'string (string c) (read-token port))))
-    (cond ((member token '("t" "true") :test #'string-equal) ps:true)
-	  ((member token '("f" "false") :test #'string-equal) ps:false)
+    (cond ((member token '("t" "true") :test #'string-equal) qs:true)
+	  ((member token '("f" "false") :test #'string-equal) qs:false)
 	  ((string= token "nil") *elisp-nil*)
-	  ((string= token "eof") ps:eof-object)
+	  ((string= token "eof") qs:eof-object)
 	  ((and (string= token "vu8") (eql (peekc port) #\())
-	   (readc port) (ps::list->bytevector (read-list port #\))))
+	   (readc port) (qs::list->bytevector (read-list port #\))))
 	  ((and (eql (peekc port) #\()
 		(member token '("u8" "s8" "u16" "s16" "u32" "s32" "u64" "s64" "f32" "f64" "c32" "c64")
 			:test #'string-equal))
@@ -391,7 +391,7 @@ DIGITS is NIL)."
 			 (if p (parse-integer spec :start (1+ p) :junk-allowed t) (length list)))))
 	     (funcall 'list->typed-array* (ssym type) (list (list lo (+ lo len -1))) list)))
 	  ((member (char-downcase c) '(#\e #\i #\x #\o #\b #\d))
-	   (or (guile-number (ps:parse-scheme-number (concatenate 'string "#" token) 10))
+	   (or (guile-number (qs:parse-scheme-number (concatenate 'string "#" token) 10))
 	       (read-error port "bad number #~A" token)))
 	  (t (read-error port "unknown # syntax #~A" token)))))
 
@@ -427,7 +427,7 @@ DIGITS is NIL)."
 			for lo = (if b (first b) 0)
 			for len = (or (and b (second b)) (nth k lens))
 			collect (list lo (+ lo len -1)))))
-      (funcall 'list->typed-array* (if (string= type "") ps:true (ssym type))
+      (funcall 'list->typed-array* (if (string= type "") qs:true (ssym type))
 	       (if (zerop rank) 0 shape)
 	       (if (zerop rank) (car data) data)))))
 
@@ -435,7 +435,7 @@ DIGITS is NIL)."
   "Guile's READ-HASH-EXTEND, for the runtime."
   (lambda (char proc)
     (setq *read-hash-procedures*
-	  (if (eq proc ps:false)
+	  (if (eq proc qs:false)
 	      (remove char *read-hash-procedures* :key #'car)
 	      (acons char proc (remove char *read-hash-procedures* :key #'car))))
-    ps:unspecific))
+    qs:unspecific))

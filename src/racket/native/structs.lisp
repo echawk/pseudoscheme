@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's structs, natively (docs/racket-linklet-compiler.md, "The
 ;;;; runtime it calls"): make-struct-type with properties, guards, auto
@@ -16,7 +16,7 @@
 ;;;; Not yet: inspectors' powers beyond that,
 ;;;; prefab structs, impersonators and chaperones.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (struct-type (:constructor %make-struct-type))
   name parent
@@ -235,13 +235,13 @@ numbers of arguments."
 ;;; The primitives
 
 (defnative "make-struct-type" (name parent-type init-field-count auto-field-count
-				    &optional (auto-v ps:false) (props '()) (inspector (current-inspector*))
-				    (proc-spec ps:false) (immutables '()) (guard ps:false)
-				    (constructor-name ps:false))
+				    &optional (auto-v qs:false) (props '()) (inspector (current-inspector*))
+				    (proc-spec qs:false) (immutables '()) (guard qs:false)
+				    (constructor-name qs:false))
     (:rumble "make-struct-type")
   ;; a field that is the procedure (proc-spec, or prop:procedure's value,
   ;; an index) is immutable, as Racket makes it
-  (let ((trace (uiop:getenv "PSEUDOSCHEME_RACKET_TRACE_STRUCT")))
+  (let ((trace (uiop:getenv "QUASISCHEME_RACKET_TRACE_STRUCT")))
     ;; for finding where a struct type is made (twice, when its
     ;; instances aren't its own)
     (when (and trace (string= trace (rname name)))
@@ -285,7 +285,7 @@ numbers of arguments."
 		      *void*))
 	   ;; what a property's guard gets, as struct-type-info returns it
 	   (info (list name init-field-count auto-field-count accessor mutator
-		       immutables (or parent ps:false) ps:false)))
+		       immutables (or parent qs:false) qs:false)))
       ;; its own properties, supers included (racket/base's prop:procedure
       ;; is racket/private/kw.rkt's, whose super is the kernel's), over
       ;; the parent's
@@ -331,8 +331,8 @@ numbers of arguments."
 
 (defun struct-procedure-kind (f) (car (gethash f *struct-procedures*)))
 
-(defnative "make-struct-type-property" (name &optional (guard ps:false) (supers '())
-					     (can-impersonate? ps:false) accessor-name contract realm)
+(defnative "make-struct-type-property" (name &optional (guard qs:false) (supers '())
+					     (can-impersonate? qs:false) accessor-name contract realm)
     (:rumble "make-struct-type-property")
   (declare (ignore can-impersonate? accessor-name contract realm))
   ;; the guard may be the symbol can-impersonate: no guard, the property
@@ -382,12 +382,12 @@ numbers of arguments."
   ;; supertype, skipped?
   (values (struct-type-name type) (struct-type-init-field-count type) (struct-type-auto-field-count type)
 	  (struct-type-accessor type) (struct-type-mutator type) (struct-type-immutables type)
-	  (or (struct-type-parent type) ps:false) ps:false))
+	  (or (struct-type-parent type) qs:false) qs:false))
 (defnative "struct-info" (v) ()
   (labels ((base (x)
 	     (if (and (struct-instance-p x) (transparent-p (struct-of-type x)))
-		 (values (struct-of-type x) ps:false)
-		 (values ps:false ps:true)))
+		 (values (struct-of-type x) qs:false)
+		 (values qs:false qs:true)))
 	   (walk (x)
 	     (if (and (struct-instance-p x) (chaperone-layer-p x))
 		 (multiple-value-bind (type skipped) (walk (layer-of x))
@@ -406,8 +406,8 @@ numbers of arguments."
 (defnative "struct-type-make-predicate" (type) (:leaf t)
   (note-struct-procedure (lambda (x) (bool (and (struct-instance-p x) (subtype-p (struct-of-type x) type))))
 			 :predicate type))
-(defnative "struct-type-authentic?" (type) (:leaf t) (declare (ignore type)) ps:false)
-(defnative "struct-type-sealed?" (type) (:leaf t) (declare (ignore type)) ps:false)
+(defnative "struct-type-authentic?" (type) (:leaf t) (declare (ignore type)) qs:false)
+(defnative "struct-type-sealed?" (type) (:leaf t) (declare (ignore type)) qs:false)
 
 (defnative "struct?" (x) (:leaf t) (bool (struct-instance-p x)))
 (defnative "struct-type?" (x) (:leaf t) (bool (struct-type-p x)))
@@ -433,7 +433,7 @@ numbers of arguments."
 
 (defun transparent-p (type)
   "Whether TYPE's instances show their fields: made with inspector #f, or prefab."
-  (or (eq (struct-type-inspector type) ps:false) (struct-type-prefab-key type)))
+  (or (eq (struct-type-inspector type) qs:false) (struct-type-prefab-key type)))
 
 ;;; (current-inspector is a parameter: hash.lisp)
 (defnative "make-inspector" (&optional (superior (current-inspector*))) (:leaf t)
@@ -476,7 +476,7 @@ its parent key (or NIL)."
 			    (prefab-struct-type parent-key (- field-count (or own 0)))))
 	       (own (or own (- field-count (if parent (struct-type-total parent) 0)))))
 	  (multiple-value-bind (type)
-	      (make-struct-type* name (or parent ps:false) own 0 ps:false '() ps:false ps:false
+	      (make-struct-type* name (or parent qs:false) own 0 qs:false '() qs:false qs:false
 				 (loop for i below own unless (member i mutable) collect i))
 	    (setf (struct-type-prefab-key type) (normalized-prefab-key name mutable parent)
 		  (gethash (cons (rkey key) field-count) *prefab-types*) type))))))
@@ -491,7 +491,7 @@ its parent key (or NIL)."
 
 (defnative "prefab-struct-key" (v) (:leaf t)
   (let ((type (and (struct-instance-p v) (struct-of-type v))))
-    (or (and type (struct-type-prefab-key type)) ps:false)))
+    (or (and type (struct-type-prefab-key type)) qs:false)))
 (defnative "make-prefab-struct" (key &rest fields) (:leaf t)
   (let ((type (prefab-struct-type key (length fields))))
     (make-instance-of type (coerce fields 'simple-vector))))
@@ -502,7 +502,7 @@ its parent key (or NIL)."
 (defnative "prefab-struct-type-key+field-count" (type) (:leaf t)
   (if (and (struct-type-p type) (struct-type-prefab-key type))
       (cons (struct-type-prefab-key type) (struct-type-total type))
-      ps:false))
+      qs:false))
 
 ;;; Unsafe field access: the index counts every field, the ancestors' first
 (defnative "unsafe-struct-ref" (s i) (:instance "#%unsafe" :leaf t) (svref (struct-fields s) i))

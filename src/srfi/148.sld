@@ -7,7 +7,7 @@
 ;;; srfi-148-a), -b and -c, which this library re-exports.  As one
 ;;; library, its macro transformers overflow SBCL's limits on one
 ;;; compiled function (2047 entry points, and arm64's 1 MB branch
-;;; range): a Pseudoscheme bug, see the report.  The library form
+;;; range): a Quasischeme bug, see the report.  The library form
 ;;; is the sample's (reference/srfi-148/148.sld), taking its Chibi
 ;;; branch: the free-identifier=? and bound-identifier=? helpers are
 ;;; 148.er-macro-transformer.scm's, on SRFI 147's er-macro-transformer,

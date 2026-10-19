@@ -13,7 +13,7 @@
 ;;;;   (ftype-ref ftype (accessor ...) fptr [index])
 ;;;;   (ftype-set! ftype (accessor ...) fptr [index] value)
 ;;;;
-;;;; Everything is in (pseudoscheme chez ftype-helpers), src/chez/ftype-helpers.sls,
+;;;; Everything is in (quasischeme chez ftype-helpers), src/chez/ftype-helpers.sls,
 ;;;; which these macros call when they expand (a transformer can't use
 ;;;; definitions of the library it is defined in), and in the host
 ;;;; procedures chez:ftype-... (src/chez/ftype.lisp).  An ftype name is a

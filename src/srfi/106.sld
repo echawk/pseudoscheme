@@ -1,4 +1,4 @@
-;;; SRFI 106: basic socket interface.  Written for Pseudoscheme, on
+;;; SRFI 106: basic socket interface.  Written for Quasischeme, on
 ;;; usocket, which is loaded from Quicklisp or ASDF the first time this
 ;;; library is imported.
 ;;;
@@ -34,7 +34,7 @@
   (import (scheme base) (scheme char)
           (only (rnrs io ports (6))
                 make-custom-binary-input-port make-custom-binary-output-port)
-          (pseudoscheme lisp)
+          (quasischeme lisp)
           (prefix (cl usocket) us:)
           (prefix (only (cl common-lisp) read-byte write-sequence
                         finish-output listen logior logand lognot

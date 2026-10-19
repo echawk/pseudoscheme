@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategy B's start-up: the native runtime as the primitive instances,
 ;;;; then the extracted thread, io, regexp and expander linklets, compiled
@@ -11,10 +11,10 @@
 ;;;; from the instance of the linklet that `(define-linklet NAME ...)'
 ;;;; made.  That's milestone 1's test harness (tests/racket/linklets/).
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defun linklet-boot ()
-  (unless psx::*host* (psx::boot))
+  (unless qsx::*host* (qsx::boot))
   (install-natives)
   (install-linklet-primitives)
   (install-stubs)
@@ -30,15 +30,15 @@
 ;;; image of this program with the expander instantiated, in the Racket
 ;;; cache (its generation, cache.lisp), and each run after replaces itself
 ;;; with that image (exec), given the same arguments.  The image is made by
-;;; a run of this program with PSEUDOSCHEME_RACKET_SAVE_CORE set to its
-;;; path; PSEUDOSCHEME_RACKET_CORE=0 turns it off.  It goes by the program
+;;; a run of this program with QUASISCHEME_RACKET_SAVE_CORE set to its
+;;; path; QUASISCHEME_RACKET_CORE=0 turns it off.  It goes by the program
 ;;; file's date and size, and the images of other builds in the generation
 ;;; (190 MB each) are deleted as one is made.  Racket's threads once
 ;;; crashed in it, a fault at the bottom of a new thread's stack: the
 ;;; image's thread stacks are the command line's 32 MB (LIMIT-THREAD-
 ;;; STACKS, saved with the image), and the scheduler raised the size to
 ;;; 64 MB, while SBCL gives a new thread the memory of a finished one
-;;; (the finalizer thread's) whatever the size now is (ps:LIMIT-THREAD-
+;;; (the finalizer thread's) whatever the size now is (qs:LIMIT-THREAD-
 ;;; STACK-SIZE only lowers it).  The expander
 ;;; is only instantiated, not booted: that, and the collection paths,
 ;;; are the run's own (EXPANDER-EVAL).
@@ -50,7 +50,7 @@ program file's date and size, as well as the cache's own key."
 	 (stamp (and exe (list (file-write-date exe)
 			       (with-open-file (in exe :element-type '(unsigned-byte 8)) (file-length in))))))
     (and stamp
-	 (merge-pathnames (format nil "core-~36R" (psx::fnv-1a (prin1-to-string stamp)))
+	 (merge-pathnames (format nil "core-~36R" (qsx::fnv-1a (prin1-to-string stamp)))
 			  (racket-cache-directory)))))
 
 (defun exec-program (path arguments)
@@ -69,9 +69,9 @@ first the program's name).  Returns only if that fails."
 (defun start-from-racket-core ()
   "Called as --racket=linklet is selected: if this program isn't the saved
 image, run it instead, making it first if need be."
-  (unless (or (uiop:getenv "PSEUDOSCHEME_RACKET_SAVE_CORE")
-	      (uiop:getenv "PSEUDOSCHEME_RACKET_CORE_ACTIVE")
-	      (member (uiop:getenv "PSEUDOSCHEME_RACKET_CORE") '("0" "no" "off") :test #'equal)
+  (unless (or (uiop:getenv "QUASISCHEME_RACKET_SAVE_CORE")
+	      (uiop:getenv "QUASISCHEME_RACKET_CORE_ACTIVE")
+	      (member (uiop:getenv "QUASISCHEME_RACKET_CORE") '("0" "no" "off") :test #'equal)
 	      (null sb-ext:*runtime-pathname*))
     (ignore-errors
      (let ((core (racket-core-path)))
@@ -86,7 +86,7 @@ image, run it instead, making it first if need be."
 	     (ensure-directories-exist core)
 	     (unwind-protect
 		  (when (zerop (nth-value 2 (uiop:run-program
-					     (list "env" (format nil "PSEUDOSCHEME_RACKET_SAVE_CORE=~A" temp)
+					     (list "env" (format nil "QUASISCHEME_RACKET_SAVE_CORE=~A" temp)
 						   (sb-ext:native-namestring sb-ext:*runtime-pathname*) "--no-userinit" "--racket=linklet"
 						   "-e" "(void)")
 					     :ignore-error-status t :output nil :error-output nil :input nil)))
@@ -94,7 +94,7 @@ image, run it instead, making it first if need be."
 		      (sb-posix:rename temp (sb-ext:native-namestring core))))
 	       (ignore-errors (when (probe-file temp) (delete-file temp))))))
 	 (when (probe-file core)
-	   (sb-posix:setenv "PSEUDOSCHEME_RACKET_CORE_ACTIVE" "1" 1)
+	   (sb-posix:setenv "QUASISCHEME_RACKET_CORE_ACTIVE" "1" 1)
 	   (exec-program (sb-ext:native-namestring core) sb-ext:*posix-argv*)))))))
 
 (defun save-racket-core (path)
@@ -103,7 +103,7 @@ doesn't return."
   (unless *expander-instance*
     (unless (instantiate-expander :stream nil)
       (uiop:quit 1)))
-  (sb-posix:unsetenv "PSEUDOSCHEME_RACKET_SAVE_CORE")
+  (sb-posix:unsetenv "QUASISCHEME_RACKET_SAVE_CORE")
   (uiop:dump-image path :executable t))
 
 (defun linklet-eval (text)
@@ -111,7 +111,7 @@ doesn't return."
 #%kernel (as racket -I '#%kernel -e would), under the default prompt;
 the last one's values.  The first use compiles and instantiates the
 expander (src/racket/linklet/sources.lisp), about half a minute."
-  (let ((save (uiop:getenv "PSEUDOSCHEME_RACKET_SAVE_CORE")))
+  (let ((save (uiop:getenv "QUASISCHEME_RACKET_SAVE_CORE")))
     (when save (save-racket-core save)))
   (let ((forms (with-input-from-string (in text)
 		 (loop for form = (read-racket in) until (eq form *eof*) collect form)))
@@ -124,7 +124,7 @@ expander (src/racket/linklet/sources.lisp), about half a minute."
     ;; of continuations, which is outside each form's default prompt
     (dolist (form forms)
       (with-racket-errors
-	(psx::call-with-continuation-base
+	(qsx::call-with-continuation-base
 	 (lambda ()
 	   (call-with-continuation-prompt
 	    (lambda () (with-racket-errors (setq values (multiple-value-list (expander-eval form)))))
@@ -154,7 +154,7 @@ written to OUTPUT."
 	  ;; inside the base of continuations (which, made by the
 	  ;; instantiation inside, would hide the prompt from it)
 	  (with-racket-errors
-	  (psx::call-with-continuation-base
+	  (qsx::call-with-continuation-base
 	   (lambda ()
 	  (call-with-continuation-prompt
 	   (lambda ()
@@ -164,7 +164,7 @@ written to OUTPUT."
 		   (let ((values (multiple-value-list (instantiate-linklet compiled imports target))))
 		     (dolist (v values)
 		       (unless (eq v *void*)
-			 (funcall (psx:host-ref "write") v output)
+			 (funcall (qsx:host-ref "write") v output)
 			 (terpri output)))))))
 	   *default-prompt-tag* nil)))))))))
 
@@ -183,7 +183,7 @@ its main submodule if it has one)."
 	;; RUN-LINKLET-FORMS, and Lisp errors raised as Racket's outside the
 	;; base: a continuation re-entered runs the rest under the base
 	(with-racket-errors
-	(psx::call-with-continuation-base
+	(qsx::call-with-continuation-base
 	 (lambda ()
 	(call-with-continuation-prompt
 	 (lambda ()
@@ -212,7 +212,7 @@ the last one's values."
       (unless (instantiate-expander :stream nil)
 	(racket-error "racket" "the expander didn't instantiate")))
     (with-racket-errors
-      (psx::call-with-continuation-base
+      (qsx::call-with-continuation-base
        (lambda ()
 	 (call-with-continuation-prompt
 	  (lambda ()

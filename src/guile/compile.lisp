@@ -1,6 +1,6 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
-;;;; Tree-IL, Guile's expanded code, compiled to Pseudoscheme's core
+;;;; Tree-IL, Guile's expanded code, compiled to Quasischeme's core
 ;;;; Scheme (docs/guile.md, stage 2), and evaluation.
 ;;;;
 ;;;; Guile's psyntax builds Tree-IL with the constructors in
@@ -29,7 +29,7 @@
 ;;;; boot-9's first pages and psyntax-pp.scm use, and makes the same
 ;;;; Tree-IL.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 ;;; ------------------------------------------------------------------
 ;;; Tree-IL nodes
@@ -50,12 +50,12 @@
 (defvar *expanded-vtables*
   (let ((meta (make-struct* *standard-vtable*
 			    (list (layout-symbol (concatenate 'string *standard-vtable-fields* "pwuwpw"))
-				  ps:false))))
+				  qs:false))))
     (coerce (loop for (stem . fields) in *tree-il-types*
 		  collect (make-struct* meta
 					(list (layout-symbol (apply #'concatenate 'string
 								    (mapcar (constantly "pw") fields)))
-					      ps:false (ssym stem) (length fields)
+					      qs:false (ssym stem) (length fields)
 					      (mapcar #'ssym fields))))
 	    'simple-vector)))
 
@@ -74,7 +74,7 @@ psyntax's 18 core types, (language tree-il) defines <fix>, <let-values>,
        (or (gethash (gstruct-vtable x) *node-types*)
 	   (let ((name (svref (gstruct-slots (gstruct-vtable x)) +vtable-index-name+)))
 	     (and (symbolp name)
-		  (cdr (assoc (ps:scheme-symbol-name name)
+		  (cdr (assoc (qs:scheme-symbol-name name)
 			      '(("<fix>" . :fix) ("<let-values>" . :let-values)
 				("<prompt>" . :prompt) ("<abort>" . :abort))
 			      :test #'string=)))))))
@@ -95,7 +95,7 @@ psyntax's 18 core types, (language tree-il) defines <fix>, <let-values>,
   (variable nil))
 
 (defmethod print-object ((s site) stream)
-  (format stream "#<site ~A>" (ps:scheme-symbol-name (site-name s))))
+  (format stream "#<site ~A>" (qs:scheme-symbol-name (site-name s))))
 
 ;; Sites are compiled as quoted constants, and compiled code isn't put
 ;; in files, so they need no load form; this is for the compiler's
@@ -121,7 +121,7 @@ a later definition first (boot.lisp's EVAL-LOAD-FORM).")
 (defun signal-unbound-variable (name &optional module)
   (when (and *unbound-variable-hook* module)
     (funcall *unbound-variable-hook* name module))
-  (guile-error (ssym "unbound-variable") ps:false "Unbound variable: ~S" (list name) ps:false))
+  (guile-error (ssym "unbound-variable") qs:false "Unbound variable: ~S" (list name) qs:false))
 
 (defun site-ref-slowly (site)
   (let ((v (or (site-variable site)
@@ -172,7 +172,7 @@ image and of this process mustn't collide.")
 (pushnew 'new-lexical-tag sb-ext:*init-hooks*)
 
 (defun fresh-lexical ()
-  (psx::make-lexical (ps::invert-case (format nil "~~~D.~A" (incf *lexical-count*) *lexical-tag*))))
+  (qsx::make-lexical (qs::invert-case (format nil "~~~D.~A" (incf *lexical-count*) *lexical-tag*))))
 
 (defvar *unassigned* '()
   "The gensyms of letrec variables not yet assigned where the code being
@@ -197,7 +197,7 @@ begin changes), else the one being compiled for."
 	     ;; an existing module only: resolving here mustn't load one
 	     (let* ((resolve (root-value "resolve-module"))
 		    (m (and resolve (ignore-errors
-				     (funcall resolve name ps:false ps:false :ensure ps:false)))))
+				     (funcall resolve name qs:false qs:false :ensure qs:false)))))
 	       (and m (truthy m) (module-p* m) m)))
 	*compile-module*)))
 
@@ -216,7 +216,7 @@ are made read-only, as Guile's compiler makes them.")
     "caar" "cadr" "cdar" "cddr" "caddr" "cdddr" "cadddr" "set-car!" "set-cdr!" "reverse"
     "list?" "boolean?" "char=?" "quotient" "remainder" "modulo" "map" "for-each"
     "call-with-prompt" "abort-to-prompt" "dynamic-wind")
-  "Guile primitives that are Pseudoscheme's host procedures of the same
+  "Guile primitives that are Quasischeme's host procedures of the same
 name and behaviour: a primcall of one compiles to a call of the host's.")
 
 (defparameter *primcall-renames*
@@ -225,7 +225,7 @@ name and behaviour: a primcall of one compiles to a call of the host's.")
 
 (defun primitive-operator (name)
   "The core expression for Guile primitive NAME (a symbol)."
-  (let* ((string (ps:scheme-symbol-name name))
+  (let* ((string (qs:scheme-symbol-name name))
 	 (rename (cdr (assoc string *primcall-renames* :test #'string=))))
     (cond (rename (core rename))
 	  ((goops-generic-primitive-p string)
@@ -264,7 +264,7 @@ references to these."
 
 ;;; Calls of the root module's primitives by name: Guile's resolve-primitives
 ;;; pass turns (+ a b), where + is the (guile) module's variable, into a
-;;; primcall; Pseudoscheme's native compiler doesn't run that pass, so this
+;;; primcall; Quasischeme's native compiler doesn't run that pass, so this
 ;;; does the same for the hot ones.  Without it every + goes through
 ;;; %guile-ref and a generic, rest-argument procedure.  As Guile's, it is
 ;;; decided when the call is compiled: the module's variable is the root
@@ -289,7 +289,7 @@ which the host's has #f for #nil.  All are in Guile's
 resolving it mustn't load one (or NIL)."
   (let* ((resolve (root-value "resolve-module"))
 	 (m (and resolve (consp name)
-		 (ignore-errors (funcall resolve name ps:false ps:false :ensure ps:false)))))
+		 (ignore-errors (funcall resolve name qs:false qs:false :ensure qs:false)))))
     (and m (truthy m) (module-p* m)
 	 (if public (module-public-interface* m) m))))
 
@@ -302,8 +302,8 @@ calls, if F is a reference to the root module's variable of a primitive in
 *RESOLVABLE-PRIMITIVES* and ARGS fit it; else NIL."
   (when (and *resolve-primitives* (member (node-type f) '(:toplevel-ref :module-ref)))
     (let* ((name (node-field f 2))
-	   (entry (and (ps:scheme-symbol-p name)
-		       (assoc (ps:scheme-symbol-name name) *resolvable-primitives* :test #'string=))))
+	   (entry (and (qs:scheme-symbol-p name)
+		       (assoc (qs:scheme-symbol-name name) *resolvable-primitives* :test #'string=))))
       (when entry
 	(let ((n (length args)))
 	  (when (and (>= n (second entry)) (or (null (third entry)) (<= n (third entry)))
@@ -319,7 +319,7 @@ calls, if F is a reference to the root module's variable of a primitive in
 		   name))))))))
 
 (defun compile-resolved-primitive (name args)
-  (let ((string (ps:scheme-symbol-name name)))
+  (let ((string (qs:scheme-symbol-name name)))
     (if (and (string= string "-") (= (length args) 2)
 	     (not (and (eq (node-type (second args)) :const) (rationalp (node-field (second args) 1)))))
 	;; exact 0 minus a flonum zero is -0.0 in Guile's (see "-" in runtime.lisp)
@@ -356,7 +356,7 @@ apart as eqv? does if EQV."
 	 (and (consp list) (proper-list-p* list) (<= (length list) *constant-member-limit*)
 	      (or (not eqv)
 		  (every (lambda (x) (or (symbolp x) (typep x 'fixnum) (characterp x)
-					 (eq x ps:false) (eq x ps:true)))
+					 (eq x qs:false) (eq x qs:true)))
 			 list))))))
 
 (defun compile-constant-member (key list)
@@ -366,7 +366,7 @@ apart as eqv? does if EQV."
     (list (list (core "lambda") (list v)
 		(labels ((tests (tail)
 			   (if (null tail)
-			       (quoted ps:false)
+			       (quoted qs:false)
 			       (list (core "if") (list (core "eq?") v (quoted (car tail)))
 				     (quoted tail)
 				     (tests (cdr tail))))))
@@ -429,9 +429,9 @@ apart as eqv? does if EQV."
 				     (compile-tree-il a))))))
     (:primcall (let ((name (node-field x 1)) (args (node-field x 2)))
 		 (cons (if (or (and (/= (length args) 2)
-				    (member (ps:scheme-symbol-name name) '("eq?" "eqv?" "equal?") :test #'string=))
+				    (member (qs:scheme-symbol-name name) '("eq?" "eqv?" "equal?") :test #'string=))
 			       (and (< (length args) 2)
-				    (member (ps:scheme-symbol-name name) '("=" "<" ">" "<=" ">=") :test #'string=)))
+				    (member (qs:scheme-symbol-name name) '("=" "<" ">" "<=" ">=") :test #'string=)))
 			   ;; Guile's take any number of arguments; the host's two
 			   (root-reference name)
 			   (primitive-operator name))
@@ -460,7 +460,7 @@ apart as eqv? does if EQV."
 	    (append (mapcar #'compile-tree-il (node-field x 2))
 		    (list (compile-tree-il (node-field x 3))))))
     (:letrec (compile-letrec (node-field x 3) (node-field x 4) (node-field x 5)
-			     (eq (node-field x 1) ps:false)))))
+			     (eq (node-field x 1) qs:false)))))
 
 (defun compile-letrec (gensyms vals body &optional parallel)
   ;; as psyntax's letrec* for the translator: ((lambda (v ...) (set! v e) ... body) #f ...),
@@ -481,7 +481,7 @@ apart as eqv? does if EQV."
 				       (append (mapcar (lambda (v tmp) (list (core "set!") v tmp)) vars temps)
 					       (list (compile-tree-il body)))))
 			  vals))
-	      (mapcar (constantly (quoted ps:unassigned)) vars)))))
+	      (mapcar (constantly (quoted qs:unassigned)) vars)))))
   (let* ((vars (mapcar #'bind-lexical gensyms))
 	 (all-lambdas (every (lambda (v) (eq (node-type v) :lambda)) vals))
 	 ;; letrec*: an init may read the variables before it, not the
@@ -496,7 +496,7 @@ apart as eqv? does if EQV."
 		       (append (mapcar (lambda (v e) (list (core "set!") v e)) vars vals)
 			       (list (compile-tree-il body)))))
 	  ;; the LABELS case (all lambdas) as psyntax makes it, with #f
-	  (mapcar (constantly (quoted (if all-lambdas ps:false ps:unassigned))) vars))))
+	  (mapcar (constantly (quoted (if all-lambdas qs:false qs:unassigned))) vars))))
 
 (defun compile-test (x)
   "Test X of a conditional.  Emacs Lisp's nil, #nil, is false to Guile's
@@ -509,7 +509,7 @@ comparisons can't return it."
 (defun boolean-node-p (x)
   (flet ((predicate-name-p (name)
 	   (and (symbolp name)
-		(let ((s (ps:scheme-symbol-name name)))
+		(let ((s (qs:scheme-symbol-name name)))
 		  (or (char= (char s (1- (length s))) #\?)
 		      (member s '("not" "<" ">" "<=" ">=" "=") :test #'string=))))))
     (case (node-type x)
@@ -527,8 +527,8 @@ comparisons can't return it."
   "Which argument of a call of F with NARGS arguments is a body Guile
 compiles inline: call-with-prompt's thunk, with-fluid*'s."
   (let ((name (case (node-type f)
-		((:toplevel-ref :module-ref) (ps:scheme-symbol-name (node-field f 2)))
-		(:primitive-ref (ps:scheme-symbol-name (node-field f 1))))))
+		((:toplevel-ref :module-ref) (qs:scheme-symbol-name (node-field f 2)))
+		(:primitive-ref (qs:scheme-symbol-name (node-field f 1))))))
     (cond ((null name) nil)
 	  ((and (string= name "call-with-prompt") (= nargs 3)) 1)
 	  ((and (member name '("with-fluid*" "with-dynamic-state") :test #'string=) (plusp nargs))
@@ -552,13 +552,13 @@ one keeps the caller's frame, for backtraces (src/continuations.lisp).")
 (defun keep-frame-operator-p (op)
   (let ((name (cond ((and (consp op) (symbolp (car op))
 			  (string-equal (symbol-name (car op)) "%guile-ref")
-			  (psx::quote-form-p (cadr op)) (site-p (cadr (cadr op))))
-		     (let ((n (site-name (cadr (cadr op))))) (and (symbolp n) (ps:scheme-symbol-name n))))
+			  (qsx::quote-form-p (cadr op)) (site-p (cadr (cadr op))))
+		     (let ((n (site-name (cadr (cadr op))))) (and (symbolp n) (qs:scheme-symbol-name n))))
 		    ((symbolp op) (string-downcase (symbol-name op)))
-		    (t (psx::primitive-name op)))))
+		    (t (qsx::primitive-name op)))))
     (and name (member name *frame-keeping-procedures* :test #'string=) t)))
 
-(setq psx::*keep-frame-operator-p* 'keep-frame-operator-p)
+(setq qsx::*keep-frame-operator-p* 'keep-frame-operator-p)
 
 (defun name-lambda (meta lambda)
   "LAMBDA, a compiled lambda, with the name META gives it (if any) as the
@@ -568,7 +568,7 @@ machine, for backtraces (src/continuations.lisp), and which otherwise
 does nothing."
   (let ((name (loop for entry in (if (listp meta) meta '())
 		    when (and (consp entry) (symbolp (car entry))
-			      (string= (ps:scheme-symbol-name (car entry)) "name")
+			      (string= (qs:scheme-symbol-name (car entry)) "name")
 			      (symbolp (cdr entry)) (cdr entry))
 		      return (cdr entry))))
     ;; a lambda with properties (an arglist): the lambda inside named
@@ -591,7 +591,7 @@ alist, that procedure-documentation and procedure-name read: its
 documentation, and if NAMED its name."
   (let ((props (loop for entry in (if (listp meta) meta '())
 		     when (and (consp entry) (symbolp (car entry))
-			       (let ((key (ps:scheme-symbol-name (car entry))))
+			       (let ((key (qs:scheme-symbol-name (car entry))))
 				 (or (string= key "documentation")
 				     (and named (string= key "name")))))
 		       collect entry)))
@@ -639,8 +639,8 @@ optional ones, keywords as (keyword . index)."
 	      (loop for (keyword nil var) in (cdr kw-spec)
 		    collect (cons keyword (or (position var gensyms) 0)))
 	      '())
-	  (if (and (truthy kw-spec) (truthy (car kw-spec))) ps:true ps:false)
-	  (if (truthy rest) rest ps:false))))
+	  (if (and (truthy kw-spec) (truthy (car kw-spec))) qs:true qs:false)
+	  (if (truthy rest) rest qs:false))))
 
 (defun clauses-arglist (case)
   "The arglist of a case-lambda: the arities of all its clauses, as one
@@ -656,7 +656,7 @@ up to the most any clause takes, a rest argument if any clause has one."
 		     max-args (max max-args (+ req opt)))
 	       (when (or (truthy (node-field c 3)) (truthy (node-field c 4)))
 		 (setq rest (or rest (if (truthy (node-field c 3)) (node-field c 3) (ssym "rest")))))))
-    (list (or min-req 0) (- max-args (or min-req 0)) '() ps:false (or rest ps:false))))
+    (list (or min-req 0) (- max-args (or min-req 0)) '() qs:false (or rest qs:false))))
 
 (defun simple-case-p (case)
   (and (not (truthy (node-field case 2))) (not (truthy (node-field case 4)))))
@@ -715,8 +715,8 @@ evaluated in the scope of those before it."
 	       (let ((rest-var (and rest (bind-lexical (pop gensyms))))
 		     (check (cond (kw (list (core "%guile-check-keywords") tail
 					    (quoted (mapcar #'car kw))
-					    (quoted (if allow-other-keys ps:true ps:false))
-					    (quoted (if rest ps:true ps:false))))
+					    (quoted (if allow-other-keys qs:true qs:false))
+					    (quoted (if rest qs:true qs:false))))
 				  ((not rest) (list (core "%guile-check-no-more") tail)))))
 		 (let ((inner (bind-keywords tail)))
 		   (when rest-var
@@ -769,14 +769,14 @@ own with no parameter named as a procedure.  Made on first use.")
   (or *safe-primitive-functions*
       (let ((table (make-hash-table :test 'eq)))
 	;; the root module's values of the host primitives' names (not
-	;; PSX:HOST-REF, which would define a name it doesn't find: quote!)
+	;; QSX:HOST-REF, which would define a name it doesn't find: quote!)
 	(maphash (lambda (name kind)
 		   (declare (ignore kind))
-		   (unless (member name psx::*calling-primitives* :test #'string=)
+		   (unless (member name qsx::*calling-primitives* :test #'string=)
 		     (let* ((v (module-variable* :root (ssym name)))
 			    (f (and v (gvariable-value v))))
 		       (when (functionp f) (setf (gethash f table) t)))))
-		 (psx::primitive-names))
+		 (qsx::primitive-names))
 	(maphash (lambda (name f)
 		   (declare (ignore name))
 		   (when (functionp f)
@@ -809,9 +809,9 @@ proved safe, defined in a declarative module."
 	 (let ((value (gvariable-value v)))
 	   (and (functionp value)
 		(or (gethash value (safe-primitive-functions))
-		    (and (gethash value psx::*safe-functions*)
-			 (let ((m (cond ((eq (site-module site) :root) ps:false)
-					((eq (site-kind site) :module) (or (existing-module (site-module site) nil) ps:false))
+		    (and (gethash value qsx::*safe-functions*)
+			 (let ((m (cond ((eq (site-module site) :root) qs:false)
+					((eq (site-kind site) :module) (or (existing-module (site-module site) nil) qs:false))
 					(t (site-module-object site))))
 			       (declarative (root-value "module-declarative?")))
 			   (and (module-p* m) declarative (truthy (funcall declarative m)))))))))))
@@ -819,7 +819,7 @@ proved safe, defined in a declarative module."
 (defun safe-operator-form-p (form)
   "(%guile-ref 'site), SITE being a SAFE-SITE-P."
   (and (consp form) (eq (car form) (core "%guile-ref"))
-       (consp (cdr form)) (psx::quote-form-p (cadr form))
+       (consp (cdr form)) (qsx::quote-form-p (cadr form))
        (site-p (cadr (cadr form)))
        (ignore-errors (safe-site-p (cadr (cadr form))))))
 
@@ -829,10 +829,10 @@ DEFINITION, (%guile-define! 'module 'name value), defines; :ASSIGNS if it
 is (%guile-set! 'site value) or defines the same variable
 (src/continuations.lisp, GUARD-SELF-CALLS)."
   (flet ((same-site-p (x)
-	   (and (psx::quote-form-p x) (site-p (cadr x))
+	   (and (qsx::quote-form-p x) (site-p (cadr x))
 		(let ((site (cadr x)))
 		  (and (eq (site-kind site) :toplevel)
-		       (psx::quote-form-p (second definition)) (psx::quote-form-p (third definition))
+		       (qsx::quote-form-p (second definition)) (qsx::quote-form-p (third definition))
 		       (eq (site-module site) (cadr (second definition)))
 		       (eq (site-name site) (cadr (third definition))))))))
     (and (consp form) (consp (cdr form))
@@ -843,15 +843,15 @@ is (%guile-set! 'site value) or defines the same variable
 		     (equal (caddr form) (third definition)) :assigns))))))
 
 (defun install-compiler-primitives ()
-  (setq psx::*definition-operators* '("%guile-define!")
-	psx::*safe-operator-hook* 'safe-operator-form-p
-	psx::*self-reference-hook* 'self-reference-form-p)
-  (psx:defhost "%guile-ref" (site) (site-ref site))
+  (setq qsx::*definition-operators* '("%guile-define!")
+	qsx::*safe-operator-hook* 'safe-operator-form-p
+	qsx::*self-reference-hook* 'self-reference-form-p)
+  (qsx:defhost "%guile-ref" (site) (site-ref site))
   ;; past the fixnums inlined (*GUILE-INLINE-PRIMITIVES*), flonums: the
   ;; host's arithmetic is the root procedure's for them, without its
   ;; lookup by name and its list of arguments.  Not 0 - 0.0, which is
   ;; -0.0 in Guile (see "-" in runtime.lisp).
-  (psx:defhost "%guile-sub2" (x y)
+  (qsx:defhost "%guile-sub2" (x y)
     (cond ((and (typep x 'fixnum) (typep y 'fixnum)) (- x y))
 	  ((and (typep x 'double-float) (typep y '(or double-float fixnum))) (- x y))
 	  ((and (typep x 'fixnum) (typep y 'double-float) (not (eql x 0))) (- x y))
@@ -859,60 +859,60 @@ is (%guile-set! 'site value) or defines the same variable
   (macrolet ((comparisons (&rest pairs)
 	       `(progn
 		  ,@(loop for (name test) in pairs
-			  collect `(psx:defhost ,(format nil "%guile-~A" name) (x y)
+			  collect `(qsx:defhost ,(format nil "%guile-~A" name) (x y)
 				     (if (and (typep x '(or fixnum double-float)) (typep y '(or fixnum double-float)))
 					 (bool (,test x y))
 					 (funcall (root-value ,name) x y)))))))
     (comparisons ("<" <) (">" >) ("<=" <=) (">=" >=) ("=" =)))
   ;; null? and not, for which Emacs Lisp's nil, #nil, counts as the empty
   ;; list and as false
-  (psx:defhost "%guile-null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
-  (psx:defhost "%guile-not" (x) (bool (or (eq x ps:false) (eq x *elisp-nil*))))
-  (psx:defhost "%guile-true" (x) (if (eq x *elisp-nil*) ps:false x))
-  (psx:defhost "%guile-append2" (x y)
+  (qsx:defhost "%guile-null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
+  (qsx:defhost "%guile-not" (x) (bool (or (eq x qs:false) (eq x *elisp-nil*))))
+  (qsx:defhost "%guile-true" (x) (if (eq x *elisp-nil*) qs:false x))
+  (qsx:defhost "%guile-append2" (x y)
     ;; lists that don't end in #nil: the host's append; else the root's,
     ;; which takes #nil as a list's end and reports the wrong type
     (if (and (proper-list-p* x) (not (nil-terminated-p y)))
 	(append x y)
 	(funcall (root-value "append") x y)))
-  (psx:defhost "%guile-set!" (site value) (site-set site value))
-  (psx:defhost "%guile-define!" (module name value) (define-in-module module name value))
-  (psx:defhost "%guile-unsupported" (name)
+  (qsx:defhost "%guile-set!" (site value) (site-set site value))
+  (qsx:defhost "%guile-define!" (module name value) (define-in-module module name value))
+  (qsx:defhost "%guile-unsupported" (name)
     (lambda (&rest args)
       (declare (ignore args))
-      (error "Guile primitive ~A isn't supported here" (ps:scheme-symbol-name name))))
-  (psx:defhost "%guile-with-meta" (f props)
+      (error "Guile primitive ~A isn't supported here" (qs:scheme-symbol-name name))))
+  (qsx:defhost "%guile-with-meta" (f props)
     (setf (gethash f *procedure-properties*) (append props (gethash f *procedure-properties* '())))
     (let ((name (assoc (ssym "name") props)))
       (when name (register-code-name f (cdr name))))
     f)
-  (psx:defhost "%guile-inline" (f)
+  (qsx:defhost "%guile-inline" (f)
     (register-code-name f :inline)
     f)
-  (psx:defhost "%guile-arity-error" ()
-    (guile-error (ssym "wrong-number-of-args") ps:false "Wrong number of arguments" '()))
-  (psx:defhost "%guile-abort*" (tag args) (apply #'psx::abort-to-prompt tag args))
-  (psx:defhost "%guile-assigned" (value name)
-    (if (eq value ps:unassigned)
-	(guile-error (ssym "misc-error") ps:false "Unbound variable: ~S" (list name))
+  (qsx:defhost "%guile-arity-error" ()
+    (guile-error (ssym "wrong-number-of-args") qs:false "Wrong number of arguments" '()))
+  (qsx:defhost "%guile-abort*" (tag args) (apply #'qsx::abort-to-prompt tag args))
+  (qsx:defhost "%guile-assigned" (value name)
+    (if (eq value qs:unassigned)
+	(guile-error (ssym "misc-error") qs:false "Unbound variable: ~S" (list name))
 	value))
-  (psx:defhost "%guile-nargs>=" (args n) (bool (nthcdr-p args n)))
-  (psx:defhost "%guile-nargs-between" (args min max)
+  (qsx:defhost "%guile-nargs>=" (args n) (bool (nthcdr-p args n)))
+  (qsx:defhost "%guile-nargs-between" (args min max)
     (let ((n (list-length args))) (bool (<= min n max))))
-  (psx:defhost "%guile-positional?" (tail) (bool (and (consp tail) (not (keywordp (car tail))))))
-  (psx:defhost "%guile-keywords-fit?" (args req opt)
+  (qsx:defhost "%guile-positional?" (tail) (bool (and (consp tail) (not (keywordp (car tail))))))
+  (qsx:defhost "%guile-keywords-fit?" (args req opt)
     (bool (and (nthcdr-p args req)
 	       (let ((tail (nthcdr req args)))
 		 (loop repeat opt
 		       while (and (consp tail) (not (keywordp (car tail))))
 		       do (setq tail (cdr tail)))
 		 (or (atom tail) (keywordp (car tail)))))))
-  (psx:defhost "%guile-check-no-more" (tail)
-    (when tail (funcall (psx:host-ref "%guile-arity-error")))
+  (qsx:defhost "%guile-check-no-more" (tail)
+    (when tail (funcall (qsx:host-ref "%guile-arity-error")))
     *unspecified*)
-  (psx:defhost "%guile-check-keywords" (tail keywords allow-other rest)
+  (qsx:defhost "%guile-check-keywords" (tail keywords allow-other rest)
     (check-keywords tail keywords (truthy allow-other) (truthy rest)))
-  (psx:defhost "%guile-keyword-ref" (tail keyword)
+  (qsx:defhost "%guile-keyword-ref" (tail keyword)
     ;; the last value given, as Guile's; a non-keyword (with a rest
     ;; argument) is passed over
     (let ((value +unbound+))
@@ -923,7 +923,7 @@ is (%guile-set! 'site value) or defines the same variable
 		   (setq tail (cdr tail))))
       value))
   (install-guile-inline-primitives)
-  (psx::register-primitive-names
+  (qsx::register-primitive-names
    '("%guile-append2" "%guile-nil:memq" "%guile-nil:memv" "%guile-nil:assq" "%guile-nil:assv"
      "%guile-nil:length" "%guile-nil:list?" "%guile-nil:reverse" "%guile-nil:last-pair"
      "%guile-nil:append"
@@ -953,13 +953,13 @@ is (%guile-set! 'site value) or defines the same variable
 		      (if (and (typep x 'fixnum) (typep y 'fixnum)) (bool (,test x y)) :call)))
     ;; #nil is made once, at load, and never replaced
     ("%guile-null?" (x) (bool (or (null x) (eq x (load-time-value *elisp-nil* t)))))
-    ("%guile-not" (x) (bool (or (eq x ps:false) (eq x (load-time-value *elisp-nil* t)))))
-    ("%guile-true" (x) (if (eq x (load-time-value *elisp-nil* t)) ps:false x)))
-  "(name lambda-list body), as in PSX::*INLINE-PRIMITIVES*.")
+    ("%guile-not" (x) (bool (or (eq x qs:false) (eq x (load-time-value *elisp-nil* t)))))
+    ("%guile-true" (x) (if (eq x (load-time-value *elisp-nil* t)) qs:false x)))
+  "(name lambda-list body), as in QSX::*INLINE-PRIMITIVES*.")
 
 (defun install-guile-inline-primitives ()
   (loop for (name params body) in *guile-inline-primitives*
-	for global = (psx:location (ssym name))
+	for global = (qsx:location (ssym name))
 	do (let ((global global) (params params) (body body))
 	     (setf (compiler-macro-function global)
 		   (lambda (form env)
@@ -995,14 +995,14 @@ is (%guile-set! 'site value) or defines the same variable
 	do (let ((k (car tail)))
 	     (cond ((keywordp k)
 		    (unless (consp (cdr tail))
-		      (guile-error (ssym "keyword-argument-error") ps:false
+		      (guile-error (ssym "keyword-argument-error") qs:false
 				   "Keyword argument has no value" '() (list k)))
 		    (unless (or allow-other (member k keywords))
-		      (guile-error (ssym "keyword-argument-error") ps:false
+		      (guile-error (ssym "keyword-argument-error") qs:false
 				   "Unrecognized keyword" '() (list k)))
 		    (setq tail (cddr tail)))
 		   (rest (setq tail (cdr tail)))
-		   (t (guile-error (ssym "keyword-argument-error") ps:false
+		   (t (guile-error (ssym "keyword-argument-error") qs:false
 				   "Invalid keyword" '() (list k))))))
   *unspecified*)
 
@@ -1012,11 +1012,11 @@ is (%guile-set! 'site value) or defines the same variable
 (defvar *pre-env* '() "symbol -> gensym, the lexical variables in scope")
 
 (defun keyword-is (x name)
-  (and (symbolp x) x (not (keywordp x)) (string= (ps:scheme-symbol-name x) name)
+  (and (symbolp x) x (not (keywordp x)) (string= (qs:scheme-symbol-name x) name)
        (not (assoc x *pre-env*))))
 
 (defun pre-gensym (name)
-  (ssym (format nil "~A-~D" (ps:scheme-symbol-name name) (incf *guile-gensym-counter*))))
+  (ssym (format nil "~A-~D" (qs:scheme-symbol-name name) (incf *guile-gensym-counter*))))
 
 (defun pre-expand (x &rest ignore)
   (declare (ignore ignore))
@@ -1024,41 +1024,41 @@ is (%guile-set! 'site value) or defines the same variable
     (pre-x x)))
 
 (defun pre-seq (forms)
-  (cond ((null forms) (make-node "void" ps:false))
+  (cond ((null forms) (make-node "void" qs:false))
 	((null (cdr forms)) (pre-x (car forms)))
-	(t (make-node "seq" ps:false (pre-x (car forms)) (pre-seq (cdr forms))))))
+	(t (make-node "seq" qs:false (pre-x (car forms)) (pre-seq (cdr forms))))))
 
 (defun pre-x (x)
-  (cond ((and (symbolp x) x (not (keywordp x)) (ps:scheme-symbol-p x))
+  (cond ((and (symbolp x) x (not (keywordp x)) (qs:scheme-symbol-p x))
 	 (let ((b (assoc x *pre-env*)))
 	   (if b
-	       (make-node "lexical-ref" ps:false x (cdr b))
-	       (make-node "toplevel-ref" ps:false ps:false x))))
-	((not (consp x)) (make-node "const" ps:false x))
+	       (make-node "lexical-ref" qs:false x (cdr b))
+	       (make-node "toplevel-ref" qs:false qs:false x))))
+	((not (consp x)) (make-node "const" qs:false x))
 	(t (let ((head (car x)))
 	     (flet ((is (name) (keyword-is head name)))
-	       (cond ((is "quote") (make-node "const" ps:false (cadr x)))
+	       (cond ((is "quote") (make-node "const" qs:false (cadr x)))
 		     ((is "quasiquote") (pre-x (quasi (cadr x) 1)))
-		     ((is "if") (make-node "conditional" ps:false (pre-x (cadr x)) (pre-x (caddr x))
-					   (if (cdddr x) (pre-x (cadddr x)) (make-node "void" ps:false))))
+		     ((is "if") (make-node "conditional" qs:false (pre-x (cadr x)) (pre-x (caddr x))
+					   (if (cdddr x) (pre-x (cadddr x)) (make-node "void" qs:false))))
 		     ((is "define")
 		      (if (consp (cadr x))
 			  (pre-x (list (ssym "define") (caadr x)
 				       (list* (ssym "lambda") (cdadr x) (cddr x))))
-			  (make-node "toplevel-define" ps:false ps:false (cadr x)
+			  (make-node "toplevel-define" qs:false qs:false (cadr x)
 				     (named (cadr x) (pre-x (caddr x))))))
 		     ((is "set!")
 		      (let ((b (assoc (cadr x) *pre-env*)))
 			(if b
-			    (make-node "lexical-set" ps:false (cadr x) (cdr b) (pre-x (caddr x)))
-			    (make-node "toplevel-set" ps:false ps:false (cadr x) (pre-x (caddr x))))))
+			    (make-node "lexical-set" qs:false (cadr x) (cdr b) (pre-x (caddr x)))
+			    (make-node "toplevel-set" qs:false qs:false (cadr x) (pre-x (caddr x))))))
 		     ((is "begin") (pre-seq (cdr x)))
 		     ((or (is "lambda") (is "lambda*"))
-		      (make-node "lambda" ps:false '() (pre-clause (cadr x) (cddr x) ps:false)))
+		      (make-node "lambda" qs:false '() (pre-clause (cadr x) (cddr x) qs:false)))
 		     ((or (is "case-lambda") (is "case-lambda*"))
-		      (make-node "lambda" ps:false '()
+		      (make-node "lambda" qs:false '()
 				 (reduce (lambda (clause alt) (pre-clause (car clause) (cdr clause) alt))
-					 (cdr x) :from-end t :initial-value ps:false)))
+					 (cdr x) :from-end t :initial-value qs:false)))
 		     ((is "let")
 		      (if (and (cadr x) (symbolp (cadr x)))
 			  ;; named let
@@ -1072,40 +1072,40 @@ is (%guile-set! 'site value) or defines the same variable
 			  (pre-let (list (car (cadr x)))
 				   (list (list* (ssym "let*") (cdr (cadr x)) (cddr x))))))
 		     ((or (is "letrec") (is "letrec*")) (pre-letrec (cadr x) (cddr x) (is "letrec*")))
-		     ((is "and") (cond ((null (cdr x)) (make-node "const" ps:false ps:true))
+		     ((is "and") (cond ((null (cdr x)) (make-node "const" qs:false qs:true))
 				       ((null (cddr x)) (pre-x (cadr x)))
-				       (t (make-node "conditional" ps:false (pre-x (cadr x))
+				       (t (make-node "conditional" qs:false (pre-x (cadr x))
 						     (pre-x (cons head (cddr x)))
-						     (make-node "const" ps:false ps:false)))))
-		     ((is "or") (cond ((null (cdr x)) (make-node "const" ps:false ps:false))
+						     (make-node "const" qs:false qs:false)))))
+		     ((is "or") (cond ((null (cdr x)) (make-node "const" qs:false qs:false))
 				      ((null (cddr x)) (pre-x (cadr x)))
 				      (t (let ((tmp (gensym-symbol "t")))
 					   (pre-x `(,(ssym "let") ((,tmp ,(cadr x)))
 						    (,(ssym "if") ,tmp ,tmp (,head ,@(cddr x)))))))))
 		     ((is "when") (pre-x `(,(ssym "if") ,(cadr x) (,(ssym "begin") ,@(cddr x)))))
-		     ((is "unless") (pre-x `(,(ssym "if") ,(cadr x) (,(ssym "if") #.ps:false #.ps:false) (,(ssym "begin") ,@(cddr x)))))
+		     ((is "unless") (pre-x `(,(ssym "if") ,(cadr x) (,(ssym "if") #.qs:false #.qs:false) (,(ssym "begin") ,@(cddr x)))))
 		     ((is "cond") (pre-x (expand-cond (cdr x))))
 		     ((is "case") (pre-x (expand-case (cadr x) (cddr x))))
 		     ((is "do") (pre-x (expand-do x)))
 		     ((or (is "@") (is "@@"))
 		      (if (and (keyword-is (cadr x) "primitive") (is "@@"))
-			  (make-node "primitive-ref" ps:false (caddr x))
-			  (make-node "module-ref" ps:false (cadr x) (caddr x) (bool (is "@")))))
+			  (make-node "primitive-ref" qs:false (caddr x))
+			  (make-node "module-ref" qs:false (cadr x) (caddr x) (bool (is "@")))))
 		     ((is "eval-when")
-		      (if (some (lambda (s) (member (ps:scheme-symbol-name s) '("eval" "load" "expand")
+		      (if (some (lambda (s) (member (qs:scheme-symbol-name s) '("eval" "load" "expand")
 						    :test #'string=))
 				(cadr x))
 			  (pre-seq (cddr x))
-			  (make-node "void" ps:false)))
+			  (make-node "void" qs:false)))
 		     ((and (consp head) (keyword-is (car head) "@@") (keyword-is (cadr head) "primitive"))
-		      (make-node "primcall" ps:false (caddr head) (mapcar #'pre-x (cdr x))))
-		     (t (make-node "call" ps:false (pre-x head) (mapcar #'pre-x (cdr x))))))))))
+		      (make-node "primcall" qs:false (caddr head) (mapcar #'pre-x (cdr x))))
+		     (t (make-node "call" qs:false (pre-x head) (mapcar #'pre-x (cdr x))))))))))
 
 (defun gensym-symbol (stem) (ssym (format nil " ~A~D" stem (incf *guile-gensym-counter*))))
 
 (defun named (name node)
   (if (eq (node-type node) :lambda)
-      (make-node "lambda" ps:false (acons (ssym "name") name (node-field node 1)) (node-field node 2))
+      (make-node "lambda" qs:false (acons (ssym "name") name (node-field node 1)) (node-field node 2))
       node))
 
 (defun quasi (x depth)
@@ -1138,16 +1138,16 @@ is (%guile-set! 'site value) or defines the same variable
 
 (defun pre-let (bindings body)
   (let* ((names (mapcar (lambda (b) (if (consp b) (car b) b)) bindings))
-	 (vals (mapcar (lambda (b) (pre-x (if (and (consp b) (cdr b)) (cadr b) ps:false))) bindings))
+	 (vals (mapcar (lambda (b) (pre-x (if (and (consp b) (cdr b)) (cadr b) qs:false))) bindings))
 	 (gensyms (mapcar #'pre-gensym names)))
     (let ((*pre-env* (append (mapcar #'cons names gensyms) *pre-env*)))
-      (make-node "let" ps:false names gensyms vals (pre-body body)))))
+      (make-node "let" qs:false names gensyms vals (pre-body body)))))
 
 (defun pre-letrec (bindings body &optional (in-order t))
   (let* ((names (mapcar #'car bindings))
 	 (gensyms (mapcar #'pre-gensym names)))
     (let ((*pre-env* (append (mapcar #'cons names gensyms) *pre-env*)))
-      (make-node "letrec" ps:false (if in-order ps:true ps:false) names gensyms
+      (make-node "letrec" qs:false (if in-order qs:true qs:false) names gensyms
 		 (mapcar (lambda (b) (named (car b) (pre-x (cadr b)))) bindings)
 		 (pre-body body)))))
 
@@ -1164,8 +1164,8 @@ is (%guile-set! 'site value) or defines the same variable
 		       ((eq f :allow-other-keys) (setq allow-other t))
 		       ((eq f :rest) (setq rest (pop formals)))
 		       ((eq mode :req) (push f req))
-		       ((eq mode :opt) (push (if (consp f) f (list f ps:false)) opt))
-		       (t (push (if (consp f) f (list f ps:false)) kw)))))))
+		       ((eq mode :opt) (push (if (consp f) f (list f qs:false)) opt))
+		       (t (push (if (consp f) f (list f qs:false)) kw)))))))
     (setq req (nreverse req) opt (nreverse opt) kw (nreverse kw))
     ;; documentation string
     (when (and (stringp (car body)) (cdr body)) (pop body))
@@ -1183,15 +1183,15 @@ is (%guile-set! 'site value) or defines the same variable
 	  (let ((g (pre-gensym (car k))))
 	    (push (cons (car k) g) *pre-env*) (push g gensyms)
 	    (push (list (intern (symbol-name (car k)) "KEYWORD") (car k) g) kw-spec)))
-	(make-node "lambda-case" ps:false req
-		   (if opt (mapcar #'car opt) ps:false)
-		   (or rest ps:false)
-		   (if (or kw allow-other) (cons (bool allow-other) (nreverse kw-spec)) ps:false)
+	(make-node "lambda-case" qs:false req
+		   (if opt (mapcar #'car opt) qs:false)
+		   (or rest qs:false)
+		   (if (or kw allow-other) (cons (bool allow-other) (nreverse kw-spec)) qs:false)
 		   (nreverse inits) (nreverse gensyms) (pre-body body) alternate)))))
 
 (defun expand-cond (clauses)
   (if (null clauses)
-      (list (ssym "if") ps:false ps:false)
+      (list (ssym "if") qs:false qs:false)
       (let ((c (car clauses)))
 	(cond ((keyword-is (car c) "else") (cons (ssym "begin") (cdr c)))
 	      ((and (cdr c) (keyword-is (cadr c) "=>"))

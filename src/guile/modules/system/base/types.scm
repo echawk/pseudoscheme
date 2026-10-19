@@ -1,4 +1,4 @@
-;;; (system base types) for Pseudoscheme.  Guile's reads an object's
+;;; (system base types) for Quasischeme.  Guile's reads an object's
 ;;; memory as libguile lays it out, from the bits object-address gives,
 ;;; to make a copy of it, or an "inferior object" standing for it: for
 ;;; GDB, and for its test of the layout.  Objects here aren't laid out
@@ -6,7 +6,7 @@
 ;;; object, so scm->object looks the object up and copies it as Guile's
 ;;; would decode it (src/guile/foreign.lisp, %scm->object).  The memory
 ;;; backends read the process's memory as Guile's do.  Written for
-;;; Pseudoscheme (not derived from Guile's source).
+;;; Quasischeme (not derived from Guile's source).
 
 (define-module (system base types)
   #:use-module (rnrs bytevectors)

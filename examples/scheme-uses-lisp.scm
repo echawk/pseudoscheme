@@ -1,6 +1,6 @@
 ;;; Scheme using Common Lisp: an R7RS program that calls into CL.
 ;;;
-;;;   bin/pseudoscheme examples/scheme-uses-lisp.scm
+;;;   bin/quasischeme examples/scheme-uses-lisp.scm
 ;;;   (r7rs:load "examples/scheme-uses-lisp.scm")        ; from Lisp
 ;;;
 ;;; A Lisp package is a library, (cl <package>): its functions and
@@ -10,7 +10,7 @@
 
 (import (scheme base) (scheme write) (scheme char)
         (prefix (cl common-lisp) cl:)
-        (pseudoscheme lisp))
+        (quasischeme lisp))
 
 (define (show label value)
   (display label) (display ": ") (write value) (newline))
@@ -43,7 +43,7 @@
 
 ;; Hash tables: cl:equal reaches Lisp as #'EQUAL itself (a wrapper
 ;; crossing back is unwrapped), so it's a valid :test.  Lisp's SETF is
-;; lisp-set!, from (pseudoscheme lisp).
+;; lisp-set!, from (quasischeme lisp).
 (define table (cl:make-hash-table #:test cl:equal))
 (lisp-set! (cl:gethash "one" table) 1)
 (lisp-set! (cl:gethash "two" table) 2)

@@ -1,14 +1,14 @@
 ;;; (srfi private srfi-140-strings): SRFI 140's procedures, for (srfi
-;;; 140) and its sublibraries.  Written for Pseudoscheme: most are SRFI
+;;; 140) and its sublibraries.  Written for Quasischeme: most are SRFI
 ;;; 135's textual procedures, from (srfi private srfi-140-texts), under
 ;;; their SRFI 140 names.
 ;;;
-;;; Istrings are ordinary Pseudoscheme strings; nothing stops a program
+;;; Istrings are ordinary Quasischeme strings; nothing stops a program
 ;;; from mutating one.  What istring? reports is provenance: the strings
 ;;; made by (srfi 140)'s make-string and string-copy (and resized by its
 ;;; string-append! and string-replace!), and by the (srfi 140 mstrings)
 ;;; procedures, are recorded as mutable strings, in a weak eq hash table
-;;; (SBCL's, through (pseudoscheme lisp)), and istring? is true of every
+;;; (SBCL's, through (quasischeme lisp)), and istring? is true of every
 ;;; other string, string literals and the results of R7RS procedures
 ;;; included.
 (define-library (srfi private srfi-140-strings)
@@ -41,7 +41,7 @@
                   (string-copy r7:string-copy))
           (scheme case-lambda)
           (only (rnrs syntax-case) syntax-case syntax identifier?)
-          (pseudoscheme lisp)
+          (quasischeme lisp)
           (prefix (only (cl common-lisp) gethash) cl:)
           (srfi private srfi-140-texts))
   (begin
@@ -176,7 +176,7 @@
         (istring-result (textual-replicate t 0 (* n (string-length t))))))
 
     ;; string-append! and string-replace!, as in (srfi 118): macros that
-    ;; set! a variable to the resized string (Pseudoscheme's strings are
+    ;; set! a variable to the resized string (Quasischeme's strings are
     ;; fixed-length), registered as mutable.  A string not in a variable
     ;; can only be changed without changing its length.
     (define (%string-append dst . values)
@@ -210,7 +210,7 @@
       (unless (eq? dst result)
         (error (string-append
                 who ": cannot change the length of a string that is not "
-                "in a variable (Pseudoscheme's strings are fixed-size)")
+                "in a variable (Quasischeme's strings are fixed-size)")
                dst)))
 
     (define-syntax string-append!

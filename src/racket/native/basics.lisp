@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; The simple primitives: Racket names for host procedures (unsafe-car
 ;;;; is car here; fx= is fx=?), constants, and small natives -- numbers,
@@ -7,7 +7,7 @@
 ;;;; and system-type.  The order here is the expander's: what it uses
 ;;;; most (tests/racket/coverage.lisp --expander) first.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Host procedures under Racket's names
@@ -73,7 +73,7 @@
 (defun install-host-aliases ()
   (loop for (instance . pairs) in *host-aliases*
 	do (loop for (name . host) in pairs
-		 do (let ((f (ignore-errors (psx:host-ref host))))
+		 do (let ((f (ignore-errors (qsx:host-ref host))))
 		      (if (functionp f)
 			  (define-primitive instance name f)
 			  (warn "--racket: *host-aliases* names ~A, which the host doesn't have" host))))))
@@ -92,7 +92,7 @@
 
 (defun immutable! (x)
   (if (typep x '(simple-array * (*)))
-      (ps-r6rs::mark-immutable x)
+      (qs-r6rs::mark-immutable x)
       (setf (gethash x *immutables*) t))
   x)
 
@@ -111,7 +111,7 @@
 assigned, which schemify's and the expander's checks compare with.")
 
 (define-primitive "#%kernel" "null" '())
-(define-primitive "#%kernel" "eof" ps:eof-object)	; a value, not a procedure
+(define-primitive "#%kernel" "eof" qs:eof-object)	; a value, not a procedure
 (define-primitive "#%unsafe" "unsafe-undefined" *unsafe-undefined*)
 
 (defnative "check-not-unsafe-undefined" (v name) (:instance "#%unsafe" :leaf t)
@@ -156,7 +156,7 @@ assigned, which schemify's and the expander's checks compare with.")
 (defnative "symbol<?" (a &rest more) (:leaf t)
   (bool (loop for x = a then y for y in more always (string< (rname x) (rname y)))))
 (defnative "symbol-interned?" (s) (:leaf t) (bool (symbol-package s)))
-(defnative "symbol-unreadable?" (s) (:leaf t) (declare (ignore s)) ps:false)
+(defnative "symbol-unreadable?" (s) (:leaf t) (declare (ignore s)) qs:false)
 (defnative "string->uninterned-symbol" (s) (:leaf t)
   (make-symbol (symbol-name (rsym s))))
 (defnative "string->unreadable-symbol" (s) (:leaf t) (rsym s))
@@ -210,7 +210,7 @@ assigned, which schemify's and the expander's checks compare with.")
 
 (defnative "make-weak-box" (v) (:leaf t) (sb-ext:make-weak-pointer v))
 (defnative "weak-box?" (x) (:leaf t) (bool (sb-ext:weak-pointer-p x)))
-(defnative "weak-box-value" (b &optional (gone ps:false)) (:leaf t)
+(defnative "weak-box-value" (b &optional (gone qs:false)) (:leaf t)
   (multiple-value-bind (v alive) (sb-ext:weak-pointer-value b)
     (if alive v gone)))
 
@@ -248,7 +248,7 @@ assigned, which schemify's and the expander's checks compare with.")
 (defvar *srcloc-type* nil "#%kernel's struct:srcloc.")
 
 (multiple-value-bind (type constructor predicate accessor)
-    (make-struct-type* (rsym "srcloc") ps:false 5 0 ps:false '() ps:false ps:false '(0 1 2 3 4))
+    (make-struct-type* (rsym "srcloc") qs:false 5 0 qs:false '() qs:false qs:false '(0 1 2 3 4))
   (setq *srcloc-type* type)
   (define-primitive "#%kernel" "struct:srcloc" type)
   (define-primitive "#%kernel" "srcloc" constructor)
@@ -356,18 +356,18 @@ index of a field of the type that has the property; or NIL."
 	 (let ((name (ignore-errors (sb-kernel:%fun-name x))))
 	   ;; the host's procedures defined by DEFUNE are named .NAME
 	   ;; the host's procedures defined by DEFUNE are named .NAME, and
-	   ;; Pseudoscheme's own arithmetic SCHEME+ and the like
+	   ;; Quasischeme's own arithmetic SCHEME+ and the like
 	   (if (and name (symbolp name) (not (null name)))
 	       (let ((n (string-left-trim "." (string-downcase (symbol-name name)))))
-		 (rsym (if (and (eq (symbol-package name) (find-package "PSEUDOSCHEME"))
+		 (rsym (if (and (eq (symbol-package name) (find-package "QUASISCHEME"))
 				(> (length n) 6) (string= n "scheme" :end1 6))
 			   (string-left-trim "-" (subseq n 6))
 			   n)))
-	       ps:false)))
-	(t ps:false)))
+	       qs:false)))
+	(t qs:false)))
 
 (defnative "version" () (:leaf t) "9.3")
-(defnative "banner" () (:leaf t) "Welcome to Racket v9.3 [pseudoscheme].
+(defnative "banner" () (:leaf t) "Welcome to Racket v9.3 [quasischeme].
 ")
 
 (defnative "system-type" (&optional (mode (rsym "os"))) (:leaf t)
@@ -382,7 +382,7 @@ index of a field of the type that has the property; or NIL."
 	  ((string= m "link") (rsym (if (uiop:os-macosx-p) "framework" "shared")))
 	  ((string= m "so-suffix") (ascii-bytes (if (uiop:os-macosx-p) ".dylib" ".so")))
 	  ((string= m "so-mode") (rsym "local"))
-	  ((string= m "fs-change") (vector ps:false ps:false ps:false ps:false))
+	  ((string= m "fs-change") (vector qs:false qs:false qs:false qs:false))
 	  ;; the machine compiled code is for: ours (BC answers racket)
 	  ((string= m "target-machine") (rsym *vm-name*))
 	  ((string= m "cross") (rsym "infer"))
@@ -401,16 +401,16 @@ index of a field of the type that has the property; or NIL."
   ;; the value is held strongly: SBCL has no ephemerons
   (make-ephemeron* (sb-ext:make-weak-pointer key) v))
 (defnative "ephemeron?" (x) (:leaf t) (bool (ephemeron-p x)))
-(defnative "ephemeron-value" (e &optional (gone ps:false) retain) (:leaf t)
+(defnative "ephemeron-value" (e &optional (gone qs:false) retain) (:leaf t)
   (declare (ignore retain))
   (if (nth-value 1 (sb-ext:weak-pointer-value (ephemeron-key e))) (ephemeron-value e) gone))
 
 (defnative "andmap" (f l &rest ls) ()
   (block andmap
-    (let ((result ps:true))
+    (let ((result qs:true))
       (apply #'mapc (lambda (&rest xs)
 		      (setq result (apply f xs))
-		      (unless (truthy result) (return-from andmap ps:false)))
+		      (unless (truthy result) (return-from andmap qs:false)))
 	     l ls)
       result)))
 (defnative "ormap" (f l &rest ls) ()
@@ -418,7 +418,7 @@ index of a field of the type that has the property; or NIL."
     (apply #'mapc (lambda (&rest xs)
 		    (let ((r (apply f xs))) (when (truthy r) (return-from ormap r))))
 	   l ls)
-    ps:false))
+    qs:false))
 (defnative "caadr" (x) (:leaf t) (caadr x))
 (defnative "cadar" (x) (:leaf t) (cadar x))
 (defnative "caddar" (x) (:leaf t) (car (cddar x)))
@@ -441,19 +441,19 @@ index of a field of the type that has the property; or NIL."
 (defnative "make-polar" (m a) (:leaf t) (* m (cis a)))
 (defnative "real-part" (z) (:leaf t) (realpart z))
 (defnative "imag-part" (z) (:leaf t) (imagpart z))
-(defnative "single-flonum?" (x) (:leaf t) (declare (ignore x)) ps:false)
-(defnative "single-flonum-available?" () (:leaf t) ps:false)
+(defnative "single-flonum?" (x) (:leaf t) (declare (ignore x)) qs:false)
+(defnative "single-flonum-available?" () (:leaf t) qs:false)
 (defnative "real->single-flonum" (x) (:leaf t)
   (racket-error "real->single-flonum" "unsupported~%  given: ~A" x))
-(defnative "extflonum?" (x) (:instance "#%extfl" :leaf t) (declare (ignore x)) ps:false)
-(defnative "extflonum-available?" () (:instance "#%extfl" :leaf t) ps:false)
+(defnative "extflonum?" (x) (:instance "#%extfl" :leaf t) (declare (ignore x)) qs:false)
+(defnative "extflonum-available?" () (:instance "#%extfl" :leaf t) qs:false)
 (defnative "current-inexact-monotonic-milliseconds" () (:leaf t)
   (coerce (/ (get-internal-real-time) (/ internal-time-units-per-second 1000)) 'double-float))
 (defnative "current-inexact-milliseconds" () (:leaf t)
   (multiple-value-bind (s us) (sb-ext:get-time-of-day) (+ (* s 1000d0) (/ us 1000d0))))
 (defnative "current-gc-milliseconds" () (:leaf t) sb-ext:*gc-run-time*)
 (defnative "current-memory-use" (&optional mode) (:leaf t) (declare (ignore mode)) (sb-kernel:dynamic-usage))
-(define-primitive "#%kernel" "eval-jit-enabled" (make-parameter* ps:true))
+(define-primitive "#%kernel" "eval-jit-enabled" (make-parameter* qs:true))
 (defnative "unquoted-printing-string" (s) (:leaf t) s)
 (defvar *interned-literals* (make-hash-table :test 'equal :weakness :value :synchronized t))
 (defnative "datum-intern-literal" (v) (:leaf t)
@@ -471,7 +471,7 @@ index of a field of the type that has the property; or NIL."
 (defun arity-at-least (n) (funcall (second *arity-at-least*) n))
 
 (multiple-value-bind (type constructor predicate accessor)
-    (make-struct-type* (rsym "arity-at-least") ps:false 1 0 ps:false '() ps:false ps:false '(0))
+    (make-struct-type* (rsym "arity-at-least") qs:false 1 0 qs:false '() qs:false qs:false '(0))
   (setq *arity-at-least* (list type constructor predicate accessor))
   (define-primitive "#%kernel" "struct:arity-at-least" type)
   (define-primitive "#%kernel" "arity-at-least" constructor)
@@ -515,12 +515,12 @@ index of a field of the type that has the property; or NIL."
 				    :leaf t)))))))
 
 ;;; UTF-8, with Racket's arguments: an error character (or byte) and a range
-(defnative "bytes->string/utf-8" (b &optional (err-char ps:false) (start 0) end) (:leaf t)
+(defnative "bytes->string/utf-8" (b &optional (err-char qs:false) (start 0) end) (:leaf t)
   (declare (ignore err-char))
   (sb-ext:octets-to-string b :external-format '(:utf-8 :replacement #\?) :start start :end end))
-(defnative "string->bytes/utf-8" (s &optional (err-byte ps:false) (start 0) end) (:leaf t)
+(defnative "string->bytes/utf-8" (s &optional (err-byte qs:false) (start 0) end) (:leaf t)
   (declare (ignore err-byte))
   (sb-ext:string-to-octets s :external-format :utf-8 :start start :end end))
-(defnative "bytes-utf-8-length" (b &optional (err-char ps:false) (start 0) end) (:leaf t)
+(defnative "bytes-utf-8-length" (b &optional (err-char qs:false) (start 0) end) (:leaf t)
   (declare (ignore err-char))
   (length (sb-ext:octets-to-string b :external-format '(:utf-8 :replacement #\?) :start start :end end)))

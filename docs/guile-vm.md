@@ -1,7 +1,7 @@
 # Guile's VM in Lisp (design)
 
 Guile mode already runs Guile's own compiler: Tree-IL, CPS and the
-assembler produce Guile 3.0 bytecode inside Pseudoscheme. What it can't
+assembler produce Guile 3.0 bytecode inside Quasischeme. What it can't
 do is run that bytecode. Nor can it load the `.go` files an installed
 Guile ships, which are the same bytecode in ELF images. This document
 plans a VM for that bytecode, written in Lisp, on top of the existing
@@ -124,7 +124,7 @@ root).
     from source: srfi-1 (1,902 tests), srfi-9, 11, 19, 26, 31, 34, 35,
     37, 41, 43, 45, 60, 64, 67, 69, 171; ice-9 format, getopt-long,
     match, optargs, q, regex, vlist. `GUILE_VM_PRELOAD` in
-    tests/run-guile-test.lisp does this. `PSEUDOSCHEME_GUILE_GO=all`
+    tests/run-guile-test.lisp does this. `QUASISCHEME_GUILE_GO=all`
     makes any program do it: each of Guile's own modules that has an
     installed `.go` file loads from it, on the VM, rather than from its
     source, natively (boot.lisp, `load-installed-compiled`). It isn't the
@@ -132,7 +132,7 @@ root).
   - Bytecode from Guile's compiler running here runs on the VM:
     rtl.test and rtl-compilation.test pass.
 - **`compile`:** to `value`, how it runs is a setting,
-  `PSEUDOSCHEME_GUILE_COMPILER` (or `psg::*guile-compiler*` from Lisp):
+  `QUASISCHEME_GUILE_COMPILER` (or `qsg::*guile-compiler*` from Lisp):
 
   | setting | `compile` to `value` | Guile's compiler (CPS, its passes, the assembler) |
   |---|---|---|
@@ -150,7 +150,7 @@ root).
   `statprof`): those need compiled code to run on the VM, so they run
   under `vm-source`.
   Under `native`, `compile`'s string literals are read-only, as Guile's
-  compiler makes them. (`PSEUDOSCHEME_GUILE_COMPILE_VALUE=lisp`, the
+  compiler makes them. (`QUASISCHEME_GUILE_COMPILE_VALUE=lisp`, the
   older switch, still means `native`.) `eval` and `load` compile to
   Lisp. Data read from a
   loaded file have source properties (line and column), as Guile's
@@ -247,8 +247,8 @@ Since the handlers are the same, so are the semantics, continuations
 included. The translation is portable Common Lisp, except in the `vop`
 backend (below).
 
-- `PSEUDOSCHEME_GUILE_JIT=0` turns it off (the `interpret` backend).
-- `PSEUDOSCHEME_GUILE_JIT_THRESHOLD=0` translates all code run. rtl,
+- `QUASISCHEME_GUILE_JIT=0` turns it off (the `interpret` backend).
+- `QUASISCHEME_GUILE_JIT_THRESHOLD=0` translates all code run. rtl,
   rtl-compilation, the continuation cases and srfi-1, match and format
   over their `.go` modules all pass so.
 
@@ -259,8 +259,8 @@ Flonum arithmetic is IEEE's, as Guile's: overflow gives an infinity and
 
 ### Backends
 
-`PSEUDOSCHEME_GUILE_VM_BACKEND` chooses how bytecode runs. It and the
-two settings above are read when the program starts (bin/pseudoscheme,
+`QUASISCHEME_GUILE_VM_BACKEND` chooses how bytecode runs. It and the
+two settings above are read when the program starts (bin/quasischeme,
 or our libguile's core), not when its image was built:
 
 - **`interpret`:** the interpreter alone, the reference.
@@ -273,7 +273,7 @@ or our libguile's core), not when its image was built:
   58 s the first time, then loaded).
 - **`vop`:** the default on SBCL/arm64, the fastest. It's `jit`, but
   SBCL-specific (vm-vops.lisp; SBCL on arm64, the feature
-  `:pseudoscheme-vops`; elsewhere `vop` is `jit`):
+  `:quasischeme-vops`; elsewhere `vop` is `jit`):
   - regions are compiled at `(safety 0)`, so the VM stack's slots are
     read and written unchecked;
   - the stack and stack pointer are kept in variables of the region's

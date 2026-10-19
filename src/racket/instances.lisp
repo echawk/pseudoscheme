@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Primitive instances: #%kernel, #%unsafe, #%flfxnum, #%paramz,
 ;;;; #%linklet, ... (docs/racket.md, "Linklets").  Linklets refer to
@@ -12,7 +12,7 @@
 ;;;; variable objects) are in linklet/api.lisp for B, and rumble's for A
 ;;;; and C.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defparameter *instance-names*
   '("#%kernel" "#%unsafe" "#%flfxnum" "#%extfl" "#%paramz" "#%foreign" "#%network"
@@ -29,7 +29,7 @@
 (defun define-primitive (instance name value)
   (setf (gethash name (primitive-instance instance)) value))
 
-(defun primitive (name &optional (instances (append *instance-names* '("#%internal" "#%pseudoscheme"))))
+(defun primitive (name &optional (instances (append *instance-names* '("#%internal" "#%quasischeme"))))
   "NAME's value in the first of INSTANCES that has it, and T; else NIL, NIL."
   (dolist (i instances (values nil nil))
     (multiple-value-bind (v found) (gethash name (primitive-instance i))
@@ -156,7 +156,7 @@ source; without it, nothing."
 		    ;; parameter-shaped (a getter and setter, by name): a
 		    ;; parameter holding #f, which linklets read as they
 		    ;; instantiate
-		    (make-parameter* ps:false)
+		    (make-parameter* qs:false)
 		    (lambda (&rest args) (declare (ignore args)) (not-yet name)))))
 	    ;; a constant we lack: a property for a property's name, else a
 	    ;; value of its own, so that references to it compile and run
@@ -166,7 +166,7 @@ source; without it, nothing."
 	      (define-primitive instance name
 		(cond ((search "prop:" name) (%make-struct-type-property (rsym name) nil '()))
 		      ;; Racket CS lists parameters as constants
-		      ((parameter-name-p name) (make-parameter* ps:false))
+		      ((parameter-name-p name) (make-parameter* qs:false))
 		      (t (make-missing-constant name)))))))))))
 
 (defun parameter-name-p (name)
@@ -182,7 +182,7 @@ current-..., print-..., read-... and so on."
 
 (defun prune-extra-primitives ()
   "Move each primitive an instance has that Racket CS's table for it
-doesn't list to the instance #%pseudoscheme: an instance exports exactly
+doesn't list to the instance #%quasischeme: an instance exports exactly
 Racket's names, or a module that requires #%kernel and defines one of
 ours (racket/private's andmap, say) would find it already required.
 Compiled code still reaches them, by their host globals."
@@ -197,4 +197,4 @@ Compiled code still reaches them, by their host globals."
 		   (primitive-instance instance))
 	  (loop for (name . value) in extra
 		do (remhash name (primitive-instance instance))
-		   (define-primitive "#%pseudoscheme" name value)))))))
+		   (define-primitive "#%quasischeme" name value)))))))

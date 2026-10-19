@@ -1,9 +1,9 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PS; -*-
 ; File core.lisp / Copyright (c) 1991 Jonathan Rees / See file COPYING
 
-;;;; Pseudoscheme run-time system
+;;;; Quasischeme run-time system
 
-(in-package "PS")
+(in-package "QS")
 
 ; The Scheme booleans
 ;   - must be self-evaluating
@@ -54,7 +54,7 @@
 ; named by INVERTING case, as CL's :INVERT readtable case does: a name
 ; written all in lower case is the upper-case CL symbol (so `car' is
 ; SCHEME::CAR, which is what the translator's own sources -- read by the
-; host's upcasing reader -- and every .pso file already use), one
+; host's upcasing reader -- and every .qso file already use), one
 ; written all in upper case is the lower-case CL symbol, and a name of
 ; mixed case is kept as is.  Inversion is its own inverse, so this is a
 ; bijection: Scheme symbols are case-sensitive, as R6RS and R7RS
@@ -91,7 +91,7 @@
 
 (defvar *symbol-sweep-threshold* 100000
   "How many symbols SCHEME may gain before MAYBE-SWEEP-SYMBOLS sweeps;
-PSEUDOSCHEME_SYMBOL_SWEEP in the environment, if set (0 sweeps every
+QUASISCHEME_SYMBOL_SWEEP in the environment, if set (0 sweeps every
 time: for testing).")
 
 (defvar *symbols-after-sweep* nil "SCHEME's symbol count after the last sweep.")
@@ -125,7 +125,7 @@ since the last sweep.  For when a file or library is done."
   (let ((n (sb-int:package-internal-symbol-count scheme-package)))
     (cond ((null *symbols-after-sweep*) (setq *symbols-after-sweep* n))
 	  ((> (- n *symbols-after-sweep*)
-	      (or (ignore-errors (parse-integer (sb-ext:posix-getenv "PSEUDOSCHEME_SYMBOL_SWEEP")))
+	      (or (ignore-errors (parse-integer (sb-ext:posix-getenv "QUASISCHEME_SYMBOL_SWEEP")))
 		  *symbol-sweep-threshold*))
 	   (sweep-symbols)
 	   (setq *symbols-after-sweep* (sb-int:package-internal-symbol-count scheme-package))))))
@@ -158,7 +158,7 @@ since the last sweep.  For when a file or library is done."
 (defvar *annotations-made* nil "Has an annotation been made?  (Else stripping is a no-op.)")
 (defvar *annotating-sfd* nil "While the reader annotates: the descriptor of what it reads.")
 
-;; Lisp booleans: read.pso tests them with (ps:true? ...), which the
+;; Lisp booleans: read.qso tests them with (qs:true? ...), which the
 ;; translator compiles as a plain Lisp test
 (defun annotating-p () (and *annotating-sfd* t))
 (defun annotated-p (x) (annotation-p x))
@@ -430,7 +430,7 @@ docs/interop.md): named by inverting case, like a Scheme symbol, so
   #+unix (string-downcase name)
   #-unix (string-upcase name)
   )
-(defvar *translated-file-type* (filename-preferred-case "pso"))
+(defvar *translated-file-type* (filename-preferred-case "qso"))
 
 ; Prelude on all translated files
 
@@ -635,7 +635,7 @@ and whether it was #!fold-case.  Other ports fold as *FOLD-CASE* says.")
 an alist from label numbers to placeholders.")
 
 (defvar *chez-reader* nil
-  "Does the reader read as Chez Scheme's does (pseudoscheme --chez)?
+  "Does the reader read as Chez Scheme's does (quasischeme --chez)?
 Then tokens that begin like numbers but aren't, such as 2.a, are
 symbols, not errors, and #!r6rs restricts a port to R6RS syntax.")
 
@@ -668,7 +668,7 @@ symbols, not errors, and #!r6rs restricts a port to R6RS syntax.")
   "NIL, or a function of an object, a port and the writer of its parts:
 true if it wrote the object.")
 
-;;; A Lisp boolean: the writer (write.pso) tests it with OR, where an
+;;; A Lisp boolean: the writer (write.qso) tests it with OR, where an
 ;;; object it doesn't know is printed (PRIN1) if this is NIL.
 (defun write-extension (obj port recur)
   (and *write-extension* (funcall *write-extension* obj port recur) t))
@@ -1045,6 +1045,6 @@ what is on a cycle; 2, whatever is shared."
   (let ((tag (list 'continuation)))
     (catch tag
       (funcall proc (lambda (&rest vals)
-		      (if (and vals (eq (car vals) :pseudoscheme-continuation-query))
+		      (if (and vals (eq (car vals) :quasischeme-continuation-query))
 			  (cons tag nil)	; its identity (src/continuations.lisp)
 			  (throw tag (values-list vals))))))))

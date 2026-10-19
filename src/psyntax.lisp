@@ -1,14 +1,14 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-PSYNTAX -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-PSYNTAX -*-
 
-;;;; psyntax: the R6RS expander as Pseudoscheme's front end
+;;;; psyntax: the R6RS expander as Quasischeme's front end
 ;;;;
 ;;;; vendor/psyntax/ is Ghuloum & Dybvig's portable R6RS library and
 ;;;; syntax-case system (2007, MIT license; see its README.txt and
-;;;; README-pseudoscheme.md).  It is written as R6RS libraries and
+;;;; README-quasischeme.md).  It is written as R6RS libraries and
 ;;;; distributed pre-expanded into plain R5RS core forms (a ".pp" file);
 ;;;; a host provides a handful of primitives and an EVAL for core forms.
 ;;;;
-;;;; Here the host is a Pseudoscheme program environment, *HOST*:
+;;;; Here the host is a Quasischeme program environment, *HOST*:
 ;;;;
 ;;;;   source --psyntax--> core Scheme --translator--> Common Lisp
 ;;;;
@@ -19,17 +19,17 @@
 ;;;; variable of *HOST* with the standard name, which is what
 ;;;; src/r6rs/*.lisp define.
 
-(defpackage "PSEUDOSCHEME-PSYNTAX"
-  (:nicknames "PSX")
+(defpackage "QUASISCHEME-PSYNTAX"
+  (:nicknames "QSX")
   (:use "COMMON-LISP")
   (:export "*HOST*" "EVAL-PROGRAM" "EVAL-LIBRARY" "EVAL-TOP-LEVEL"
 	   "EVAL-FORMS" "LOAD-FILE" "EXPAND" "REBUILD" "*LIBRARY-PATH*" "*SYSTEM-LIBRARY-PATH*"
 	   "DEFHOST" "HOST-REF" "HOST-SET!" "MISSING-PRIMITIVES"
 	   "TABLE-EXPORTS" "*LIBRARY-FORM-HOOK*" "*LIBRARY-EXTENSIONS*" "CANDIDATE-FILES" "*IMPLEMENTATION-VARIANTS*" "LOCATION" "HOST-EVAL"))
 
-(in-package "PSEUDOSCHEME-PSYNTAX")
+(in-package "QUASISCHEME-PSYNTAX")
 
-(defun sym (string) (psl:scheme-symbol string))
+(defun sym (string) (qsl:scheme-symbol string))
 
 (defvar *optimize-off* nil
   "True to skip OPTIMIZE-CORE (src/cp0.lisp): compiling psyntax's own image.")
@@ -42,7 +42,7 @@
 
 (defun location (name)
   "The CL symbol holding the host global NAME (a Scheme symbol)."
-  (psl:tr "PROGRAM-VARIABLE-LOCATION" (psl:tr "PROGRAM-ENV-ENSURE-DEFINED" *host* name)))
+  (qsl:tr "PROGRAM-VARIABLE-LOCATION" (qsl:tr "PROGRAM-ENV-ENSURE-DEFINED" *host* name)))
 
 (defun make-lexical (name)
   "A lexical variable for core code, named NAME: uninterned, so that it
@@ -63,13 +63,13 @@ as long as the process runs, as no package lets go of a symbol."
 		;; variable before being changed, so R5RS's isn't.
 		(when (member name *shared-primitives*)
 		  (setq *shared-primitives* (remove name *shared-primitives*))
-		  (define-builtin-alias *host* name (psl:tr "PROGRAM-ENV-LOOKUP" *host* name))
-		  (psl:install-variable! *host* name value))
+		  (define-builtin-alias *host* name (qsl:tr "PROGRAM-ENV-LOOKUP" *host* name))
+		  (qsl:install-variable! *host* name value))
 		(location name))))
     (setf (symbol-value loc) value)
     (if (functionp value)
-	(ps:set-function-from-value loc)
-	(unless (get loc 'ps::defined) (setf (get loc 'ps::defined) t)))
+	(qs:set-function-from-value loc)
+	(unless (get loc 'qs::defined) (setf (get loc 'qs::defined) t)))
     value))
 
 (defmacro defhost (name lambda-list &body body)
@@ -97,11 +97,11 @@ as long as the process runs, as no package lets go of a symbol."
 
 (defun strip-annotations (x)
   "X with each annotation in it replaced by its stripped datum."
-  (if (not ps::*annotations-made*)
+  (if (not qs::*annotations-made*)
       x
       (let ((seen (make-hash-table :test 'eq)))
 	(labels ((walk (x)
-		   (cond ((ps::annotation-p x) (ps::annotation-stripped x))
+		   (cond ((qs::annotation-p x) (qs::annotation-stripped x))
 			 ((gethash x seen) x)
 			 ((consp x)
 			  (setf (gethash x seen) t)
@@ -120,33 +120,33 @@ as long as the process runs, as no package lets go of a symbol."
     ;; unbound variable (src/r6rs/conditions.lisp)
     (let ((symbol (intern (format nil "~A~D" *gensym-prefix* (incf *gensym-count*)) "SCHEME")))
       (when (and args (symbolp (first args)))
-	(setf (get symbol :source-name) (ps:scheme-symbol-name (first args))))
+	(setf (get symbol :source-name) (qs:scheme-symbol-name (first args))))
       symbol))
-  (defhost "void" () ps:unspecific)
+  (defhost "void" () qs:unspecific)
   (defhost "%letrec-check" (flag value name)
-    (if (eq flag ps:false)
-	(ps-r6rs::r6rs-assertion-violation
-	 ps:false (format nil "attempt to reference undefined variable ~A"
-			  (or (get name :source-name) (ps:scheme-symbol-name name))))
+    (if (eq flag qs:false)
+	(qs-r6rs::r6rs-assertion-violation
+	 qs:false (format nil "attempt to reference undefined variable ~A"
+			  (or (get name :source-name) (qs:scheme-symbol-name name))))
 	value))
   (defhost "symbol-value" (s) (symbol-value (location s)))
-  (defhost "set-symbol-value!" (s v) (host-set! s v) ps:unspecific)
+  (defhost "set-symbol-value!" (s v) (host-set! s v) qs:unspecific)
   ;; the expanded code runs without the expander lock (CALL-WITH-EXPANDER-LOCK)
   (defhost "eval-core" (x) (call-without-expander-lock (lambda () (host-eval x))))
-  (defhost "lisp-keyword?" (x) (ps:true? (keywordp x)))
+  (defhost "lisp-keyword?" (x) (qs:true? (keywordp x)))
   ;; SRFI 4's #s16(...), SRFI 88's foo:, and records (SRFI 163's array
   ;; literals)
   ;; Chez's source annotations, which psyntax looks through
-  (defhost "annotation?" (x) (ps:true? (ps::annotation-p x)))
-  (defhost "annotation-expression" (x) (ps::annotation-expression x))
-  (defhost "annotation-stripped" (x) (ps::annotation-stripped x))
+  (defhost "annotation?" (x) (qs:true? (qs::annotation-p x)))
+  (defhost "annotation-expression" (x) (qs::annotation-expression x))
+  (defhost "annotation-stripped" (x) (qs::annotation-stripped x))
   (defhost "strip-annotations" (x) (strip-annotations x))
   (defhost "host-literal?" (x)
     ;; Chez's #!eof too: the end-of-file object is self-evaluating there
-    (ps:true? (or (and (ps:numeric-vector-tag x) t) (ps:keyword-object-p x)
-		  (typep x 'ps-r6rs::record) (eq x ps:eof-object))))
+    (qs:true? (or (and (qs:numeric-vector-tag x) t) (qs:keyword-object-p x)
+		  (typep x 'qs-r6rs::record) (eq x qs:eof-object))))
   (defhost "pretty-print" (x &optional (port *standard-output*))
-    (funcall ps:*scheme-write* x port) (terpri port) ps:unspecific))
+    (funcall qs:*scheme-write* x port) (terpri port) qs:unspecific))
 
 (defparameter *closed-primitives* '("assv" "for-each")
   "Primitives whose host binding is one of the translator's integrated
@@ -156,7 +156,7 @@ old built-in.")
 
 (defparameter *chez-closed-primitives* '("map")
   "Primitives closed in the Chez mode only: map, whose arguments Chez
-checks (PS-R6RS::CHECK-MAP-ARGUMENTS).")
+checks (QS-R6RS::CHECK-MAP-ARGUMENTS).")
 
 (defvar *chez-renamed-primitives* (make-hash-table :test 'equal)
   "In the Chez mode, primitive name -> the host global that stands for it
@@ -174,7 +174,7 @@ calls with no arguments.")
 (defun chez-renamed-primitive (name nargs)
   "The host global standing for primitive NAME called with NARGS
 arguments (NIL: not called) in the Chez mode, or NIL."
-  (when ps:*chez-reader*
+  (when qs:*chez-reader*
     (let ((r (gethash name *chez-renamed-primitives*)))
       (cond ((null r) nil)
 	    ((consp r) (and (eql nargs 0) (car r)))
@@ -184,7 +184,7 @@ arguments (NIL: not called) in the Chez mode, or NIL."
   "Whether primitive NAME (a string) is closed (*CLOSED-PRIMITIVES*,
 and in the Chez mode *CHEZ-CLOSED-PRIMITIVES*)."
   (or (member name *closed-primitives* :test #'string=)
-      (and ps:*chez-reader* (member name *chez-closed-primitives* :test #'string=))))
+      (and qs:*chez-reader* (member name *chez-closed-primitives* :test #'string=))))
 
 (defparameter *extended-primitives* '()
   "(name min max): closed primitives (see *CLOSED-PRIMITIVES*) whose new
@@ -193,19 +193,19 @@ with MIN to MAX (NIL: any number of) arguments, as Chez's variadic fx+
 does.  OPEN-PRIMITIVES still opens such calls, so they stay open-coded.")
 
 (defun builtin-alias-name (name)
-  (sym (concatenate 'string "%builtin:" (if (stringp name) name (ps:scheme-symbol-name name)))))
+  (sym (concatenate 'string "%builtin:" (if (stringp name) name (qs:scheme-symbol-name name)))))
 
 (defun define-builtin-alias (env name den)
   "Define %builtin:NAME in ENV as DEN, R5RS's built-in NAME, which the
 translator open-codes: the host's NAME is another procedure now (an
 extension of it), whose calls with the arguments the built-in takes
 (*EXTENDED-PRIMITIVES*) go to the built-in still."
-  (psl:tr "PROGRAM-ENV-DEFINE!" env (builtin-alias-name name) den))
+  (qsl:tr "PROGRAM-ENV-DEFINE!" env (builtin-alias-name name) den))
 
 (defun builtin-alias (name)
   "%builtin:NAME if the host has it, else NAME."
   (let ((alias (builtin-alias-name name)))
-    (if (psl:binding-defined-p *host* alias) alias name)))
+    (if (qsl:binding-defined-p *host* alias) alias name)))
 
 (defun extended-primitive-name (f)
   "The host global F, (primitive x) or psyntax's plain x, names."
@@ -217,7 +217,7 @@ extension of it), whose calls with the arguments the built-in takes
 (defun open-call-of-extended-primitive-p (form)
   (let ((f (extended-primitive-name (car form))))
     (and f
-	 (let ((entry (assoc (ps:scheme-symbol-name f) *extended-primitives* :test #'string=))
+	 (let ((entry (assoc (qs:scheme-symbol-name f) *extended-primitives* :test #'string=))
 	       (n (proper-length (cdr form))))
 	   (and entry n (<= (second entry) n) (or (null (third entry)) (<= n (third entry))))))))
 
@@ -240,43 +240,43 @@ psyntax renames every user variable: nothing in its output can shadow a
 host global."
   (cond ((atom form)
 	 ;; a host global by name, as at Chez's top level
-	 (let ((r (and ps:*chez-reader* (symbolp form) form (chez-renamed-primitive (ps:scheme-symbol-name form) nil))))
+	 (let ((r (and qs:*chez-reader* (symbolp form) form (chez-renamed-primitive (qs:scheme-symbol-name form) nil))))
 	   (if r (sym r) form)))
-	((and ps:*chez-reader* (symbolp (car form)) (car form) (proper-length (cdr form))
-	      (chez-renamed-primitive (ps:scheme-symbol-name (car form)) (proper-length (cdr form))))
-	 (cons (sym (chez-renamed-primitive (ps:scheme-symbol-name (car form)) (proper-length (cdr form))))
+	((and qs:*chez-reader* (symbolp (car form)) (car form) (proper-length (cdr form))
+	      (chez-renamed-primitive (qs:scheme-symbol-name (car form)) (proper-length (cdr form))))
+	 (cons (sym (chez-renamed-primitive (qs:scheme-symbol-name (car form)) (proper-length (cdr form))))
 	       (mapcar #'open-primitives-1 (cdr form))))
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "QUOTE"))
 	 ;; '#() and "" are Chez's single empty vector and string
-	 (if (and ps:*chez-reader* *canonical-empty* (consp (cdr form))
+	 (if (and qs:*chez-reader* *canonical-empty* (consp (cdr form))
 		  (typep (cadr form) '(simple-array * (0))))
 	     (list (car form) (funcall *canonical-empty* (cadr form)))
 	     form))
 	((and (consp (car form)) (symbolp (caar form)) (string= (symbol-name (caar form)) "PRIMITIVE")
-	      (consp (cdar form)) (symbolp (cadar form)) ps:*chez-reader* (proper-length (cdr form))
-	      (chez-renamed-primitive (ps:scheme-symbol-name (cadar form)) (proper-length (cdr form))))
-	 (cons (sym (chez-renamed-primitive (ps:scheme-symbol-name (cadar form)) (proper-length (cdr form))))
+	      (consp (cdar form)) (symbolp (cadar form)) qs:*chez-reader* (proper-length (cdr form))
+	      (chez-renamed-primitive (qs:scheme-symbol-name (cadar form)) (proper-length (cdr form))))
+	 (cons (sym (chez-renamed-primitive (qs:scheme-symbol-name (cadar form)) (proper-length (cdr form))))
 	       (mapcar #'open-primitives-1 (cdr form))))
 	((open-call-of-extended-primitive-p form)
 	 (cons (builtin-alias (extended-primitive-name (car form))) (mapcar #'open-primitives-1 (cdr form))))
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
-	      (chez-renamed-primitive (ps:scheme-symbol-name (cadr form)) nil))
-	 (sym (chez-renamed-primitive (ps:scheme-symbol-name (cadr form)) nil)))
+	      (chez-renamed-primitive (qs:scheme-symbol-name (cadr form)) nil))
+	 (sym (chez-renamed-primitive (qs:scheme-symbol-name (cadr form)) nil)))
 	((and (symbolp (car form)) (string= (symbol-name (car form)) "PRIMITIVE")
 	      (consp (cdr form)) (symbolp (cadr form)) (null (cddr form))
-	      (not (closed-primitive-p (ps:scheme-symbol-name (cadr form)))))
+	      (not (closed-primitive-p (qs:scheme-symbol-name (cadr form)))))
 	 (cadr form))
 	;; ((primitive void)), psyntax's unspecified value: the value itself
 	((and (consp (car form)) (null (cdr form))
 	      (symbolp (caar form)) (string= (symbol-name (caar form)) "PRIMITIVE")
 	      (consp (cdar form)) (symbolp (cadar form))
-	      (string= (ps:scheme-symbol-name (cadar form)) "void"))
-	 (list (sym "quote") ps:unspecific))
+	      (string= (qs:scheme-symbol-name (cadar form)) "void"))
+	 (list (sym "quote") qs:unspecific))
 	((eq-membership-p form)
 	 ;; (memv x '(datum ...)), as case expands: memq when eqv? is eq?
 	 ;; on every datum, which the translator open-codes
-	 (list (sym (if (string= (ps:scheme-symbol-name (cadr (car form))) "memv") "memq" "assq"))
+	 (list (sym (if (string= (qs:scheme-symbol-name (cadr (car form))) "memv") "memq" "assq"))
 	       (open-primitives-1 (cadr form))
 	       (caddr form)))
 	(t (let ((a (open-primitives-1 (car form))) (d (open-primitives-list (cdr form))))
@@ -296,12 +296,12 @@ so that eqv? on them is eq?."
   (and (consp form) (consp (car form))
        (symbolp (caar form)) (string= (symbol-name (caar form)) "PRIMITIVE")
        (consp (cdar form)) (symbolp (cadar form))
-       (member (ps:scheme-symbol-name (cadar form)) '("memv" "assv") :test #'string=)
+       (member (qs:scheme-symbol-name (cadar form)) '("memv" "assv") :test #'string=)
        (= (length form) 3)
        (let ((list (caddr form)))
 	 (and (consp list) (symbolp (car list)) (string= (symbol-name (car list)) "QUOTE")
 	      (listp (cadr list))
-	      (let ((assv (string= (ps:scheme-symbol-name (cadar form)) "assv")))
+	      (let ((assv (string= (qs:scheme-symbol-name (cadar form)) "assv")))
 		(every (lambda (d)
 			 (let ((key (if assv (if (consp d) (car d) 0) d)))
 			   (not (and (numberp key) (not (typep key 'fixnum))))))
@@ -396,15 +396,15 @@ circular, R7RS 2.4)."
   (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
 	   (quote-p (x) (and (consp x) (keyword-p (car x) "QUOTE")))
 	   (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
-	   (false-p (x) (and (quote-p x) (eq (cadr x) ps:false)))
+	   (false-p (x) (and (quote-p x) (eq (cadr x) qs:false)))
 	   (set-p (s vars) (and (consp s) (keyword-p (car s) "SET!") (consp (cdr s)) (consp (cddr s))
 				(member (cadr s) vars)))
-	   (flag-for (v) (sym (format nil "~A%defined" (ps:scheme-symbol-name v))))
+	   (flag-for (v) (sym (format nil "~A%defined" (qs:scheme-symbol-name v))))
 	   (check (flag v) `(,(sym "%letrec-check") ,flag ,v (,(sym "quote") ,v)))
 	   ;; a check before a call or assignment of V, which needs no value
 	   ;; of V: one that mentioned V would let V escape, so that the
 	   ;; continuation transformation couldn't know V's calls
-	   (check-only (flag v) `(,(sym "%letrec-check") ,flag (,(sym "quote") ,ps:false) (,(sym "quote") ,v)))
+	   (check-only (flag v) `(,(sym "%letrec-check") ,flag (,(sym "quote") ,qs:false) (,(sym "quote") ,v)))
 	   (mentioned (e table)
 	     ;; the variables of TABLE (a hash set) E mentions
 	     (let ((found '()))
@@ -555,11 +555,11 @@ circular, R7RS 2.4)."
 						      (t s))))
 					(push s new)
 					(let ((c (and defines (assoc defines checked))))
-					  (when c (push `(,(sym "set!") ,(cdr c) (,(sym "quote") ,ps:true)) new))))))
+					  (when c (push `(,(sym "set!") ,(cdr c) (,(sym "quote") ,qs:true)) new))))))
 			   `((,(caar e) ,(append vars (mapcar #'cdr checked))
 			      (,(sym "begin") ,@(nreverse new)))
 			     ,@args
-			     ,@(mapcar (lambda (c) (declare (ignore c)) `(,(sym "quote") ,ps:false)) checked))))))))))
+			     ,@(mapcar (lambda (c) (declare (ignore c)) `(,(sym "quote") ,qs:false)) checked))))))))))
 	   (letrec-checked (e)
 	     (when (and (keyword-p (car e) "LETREC") (consp (cdr e)) (listp (cadr e)) (cadr e)
 			(every (lambda (b) (and (consp b) (consp (cdr b)))) (cadr e))
@@ -578,8 +578,8 @@ circular, R7RS 2.4)."
 		 (when (some (lambda (b) (mentioned (cadr b) table)) (cadr e))
 		   `((,(sym "lambda") (,flag)
 		      (,(car e) ,(mapcar (lambda (b) (list (car b) (guard-references (cadr b) flags))) (cadr e))
-		       (,(sym "begin") (,(sym "set!") ,flag (,(sym "quote") ,ps:true)) ,@(cddr e))))
-		     (,(sym "quote") ,ps:false)))))))
+		       (,(sym "begin") (,(sym "set!") ,flag (,(sym "quote") ,qs:true)) ,@(cddr e))))
+		     (,(sym "quote") ,qs:false)))))))
     (walk form)))
 
 (defun definitions-as-letrec (form)
@@ -588,7 +588,7 @@ circular, R7RS 2.4)."
     (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
 	     (quote-p (x) (and (consp x) (keyword-p (car x) "QUOTE")))
 	     (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
-	     (false-p (x) (and (quote-p x) (eq (cadr x) ps:false)))
+	     (false-p (x) (and (quote-p x) (eq (cadr x) qs:false)))
 	     (count-assignments (e)
 	       (cond ((atom e))
 		     ((quote-p e))
@@ -640,7 +640,7 @@ circular, R7RS 2.4)."
 							    statements))
 				(rest (remove-if (lambda (s) (member s definitions)) statements))
 				(others (remove-if (lambda (v) (or (member v defined) (assoc v aliases))) vars))
-				(inner (let ((body (cond ((null rest) `(,(sym "quote") ,ps:unspecific))
+				(inner (let ((body (cond ((null rest) `(,(sym "quote") ,qs:unspecific))
 							 ((null (cdr rest)) (car rest))
 							 (t `(,(sym "begin") ,@rest)))))
 					 (if definitions
@@ -649,7 +649,7 @@ circular, R7RS 2.4)."
 					       ,body)
 					     body))))
 			   (if others
-			       `((,(caar e) ,others ,inner) ,@(mapcar (lambda (v) (declare (ignore v)) `(,(sym "quote") ,ps:false)) others))
+			       `((,(caar e) ,others ,inner) ,@(mapcar (lambda (v) (declare (ignore v)) `(,(sym "quote") ,qs:false)) others))
 			       inner))))))))
 	     (find-aliases (statements vars defined)
 	       ;; ((v . w) ...) for each (set! v w), V one of VARS assigned
@@ -696,7 +696,7 @@ that body, as (let () ...) is; or FORM if it has no such body."
   (setq *hoisted-procedures* '())
   (labels ((keyword-p (x name) (and (symbolp x) (string= (symbol-name x) name)))
 	   (lambda-p (x) (and (consp x) (keyword-p (car x) "LAMBDA")))
-	   (false-p (x) (and (consp x) (keyword-p (car x) "QUOTE") (eq (cadr x) ps:false)))
+	   (false-p (x) (and (consp x) (keyword-p (car x) "QUOTE") (eq (cadr x) qs:false)))
 	   (body-form-p (e)
 	     ;; ((lambda (v ...) body) '#f ...)
 	     (and (consp e) (lambda-p (car e)) (consp (cdr (car e))) (consp (cddr (car e)))
@@ -731,7 +731,7 @@ that body, as (let () ...) is; or FORM if it has no such body."
 				      collect (cadr s))))
 		 (setq *hoisted-procedures* (append defined *hoisted-procedures*))
 		 `(,@(loop for v in vars unless (member v defined)
-			   collect `(,(sym "define") ,v (,(sym "quote") ,ps:false)))
+			   collect `(,(sym "define") ,v (,(sym "quote") ,qs:false)))
 		   ,@(loop for s in statements
 			   append (cond ((and (consp s) (keyword-p (car s) "SET!") (member (cadr s) defined))
 					 (list `(,(sym "define") ,(cadr s) ,(caddr s))))
@@ -935,13 +935,13 @@ megabyte or so (arm64's conditional branches reach 1 MB); inline
 arithmetic (SCHEME+ and so on, src/numbers.lisp) makes code bigger, so
 a form bigger than *INLINE-ARITHMETIC-LIMIT* is compiled without it.  A
 TOP-LEVEL begin's forms are compiled one by one: its biggest counts."
-  (let ((lisp (psl:tr "TRANSLATE" form *host*))
+  (let ((lisp (qsl:tr "TRANSLATE" form *host*))
 	(size (if (and top-level (consp form) (symbolp (car form))
 		       (string= (symbol-name (car form)) "BEGIN"))
 		  (reduce #'max (cdr form) :key #'tree-size :initial-value 0)
 		  (tree-size form))))
     (if (> size *inline-arithmetic-limit*)
-	`(locally (declare (notinline ps:scheme+ ps:scheme- ps:scheme*)) ,lisp)
+	`(locally (declare (notinline qs:scheme+ qs:scheme- qs:scheme*)) ,lisp)
 	(inline-small-labels lisp))))
 
 ;;; Small known procedures inline (docs/optimizations.md, idea 6).  SBCL
@@ -1006,14 +1006,14 @@ reach themselves through the others."
 
 (defun all-primitive-names ()
   (remove-duplicates
-   (append (mapcar #'sym (loop for (nil export-string) in ps-r7rs:*standard-libraries*
-			       append (ps-r7rs:split-names export-string)))
-	   (psl:tr "INTERFACE-NAMES"
-		   (psl:tr "STRUCTURE-INTERFACE" (psl:base-structure))))))
+   (append (mapcar #'sym (loop for (nil export-string) in qs-r7rs:*standard-libraries*
+			       append (qs-r7rs:split-names export-string)))
+	   (qsl:tr "INTERFACE-NAMES"
+		   (qsl:tr "STRUCTURE-INTERFACE" (qsl:base-structure))))))
 
 (defun overridden-primitive-names ()
   "Names the host's INSTALL-PRIMITIVES (re)defines."
-  (mapcar (lambda (p) (sym (car p))) ps-r6rs:*primitives*))
+  (mapcar (lambda (p) (sym (car p))) qs-r6rs:*primitives*))
 
 (defun make-host (&optional (package-name *host-package-name*))
   "The host environment: a copy of the R7RS implementation env's
@@ -1023,26 +1023,26 @@ R5RS binding itself, so the translator open-codes it ((+ a b) becomes
 CL's +, (vector-ref v i) SVREF) as it does in R5RS code.  A copy would
 be a fresh variable, called out of line."
   (let ((env (fresh-host-env package-name))
-	(base (psl:base-structure))
+	(base (qsl:base-structure))
 	(overridden (overridden-primitive-names))
 	(shared '()))
     (dolist (name (all-primitive-names))
-      (when (psl:binding-defined-p ps-r7rs:*implementation-env* name)
-	(let ((den (psl:tr "PROGRAM-ENV-LOOKUP" ps-r7rs:*implementation-env* name))
-	      (base-den (and (member name (psl:tr "INTERFACE-NAMES" (psl:tr "STRUCTURE-INTERFACE" base)))
-			     (psl:tr "STRUCTURE-REF" base name))))
+      (when (qsl:binding-defined-p qs-r7rs:*implementation-env* name)
+	(let ((den (qsl:tr "PROGRAM-ENV-LOOKUP" qs-r7rs:*implementation-env* name))
+	      (base-den (and (member name (qsl:tr "INTERFACE-NAMES" (qsl:tr "STRUCTURE-INTERFACE" base)))
+			     (qsl:tr "STRUCTURE-REF" base name))))
 	  (if (and base-den
-		   (psl:variable-node-p den) (psl:variable-node-p base-den)
-		   (boundp (psl:tr "PROGRAM-VARIABLE-LOCATION" den))
-		   (boundp (psl:tr "PROGRAM-VARIABLE-LOCATION" base-den))
-		   (eq (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" den))
-		       (symbol-value (psl:tr "PROGRAM-VARIABLE-LOCATION" base-den)))
+		   (qsl:variable-node-p den) (qsl:variable-node-p base-den)
+		   (boundp (qsl:tr "PROGRAM-VARIABLE-LOCATION" den))
+		   (boundp (qsl:tr "PROGRAM-VARIABLE-LOCATION" base-den))
+		   (eq (symbol-value (qsl:tr "PROGRAM-VARIABLE-LOCATION" den))
+		       (symbol-value (qsl:tr "PROGRAM-VARIABLE-LOCATION" base-den)))
 		   (not (member name overridden)))
-	      (if (closed-primitive-p (ps:scheme-symbol-name name))
+	      (if (closed-primitive-p (qs:scheme-symbol-name name))
 		  (progn (define-builtin-alias env name base-den)
-			 (psl:copy-bindings! env ps-r7rs:*implementation-env* (list name)))
-		  (progn (psl:tr "PROGRAM-ENV-DEFINE!" env name base-den) (push name shared)))
-	      (psl:copy-bindings! env ps-r7rs:*implementation-env* (list name))))))
+			 (qsl:copy-bindings! env qs-r7rs:*implementation-env* (list name)))
+		  (progn (qsl:tr "PROGRAM-ENV-DEFINE!" env name base-den) (push name shared)))
+	      (qsl:copy-bindings! env qs-r7rs:*implementation-env* (list name))))))
     (setq *shared-primitives* shared)
     env))
 
@@ -1057,7 +1057,7 @@ named PACKAGE-NAME: a previous host's package is deleted, so nothing of
 it (bindings, say, from a REBUILD's seed) carries over."
   (let ((old (find-package package-name)))
     (when old (delete-package old)))
-  (psl:tr "MAKE-PROGRAM-ENV" (intern package-name "SCHEME") '()))
+  (qsl:tr "MAKE-PROGRAM-ENV" (intern package-name "SCHEME") '()))
 
 (defun install-primitives (alist)
   "ALIST of (name-string . function), e.g. from DEFPRIM registries."
@@ -1067,20 +1067,20 @@ it (bindings, say, from a REBUILD's seed) carries over."
 ;;; Loading the expander
 
 (defun vendor-file (name)
-  (asdf:system-relative-pathname :pseudoscheme
+  (asdf:system-relative-pathname :quasischeme
 				 (concatenate 'string "vendor/psyntax/" name)))
 
 (defun read-scheme-text (string)
   (with-input-from-string (in string)
-    (loop for form = (funcall ps:*scheme-read* in)
-	  until (eq form ps:eof-object)
+    (loop for form = (funcall qs:*scheme-read* in)
+	  until (eq form qs:eof-object)
 	  collect form)))
 
 (defun read-file-forms (path)
   (with-open-file (in path)
-    (ps:skip-script-header in)
-    (loop for form = (funcall ps:*scheme-read* in)
-	  until (eq form ps:eof-object)
+    (qs:skip-script-header in)
+    (loop for form = (funcall qs:*scheme-read* in)
+	  until (eq form qs:eof-object)
 	  collect form)))
 
 (defun load-image (path &key (drop-last nil))
@@ -1092,21 +1092,21 @@ the command line and exits; DROP-LAST skips it.)"
       (host-eval form))))
 
 ;;; psyntax's image is compiled once, by ASDF (the PSYNTAX-IMAGE
-;;; component in pseudoscheme.asd): translated to Lisp, which
+;;; component in quasischeme.asd): translated to Lisp, which
 ;;; COMPILE-FILE compiles.  Translating the image takes a moment; it's
 ;;; the Lisp compiler that's slow, and BOOT would otherwise run it on
 ;;; every start.  The fasl is valid only for a host built the same way,
 ;;; with the same shared primitives (see MAKE-HOST), which it checks.
 
 (defvar *image-fasl* nil
-  "The compiled psyntax-pseudoscheme.pp, if ASDF has built it.")
+  "The compiled psyntax-quasischeme.pp, if ASDF has built it.")
 
 (defun prepare-host (&optional (package-name *host-package-name*))
   "Create *HOST*, with everything psyntax's image expects of it."
   (setq *host* (make-host package-name))
-  (setf ps-r6rs::*globals-hook* #'host-ref)
-  (ps-r6rs::install-exception-hooks)
-  (install-primitives ps-r6rs:*primitives*)
+  (setf qs-r6rs::*globals-hook* #'host-ref)
+  (qs-r6rs::install-exception-hooks)
+  (install-primitives qs-r6rs:*primitives*)
   (install-adapter)
   (install-continuation-primitives)
   (install-inline-primitives)
@@ -1130,30 +1130,30 @@ the command line and exits; DROP-LAST skips it.)"
      (if (and (typep bv '(simple-array (unsigned-byte 8) (*)))
 	      (typep k 'fixnum) (< -1 k (length bv))
 	      (typep byte '(unsigned-byte 8)))
-	 (progn (setf (aref bv k) byte) ps:unspecific)
+	 (progn (setf (aref bv k) byte) qs:unspecific)
 	 :call))
     ("bytevector-length" (bv)
      (if (typep bv '(simple-array (unsigned-byte 8) (*)))
 	 (length bv)
 	 :call))
     ;; two strings: CL's comparisons, which compare code points as R7RS does
-    ("string=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string= a b) t ps:false) :call))
-    ("string<?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string< a b) t ps:false) :call))
-    ("string>?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string> a b) t ps:false) :call))
-    ("string<=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string<= a b) t ps:false) :call))
-    ("string>=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string>= a b) t ps:false) :call))
+    ("string=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string= a b) t qs:false) :call))
+    ("string<?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string< a b) t qs:false) :call))
+    ("string>?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string> a b) t qs:false) :call))
+    ("string<=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string<= a b) t qs:false) :call))
+    ("string>=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string>= a b) t qs:false) :call))
     ;; the Chez mode's mutators (src/chez/chez.lisp), which refuse an immutable
     ;; object: one with the header flag of src/chez/host.lisp
     ("chez:vector-set!" (v k obj)
      (if (and (simple-vector-p v) (typep k 'fixnum) (< -1 k (length v))
 	      (not (logtest (ash sb-vm:+vector-shareable-nonstd+ 8) (sb-kernel:get-header-data v))))
-	 (progn (setf (svref v k) obj) ps:unspecific)
+	 (progn (setf (svref v k) obj) qs:unspecific)
 	 :call))
     ("chez:string-set!" (s k c)
      (if (and (typep s '(simple-array character (*))) (typep k 'fixnum) (< -1 k (length s))
 	      (characterp c)
 	      (not (logtest (ash sb-vm:+vector-shareable-nonstd+ 8) (sb-kernel:get-header-data s))))
-	 (progn (setf (schar s k) c) ps:unspecific)
+	 (progn (setf (schar s k) c) qs:unspecific)
 	 :call))
     ;; the Chez mode's comparisons, which check their arguments' types
     ,@(loop for (name test type) in '(("char=?" char= character) ("char<?" char< character)
@@ -1165,21 +1165,21 @@ the command line and exits; DROP-LAST skips it.)"
 				      ("string>?" string> simple-string) ("string<=?" string<= simple-string)
 				      ("string>=?" string>= simple-string))
 	    collect `(,(concatenate 'string "chez:" name) (a b)
-		      (if (and (typep a ',type) (typep b ',type)) (if (,test a b) t ps:false) :call)))
+		      (if (and (typep a ',type) (typep b ',type)) (if (,test a b) t qs:false) :call)))
     ;; R7RS define-record-type's procedures (src/r7rs/syntax.sls), for a
     ;; record of exactly the type: a subtype's, or an error, by the call
     ("r7rs:record-ref" (x rtd i who)
-     (if (and (ps-r6rs::record-p x) (eq (ps-r6rs::record-rtd x) rtd))
-	 (svref (ps-r6rs::record-values x) i)
+     (if (and (qs-r6rs::record-p x) (eq (qs-r6rs::record-rtd x) rtd))
+	 (svref (qs-r6rs::record-values x) i)
 	 :call))
     ("r7rs:record-set!" (x rtd i value who)
-     (if (and (ps-r6rs::record-p x) (eq (ps-r6rs::record-rtd x) rtd))
-	 (progn (setf (svref (ps-r6rs::record-values x) i) value) ps:unspecific)
+     (if (and (qs-r6rs::record-p x) (eq (qs-r6rs::record-rtd x) rtd))
+	 (progn (setf (svref (qs-r6rs::record-values x) i) value) qs:unspecific)
 	 :call))
     ("r7rs:record?" (x rtd)
-     (if (and (ps-r6rs::record-p x) (eq (ps-r6rs::record-rtd x) rtd)) t :call))
+     (if (and (qs-r6rs::record-p x) (eq (qs-r6rs::record-rtd x) rtd)) t :call))
     ;; a letrec variable's reference that may come before its init (LETREC-CHECKS)
-    ("%letrec-check" (flag value name) (if (eq flag ps:false) :call value)))
+    ("%letrec-check" (flag value name) (if (eq flag qs:false) :call value)))
   "(name lambda-list body): BODY, with the arguments bound to the
 variables of LAMBDA-LIST, is the inline code, in which :CALL stands for
 calling the primitive itself.")
@@ -1203,7 +1203,7 @@ calling the primitive itself.")
 (defun host-signature ()
   "What compiled code depends on in a host: which primitives are R5RS's
 own bindings, and so open-coded."
-  (sort (mapcar #'ps:scheme-symbol-name *shared-primitives*) #'string<))
+  (sort (mapcar #'qs:scheme-symbol-name *shared-primitives*) #'string<))
 
 (defun compile-image (image fasl)
   "Translate the psyntax IMAGE (a .pp file) to Lisp and compile it into
@@ -1214,7 +1214,7 @@ written with the real host package's name."
   (let* ((compiling (concatenate 'string *host-package-name* " (compiling)"))
 	 (*host* nil)
 	 (*shared-primitives* '())
-	 (ps-r6rs::*globals-hook* ps-r6rs::*globals-hook*)
+	 (qs-r6rs::*globals-hook* qs-r6rs::*globals-hook*)
 	 ;; Written under temporary names and renamed into place: other
 	 ;; Lisp processes sharing the fasl cache may be loading the old
 	 ;; fasl.
@@ -1229,7 +1229,7 @@ written with the real host package's name."
 	   (signature (host-signature))
 	   (code (handler-bind ((warning #'muffle-warning))
 		   (let ((*optimize-off* t)) ; psyntax's own image: as it was
-		     (mapcar (lambda (form) (psl:tr "TRANSLATE" (open-primitives form) *host*))
+		     (mapcar (lambda (form) (qsl:tr "TRANSLATE" (open-primitives form) *host*))
 			     forms)))))
       (labels ((rename (x)
 		 (cond ((and (symbolp x) (eq (symbol-package x) from))
@@ -1269,7 +1269,7 @@ that differs from this one."
   (and *image-fasl*
        (probe-file *image-fasl*)
        (>= (file-write-date *image-fasl*)
-	   (or (file-write-date (vendor-file "psyntax-pseudoscheme.pp")) 0))
+	   (or (file-write-date (vendor-file "psyntax-quasischeme.pp")) 0))
        (catch 'stale-image
 	 (handler-bind ((warning #'muffle-warning))
 	   (load *image-fasl*))
@@ -1286,7 +1286,7 @@ sources elsewhere (boot/ builds one with Chez Scheme)."
 
 (defun boot-1 (seed)
   (prepare-host)
-  (let ((own (vendor-file "psyntax-pseudoscheme.pp")))
+  (let ((own (vendor-file "psyntax-quasischeme.pp")))
     (cond ((and seed (not (eq seed t)))
 	   (load-image seed))
 	  ((and (not seed) (load-compiled-image)))
@@ -1364,16 +1364,16 @@ and taken again after."
 is looked for as foo/bar.sls, then .ss, .sld and .scm, in each.")
 
 (defvar *system-library-path*
-  (list (cons "srfi" (namestring (asdf:system-relative-pathname :pseudoscheme "src/srfi/"))))
-  "Libraries that ship with Pseudoscheme, searched after *LIBRARY-PATH*.
+  (list (cons "srfi" (namestring (asdf:system-relative-pathname :quasischeme "src/srfi/"))))
+  "Libraries that ship with Quasischeme, searched after *LIBRARY-PATH*.
 An entry (PREFIX . DIR) roots names beginning with PREFIX at DIR: (srfi
 1) is src/srfi/1.sld.")
 
 (defparameter *library-extensions* '("sls" "ss" "sld" "scm"))
 
-(defparameter *implementation-variants* '("pseudoscheme" nil "chezscheme" "ikarus")
+(defparameter *implementation-variants* '("quasischeme" nil "chezscheme" "ikarus")
   "Implementation-specific variants of a library file to try, in order:
-foo.pseudoscheme.sls first, then the generic foo.sls (NIL), then other
+foo.quasischeme.sls first, then the generic foo.sls (NIL), then other
 systems' variants, as Akku lays them out.  Chez's is next because
 nearly every Akku package has one, and src/chez/ supplies the
 (chezscheme) library such variants import; Ikarus is psyntax-based.")
@@ -1409,7 +1409,7 @@ version dropped."
   (format nil "~{~A~^/~}"
 	  (loop for part in name
 		while (symbolp part)
-		collect (ps:scheme-symbol-name part))))
+		collect (qs:scheme-symbol-name part))))
 
 (defvar *library-form-hook* nil
   "If set, a function from a library name to its (R6RS library) form or
@@ -1430,16 +1430,16 @@ define-library forms (src/r7rs/front.lisp).")
       ;; allows: *LIBRARY-LOADERS*)
       (let ((file (locate-library-file name)))
 	(and (stringp file)
-	     (let ((form (with-open-file (in file) (funcall ps:*scheme-read* in))))
-	       (and (psl:keyword-head-p form "library") form))))
-      ps:false))
+	     (let ((form (with-open-file (in file) (funcall qs:*scheme-read* in))))
+	       (and (qsl:keyword-head-p form "library") form))))
+      qs:false))
 
 (defun locate-library-file (name)
   "psyntax's FILE-LOCATOR: a file name for library NAME, or #f."
   (let ((stem (library-name-file-stem name)))
     (or (loop for path in (candidate-files stem)
 	      when (probe-file path) return (namestring path))
-	ps:false)))
+	qs:false)))
 
 ;;; ------------------------------------------------------------------
 ;;; Entry points
@@ -1448,7 +1448,7 @@ define-library forms (src/r7rs/front.lisp).")
   (let ((loc (location (sym name))))
     (unless (boundp loc)
       (error "psyntax entry point ~A is missing: the loaded image predates ~
-              vendor/psyntax/psyntax/main.ss -- run (psx:rebuild)" name))
+              vendor/psyntax/psyntax/main.ss -- run (qsx:rebuild)" name))
     (symbol-value loc)))
 
 
@@ -1463,7 +1463,7 @@ define-library forms (src/r7rs/front.lisp).")
 (defvar *top-level-self-calls*)		; src/continuations.lisp
 
 (defun eval-top-level (form)
-  "Evaluate FORM at the REPL, in (pseudoscheme interaction)."
+  "Evaluate FORM at the REPL, in (quasischeme interaction)."
   (let ((*top-level-self-calls* t))
     (funcall (entry "psyntax:eval-top-level") form)))
 
@@ -1474,8 +1474,8 @@ define-library forms (src/r7rs/front.lisp).")
 (defun eval-forms (forms)
   "Evaluate a file's worth of forms: any (library ...) forms are
 installed, and what follows them, if anything, is run as a program."
-  (let ((result ps:unspecific))
-    (loop while (and forms (psl:keyword-head-p (car forms) "library"))
+  (let ((result qs:unspecific))
+    (loop while (and forms (qsl:keyword-head-p (car forms) "library"))
 	  do (eval-library (pop forms)))
     (when forms
       (setq result (eval-program forms)))
@@ -1487,11 +1487,11 @@ installed, and what follows them, if anything, is run as a program."
 
 
 ;;; ------------------------------------------------------------------
-;;; Rebuilding the expander image on Pseudoscheme itself
+;;; Rebuilding the expander image on Quasischeme itself
 
 (defun rebuild (&key seed (directory (vendor-file "")))
   "Run psyntax-buildscript.ss -- the expander expanding its own sources --
-writing psyntax-pseudoscheme.pp.  SEED is as for BOOT.  DIRECTORY holds
+writing psyntax-quasischeme.pp.  SEED is as for BOOT.  DIRECTORY holds
 the build script and psyntax/ and receives the image; by default
 vendor/psyntax/, else (as for boot/) a copy of it.  Escape-only: the
 build is a program of no continuations to speak of, and big."
@@ -1504,7 +1504,7 @@ build is a program of no continuations to speak of, and big."
 	 (*default-pathname-defaults* directory)
 	 (start (get-internal-real-time)))
     (eval-program (read-file-forms (merge-pathnames "psyntax-buildscript.ss" directory)))
-    (canonicalize-gensyms (merge-pathnames "psyntax-pseudoscheme.pp" directory))
+    (canonicalize-gensyms (merge-pathnames "psyntax-quasischeme.pp" directory))
     (format t "~&Rebuilt psyntax in ~,1Fs~%"
 	    (/ (- (get-internal-real-time) start) internal-time-units-per-second)))
   (boot))
@@ -1542,7 +1542,7 @@ canonical names can't clash with those of a later session.)"
 	  (dolist (line header) (write-line line out))
 	  (terpri out)
 	  (dolist (form forms)
-	    (funcall ps:*scheme-write* form out)
+	    (funcall qs:*scheme-write* form out)
 	    (format out "~%~%~%")))))))
 
 ;;; ------------------------------------------------------------------
@@ -1554,17 +1554,17 @@ any of the library KEYS (strings: \"r\" for (rnrs), \"r5\", ...)."
   (let* ((forms (read-file-forms (vendor-file "psyntax-buildscript.ss")))
 	 (def (find-if (lambda (f)
 			 (and (consp f) (consp (cdr f)) (symbolp (cadr f))
-			      (string= (ps:scheme-symbol-name (cadr f)) "identifier->library-map")))
+			      (string= (qs:scheme-symbol-name (cadr f)) "identifier->library-map")))
 		       forms)))
     (loop for (name . libs) in (cadr (caddr def))
-	  when (some (lambda (k) (member (ps:scheme-symbol-name k) keys :test #'string=)) libs)
-	    collect (ps:scheme-symbol-name name))))
+	  when (some (lambda (k) (member (qs:scheme-symbol-name k) keys :test #'string=)) libs)
+	    collect (qs:scheme-symbol-name name))))
 
 ;;; ------------------------------------------------------------------
 ;;; Diagnostics
 
 (defun missing-primitives ()
   "Names exported by some psyntax library that have no host binding."
-  (let ((pslib (funcall (entry "psyntax:environment") (list (list (sym "pseudoscheme"))))))
+  (let ((pslib (funcall (entry "psyntax:environment") (list (list (sym "quasischeme"))))))
     (declare (ignore pslib))
     nil))

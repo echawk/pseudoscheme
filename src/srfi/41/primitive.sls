@@ -12,7 +12,7 @@
 ; CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
 ; THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-(library (srfi :41 primitive)  ; PSEUDOSCHEME: renamed from (streams primitive)
+(library (srfi :41 primitive)  ; QUASISCHEME: renamed from (streams primitive)
 ;
 
   (export stream-null stream-cons stream? stream-null? stream-pair?

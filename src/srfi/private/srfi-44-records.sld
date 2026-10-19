@@ -1,6 +1,6 @@
 ;;; (srfi private srfi-44-records): R7RS define-record-type with SRFI
 ;;; 256's extension for subtypes, which Antero Mejr's SRFI 44
-;;; implementation uses.  Written for Pseudoscheme on R6RS procedural
+;;; implementation uses.  Written for Quasischeme on R6RS procedural
 ;;; records.
 ;;;
 ;;;   (define-record-type <type> (ctor field ...) pred (field acc [mod]) ...)

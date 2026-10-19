@@ -10,7 +10,7 @@
 	 (intern (let ((string (symbol-name name)))
 		   ;; Cf. perhaps-rename in p-utils.scm
 		   (if (multiple-value-bind (sym status)
-			   (find-symbol string (find-package "PS-LISP"))
+			   (find-symbol string (find-package "QS-LISP"))
 			 (declare (ignore sym))
 			 (eq status :external))
 		       (concatenate 'string "." string)
@@ -18,7 +18,7 @@
 		 *package*)))
     `(progn
 	    (defun ,new-name ,bvl ,@body)
-	    (ps:set-value-from-function ',new-name)
+	    (qs:set-value-from-function ',new-name)
 	    ',name)))
 
 ; Definitions for CAR and CDR for when they are *not* open-coded.
@@ -75,19 +75,19 @@
 (defune list? (l)			;New in R4RS
   (do ((l l (cddr l))
        (lag l (cdr lag)))
-      ((not (consp l)) (ps:true? (null l)))
+      ((not (consp l)) (qs:true? (null l)))
     (when (not (consp (cdr l)))
-      (return (ps:true? (null (cdr l)))))
+      (return (qs:true? (null (cdr l)))))
     (when (eq (cdr l) lag)
-      (return ps:false))))
+      (return qs:false))))
 
 ; LOAD -- forward reference to not-yet-existing EVAL module
 
 (defune load (filespec &rest optional-args)
-  (apply #'ps:scheme-load filespec optional-args))
+  (apply #'qs:scheme-load filespec optional-args))
 
 (defune eval (form env)
-  (ps:scheme-eval form env))
+  (qs:scheme-eval form env))
 
 ; MAKE-STRING
 
@@ -97,32 +97,32 @@
 
 ; MAKE-VECTOR
 
-(defune make-vector (size &optional (fill ps:unspecific))
+(defune make-vector (size &optional (fill qs:unspecific))
   (make-sequence 'vector size :initial-element fill))
 
 ; NOT
 
 (defune not (obj)
-  (ps:true? (eq obj ps:false)))
+  (qs:true? (eq obj qs:false)))
 
 ; NUMBER->STRING
 
 (defune number->string (num &optional (radix 10))
   (let ((radix (if (equal radix '(scheme::heur)) 10 radix)))
-    (ps:format-scheme-number num radix)))
+    (qs:format-scheme-number num radix)))
 
 ; READ
 
 (defune read (&optional (port *standard-input*))
-  (funcall ps:*scheme-read* port))
+  (funcall qs:*scheme-read* port))
 
 ; READ-CHAR
 
 (defune read-char (&optional (port *standard-input*))
-  (read-char port nil ps:eof-object))
+  (read-char port nil qs:eof-object))
 
 (defune peek-char (&optional (port *standard-input*))
-  (peek-char nil port nil ps:eof-object))
+  (peek-char nil port nil qs:eof-object))
 
 ; STRING
 
@@ -132,7 +132,7 @@
 ; STRING->NUMBER
 
 (defune string->number (string &optional (radix 10))
-  (or (ps:parse-scheme-number string radix) ps:false))
+  (or (qs:parse-scheme-number string radix) qs:false))
 
 ; STRING-APPEND
 
@@ -147,18 +147,18 @@
 (defune symbol->string (symbol)
   ;; Case is inverted between Scheme names and CL symbol names; see
   ;; INVERT-CASE in core.lisp.  The translator's own internals name CL
-  ;; symbols and packages with PS-LISP:SYMBOL-NAME directly
+  ;; symbols and packages with QS-LISP:SYMBOL-NAME directly
   ;; (classify.scm's NAME->STRING, module.scm, emit.scm, reify.scm,
   ;; p-utils.scm), never through this.
   (let ((package (symbol-package symbol)))
-    (cond ((or (eq package ps:scheme-package)
+    (cond ((or (eq package qs:scheme-package)
 	       ;; Uninterned (GENSYM/MAKE-SYMBOL) symbols, e.g. hygienic
 	       ;; renames, have no package to qualify with.
 	       (null package)
 	       ;; #:name keywords (docs/interop.md): their name
 	       (keywordp symbol))
-	   (ps:scheme-symbol-name symbol))
-	  ((not (ps:scheme-symbol-p symbol))
+	   (qs:scheme-symbol-name symbol))
+	  ((not (qs:scheme-symbol-p symbol))
 	   (error "symbol->string: invalid argument - ~S"
 		  symbol))
 	  (t (multiple-value-bind (sym-again status)
@@ -181,19 +181,19 @@
 
 (proclaim '(inline vector?))
 (defune vector? (obj)
-  (ps:true? (simple-vector-p obj)))
+  (qs:true? (simple-vector-p obj)))
 
 ; WRITE
 ; Do a real printer some time.
 ; It seems sensible to respect *print-pretty*, in any case.
 
 (defune write (obj &optional (port *standard-output*))
-  (funcall ps:*scheme-write* obj port)
-  ps:unspecific)
+  (funcall qs:*scheme-write* obj port)
+  qs:unspecific)
 
 (defune display (obj &optional (port *standard-output*))
-  (funcall ps:*scheme-display* obj port)
-  ps:unspecific)
+  (funcall qs:*scheme-display* obj port)
+  qs:unspecific)
 
 ; String ports (not required by R5RS itself, but widely provided as an
 ; extension, and relied on by chibi's R5RS/R7RS test suites).
@@ -224,7 +224,7 @@
 
 (defune flush-output (&optional (port *standard-output*))
   (cl:force-output port)
-  ps:unspecific)
+  qs:unspecific)
 
 ; CASE-AUX
 ;  Usually this should be open-coded, but sometimes it may not be.
@@ -240,8 +240,8 @@
 
 (defune rationalize (x e)
   ;; Inexact if either argument is (R7RS 6.2.6).
-  (flet ((nanp (x) (ps:nan-p x))
-	 (infp (x) (ps:infinite-p x)))
+  (flet ((nanp (x) (qs:nan-p x))
+	 (infp (x) (qs:infinite-p x)))
     (cond ((or (nanp x) (nanp e)) (if (nanp x) x e))
 	  ((infp e) (if (infp x) (- e e) 0d0))
 	  ((infp x) x)
@@ -278,13 +278,13 @@
 		0)))))
 
 (defune interaction-environment ()
-  (declare (special ps:*current-rep-environment*))
-  ps:*current-rep-environment*)
+  (declare (special qs:*current-rep-environment*))
+  qs:*current-rep-environment*)
 
 (defune scheme-report-environment (n)
-  (declare (special ps:scheme-report-environment))
+  (declare (special qs:scheme-report-environment))
   (case n
-    ((4 5) ps:scheme-report-environment)
+    ((4 5) qs:scheme-report-environment)
     (otherwise (error "invalid scheme report" n))))
 
 ; NULL-ENVIRONMENT is specified to contain only the R5RS syntactic
@@ -295,10 +295,10 @@
 ; superset, not a divergent one, of what the standard specifies.
 
 (defune null-environment (n)
-  (declare (special ps:scheme-report-environment))
+  (declare (special qs:scheme-report-environment))
   (case n
-    ((4 5) ps:scheme-report-environment)
+    ((4 5) qs:scheme-report-environment)
     (otherwise (error "invalid scheme report" n))))
 
 (defune syntax-error (message &rest irritants)
-  (apply #'ps:scheme-warn message irritants))
+  (apply #'qs:scheme-warn message irritants))

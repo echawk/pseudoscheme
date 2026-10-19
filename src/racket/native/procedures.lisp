@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Procedures, natively: impersonators and chaperones, impersonator
 ;;;; properties, procedure-reduce-arity.
@@ -13,7 +13,7 @@
 ;;;; Not yet, and approximated: a chaperone of a vector (and of the other
 ;;;; data below) is the value itself.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (impersonation (:constructor make-impersonation (kind of props)))
   kind					; :chaperone or :impersonator
@@ -130,18 +130,18 @@ are approximate, so that isn't checked.)"
     (setf (gethash new *reduced-arity-of*) proc)
     new))
 
-(defnative "procedure-reduce-arity" (proc arity &optional (name ps:false) realm) (:rumble "procedure-reduce-arity")
+(defnative "procedure-reduce-arity" (proc arity &optional (name qs:false) realm) (:rumble "procedure-reduce-arity")
   (declare (ignore realm))
   (reduce-arity "procedure-reduce-arity" proc (arity->mask arity) name))
-(defnative "procedure-reduce-arity-mask" (proc mask &optional (name ps:false) realm) ()
+(defnative "procedure-reduce-arity-mask" (proc mask &optional (name qs:false) realm) ()
   (declare (ignore realm))
   (reduce-arity "procedure-reduce-arity-mask" proc mask name))
 
 ;;; procedure-specialize: a hint to compile a closure for its values;
 ;;; the procedure itself here
 (defnative "procedure-specialize" (f) (:leaf t) f)
-(defnative "procedure-impersonator*?" (f) (:leaf t) (declare (ignore f)) ps:false)
-(defnative "procedure-extract-target" (f) (:leaf t) (declare (ignore f)) ps:false)
+(defnative "procedure-impersonator*?" (f) (:leaf t) (declare (ignore f)) qs:false)
+(defnative "procedure-extract-target" (f) (:leaf t) (declare (ignore f)) qs:false)
 (defvar *single-valued-primitives* nil
   "The procedures of *host-shared* that return one value, once found (EQ table).")
 
@@ -168,5 +168,5 @@ are approximate, so that isn't checked.)"
 		 for i = (impersonation x)
 		 while (or i (gethash x *reduced-arity-of*))
 		 finally (return x))))
-    (if (or (gethash g *struct-procedures*) (single-valued-primitive-p g)) 1 ps:false)))
-(defnative "primitive-result-arity" (f) (:leaf t) (declare (ignore f)) ps:false)
+    (if (or (gethash g *struct-procedures*) (single-valued-primitive-p g)) 1 qs:false)))
+(defnative "primitive-result-arity" (f) (:leaf t) (declare (ignore f)) qs:false)

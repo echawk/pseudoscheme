@@ -1,4 +1,4 @@
-;;; SRFI 211: the syntax-case system.  Written for Pseudoscheme (the SRFI's implementation is
+;;; SRFI 211: the syntax-case system.  Written for Quasischeme (the SRFI's implementation is
 ;;; necessarily per-implementation); see 211.sld.
 ;;; R6RS's syntax-case, as psyntax provides it; it already accepts ...
 ;;; and _ as literals, as SRFI 211 requires.

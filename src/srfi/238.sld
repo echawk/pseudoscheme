@@ -1,4 +1,4 @@
-;;; SRFI 238: Codesets.  Written for Pseudoscheme after Lassi Kortela's
+;;; SRFI 238: Codesets.  Written for Quasischeme after Lassi Kortela's
 ;;; sample implementation (reference/srfi-238/; the SRFI's MIT licence):
 ;;; the codesets errno and signal, their names those of the sample's
 ;;; errnolist.txt and signallist.txt that SBCL defines here, with the
@@ -7,7 +7,7 @@
 ;;; are the usual descriptions.
 (define-library (srfi 238)
   (export codeset? codeset-symbols codeset-symbol codeset-number codeset-message)
-  (import (scheme base) (scheme char) (only (pseudoscheme lisp) lisp-eval-string))
+  (import (scheme base) (scheme char) (only (quasischeme lisp) lisp-eval-string))
   (begin
     ;; ((number . symbol) ...), of the NAMES SBCL's package has constants for
     (define %alist
@@ -15,7 +15,7 @@
        "(lambda (names package)
           (require :sb-posix)
           (loop for name in names
-                for sym = (find-symbol (string-upcase (ps:scheme-symbol-name name)) package)
+                for sym = (find-symbol (string-upcase (qs:scheme-symbol-name name)) package)
                 when (and sym (boundp sym) (integerp (symbol-value sym)))
                   collect (cons (symbol-value sym) name)))"))
     (define %strerror (lisp-eval-string "(lambda (n) (sb-int:strerror n))"))

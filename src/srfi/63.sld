@@ -8,7 +8,7 @@
 ;;; record-constructor, record-accessor, record-predicate, by field
 ;;; name), on R6RS's procedural records.
 ;;;
-;;; One change, marked PSEUDOSCHEME: the SRFI's equal? (which must
+;;; One change, marked QUASISCHEME: the SRFI's equal? (which must
 ;;; compare arrays) falls back to R7RS's equal? instead of returning #f
 ;;; for the types it doesn't know, so that bytevectors, for instance,
 ;;; are still compared by content.  This equal? clashes with R7RS's,

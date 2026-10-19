@@ -18,7 +18,7 @@
           (scheme file)
           (srfi 1) (only (srfi 48) format)
           (srfi private srfi-201-match)
-          (only (pseudoscheme lisp) lisp-eval-string))
+          (only (quasischeme lisp) lisp-eval-string))
   (begin
     ;; Guile's
     (define (1+ n) (+ n 1))
@@ -37,9 +37,9 @@
     ;; Guile's unread-char: wisp reads through a port that keeps the
     ;; characters pushed back, a Gray stream over the port it reads
     (lisp-eval-string
-     "(defpackage \"PSEUDOSCHEME-SRFI-119\" (:use \"COMMON-LISP\"))")
+     "(defpackage \"QUASISCHEME-SRFI-119\" (:use \"COMMON-LISP\"))")
     (lisp-eval-string
-     "(let ((*package* (find-package \"PSEUDOSCHEME-SRFI-119\")))
+     "(let ((*package* (find-package \"QUASISCHEME-SRFI-119\")))
         (eval (read-from-string \"(progn
           (defclass pushback-port (trivial-gray-streams:fundamental-character-input-stream)
             ((source :initarg :source) (pushed :initform '())))
@@ -60,16 +60,16 @@
             (or (and (slot-value s 'pushed) t) (listen (slot-value s 'source)))))\")))")
     (define make-pushback-port
       (lisp-eval-string
-       "(lambda (port) (make-instance 'pseudoscheme-srfi-119::pushback-port :source port))"))
+       "(lambda (port) (make-instance 'quasischeme-srfi-119::pushback-port :source port))"))
     (define unread-char
       (lisp-eval-string
        "(lambda (c port)
-          (if (typep port 'pseudoscheme-srfi-119::pushback-port)
-              (push c (slot-value port 'pseudoscheme-srfi-119::pushed))
+          (if (typep port 'quasischeme-srfi-119::pushback-port)
+              (push c (slot-value port 'quasischeme-srfi-119::pushed))
               ;; another port, a string port say: what was just read
               ;; is unread, the latest first
               (file-position port (1- (file-position port))))
-          ps:unspecific)")))
+          qs:unspecific)")))
   (include "reference/srfi-119/wisp-body.scm")
   (begin
     ;; one form at a time, from the chunks wisp-scheme-read-chunk reads

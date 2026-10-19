@@ -1,11 +1,11 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategy A (and C): Racket CS's layers, compiled by --chez in Racket
 ;;;; CS's order (docs/racket.md, "Build time").  Each is compiled as a
 ;;;; whole library (compile-whole-library, Chez mode) when the image is
 ;;;; built, so start-up only instantiates.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defparameter *cs-layers*
   '(("rumble" "racket/src/cs/rumble.sls")

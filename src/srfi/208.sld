@@ -1,4 +1,4 @@
-;;; SRFI 208: NaN procedures.  Written for Pseudoscheme: inexact reals are
+;;; SRFI 208: NaN procedures.  Written for Quasischeme: inexact reals are
 ;;; IEEE doubles, and a NaN's sign, quiet bit and payload are its bits
 ;;; (float-features' DOUBLE-FLOAT-BITS and BITS-DOUBLE-FLOAT): bit 63 the
 ;;; sign, bits 62-52 all ones, bit 51 quiet, bits 50-0 the payload.  The

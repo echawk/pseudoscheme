@@ -1,8 +1,8 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R7RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R7RS -*-
 
 ;;;; The R7RS implementation environment
 ;;;;
-;;;; The procedures behind R7RS-small, built in a native Pseudoscheme
+;;;; The procedures behind R7RS-small, built in a native Quasischeme
 ;;;; environment that the psyntax host (src/psyntax.lisp) then copies:
 ;;;;
 ;;;; 1. Start from a *copy* of the R5RS bindings
@@ -17,7 +17,7 @@
 ;;;; The (scheme ...) libraries themselves are psyntax libraries now; see
 ;;;; front.lisp.
 
-(in-package "PSEUDOSCHEME-R7RS")
+(in-package "QUASISCHEME-R7RS")
 
 (defvar *implementation-env* nil
   "The environment the R7RS procedures are defined in.")
@@ -25,42 +25,42 @@
 (defvar *stubs* '()
   "Names of Appendix A procedures bound only to stubs.")
 
-(defun sym (string) (psl:scheme-symbol string))
+(defun sym (string) (qsl:scheme-symbol string))
 
 (defun load-scheme-file-from (path env)
   "Evaluate every form of PATH (relative to src/) in ENV with the
 dedicated reader, natively."
   (with-open-file (in (asdf:system-relative-pathname
-		       :pseudoscheme (concatenate 'string "src/" path)))
-    (loop for form = (funcall ps:*scheme-read* in)
-	  until (eq form ps:eof-object)
-	  do (ps:scheme-eval form env))))
+		       :quasischeme (concatenate 'string "src/" path)))
+    (loop for form = (funcall qs:*scheme-read* in)
+	  until (eq form qs:eof-object)
+	  do (qs:scheme-eval form env))))
 
 (defprim "features" ()
   ;; and full-continuations when code is compiled with re-entrant
   ;; continuations (src/continuations.lisp, loaded later)
-  (mapcar #'sym (append psl:*scheme-features*
-			(let ((full (find-symbol "*FULL-CONTINUATIONS*" "PSEUDOSCHEME-PSYNTAX")))
+  (mapcar #'sym (append qsl:*scheme-features*
+			(let ((full (find-symbol "*FULL-CONTINUATIONS*" "QUASISCHEME-PSYNTAX")))
 			  (when (and full (symbol-value full)) '("full-continuations"))))))
 
 (defun stub-function (export)
   (lambda (&rest args)
     (declare (ignore args))
-    (ps:scheme-error "~A: not implemented yet" export)))
+    (qs:scheme-error "~A: not implemented yet" export)))
 
 (defun build-implementation-env ()
-  (let ((env (psl:new-library-env "r7rs implementation")))
-    (psl:copy-all! env (psl:base-structure))
+  (let ((env (qsl:new-library-env "r7rs implementation")))
+    (qsl:copy-all! env (qsl:base-structure))
     (loop for (name . function) in *primitives*
-	  do (psl:install-variable! env (sym name) function))
+	  do (qsl:install-variable! env (sym name) function))
     (load-scheme-file-from "r7rs/base.scm" env)
     (setq *stubs* '())
     (dolist (export (remove-duplicates
 		     (loop for (nil s) in *standard-libraries* append (split-names s))
 		     :test #'string=))
       (unless (or (syntax-export-p export)
-		  (psl:binding-defined-p env (sym export)))
-	(psl:install-variable! env (sym export) (stub-function export))
+		  (qsl:binding-defined-p env (sym export)))
+	(qsl:install-variable! env (sym export) (stub-function export))
 	(push export *stubs*)))
     env))
 

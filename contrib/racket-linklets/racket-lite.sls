@@ -1,7 +1,7 @@
 ;;; A small stand-in for Racket CS's rumble layer (and the bits of its
 ;;; io and thread layers a linklet calls): enough of Racket's primitives,
 ;;; with Racket's behavior, to run linklets schemify produced for Chez
-;;; Scheme on Pseudoscheme's Chez mode.  Written for Pseudoscheme (not
+;;; Scheme on Quasischeme's Chez mode.  Written for Quasischeme (not
 ;;; derived from Racket's source).
 
 (library (racket-lite)

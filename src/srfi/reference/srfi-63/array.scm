@@ -125,7 +125,7 @@
          (and (array? obj1) (array? obj2)
               (equal? (array:dimensions obj1) (array:dimensions obj2))
               (equal? (array:store obj1) (array:store obj2))))
-        (else (r7:equal? obj1 obj2))))  ; PSEUDOSCHEME: was #f
+        (else (r7:equal? obj1 obj2))))  ; QUASISCHEME: was #f
 
 ;;@body
 ;;Returns the number of dimensions of @1.  If @1 is not an array, 0 is

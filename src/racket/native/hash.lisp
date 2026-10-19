@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's hash tables, natively.
 ;;;;
@@ -18,7 +18,7 @@
 ;;;; Chaperones and impersonators are CHASH structs (chaperone.lisp makes
 ;;;; them).  Not yet: ephemeron tables and equal-always?.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Hashing
@@ -265,7 +265,7 @@ differ, at SHIFT."
 (defun check-hash (who x)
   (unless (hash-table-p* x)
     (racket-error who "contract violation~%  expected: hash?~%  given: ~A"
-		  (with-output-to-string (s) (funcall (psx:host-ref "write") x s)))))
+		  (with-output-to-string (s) (funcall (qsx:host-ref "write") x s)))))
 
 (defun hash-kind (h)
   (cond ((rhash-p h) (rhash-kind h)) ((ihash-p h) (ihash-kind h)) (t (hash-kind (chash-of h)))))
@@ -371,7 +371,7 @@ differ, at SHIFT."
 
 (defun fail-value (who key fail fail-p)
   (cond ((not fail-p) (racket-error who "no value found for key~%  key: ~A"
-				    (with-output-to-string (s) (funcall (psx:host-ref "write") key s))))
+				    (with-output-to-string (s) (funcall (qsx:host-ref "write") key s))))
 	((functionp fail) (funcall fail))
 	(t fail)))
 
@@ -475,9 +475,9 @@ differ, at SHIFT."
 
 (defnative "hash-iterate-first" (h) (:rumble "hash-iterate-first" :leaf t)
   (check-hash "hash-iterate-first" h)
-  (if (plusp (length (entries h))) 0 ps:false))
+  (if (plusp (length (entries h))) 0 qs:false))
 (defnative "hash-iterate-next" (h i) (:leaf t)
-  (if (< (1+ i) (length (entries h))) (1+ i) ps:false))
+  (if (< (1+ i) (length (entries h))) (1+ i) qs:false))
 (defnative "hash-iterate-key" (h i &optional bad) (:leaf t)
   (declare (ignore bad))
   (car (iterate-check h i "hash-iterate-key")))
@@ -502,7 +502,7 @@ differ, at SHIFT."
 (defnative "make-weak-hashalw" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :equal assocs t))
 (defnative "make-immutable-hashalw" (&optional (assocs '())) (:leaf t) (ihash-from-assocs :equal assocs))
 (defnative "hashalw" (&rest kvs) (:leaf t) (ihash-from-pairs :equal kvs))
-(defnative "hash-equal-always?" (h) (:leaf t) (declare (ignore h)) ps:false)
+(defnative "hash-equal-always?" (h) (:leaf t) (declare (ignore h)) qs:false)
 (defnative "make-ephemeron-hash" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :equal assocs t))
 (defnative "make-ephemeron-hasheq" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :eq assocs t))
 (defnative "make-ephemeron-hasheqv" (&optional (assocs '())) (:leaf t) (rhash-from-assocs :eqv assocs t))
@@ -513,9 +513,9 @@ differ, at SHIFT."
 
 ;;; Unsafe immutable-hash iteration: the same positions
 (defnative "unsafe-immutable-hash-iterate-first" (h) (:instance "#%unsafe" :leaf t)
-  (if (plusp (length (entries h))) 0 ps:false))
+  (if (plusp (length (entries h))) 0 qs:false))
 (defnative "unsafe-immutable-hash-iterate-next" (h i) (:instance "#%unsafe" :leaf t)
-  (if (< (1+ i) (length (entries h))) (1+ i) ps:false))
+  (if (< (1+ i) (length (entries h))) (1+ i) qs:false))
 (defnative "unsafe-immutable-hash-iterate-key" (h i &optional bad-index-v) (:instance "#%unsafe" :leaf t)
   (declare (ignore bad-index-v))
   (car (svref (entries h) i)))
@@ -533,9 +533,9 @@ differ, at SHIFT."
 (macrolet ((def (kind)
 	     `(progn
 		(defnative ,(format nil "unsafe-~A-hash-iterate-first" kind) (h) (:instance "#%unsafe" :leaf t)
-		  (if (plusp (length (entries h))) 0 ps:false))
+		  (if (plusp (length (entries h))) 0 qs:false))
 		(defnative ,(format nil "unsafe-~A-hash-iterate-next" kind) (h i) (:instance "#%unsafe" :leaf t)
-		  (if (< (1+ i) (length (entries h))) (1+ i) ps:false))
+		  (if (< (1+ i) (length (entries h))) (1+ i) qs:false))
 		(defnative ,(format nil "unsafe-~A-hash-iterate-key" kind) (h i &optional bad) (:instance "#%unsafe" :leaf t)
 		  (if (< -1 i (length (entries h))) (car (svref (entries h) i)) bad))
 		(defnative ,(format nil "unsafe-~A-hash-iterate-value" kind) (h i &optional bad) (:instance "#%unsafe" :leaf t)

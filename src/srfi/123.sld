@@ -80,7 +80,7 @@
   (begin
     ;; The reference's body-level cond-expands have no else clause and
     ;; rely on one that matches nothing expanding to nothing; R7RS leaves
-    ;; that unspecified and Pseudoscheme reports an error.  So the body
+    ;; that unspecified and Quasischeme reports an error.  So the body
     ;; sees this cond-expand, which supplies an empty else.
     (define-syntax cond-expand
       (syntax-rules (else)

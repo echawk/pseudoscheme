@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R7RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R7RS -*-
 
 ;;;; (guile): the first piece of a Guile mode (docs/guile.md).  Guile's
 ;;;; default environment is a whole language, so (guile) exports all of
@@ -7,7 +7,7 @@
 ;;;; psyntax's library loader (*LIBRARY-LOADERS*), so that booting doesn't
 ;;;; pay for it or for the SRFIs it imports.
 
-(in-package "PSEUDOSCHEME-R7RS")
+(in-package "QUASISCHEME-R7RS")
 
 (defparameter *guile-extras*
   '(;; prompts and escapes, Guile's core
@@ -35,25 +35,25 @@
 
 (defun guile-library-form ()
   (let ((exports (remove-duplicates
-		  (append (psx:table-exports '("r" "mp" "ms" "r5" "ev")) *guile-extras*)
+		  (append (qsx:table-exports '("r" "mp" "ms" "r5" "ev")) *guile-extras*)
 		  :test #'string= :from-end t)))
     (list* (ssym "library") (list (ssym "guile"))
 	   (cons (ssym "export") (mapcar #'ssym exports))
 	   (read-scheme "(import (rnrs) (rnrs mutable-pairs) (rnrs mutable-strings) (rnrs r5rs) (rnrs eval)
-                         (pseudoscheme control)
+                         (quasischeme control)
                          (only (chezscheme) format iota last-pair)
                          (only (srfi :1) delete delete! list-index append-map filter-map
                                reduce fold first second third)
                          (only (srfi :13) string-null? string-join string-index string-contains
                                string-prefix? string-suffix? string-trim string-trim-right
                                string-trim-both))")
-	   (read-forms (asdf:system-relative-pathname :pseudoscheme "src/guile/guile.scm")))))
+	   (read-forms (asdf:system-relative-pathname :quasischeme "src/guile/guile.scm")))))
 
 (defun load-guile-library (name)
   "A loader for psyntax (*LIBRARY-LOADERS*): make (guile) when it's asked
 for; true if it was."
   (when (equal (mapcar #'sname* (if (listp (car (last name))) (butlast name) name)) '("guile"))
-    (psx:eval-library (guile-library-form))
+    (qsx:eval-library (guile-library-form))
     t))
 
-(pushnew 'load-guile-library psx::*library-loaders*)
+(pushnew 'load-guile-library qsx::*library-loaders*)

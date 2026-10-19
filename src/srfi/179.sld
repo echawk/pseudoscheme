@@ -7,7 +7,7 @@
 ;;; two changes below; (srfi 179 base), chibi's internal library, is
 ;;; in 179/base.sld.
 ;;;
-;;; Changes, marked PSEUDOSCHEME: array-tile's argument check in
+;;; Changes, marked QUASISCHEME: array-tile's argument check in
 ;;; transforms.scm required each tile size to be at most the domain's
 ;;; upper bound, which rejects valid sizes when a lower bound is
 ;;; negative (the SRFI's own tests make such calls); it now requires
@@ -33,16 +33,16 @@
           (scheme vector)
           (scheme sort)
           (srfi 160 base)
-          (srfi 231 private u1vector)   ; PSEUDOSCHEME: added
-          (except (srfi 179 base)       ; PSEUDOSCHEME: was (srfi 179 base)
+          (srfi 231 private u1vector)   ; QUASISCHEME: added
+          (except (srfi 179 base)       ; QUASISCHEME: was (srfi 179 base)
                   specialized-array-default-safe?
                   specialized-array-default-mutable?)
-          (prefix (only (srfi 179 base) ; PSEUDOSCHEME: added
+          (prefix (only (srfi 179 base) ; QUASISCHEME: added
                         specialized-array-default-safe?
                         specialized-array-default-mutable?)
                   %)
-          (srfi private srfi-215-parameter)  ; PSEUDOSCHEME: added
-          (only (rnrs base) assert))  ; PSEUDOSCHEME: was (chibi assert)
+          (srfi private srfi-215-parameter)  ; QUASISCHEME: added
+          (only (rnrs base) assert))  ; QUASISCHEME: was (chibi assert)
   (export
    ;; Miscellaneous Functions
    translation? permutation?
@@ -79,7 +79,7 @@
    specialized-array-reshape
    )
   (begin
-    ;; PSEUDOSCHEME: the SRFI makes these procedures that set the
+    ;; QUASISCHEME: the SRFI makes these procedures that set the
     ;; default when given an argument; chibi's are parameters, which
     ;; here can't be called with one.
     (define specialized-array-default-safe?

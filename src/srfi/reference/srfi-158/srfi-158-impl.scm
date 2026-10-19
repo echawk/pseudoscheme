@@ -75,7 +75,7 @@
 
 
 ;; make-coroutine-generator
-;; PSEUDOSCHEME: the original definition (the full-continuations clause)
+;; QUASISCHEME: the original definition (the full-continuations clause)
 ;; resumes a continuation captured in an earlier, already-returned call,
 ;; which needs re-entrant continuations.  With escape-only ones
 ;; (--continuations=escape), PROC runs to completion on the first call
@@ -172,7 +172,7 @@
 
 
 ;; make-unfold-generator
-;; PSEUDOSCHEME: direct style instead of make-coroutine-generator, so
+;; QUASISCHEME: direct style instead of make-coroutine-generator, so
 ;; that infinite unfolds work.
 (define (make-unfold-generator stop? mapper successor seed)
   (let ((s seed))
@@ -328,7 +328,7 @@
 
 
 ;; gtake
-;; PSEUDOSCHEME: direct style instead of make-coroutine-generator, so
+;; QUASISCHEME: direct style instead of make-coroutine-generator, so
 ;; that taking from an infinite generator works.
 (define gtake
   (case-lambda ((gen k) (gtake gen k (eof-object)))

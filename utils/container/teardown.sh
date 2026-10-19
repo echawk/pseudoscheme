@@ -10,7 +10,7 @@ if [ "$(uname)" = Darwin ] && ! podman machine inspect "$MACHINE" > /dev/null 2>
   echo "No podman machine $MACHINE; nothing to do."
   exit 0
 fi
-podman $CONNECTION ps -a --format '{{.Names}}' | grep '^pseudoscheme-' | xargs -r podman $CONNECTION rm -f
+podman $CONNECTION ps -a --format '{{.Names}}' | grep '^quasischeme-' | xargs -r podman $CONNECTION rm -f
 for v in $VOLUMES; do podman $CONNECTION volume rm -f "$v" > /dev/null 2>&1 || true; done
 podman $CONNECTION rmi -f "$IMAGE" > /dev/null 2>&1 || true
 if [ "$(uname)" = Darwin ] && [ -z "$KEEP_MACHINE" ]; then

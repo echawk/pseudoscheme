@@ -34,7 +34,7 @@
   (handler-bind ((warning #'muffle-warning))
     (load-system :r7rs)))
 
-(ps:disable-float-traps)
+(qs:disable-float-traps)
 
 (defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
 
@@ -97,7 +97,7 @@ written form of its value."
   `(check ,name ,expected (lambda () (scheme ,text))))
 
 (defparameter *prelude*
-  "(import (scheme base) (prefix (cl interop-test-lib) t:) (prefix (cl common-lisp) cl:) (pseudoscheme lisp)) ")
+  "(import (scheme base) (prefix (cl interop-test-lib) t:) (prefix (cl common-lisp) cl:) (quasischeme lisp)) ")
 
 (defun p (body) (concatenate 'string *prelude* body))
 
@@ -144,7 +144,7 @@ written form of its value."
        (p "(guard (e ((error-object? e) (error-object-message e))) (t:fail))"))
 (test "macros, functions and variables are all exported" (:syntax :procedure :syntax)
   (let ((exports (r7rs:library-exports '(cl interop-test-lib))))
-    (flet ((kind (name) (cdr (assoc name exports :key #'ps:scheme-symbol-name :test #'string=))))
+    (flet ((kind (name) (cdr (assoc name exports :key #'qs:scheme-symbol-name :test #'string=))))
       (list (kind "a-macro") (kind "add") (kind "*counter*")))))
 (stest "sort with a Lisp predicate" "(1 2 3)" (p "(cl:sort (list 3 1 2) cl:<)"))
 (stest "sort with a Scheme predicate and #:key" "((1 . a) (2 . b))"
@@ -162,7 +162,7 @@ written form of its value."
 
 ;; Autoloading: a stand-in loader that "loads" a system by making its package.
 (defvar *loaded-systems* '())
-(let ((pseudoscheme-interop:*lisp-system-loader*
+(let ((quasischeme-interop:*lisp-system-loader*
 	(lambda (system)
 	  (push system *loaded-systems*)
 	  (when (string= system "autoloaded-pkg")
@@ -232,12 +232,12 @@ written form of its value."
   (funcall 'srfi-1::append-map (r7rs:verbatim (lambda (x) (if (evenp x) nil (list x x)))) '(1 2 3)))
 (test "use-library with :package and a string name" "000042"
   (progn (r7rs:use-library "(srfi 13)" :package "S13-TEST") (uiop:symbol-call "S13-TEST" "STRING-PAD" "42" 6 #\0)))
-(test "use-library :convert nil gives the procedures themselves" ps:false
+(test "use-library :convert nil gives the procedures themselves" qs:false
   (progn (r7rs:use-library '(srfi 1) :package "SRFI-1-RAW" :convert nil)
 	 (uiop:symbol-call "SRFI-1-RAW" "ANY" (r7rs:eval "(lambda (x) (string? x))") '(1 2))))
 (test "library-exports" (:procedure :syntax)
-  (list (cdr (assoc "fold" (r7rs:library-exports '(srfi 1)) :key #'ps:scheme-symbol-name :test #'equal))
-	(cdr (assoc "cut" (r7rs:library-exports '(srfi 26)) :key #'ps:scheme-symbol-name :test #'equal))))
+  (list (cdr (assoc "fold" (r7rs:library-exports '(srfi 1)) :key #'qs:scheme-symbol-name :test #'equal))
+	(cdr (assoc "cut" (r7rs:library-exports '(srfi 26)) :key #'qs:scheme-symbol-name :test #'equal))))
 (test "variables become symbol macros" 3
   (progn (r7rs:eval "(define-library (itest vars) (export counter bump!) (import (scheme base)) (begin (define counter 1) (define (bump!) (set! counter (+ counter 1)))))")
 	 (r7rs:use-library '(itest vars) :package "ITEST-VARS")
@@ -250,7 +250,7 @@ written form of its value."
 (test "r7rs:scheme" 120 (r7rs:scheme (define (fact n) (if (= n 0) 1 (* n (fact (- n 1))))) (fact 5)))
 (test "r7rs:scheme imports at the REPL" (3 2 1) (r7rs:scheme (import (srfi 1)) (fold cons '() '(1 2 3))))
 (test "r7rs:scheme converts #f" nil (r7rs:scheme (eq? 'a 'b)))
-(test "r7rs:eval keeps #f" ps:false (r7rs:eval "(eq? 'a 'b)"))
+(test "r7rs:eval keeps #f" qs:false (r7rs:eval "(eq? 'a 'b)"))
 (test "r7rs:true-p" (nil t) (list (r7rs:true-p r7rs:false) (r7rs:true-p nil)))
 (test "r7rs:procedure from the REPL" 720 (funcall (r7rs:procedure "fact") 6))
 (test "r7rs:procedure from a library" 2 (funcall (r7rs:procedure "string-index" :library '(srfi 13)) "hello" #\l))
@@ -324,7 +324,7 @@ written form of its value."
 (test "r5rs:eval folds case" 3 (r5rs:eval "(DEFINE (Add A B) (+ a b)) (add 1 2)"))
 (test "r5rs:procedure" 9 (funcall (r5rs:procedure "add") 4 5))
 (test "r5rs:expand / translate" (t t) (list (consp (r5rs:expand '(let ((x 1)) x))) (consp (r5rs:translate '(lambda (x) x)))))
-(test "r5rs:read-from-string folds case" "hello" (ps:scheme-symbol-name (r5rs:read-from-string "HELLO")))
+(test "r5rs:read-from-string folds case" "hello" (qs:scheme-symbol-name (r5rs:read-from-string "HELLO")))
 
 ;;; ------------------------------------------------------------------
 ;;; ASDF

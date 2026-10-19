@@ -30,7 +30,7 @@
 
 ;; this library requires SRFi-18, 19, 69 and 114
 ;; The body of timer.sld (the SRFI 120 sample implementation), for
-;; (include ...); three changes, marked PSEUDOSCHEME.
+;; (include ...); three changes, marked QUASISCHEME.
 
     ;; priority queue
     ;; hope it'll soon enough be a SRFI.
@@ -168,7 +168,7 @@
 	(define (task=? a b)
 	  (time=? (timer-task-next a) (timer-task-next b)))
 	(define (task<? a b)
-	  ;; PSEUDOSCHEME: was time=?, which left the tasks unordered
+	  ;; QUASISCHEME: was time=?, which left the tasks unordered
 	  (time<? (timer-task-next a) (timer-task-next b)))
 	(make-comparator timer-task? task=?
 			 (make-comparison=/< task=? task<?)
@@ -202,7 +202,7 @@
 	 (let ((m mutex)
 	       (c cv)
 	       (to timeout))
-	   ;; PSEUDOSCHEME: relocked after a timeout too (SRFI 18 leaves
+	   ;; QUASISCHEME: relocked after a timeout too (SRFI 18 leaves
 	   ;; the mutex unlocked either way), or the worker goes on
 	   ;; without it and then unlocks it
 	   (mutex-unlock! m c to)
@@ -236,7 +236,7 @@
 			    (mutex-lock! (timer-lock t))
 			    (if (timer-task-running? first)
 				(let ((p (timer-task-period first)))
-				  ;; PSEUDOSCHEME: rescheduled while it ran:
+				  ;; QUASISCHEME: rescheduled while it ran:
 				  ;; its next time is set; queue it
 				  (if (eq? (timer-task-running? first) 'rescheduled)
 				      (set! p #f))
@@ -345,7 +345,7 @@
 		;; update period
 		(timer-task-period-set! task p)
 		(timer-task-next-set! task next)
-		;; PSEUDOSCHEME: a running task isn't in the queue: the worker
+		;; QUASISCHEME: a running task isn't in the queue: the worker
 		;; queues it when it has run
 		(if (timer-task-running? task)
 		    (timer-task-running-set! task 'rescheduled)

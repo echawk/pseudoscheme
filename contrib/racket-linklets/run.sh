@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run Racket CS's schemified linklets on Pseudoscheme's Chez mode
+# Run Racket CS's schemified linklets on Quasischeme's Chez mode
 # (README.md): Racket's own regexp tests on its regexp linklet, then
 # its schemify linklet schemifying a linklet, and that run here too.
 #

@@ -468,7 +468,7 @@
             list1))
       '()))
 
-;; PSEUDOSCHEME: commented out; iappend-reverse is defined again below,
+;; QUASISCHEME: commented out; iappend-reverse is defined again below,
 ;; and a library may not define a name twice.
 ;(define (iappend-reverse rev-head tail) (ifold ipair tail rev-head))
 
@@ -769,7 +769,7 @@
 
 
 ;;; We extend IMAP to handle arguments of unequal ilength.
-;; PSEUDOSCHEME: commented out; ilists-base.scm defines imap, the same
+;; QUASISCHEME: commented out; ilists-base.scm defines imap, the same
 ;; way, and a library may not define a name twice.
 ;(define imap imap-in-order)
 

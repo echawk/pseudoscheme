@@ -25,14 +25,14 @@
           syntax->datum make-variable-transformer
           eval-r6rs-top-level boot-library-expand eval-top-level
           null-environment
-          ;; PSEUDOSCHEME
+          ;; QUASISCHEME
           scheme-report-environment
           interaction-library-name interaction-source-name
           identifier-binding environment-symbols eval-hook
           interaction-symbols top-level-binding expand-top-level
           expansion-lock-hook expand-r6rs-top-level mixed-bodies syntax->annotation)
   (import
-    ;; PSEUDOSCHEME: only names (rnrs) exports (environment, eval
+    ;; QUASISCHEME: only names (rnrs) exports (environment, eval
     ;; and null-environment are (rnrs eval)'s and (rnrs r5rs)'s), as
     ;; R6RS requires and Chez enforces (boot/: building from source).
     (except (rnrs) 
@@ -92,7 +92,7 @@
   ;;; with it in its substitution.  gen-label generates such labels.
   ;;; the labels have to have read/write eq? invariance to support 
   ;;; separate compilation.
-  ;;; PSEUDOSCHEME: the identifier's name is kept with the gensym, for
+  ;;; QUASISCHEME: the identifier's name is kept with the gensym, for
   ;;; messages about an unbound variable.
   (define gen-label
     (lambda (x)
@@ -122,7 +122,7 @@
   ;;;  #<rib list-of-symbols list-of-list-of-marks list-of-labels #f>
   
   (define (extend-rib! rib id label)
-    ;;; PSEUDOSCHEME: FIND returns the label of the existing entry.
+    ;;; QUASISCHEME: FIND returns the label of the existing entry.
     (define (find sym mark* sym* mark** label*)
       (and (pair? sym*)
            (if (and (eq? sym (car sym*))
@@ -136,12 +136,12 @@
         (let ((old (and (memq sym (rib-sym* rib))
                         (find sym mark* sym* (rib-mark** rib) (rib-label* rib)))))
           ;;; signal an error if the identifier was already
-          ;;; in the rib -- PSEUDOSCHEME: unless it was imported.  A
+          ;;; in the rib -- QUASISCHEME: unless it was imported.  A
           ;;; definition then shadows the import, as R7RS systems
           ;;; (chibi, Gauche, ...) allow and libraries rely on.
           (when (and old (not (imported-label->binding old)))
             (stx-error id "cannot redefine"))
-          ;;; PSEUDOSCHEME: the definition replaces the import's entry.
+          ;;; QUASISCHEME: the definition replaces the import's entry.
           ;;; (A second entry could be found first once the rib is
           ;;; sealed, which orders entries by how often they're used.)
           (if old
@@ -151,7 +151,7 @@
                 (set-rib-mark**! rib (cons mark* (rib-mark** rib)))
                 (set-rib-label*! rib (cons label (rib-label* rib)))))))))
 
-  ;;; PSEUDOSCHEME: give the entry for SYM and MARK* in the (unsealed)
+  ;;; QUASISCHEME: give the entry for SYM and MARK* in the (unsealed)
   ;;; RIB the label LABEL instead.
   (define (rib-replace-label! rib sym mark* label)
     (set-rib-label*! rib
@@ -162,7 +162,7 @@
            (cons label (cdr label*)))
           (else (cons (car label*) (f (cdr sym*) (cdr mark**) (cdr label*))))))))
 
-  ;;; PSEUDOSCHEME: bind ID to LABEL in RIB, replacing any entry for it
+  ;;; QUASISCHEME: bind ID to LABEL in RIB, replacing any entry for it
   ;;; there (define-property, SRFI 213).
   (define (rib-rebind! rib id label)
     (let ((sym (id->sym id)) (mark* (stx-mark* id)))
@@ -287,7 +287,7 @@
   ;;; or an antimark.
   ;;; (two marks must be eq?-comparable, so we use a string
   ;;; of one char (this assumes that strings are mutable)).
-  ;;; PSEUDOSCHEME: a gensym instead, which, like a label, keeps its
+  ;;; QUASISCHEME: a gensym instead, which, like a label, keeps its
   ;;; identity when it is written to a file and read back, so that
   ;;; syntax objects in compiled libraries still compare correctly.
 
@@ -375,7 +375,7 @@
       (mkstx e '() (list subst))))
 
   ;;; now are some deconstructors and predicates for syntax objects.
-  ;;; PSEUDOSCHEME: Chez's source annotations: an annotation in a datum
+  ;;; QUASISCHEME: Chez's source annotations: an annotation in a datum
   ;;; stands for its expression (and syntax->datum gives its stripped
   ;;; form); syntax->annotation gives it back.
   (define syntax-kind?
@@ -434,7 +434,7 @@
             ((annotation? x) (syntax-cdr (annotation-expression x)))
             (else (error 'syntax-cdr "not a pair" x))))))
   (define id?
-    ;;; PSEUDOSCHEME: a Lisp keyword is a constant, not an identifier.
+    ;;; QUASISCHEME: a Lisp keyword is a constant, not an identifier.
     (lambda (x) (syntax-kind? x (lambda (s) (and (symbol? s) (not (lisp-keyword? s)))))))
   
   (define id->sym
@@ -465,19 +465,19 @@
   ;;; same label or if both are unbound and they have the same name.
   (define free-id=?
     (lambda (i j)
-      ;; PSEUDOSCHEME: the labels of bindings, not of identifier
+      ;; QUASISCHEME: the labels of bindings, not of identifier
       ;; properties (SRFI 213), which name the same bindings
       (let ((t0 (base-label (id->label i))) (t1 (base-label (id->label j))))
         (if (or t0 t1)
             (eq? t0 t1)
             (eq? (id->sym i) (id->sym j))))))
 
-  ;;; PSEUDOSCHEME: identifier properties (SRFI 213).  define-property
+  ;;; QUASISCHEME: identifier properties (SRFI 213).  define-property
   ;;; gives the identifier a new label, bound as its old one is, whose
   ;;; entry here is (old-label . ((key-label . value) ...)): its
   ;;; properties, keyed by the key's base label, and its old label's.
   (define property-table (make-eq-hashtable))
-  ;; PSEUDOSCHEME: a property's key: its identifier's label, or, unbound,
+  ;; QUASISCHEME: a property's key: its identifier's label, or, unbound,
   ;; its name (free-identifier=? compares unbound identifiers by name)
   (define (property-key id) (or (base-label (id->label id)) (id->sym id)))
 
@@ -487,7 +487,7 @@
 
   (define property-lookup
     (case-lambda
-      ;; PSEUDOSCHEME: (r id), as in Chez: ID's compile-time value, or #f
+      ;; QUASISCHEME: (r id), as in Chez: ID's compile-time value, or #f
       ((id r)
        (unless (id? id) (assertion-violation 'lookup "not an identifier" id))
        (let ((label (id->label id)))
@@ -513,7 +513,7 @@
                ((assq key-label (cdr entry)) => cdr)
                (else (loop (car entry))))))))))
 
-  ;;; PSEUDOSCHEME: syntax parameters (SRFI 139).  syntax-parameterize
+  ;;; QUASISCHEME: syntax parameters (SRFI 139).  syntax-parameterize
   ;;; binds a keyword's label in the environment R, which label->binding
   ;;; then consults first for the labels in this table.
   (define parameterized-labels (make-eq-hashtable))
@@ -537,13 +537,13 @@
            (or (bound-id=? id (car id*))
                (bound-id-member? id (cdr id*))))))
 
-  ;;; PSEUDOSCHEME: bytevectors are literals in R6RS (11.4.1), and
+  ;;; QUASISCHEME: bytevectors are literals in R6RS (11.4.1), and
   ;;; vectors are in R7RS (4.1.2) and accepted by most R6RS systems.
   (define self-evaluating?
     (lambda (x) ;;; am I missing something here?
       (or (number? x) (string? x) (char? x) (boolean? x)
           (bytevector? x) (vector? x)
-          ;; PSEUDOSCHEME: Lisp keywords (#:test), for Lisp keyword
+          ;; QUASISCHEME: Lisp keywords (#:test), for Lisp keyword
           ;; arguments; see docs/interop.md.  And whatever else the
           ;; host's reader makes that evaluates to itself, such as
           ;; SRFI 4's #s16(1 2 3).
@@ -580,7 +580,7 @@
   ;;; id->label takes an id (that's a sym x marks x substs) and
   ;;; searches the substs for a label associated with the same sym
   ;;; and marks.
-  ;;; PSEUDOSCHEME: what identifier ID refers to, for the Lisp bridge
+  ;;; QUASISCHEME: what identifier ID refers to, for the Lisp bridge
   ;;; (src/interop.lisp): unbound, variable (a lexical, or a library or
   ;;; REPL variable), or else the binding itself (a primitive, a macro,
   ;;; or core syntax).  Local macros (let-syntax) look like
@@ -697,8 +697,8 @@
                       macro! local-macro local-macro! global-macro
                       global-macro! module set! let-syntax 
                       letrec-syntax import $core-rtd
-                      alias define-property           ; PSEUDOSCHEME
-                      library meta)                   ; PSEUDOSCHEME: Chez's
+                      alias define-property           ; QUASISCHEME
+                      library meta)                   ; QUASISCHEME: Chez's
 
                     (values type (binding-value b) id))
                    (else
@@ -732,7 +732,7 @@
         ((and (pair? x) (eq? (car x) 'macro!) (procedure? (cdr x)))
          (cons* 'local-macro! (cdr x) src))
         ((and (pair? x) (eq? (car x) '$rtd)) x)
-        ;; PSEUDOSCHEME: Chez's compile-time value, ($ctv . value)
+        ;; QUASISCHEME: Chez's compile-time value, ($ctv . value)
         ;; (make-compile-time-value), which (r id) gives a transformer:
         ;; bound as ($ctv value . expr), EXPR making it again (in a
         ;; library's visit code)
@@ -880,7 +880,7 @@
 
   (define parse-define
     (lambda (x)
-      ;;; PSEUDOSCHEME: (define id), which R6RS allows, gives id an
+      ;;; QUASISCHEME: (define id), which R6RS allows, gives id an
       ;;; unspecified value.
       (syntax-match x ()
         ((_ (id . fmls) b b* ...) (id? id)
@@ -927,7 +927,7 @@
          (add-lexicals (cdr lab*) (cdr lex*)
            (add-lexical (car lab*) (car lex*) r))))))
   ;;;
-  ;;; PSEUDOSCHEME: rewritten to accept any formals, as R6RS 11.4.6
+  ;;; QUASISCHEME: rewritten to accept any formals, as R6RS 11.4.6
   ;;; allows -- (let-values (((a b . c) e)) ...), ((a . b) e), (a e) --
   ;;; not just proper lists.  The lambda formals of each CALL-WITH-VALUES
   ;;; consumer have the same shape, built from the generated lexicals.
@@ -989,7 +989,7 @@
   (define letrec*-transformer
     (lambda (e r mr) (letrec-helper e r mr build-letrec*)))
 
-  ;;; PSEUDOSCHEME: as Chez's type-descriptor too: of a
+  ;;; QUASISCHEME: as Chez's type-descriptor too: of a
   ;;; define-record-type name, its record type descriptor; of anything
   ;;; else (a Chez define-record type's name is a variable), its value.
   (define type-descriptor-transformer
@@ -1067,7 +1067,7 @@
  
   (define case-transformer ;;; go away
     (lambda (e r mr)
-      ;; PSEUDOSCHEME: as in Chez, a clause's keys may be one datum
+      ;; QUASISCHEME: as in Chez, a clause's keys may be one datum
       ;; rather than a list of them, ([register ...])
       (define else-id?
         (lambda (x) (and (id? x) (free-id=? x (scheme-stx 'else)))))
@@ -1148,7 +1148,7 @@
             (else x)))
         '() '())))
   
-  ;;; PSEUDOSCHEME: the body is a body, (let () b b* ...), as R6RS
+  ;;; QUASISCHEME: the body is a body, (let () b b* ...), as R6RS
   ;;; specifies (11.19), so it may begin with definitions.
   (define with-syntax-macro
     (lambda (e)
@@ -1210,7 +1210,7 @@
                                 "not a procedure" v)))))
              (stx-error stx "invalid formals"))))))
   
-  ;;; PSEUDOSCHEME: R6RS's expansion, whose handler, when no clause
+  ;;; QUASISCHEME: R6RS's expansion, whose handler, when no clause
   ;;; matches, re-enters its own continuation to re-raise in the dynamic
   ;;; environment of the RAISE -- through %guard-reraise, which falls
   ;;; back to re-raising from the guard's own context where that
@@ -1308,7 +1308,7 @@
   (define delay-macro
     (lambda (stx)
       (syntax-match stx ()
-        ;; PSEUDOSCHEME: the host's promises are R7RS's (one type for
+        ;; QUASISCHEME: the host's promises are R7RS's (one type for
         ;; delay, delay-force, make-promise and force); $delay builds one
         ;; from a thunk.
         ((_ expr)
@@ -1317,7 +1317,7 @@
   (define assert-macro
     (lambda (stx)
       (syntax-match stx ()
-        ;; PSEUDOSCHEME: R6RS 11.14 -- the value of expr if true, else an
+        ;; QUASISCHEME: R6RS 11.14 -- the value of expr if true, else an
         ;; &assertion condition (this raised &error and returned void).
         ((_ expr)
          (let ((t (gensym)))
@@ -1378,7 +1378,7 @@
                      (loop ,@init*)))
                 (stx-error stx "invalid bindings"))))))))
   
-  ;;; PSEUDOSCHEME: let*-values (R6RS 11.4.6) was missing; the table
+  ;;; QUASISCHEME: let*-values (R6RS 11.4.6) was missing; the table
   ;;; listed it as a procedure.
   (define let*-values-macro
     (lambda (stx)
@@ -1460,7 +1460,7 @@
                         (datum->stx id (reverse ls))))
                      (else (f (cons x ls)))))))))))))
   
-  ;;; PSEUDOSCHEME: R7RS 4.3.2's custom ellipsis, (syntax-rules <ellipsis>
+  ;;; QUASISCHEME: R7RS 4.3.2's custom ellipsis, (syntax-rules <ellipsis>
   ;;; (literal ...) rule ...).  Rewrite the rules into ordinary ones: the
   ;;; custom ellipsis ELL (if not #f) becomes ..., and ... (an ordinary
   ;;; identifier in such rules) becomes (DOTS-FOR ...): a fresh
@@ -1481,7 +1481,7 @@
                   (list->vector (map f (syntax-vector->list x)))
                   x)))))))
 
-  ;;; PSEUDOSCHEME: R7RS 4.3.2 lets _ and the ellipsis be literals, which
+  ;;; QUASISCHEME: R7RS 4.3.2 lets _ and the ellipsis be literals, which
   ;;; then match only themselves.  An ellipsis literal can't be an
   ;;; ellipsis in the templates either: each ... there becomes (... ...).
   (define (escape-ellipsis x)
@@ -1528,7 +1528,7 @@
                          pat* tmp*)))
            (syntax-rules-macro
              (cond
-               ;; PSEUDOSCHEME: the custom ellipsis is a literal, so the
+               ;; QUASISCHEME: the custom ellipsis is a literal, so the
                ;; rules have no ellipsis at all.  If it is ... itself,
                ;; the next case handles that; otherwise ... is ordinary.
                ((bound-id-member? ell lits)
@@ -1542,7 +1542,7 @@
            (unless (for-all id? lits)
              (stx-error e "invalid literals"))
            (let ((pat* (map (lambda (pat)
-                              ;; PSEUDOSCHEME: the keyword's position is
+                              ;; QUASISCHEME: the keyword's position is
                               ;; ignored (R6RS 11.19, R7RS 4.3.2), even
                               ;; when it is _ and _ is a literal.
                               (syntax-match pat ()
@@ -1661,7 +1661,7 @@
             ((quasiquote p)
              (quasicons (app 'quote 'quasiquote) (quasi (list p) (+ lev 1))))
             ((p . q) (quasicons (quasi p lev) (quasi q lev)))
-            ;;; PSEUDOSCHEME: (not (stx? x)) kept a syntax object, a
+            ;;; QUASISCHEME: (not (stx? x)) kept a syntax object, a
             ;;; vector in the original, from matching; it's a record now.
             (#(x ...) (quasivector (vquasi x lev)))
             (p (app 'quote p)))))
@@ -1682,7 +1682,7 @@
                    (values lhs* rhs* (list 'unsyntax p)))))
             (unsyntax (= lev 0)
              (stx-error p "incorrect use of unsyntax"))
-            ;; PSEUDOSCHEME: R6RS 11.19 allows any number of operands in
+            ;; QUASISCHEME: R6RS 11.19 allows any number of operands in
             ;; (unsyntax e ...) and (unsyntax-splicing e ...) in a list:
             ;; each value is inserted (spliced) in turn.  The 2007 code
             ;; took exactly one.
@@ -1714,7 +1714,7 @@
                 (values (append lhs2* lhs*)
                         (append rhs2* rhs*)
                         (cons p q))))
-            ;;; PSEUDOSCHEME: no (not (stx? p)) fender, as in quasi, and
+            ;;; QUASISCHEME: no (not (stx? p)) fender, as in quasi, and
             ;;; the elements are one list, so that unsyntax-splicing works
             ;;; in a vector as in a list.
             (#(x ...)
@@ -1829,7 +1829,7 @@
                      ((immutable name . rest) `(immutable ,name))
                      (name `(immutable ,name))))
                ls)))
-        ;;; PSEUDOSCHEME: the clauses are sealed and opaque, not sealed?
+        ;;; QUASISCHEME: the clauses are sealed and opaque, not sealed?
         ;;; and opaque?, and a parent can be given as (parent-rtd rtd rcd).
         (let ((parent-rtd-code 
                (syntax-match (get-clause 'parent clause*) ()
@@ -1885,7 +1885,7 @@
              (cons i (f rest (+ i 1))))
             ((_ . rest)
              (f rest (+ i 1))))))
-      ;;; PSEUDOSCHEME: the final R6RS names the default mutator
+      ;;; QUASISCHEME: the final R6RS names the default mutator
       ;;; <record name>-<field name>-set! (library report 6.2); this
       ;;; 2007 code predates that and produced set-<record>-<field>!.
       (define (get-mutators foo fields ctxt)
@@ -1928,7 +1928,7 @@
           (cond
             ((null? ls) '())
             (else (cons i (f (cdr ls) (+ i 1)))))))
-      ;;; PSEUDOSCHEME: the names made for a record (make-foo, foo?,
+      ;;; QUASISCHEME: the names made for a record (make-foo, foo?,
       ;;; foo-x, foo-x-set!) are in the record name's context, as Chez
       ;;; makes them, not the define-record-type keyword's: when a macro's
       ;;; output holds the keyword and its use supplies the name, the
@@ -2066,7 +2066,7 @@
   (define convert-pattern
    ; returns syntax-dispatch pattern & ids
     (lambda (pattern keys)
-      ;; PSEUDOSCHEME: ... in keys (from syntax-rules) is a literal.
+      ;; QUASISCHEME: ... in keys (from syntax-rules) is a literal.
       (define (ellipsis? x)
         (and (id? x)
              (free-id=? x (scheme-stx '...))
@@ -2338,7 +2338,7 @@
         (syntax-match e ()
           ((_ expr (keys ...) clauses ...)
            (begin
-             ;; PSEUDOSCHEME: ... may be a literal, as in R7RS's
+             ;; QUASISCHEME: ... may be a literal, as in R7RS's
              ;; syntax-rules, which expands into syntax-case.
              (unless (for-all id? keys)
                (stx-error e "invalid literals"))
@@ -2396,13 +2396,13 @@
                  (let-values (((ynew maps)
                                (gen-syntax src y r maps ellipsis? vec?)))
                    (values (gen-cons e x y xnew ynew) maps))))
-              ;;; PSEUDOSCHEME: no (not (stx? e)) fender, as in quasi.
+              ;;; QUASISCHEME: no (not (stx? e)) fender, as in quasi.
               (#(ls ...)
                (let-values (((lsnew maps)
                              (gen-syntax src ls r maps ellipsis? #t)))
                  (values (gen-vector e ls lsnew) maps)))
               (_ (values `(quote ,e) maps)))))
-        ;; PSEUDOSCHEME: SRFI 149: a pattern variable under more
+        ;; QUASISCHEME: SRFI 149: a pattern variable under more
         ;; ellipses than in its pattern is repeated for the innermost
         ;; excess ones, so it iterates in the outermost maps.  Other
         ;; expanders (and code written for them) iterate it in the
@@ -2469,7 +2469,7 @@
                      (if (and (eq? xnew x) (eq? ynew y))
                          `(quote ,e)
                          `(quote ,(cons xnew ynew))))
-                   ;; PSEUDOSCHEME: and a wrapped (), so that #'(a b)
+                   ;; QUASISCHEME: and a wrapped (), so that #'(a b)
                    ;; is a list, as other expanders make it
                    (if (or (null? (cadr ynew)) (syntax-null? (cadr ynew)))
                        `(list ,xnew)
@@ -2505,7 +2505,7 @@
         (lambda (e r mr)
           (syntax-match e ()
             ((_ x)
-             ;; PSEUDOSCHEME: SRFI 149's way, else the other (above)
+             ;; QUASISCHEME: SRFI 149's way, else the other (above)
              (let ((first (call-with-current-continuation
                            (lambda (k)
                              (set! srfi-149-escape k)
@@ -2517,7 +2517,7 @@
                    (let-values (((e maps) (gen-syntax e x r '() ellipsis? #f)))
                      (regen e)))))))))
 
-  ;;; PSEUDOSCHEME: while a template is expanded SRFI 149's way, the
+  ;;; QUASISCHEME: while a template is expanded SRFI 149's way, the
   ;;; continuation to give up with; else #f.
   (define srfi-149-escape #f)
   (define (extra-ellipsis src)
@@ -2525,7 +2525,7 @@
         (srfi-149-escape #f)
         (stx-error src "extra ellipsis in syntax form")))
   
-  ;;; PSEUDOSCHEME: (syntax-parameterize ((keyword transformer) ...)
+  ;;; QUASISCHEME: (syntax-parameterize ((keyword transformer) ...)
   ;;; body ...), SRFI 139: the body, with each keyword bound to its new
   ;;; transformer wherever its binding is referred to.
   (define syntax-parameterize-transformer
@@ -2548,7 +2548,7 @@
   (define core-macro-transformer
     (lambda (name)
       (case name
-        ((syntax-parameterize)    syntax-parameterize-transformer) ; PSEUDOSCHEME
+        ((syntax-parameterize)    syntax-parameterize-transformer) ; QUASISCHEME
         ((quote)                  quote-transformer)
         ((lambda)                 lambda-transformer)
         ((case-lambda)            case-lambda-transformer)
@@ -2574,7 +2574,7 @@
         ((_ opt* ...)
          (and (for-all id? opt*) (file-options-spec (map id->sym opt*)))
          (bless `((enum-set-constructor
-                     ;; PSEUDOSCHEME: and Chez's (compat.ss, file-options-spec)
+                     ;; QUASISCHEME: and Chez's (compat.ss, file-options-spec)
                      (make-enumeration '(no-create no-fail no-truncate append compressed exclusive replace)))
                    '(,@(file-options-spec (map id->sym opt*)))))))))
 
@@ -2637,7 +2637,7 @@
     (car x))
 
   ;;; chi procedures
-  ;;; PSEUDOSCHEME: a transformer may return a procedure, which is
+  ;;; QUASISCHEME: a transformer may return a procedure, which is
   ;;; called with a lookup procedure for identifier properties, and
   ;;; returns the output (SRFI 213).
   ;;; R is the expansion environment, which the lookup procedure
@@ -2668,7 +2668,7 @@
         (let ((transformer
                (cond
                  ((procedure? x) x)
-                 ;; PSEUDOSCHEME: a library's variable transformer
+                 ;; QUASISCHEME: a library's variable transformer
                  ((and (pair? x) (eq? (car x) 'macro!) (procedure? (cdr x))) (cdr x))
                  ;; and a compile-time value isn't syntax to expand
                  ((and (pair? x) (eq? (car x) '$ctv)) (stx-error e "invalid syntax"))
@@ -2759,7 +2759,7 @@
          (let-values (((type value kwd) (syntax-type x r)))
            (case type
              ((lexical)
-              ;; PSEUDOSCHEME: assigning an exported variable updates
+              ;; QUASISCHEME: assigning an exported variable updates
               ;; its location too (see library-body-expander).
               (let ((exported (assq value (library-export-locs))))
                 (if exported
@@ -2770,7 +2770,7 @@
                     (build-lexical-assignment no-source
                       value
                       (chi-expr v r mr)))))
-             ;; PSEUDOSCHEME: a global of the REPL's own interaction
+             ;; QUASISCHEME: a global of the REPL's own interaction
              ;; library is assignable (as GEN-GLOBAL-VAR-BINDING already
              ;; allows for DEFINE); only imported ones aren't.
              ((global)
@@ -2877,7 +2877,7 @@
                          r mr '() '() '() '() rib #f)))
            (when (null? e*)
              (stx-error e* "no expression in body"))
-           ;; PSEUDOSCHEME: SRFI 251: definitions after the first
+           ;; QUASISCHEME: SRFI 251: definitions after the first
            ;; expression begin a body of their own, in the scope of
            ;; this one's definitions -- unless (mixed-bodies) is #f, as
            ;; at Chez's top level, which has them expanded as
@@ -2896,7 +2896,7 @@
 
   (define mixed-bodies (make-parameter #t))
 
-  ;;; PSEUDOSCHEME: E*, a body's forms from its first expression on, as
+  ;;; QUASISCHEME: E*, a body's forms from its first expression on, as
   ;;; the expressions before any definition and the forms from that
   ;;; definition on.  Macro uses are expanded to tell (in RIB, as
   ;;; chi-body* expands them), and begins spliced.
@@ -2924,7 +2924,7 @@
                    (loop (cons (add-subst rib (chi-macro value e r)) (cdr e*)) cmd*))
                   (else (loop (cdr e*) (cons e cmd*))))))))))
 
-  ;;; PSEUDOSCHEME: Chez's (id indirect-id ...) in an export list
+  ;;; QUASISCHEME: Chez's (id indirect-id ...) in an export list
   ;;; exports id and the identifiers its expansions may refer to: here
   ;;; they're all simply exported, once each (several may name the
   ;;; same indirect identifier).
@@ -2977,7 +2977,7 @@
                               (cons (cons lab (cons '$module iface)) mr)
                               mod** kwd*)))))))))
 
-  ;;; PSEUDOSCHEME: Chez's (meta define id expr) and (meta define (id
+  ;;; QUASISCHEME: Chez's (meta define id expr) and (meta define (id
   ;;; . formals) body ...) -- meta and then the definition -- in a body: ID is bound for the expander only.
   ;;; EXPR is expanded in the meta environment and evaluated now, into a
   ;;; fresh global, which ID names as a lexical in both environments --
@@ -3006,7 +3006,7 @@
                (values r mr))))))
       (_ (stx-error e "malformed meta"))))
 
-  ;;; PSEUDOSCHEME: set while a library is expanded; something in it
+  ;;; QUASISCHEME: set while a library is expanded; something in it
   ;;; (meta, define-property) makes it unfit for the compiled-library
   ;;; cache, which library-expander then isn't told of.
   (define library-uncacheable (make-parameter #f))
@@ -3058,7 +3058,7 @@
                                            (if (eq? type 'let-syntax) x (add-subst xrib x))
                                            mr)))
                                      xrhs*)))
-                       ;; PSEUDOSCHEME: was: splice the body forms, wrapped
+                       ;; QUASISCHEME: was: splice the body forms, wrapped
                        ;; in xrib, into this body and go on with RIB.  But
                        ;; a macro's output gets RIB prepended (see the
                        ;; macro cases below), so identifiers from the
@@ -3078,7 +3078,7 @@
                                          lex* rhs* mod** kwd* irib top?)))
                            (for-each
                              (lambda (sym mark* label)
-                               ;; PSEUDOSCHEME: a property's label
+                               ;; QUASISCHEME: a property's label
                                ;; replaces the identifier's (SRFI 213)
                                (if (hashtable-ref property-table label #f)
                                    (rib-rebind! rib (make-stx sym mark* '()) label)
@@ -3095,7 +3095,7 @@
                     ((_ x* ...)
                      (chi-body* (append x* (cdr e*))
                         r mr lex* rhs* mod** kwd* rib top?))))
-                 ;; PSEUDOSCHEME: Chez's (meta define ...): see
+                 ;; QUASISCHEME: Chez's (meta define ...): see
                  ;; chi-meta-definition.
                  ((meta)
                   (let-values (((r mr) (chi-meta-definition e r mr
@@ -3103,7 +3103,7 @@
                     (chi-body* (cdr e*) r mr lex* rhs* mod** kwd* rib top?)))
                  ((library)
                   (stx-error e "a library form is allowed only at top level"))
-                 ;; PSEUDOSCHEME: (alias new old), SRFI 212: NEW is bound
+                 ;; QUASISCHEME: (alias new old), SRFI 212: NEW is bound
                  ;; to OLD's binding (an unbound OLD's too).  OLD can't
                  ;; then be defined in this body, like a keyword used.
                  ((alias)
@@ -3115,7 +3115,7 @@
                        (extend-rib! rib new (or (base-label (id->label old)) (gen-label old)))
                        (chi-body* (cdr e*) r mr lex* rhs* mod** (cons old (cons new kwd*))
                                   rib top?)))))
-                 ;; PSEUDOSCHEME: (define-property id key expr), SRFI 213:
+                 ;; QUASISCHEME: (define-property id key expr), SRFI 213:
                  ;; ID gets a new label, bound as its old one is, with
                  ;; the property; EXPR is evaluated now, as a
                  ;; transformer is.
@@ -3164,7 +3164,7 @@
                                 (let ((id* (car iface)) (lab* (cdr iface)))
                                   (values id* lab*))))
                              (else (stx-error e "invalid import")))))))
-                    ;; PSEUDOSCHEME: as in Chez, a body's import may name
+                    ;; QUASISCHEME: as in Chez, a body's import may name
                     ;; libraries too, (import (only (foo) bar)): their
                     ;; names are bound in the body, in the context of the
                     ;; import keyword
@@ -3223,7 +3223,7 @@
                    (else (shadow-at-top-level id ctxt))))))
             (else (shadow-at-top-level id ctxt)))))))
 
-  ;;; PSEUDOSCHEME: at the REPL, defining an imported name makes a new
+  ;;; QUASISCHEME: at the REPL, defining an imported name makes a new
   ;;; binding in the interaction library that shadows the import, as
   ;;; R7RS REPLs do (it was "cannot modify imported binding").
   (define (shadow-at-top-level id ctxt)
@@ -3267,7 +3267,7 @@
                       (let ((b (make-eval-transformer expanded-rhs)))
                         (set-global-macro-binding! (id->sym id) loc b)
                         (chi-top* (cdr e*) init*))))))
-               ;; PSEUDOSCHEME: was "not supported yet at top level".  The
+               ;; QUASISCHEME: was "not supported yet at top level".  The
                ;; REPL top level has no lexical environment to extend, so
                ;; this expands it as an expression (CHI-EXPR handles
                ;; let-syntax): everything but definitions in its body.
@@ -3278,7 +3278,7 @@
                 (syntax-match e ()
                   ((_ x* ...)
                    (chi-top* (append x* (cdr e*)) init*))))
-               ;; PSEUDOSCHEME: (import <import set> ...) at the REPL adds
+               ;; QUASISCHEME: (import <import set> ...) at the REPL adds
                ;; the bindings to the interaction library, shadowing
                ;; earlier ones (R7RS 5.2).  (The original only had the
                ;; module system's (import <module-id>) here.)
@@ -3293,7 +3293,7 @@
                                 (else spec)))
                             (stx->datum imp*)))
                      (chi-top* (cdr e*) init*)))))
-               ;; PSEUDOSCHEME: (define-property id key expr) at top level:
+               ;; QUASISCHEME: (define-property id key expr) at top level:
                ;; ID's name in the interaction library gets a new label,
                ;; bound as the old one is, with the property
                ((define-property)
@@ -3311,7 +3311,7 @@
                        (extend-library-subst! lib (id->sym id) new)
                        (extend-library-env! lib new b)
                        (chi-top* (cdr e*) init*))))))
-               ;; PSEUDOSCHEME: Chez's (alias new old) at top level: NEW's
+               ;; QUASISCHEME: Chez's (alias new old) at top level: NEW's
                ;; name in the interaction library is OLD's label
                ((alias)
                 (syntax-match e ()
@@ -3320,16 +3320,16 @@
                      (unless (and label lib) (stx-error e "invalid alias"))
                      (extend-library-subst! lib (id->sym new) label)
                      (chi-top* (cdr e*) init*)))))
-               ;; PSEUDOSCHEME: Chez's module at top level (chi-top-module)
+               ;; QUASISCHEME: Chez's module at top level (chi-top-module)
                ((module)
                 (chi-top-module e)
                 (chi-top* (cdr e*) init*))
-               ;; PSEUDOSCHEME: Chez's library as a top-level form, so
+               ;; QUASISCHEME: Chez's library as a top-level form, so
                ;; that a macro can produce one (top-level-library-expander)
                ((library)
                 (top-level-library-expander e)
                 (chi-top* (cdr e*) init*))
-               ;; PSEUDOSCHEME: Chez's (meta define id expr) at top level:
+               ;; QUASISCHEME: Chez's (meta define id expr) at top level:
                ;; evaluated now, and an ordinary global besides
                ((meta)
                 (syntax-match e ()
@@ -3350,7 +3350,7 @@
                    (cons (cons #f (chi-expr e '() '()))
                       init*))))))))))
   
-;;; PSEUDOSCHEME: the bindings of import specs IMP* added to the
+;;; QUASISCHEME: the bindings of import specs IMP* added to the
   ;;; interaction library, shadowing earlier ones.
   (define (import-at-top-level imp*)
     (let-values (((subst lib*) (parse-import-spec* imp*)))
@@ -3360,26 +3360,26 @@
         (reverse subst))
       (for-each (lambda (lib) ((inv-collector) lib) ((vis-collector) lib)) lib*)))
 
-  ;;; PSEUDOSCHEME: Chez's top-level modules, by name: (name . library
+  ;;; QUASISCHEME: Chez's top-level modules, by name: (name . library
   ;;; name), for (import name).
-  ;; PSEUDOSCHEME: Chez's scheme module, all of (scheme) (src/chez/chez.lisp)
+  ;; QUASISCHEME: Chez's scheme module, all of (scheme) (src/chez/chez.lisp)
   (define top-level-modules (make-parameter '((scheme scheme))))
 
-  ;;; PSEUDOSCHEME: Chez's (module name (export ...) body ...) at top
+  ;;; QUASISCHEME: Chez's (module name (export ...) body ...) at top
   ;;; level, expanded as a library of its own that imports what the top
   ;;; level has (a library made of the interaction library's bindings
   ;;; and the source library's).  Without a name, its
   ;;; exports are imported here at once; with one, (import name) does that.
   (define (chi-top-module e)
     (let-values (((name exp-id* b*) (parse-module e)))
-      (let* ((lib-name (list 'pseudoscheme 'module
+      (let* ((lib-name (list 'quasischeme 'module
                              (string->symbol (symbol->string (gensym 'module)))))
              (top-subst (library-subst (interaction-library)))
              (source (interaction-source-name))
              (source-subst (if (library-exists? source)
                                (library-subst (find-library-by-name source))
                                '()))
-             (top-name (list 'pseudoscheme 'module
+             (top-name (list 'quasischeme 'module
                              (string->symbol (symbol->string (gensym 'top)))))
              ;; the top level's bindings, the latest of each name
              (subst (let ((seen (make-eq-hashtable)))
@@ -3475,7 +3475,7 @@
             (export exp* ...)
             (import imp* ...)
             b* ...)
-         ;; PSEUDOSCHEME: an annotated form's header is data; its body
+         ;; QUASISCHEME: an annotated form's header is data; its body
          ;; keeps its annotations
          (and (eq? (strip-annotations export) 'export) (eq? (strip-annotations import) 'import)
               (eq? (strip-annotations library) 'library))
@@ -3588,7 +3588,7 @@
                    ((null? p*) #t)
                    ((null? x) #f)
                    (else 
-                    ;; PSEUDOSCHEME: was (cdr x*), stepping through the
+                    ;; QUASISCHEME: was (cdr x*), stepping through the
                     ;; spec instead of the version being tested.
                     (and ((car p*) (car x)) 
                          (f (cdr p*) (cdr x)))))))))
@@ -3650,14 +3650,14 @@
                   spec*))
              (imp-collector lib)
              (library-subst lib))))
-        ;; PSEUDOSCHEME: (for <import set> <import level> ...) (R6RS 7.1).
+        ;; QUASISCHEME: (for <import set> <import level> ...) (R6RS 7.1).
         ;; With implicit phasing the levels are irrelevant.
         ((for isp . level*) (eq? for 'for)
          (get-import isp))
         ((x x* ...)
          (not (memq x '(for rename except only prefix library)))
          (get-import `(library (,x . ,x*))))
-        ;; PSEUDOSCHEME: a Chez top-level module's name, as in
+        ;; QUASISCHEME: a Chez top-level module's name, as in
         ;; (only scheme list)
         (spec (and (symbol? spec) (assq spec (top-level-modules)))
          (get-import `(library ,(cdr (assq spec (top-level-modules))))))
@@ -3713,7 +3713,7 @@
     (lambda (e* rib top?)
       (let-values (((e* r mr lex* rhs* mod** _kwd*)
                     (chi-body* e* '() '() '() '() '() '() rib top?)))
-        ;; PSEUDOSCHEME: in top-level mode every expression became a
+        ;; QUASISCHEME: in top-level mode every expression became a
         ;; dummy definition; keep a final one as the body's value.
         (let-values (((e* lex* rhs*)
                       (if (and top? (null? e*) (pair? rhs*)
@@ -3723,11 +3723,11 @@
           (values (append (apply append (reverse mod**)) e*)
              r mr (reverse lex*) (reverse rhs*))))))
   
-  ;;; PSEUDOSCHEME: ((lexical . location) ...) for the exported
+  ;;; QUASISCHEME: ((lexical . location) ...) for the exported
   ;;; variables of the library being expanded.
   (define library-export-locs (make-parameter '()))
 
-  ;;; PSEUDOSCHEME: B* may be syntax objects already wrapped for the top
+  ;;; QUASISCHEME: B* may be syntax objects already wrapped for the top
   ;;; level (WRAPPED?, a library a macro produced there), which get only
   ;;; the library's rib.
   (define library-body-expander
@@ -3742,12 +3742,12 @@
                 (vtc (make-collector)))
             (parameterize ((inv-collector rtc)
                            (vis-collector vtc))
-              ;; PSEUDOSCHEME: #t (top-level-program mode) lets
+              ;; QUASISCHEME: #t (top-level-program mode) lets
               ;; definitions and expressions interleave, as R7RS library
               ;; bodies may; for R6RS bodies that's a harmless extension.
               (let-values (((init* r mr lex* rhs*)
                             (chi-library-internal b* rib #t)))
-               ;; PSEUDOSCHEME: exported variables get their global
+               ;; QUASISCHEME: exported variables get their global
                ;; locations now, so that a set! in the library can update
                ;; the location as well (see chi-set!), and importers see
                ;; the new value; psyntax copied each variable to its
@@ -3778,7 +3778,7 @@
                                 (build-exports global* init*)))
                             (invoke-definitions 
                              (map build-global-define (map cdr global*))))
-                        ;; PSEUDOSCHEME: every imported library is
+                        ;; QUASISCHEME: every imported library is
                         ;; invoked, not only those whose variables are
                         ;; referenced: R7RS libraries may rely on the
                         ;; side effects of their imports' bodies.
@@ -3795,7 +3795,7 @@
       (let-values (((name* exp* imp* b*) (parse-library e)))
         (core-library-expander-parts name* exp* imp* b* #f))))
 
-  ;;; PSEUDOSCHEME: whether the library being expanded is a top-level
+  ;;; QUASISCHEME: whether the library being expanded is a top-level
   ;;; module (chi-top-module)
   (define expanding-top-module (make-parameter #f))
 
@@ -3804,7 +3804,7 @@
         (let-values (((name ver) (parse-library-name name*)))
           (let-values (((imp* invoke-req* visit-req* invoke-code
                               visit-code export-subst export-env)
-                        ;; PSEUDOSCHEME: a library expanded while the REPL
+                        ;; QUASISCHEME: a library expanded while the REPL
                         ;; runs (imported there) doesn't see the REPL's
                         ;; bindings: its unbound identifiers stay unbound
                         ;; -- except a top-level module's: what a macro
@@ -3843,7 +3843,7 @@
   (define environment?
     (lambda (x) (env? x)))
 
-  ;;; PSEUDOSCHEME: Ikarus's environment-symbols, the names an
+  ;;; QUASISCHEME: Ikarus's environment-symbols, the names an
   ;;; environment binds, for the (ikarus) compatibility library.
   (define environment-symbols
     (lambda (x)
@@ -3897,7 +3897,7 @@
   ;;; This is R6RS's eval.  It takes an expression and an environment,
   ;;; expands the expression, invokes its invoke-required libraries and
   ;;; evaluates its expanded core form.
-  ;;; PSEUDOSCHEME: as in Chez, the environment is optional; without one,
+  ;;; QUASISCHEME: as in Chez, the environment is optional; without one,
   ;;; or with one that isn't psyntax's (the host's interaction
   ;;; environment), eval calls (eval-hook) with the expression and the
   ;;; environment or #f.
@@ -3916,7 +3916,7 @@
     (make-parameter
       (lambda (x env) (error 'eval "not an environment" env))))
 
-  ;;; PSEUDOSCHEME: psyntax's state (the library table, the interaction
+  ;;; QUASISCHEME: psyntax's state (the library table, the interaction
   ;;; library, its parameters) is global, so one thread at a time may
   ;;; expand.  The host sets this hook to call its thunk holding a
   ;;; recursive lock, which its eval-core lets go of while expanded code
@@ -3931,7 +3931,7 @@
   (define (library-expander x)
     (library-expander-with (lambda () (core-library-expander x))))
 
-  ;;; PSEUDOSCHEME: Chez's library as a top-level form, which a macro may
+  ;;; QUASISCHEME: Chez's library as a top-level form, which a macro may
   ;;; have produced: its body keeps its syntax (an identifier the macro
   ;;; put there refers to what it did where the macro was defined); its
   ;;; name, exports and imports are data.
@@ -3978,7 +3978,7 @@
            (lambda () (visit! macro*))
            (lambda () (eval-core (expanded->core invoke-code)))
            #t)
-        ;; PSEUDOSCHEME: for compiled libraries (library-manager.ss).
+        ;; QUASISCHEME: for compiled libraries (library-manager.ss).
         ;; The code is passed as thunks: converting it to core forms
         ;; looks up primitives, which a bootstrap may not have.
         (unless (vector-ref uncacheable 0)
@@ -4053,7 +4053,7 @@
                      global*
                      (cons (cons loc (binding-value b)) macro*))))
                (($rtd $module) (f (cdr r) (cons x env) global* macro*))
-               ;; PSEUDOSCHEME: a compile-time value: a global macro whose
+               ;; QUASISCHEME: a compile-time value: a global macro whose
                ;; value is ($ctv . value)
                (($ctv)
                 (let ((loc (gensym)))
@@ -4096,7 +4096,7 @@
       (error 'expander "invalid syntax"
           (stx->datum x) (apply string-append args))))
   
-  ;;; PSEUDOSCHEME: a bare symbol is an identifier to the expander
+  ;;; QUASISCHEME: a bare symbol is an identifier to the expander
   ;;; (id?), but not to identifier?: only a syntax object is.
   (define identifier? (lambda (x) (and (stx? x) (id? x))))
   
@@ -4117,7 +4117,7 @@
             (for-each invoke-library lib*)
             (eval-core (expanded->core invoke-code)))))))
 
-  ;;; PSEUDOSCHEME: a top-level program expanded but not run, for Chez's
+  ;;; QUASISCHEME: a top-level program expanded but not run, for Chez's
   ;;; compile-program: a list of the specs (id name version) of the
   ;;; libraries it invokes, in order, and its core form.
   (define expand-r6rs-top-level
@@ -4132,15 +4132,15 @@
   ;;; that serves as the base for an r5rs-like top-level environment.
   ;;; The identifiers in the top-level library are copied on demand from
   ;;; the (ikarus) library which contains all the public bindings of the
-  ;;; system.  PSEUDOSCHEME: (pseudoscheme) and (pseudoscheme interaction)
+  ;;; system.  QUASISCHEME: (quasischeme) and (quasischeme interaction)
   ;;; here.
 
   (define interaction-library (make-parameter #f))
 
-  ;;; PSEUDOSCHEME: which library is the REPL's, and which one unknown
+  ;;; QUASISCHEME: which library is the REPL's, and which one unknown
   ;;; names are copied from on demand; R6RS and R7RS sessions differ.
-  (define interaction-library-name (make-parameter '(pseudoscheme interaction)))
-  (define interaction-source-name (make-parameter '(pseudoscheme)))
+  (define interaction-library-name (make-parameter '(quasischeme interaction)))
+  (define interaction-source-name (make-parameter '(quasischeme)))
 
   (define (interaction-sym->label sym) 
     (cond
@@ -4167,7 +4167,7 @@
                    label))))))))
       (else #f)))
 
-;;; PSEUDOSCHEME: for the REPL (src/repl/), without adding to the
+;;; QUASISCHEME: for the REPL (src/repl/), without adding to the
   ;;; interaction library as a reference would: the names visible at
   ;;; the top level running, and what one of them is bound to there --
   ;;; #f if nothing, else its binding, (global lib . location),
@@ -4195,7 +4195,7 @@
       (and x
            (or (imported-label->binding (cdr x)) 'variable))))
 
-;;; PSEUDOSCHEME: X expanded at the top level running, as
+;;; QUASISCHEME: X expanded at the top level running, as
   ;;; eval-top-level would before evaluating it: the core forms, a
   ;;; definition's as (define location expression).  (The REPL's
   ;;; ,expand; a definition's name is bound by it, as by evaluating.)

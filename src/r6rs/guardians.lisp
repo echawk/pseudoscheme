@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; Guardians, Chez Scheme's and Guile's: an object registered with a
 ;;;; guardian comes back from it (or a representative does) once nothing
@@ -20,7 +20,7 @@
 ;;;; guarded object comes back in the same round.  Elsewhere than SBCL,
 ;;;; nothing comes back.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defstruct (guardian (:constructor %make-guardian (ordered)))
   ordered
@@ -62,7 +62,7 @@ inaccessible objects the next time they're asked."
 (defun guardian-register (g object &optional (representative object))
   (sb-thread:with-mutex (*guardian-lock*)
     (push (list object representative *collections*) (guardian-entries g)))
-  ps:unspecific)
+  qs:unspecific)
 
 (defun live-guardians ()
   (setq *guardians* (delete-if-not #'sb-ext:weak-pointer-value *guardians*))
@@ -119,7 +119,7 @@ or false."
 	    *asked-collection* nil)
       (find-inaccessible-objects)
       (setq *last-search-time* (get-internal-real-time)))
-    (if (guardian-ready g) (pop (guardian-ready g)) ps:false)))
+    (if (guardian-ready g) (pop (guardian-ready g)) qs:false)))
 
 (defun guardian-unregister (g)
   "Stop G guarding its objects: a list of them (not yet inaccessible)."

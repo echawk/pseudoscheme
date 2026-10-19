@@ -1,4 +1,4 @@
-;;; SRFI 260: Generated symbols.  Written for Pseudoscheme, after Marc
+;;; SRFI 260: Generated symbols.  Written for Quasischeme, after Marc
 ;;; Nieper-Wißkirchen's portable sample implementation (MIT), which this
 ;;; follows: an interned symbol named with 128 random bits from
 ;;; /dev/random, written in hexadecimal after "g:".

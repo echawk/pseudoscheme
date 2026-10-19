@@ -1,4 +1,4 @@
-;;; (language tree-il spec) for Pseudoscheme.  Guile's goes from Tree-IL
+;;; (language tree-il spec) for Quasischeme.  Guile's goes from Tree-IL
 ;;; to CPS or bytecode, for its VM, and so does this one, to `value' too
 ;;; (the bytecode loaded and run by the VM); or, if
 ;;; %compile-value-via-bytecode? says not, Tree-IL goes to `value'
@@ -8,7 +8,7 @@
 ;;; by Guile's own analyzer.  Guile's lowerer (peval and the rest) runs
 ;;; only before its own passes: what it makes of dynamic extents
 ;;; (push-fluid and pop-fluid, prompts) is for its VM.  Written for
-;;; Pseudoscheme (not derived from Guile's source).
+;;; Quasischeme (not derived from Guile's source).
 
 (define-module (language tree-il spec)
   #:use-module (system base language)

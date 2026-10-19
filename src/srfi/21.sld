@@ -1,8 +1,8 @@
-;;; SRFI 21: Real-time multithreading support.  Written for Pseudoscheme:
+;;; SRFI 21: Real-time multithreading support.  Written for Quasischeme:
 ;;; SRFI 18's threads (src/srfi/18.sld, on the host's threads), with
 ;;; SRFI 21's base priority, priority boost and quantum.
 ;;;
-;;; Pseudoscheme's threads are the operating system's, whose scheduler
+;;; Quasischeme's threads are the operating system's, whose scheduler
 ;;; knows nothing of these: each thread has them, a new one its creator's,
 ;;; and they can be read and set, but they don't affect scheduling, and
 ;;; there is no priority inheritance.  A quantum of 0 reads as .01, the
@@ -25,13 +25,13 @@
           join-timeout-exception? abandoned-mutex-exception?
           terminated-thread-exception? uncaught-exception?
           uncaught-exception-reason)
-  (import (scheme base) (scheme case-lambda) (srfi 18) (only (pseudoscheme lisp) lisp-eval-string))
+  (import (scheme base) (scheme case-lambda) (srfi 18) (only (quasischeme lisp) lisp-eval-string))
   (begin
     ;; thread -> #(base-priority priority-boost quantum), weakly
     (define attributes
       (lisp-eval-string "(make-hash-table :test 'eq :weakness :key :synchronized t)"))
-    (define %ref (lisp-eval-string "(lambda (table key) (gethash key table ps:false))"))
-    (define %set! (lisp-eval-string "(lambda (table key value) (setf (gethash key table) value) ps:unspecific)"))
+    (define %ref (lisp-eval-string "(lambda (table key) (gethash key table qs:false))"))
+    (define %set! (lisp-eval-string "(lambda (table key value) (setf (gethash key table) value) qs:unspecific)"))
 
     (define (thread-attributes thread)
       (unless (thread? thread) (error "not a thread" thread))

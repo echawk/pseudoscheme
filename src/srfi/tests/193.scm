@@ -1,4 +1,4 @@
-;;; Tests for SRFI 193, run as a program by bin/pseudoscheme: this file
+;;; Tests for SRFI 193, run as a program by bin/quasischeme: this file
 ;;; is then the script, and the command.
 (import (scheme base) (scheme process-context) (srfi 64) (srfi 193))
 (test-begin "srfi-193")

@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-INTEROP -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-INTEROP -*-
 
 ;;;; Scheme and Common Lisp, both ways (docs/interop.md)
 ;;;;
@@ -9,7 +9,7 @@
 ;;;;   (cl:sort (list 3 1 2) cl:< #:key cl:identity)
 ;;;;
 ;;;; loading the system that defines the package if it isn't there yet
-;;;; (*LISP-SYSTEM-LOADER*), and (pseudoscheme lisp) has the helpers
+;;;; (*LISP-SYSTEM-LOADER*), and (quasischeme lisp) has the helpers
 ;;;; (lisp-true?, lisp-let, lisp-function, ...).
 ;;;;
 ;;;; Lisp calling Scheme: USE-LIBRARY makes a Scheme library a Lisp
@@ -19,7 +19,7 @@
 ;;;;   (srfi-1:filter #'evenp '(1 2 3 4))   ; => (2 4)
 ;;;;
 ;;;; Most values are shared as they are (lists, numbers, strings,
-;;;; vectors, functions...).  Booleans are not: Scheme's #f is PS:FALSE,
+;;;; vectors, functions...).  Booleans are not: Scheme's #f is QS:FALSE,
 ;;;; and Lisp's false is NIL, which is Scheme's ().  So every crossing
 ;;;; converts:
 ;;;;
@@ -35,7 +35,7 @@
 ;;;;   crossing back is unwrapped, so cl:equal reaches MAKE-HASH-TABLE
 ;;;;   as #'EQUAL.
 
-(defpackage "PSEUDOSCHEME-INTEROP"
+(defpackage "QUASISCHEME-INTEROP"
   (:use "COMMON-LISP")
   (:export "SCHEMIFY" "EXPORT-BINDINGS" "IMPORT-INTO-PACKAGE" "*LISP-SYSTEM-LOADER*" "*AUTOLOAD-LISP-SYSTEMS*" "LOAD-LISP-SYSTEM"
 	   "USE-LIBRARY" "LIBRARY-EXPORTS" "VERBATIM" "BOOT"
@@ -43,9 +43,9 @@
 	   "LISP-PREDICATE-NAME-P" "*LISP-PREDICATES*" "*NOT-LISP-PREDICATES*"
 	   "LIBRARY-PACKAGE-NAME" "PARSE-LIBRARY-NAME"))
 
-(in-package "PSEUDOSCHEME-INTEROP")
+(in-package "QUASISCHEME-INTEROP")
 
-(defun ssym (string) (ps:intern-scheme-symbol string))
+(defun ssym (string) (qs:intern-scheme-symbol string))
 
 (defun scheme-false-constant-p (x)
   (and (symbolp x) x (symbol-package x)
@@ -66,14 +66,14 @@ and #t); conses and vectors are copied recursively."
     (null nil)
     ((eql t) t)
     (keyword datum)
-    ((satisfies scheme-false-constant-p) ps:false)
+    ((satisfies scheme-false-constant-p) qs:false)
     ((satisfies scheme-true-constant-p) t)
-    ;; Already Scheme: SCHEME symbols, #f (PS:FALSE), uninterned symbols.
-    (symbol (if (or (eq (symbol-package datum) ps:scheme-package)
-		    (eq datum ps:false)
+    ;; Already Scheme: SCHEME symbols, #f (QS:FALSE), uninterned symbols.
+    (symbol (if (or (eq (symbol-package datum) qs:scheme-package)
+		    (eq datum qs:false)
 		    (null (symbol-package datum)))
 		datum
-		(intern (symbol-name datum) ps:scheme-package)))
+		(intern (symbol-name datum) qs:scheme-package)))
     (cons (cons (schemify (car datum)) (schemify (cdr datum))))
     (simple-vector (map 'simple-vector #'schemify datum))
     (t datum)))
@@ -117,7 +117,7 @@ once; the barrier makes it an error instead.  Escaping works."
   (or (gethash procedure *originals*)
       (gethash procedure *lisp-facing*)
       (let ((f (lambda (&rest args)
-		 (psx::%barrier "Lisp code that called a Scheme procedure"
+		 (qsx::%barrier "Lisp code that called a Scheme procedure"
 		   (multiple-value-call #'values-to-lisp
 		     (apply procedure (mapcar #'to-scheme args)))))))
 	(setf (gethash f *originals*) procedure
@@ -131,7 +131,7 @@ Lisp (TO-LISP); if PREDICATE, a NIL result comes back as #f."
       (let ((f (if predicate
 		   (lambda (&rest args)
 		     (let ((r (apply function (mapcar #'to-lisp args))))
-		       (if (null r) ps:false r)))
+		       (if (null r) qs:false r)))
 		   (lambda (&rest args)
 		     (apply function (mapcar #'to-lisp args))))))
 	(setf (gethash f *originals*) function)
@@ -141,9 +141,9 @@ Lisp (TO-LISP); if PREDICATE, a NIL result comes back as #f."
 (defun to-lisp (x)
   "A Scheme value passed to Lisp.  A condition a Scheme handler got for
 a Lisp error is that Lisp condition again."
-  (cond ((eq x ps:false) nil)
+  (cond ((eq x qs:false) nil)
 	((and (functionp x) (not (gethash x *verbatim*))) (lisp-facing x))
-	((typep x 'structure-object) (or (ps-r6rs::foreign-original x) x))
+	((typep x 'structure-object) (or (qs-r6rs::foreign-original x) x))
 	(t x)))
 
 (defun to-scheme (x)
@@ -248,8 +248,8 @@ lisp-set!.")
   "(setf (ACCESSOR . ARGS) VALUE), ACCESSOR a function from a (cl ...)
 library or a Lisp symbol; any place Lisp's SETF knows works."
   (let* ((sym (cond ((gethash accessor *function-symbols*))
-		    ((and (symbolp accessor) (not (eq (symbol-package accessor) ps:scheme-package))) accessor)
-		    (t (ps:scheme-error "lisp-set!: not a Lisp accessor: ~S" accessor))))
+		    ((and (symbolp accessor) (not (eq (symbol-package accessor) qs:scheme-package))) accessor)
+		    (t (qs:scheme-error "lisp-set!: not a Lisp accessor: ~S" accessor))))
 	 (key (cons sym (length args)))
 	 (setter (or (gethash key *setters*)
 		     (setf (gethash key *setters*)
@@ -283,27 +283,27 @@ is its Lisp symbol."
 	  macros (sort macros #'string< :key #'symbol-name)
 	  others (sort others #'string< :key #'symbol-name))
     (let* ((n (incf *cl-library-count*))
-	   (prims-name (list "pseudoscheme" "cl-primitives" (format nil "~A~D" (package-name package) n)))
+	   (prims-name (list "quasischeme" "cl-primitives" (format nil "~A~D" (package-name package) n)))
 	   (prims '()))
       (dolist (s functions)
 	(let ((global (host-global n s)))
 	  (let ((f (scheme-facing (fdefinition s) (lisp-predicate-name-p (symbol-name s)))))
 	    (setf (gethash f *function-symbols*) s)
-	    (psx:host-set! global f))
-	  (push (cons (ps:invert-case (symbol-name s)) global) prims)))
-      (ps-r7rs::install-host-library prims-name (nreverse prims))
-      (labels ((scheme-name (s) (ssym (ps:invert-case (symbol-name s))))
+	    (qsx:host-set! global f))
+	  (push (cons (qs:invert-case (symbol-name s)) global) prims)))
+      (qs-r7rs::install-host-library prims-name (nreverse prims))
+      (labels ((scheme-name (s) (ssym (qs:invert-case (symbol-name s))))
 	       (r (string) (ssym (concatenate 'string "%%r:" string))))
 	(list* (ssym "library") (cons (ssym "cl") name)
 	       (cons (ssym "export") (mapcar #'scheme-name (append functions variables macros others)))
 	       (list (ssym "import")
 		     (list (ssym "prefix") (list (ssym "rnrs")) (ssym "%%r:"))
 		     (list (ssym "prefix")
-			   (list (ssym "only") (list (ssym "pseudoscheme") (ssym "lisp"))
+			   (list (ssym "only") (list (ssym "quasischeme") (ssym "lisp"))
 				 (ssym "lisp-macro-transformer") (ssym "lisp-variable-transformer")
 				 (ssym "lisp-symbol-transformer"))
 			   (ssym "%%lisp-m:"))
-		     (list (ssym "prefix") (list (ssym "pseudoscheme") (ssym "lisp") (ssym "primitives"))
+		     (list (ssym "prefix") (list (ssym "quasischeme") (ssym "lisp") (ssym "primitives"))
 			   (ssym "%%lisp:"))
 		     (mapcar #'ssym prims-name))
 	       (append
@@ -325,7 +325,7 @@ is its Lisp symbol."
 
 (defun cl-library-hook (name)
   (when (and (consp name) (symbolp (car name))
-	     (string= (ps:scheme-symbol-name (car name)) "cl")
+	     (string= (qs:scheme-symbol-name (car name)) "cl")
 	     (cdr name))
     (cl-library-form (cdr name))))
 
@@ -388,53 +388,53 @@ beginning with a colon is a keyword, as in Lisp."
   "What identifier ID (a syntax object) means inside a call of the Lisp
 macro MACRO: *VARIABLE-MARKER* for a Scheme variable, else a Lisp
 symbol."
-  (let* ((b (funcall (psx:host-ref "psyntax:identifier-binding") id))
-	 (symbol (funcall (psx:host-ref "psyntax:syntax->datum") id))
+  (let* ((b (funcall (qsx:host-ref "psyntax:identifier-binding") id))
+	 (symbol (funcall (qsx:host-ref "psyntax:syntax->datum") id))
 	 (name (symbol-name symbol)))
-    (cond ((and (symbolp b) (string= (ps:scheme-symbol-name b) "variable")) *variable-marker*)
-	  ((and (symbolp b) (string= (ps:scheme-symbol-name b) "unbound")) (lisp-name-symbol symbol macro))
+    (cond ((and (symbolp b) (string= (qs:scheme-symbol-name b) "variable")) *variable-marker*)
+	  ((and (symbolp b) (string= (qs:scheme-symbol-name b) "unbound")) (lisp-name-symbol symbol macro))
 	  ((consp b)
-	   (let ((kind (ps:scheme-symbol-name (car b))))
+	   (let ((kind (qs:scheme-symbol-name (car b))))
 	     (cond ((string= kind "core-prim")
 		    ;; a function of a (cl ...) library is its Lisp symbol
 		    ;; (so it works as a type or class name too); any other
 		    ;; primitive is a Scheme value
 		    (let* ((global (cdr b))
-			   (value (and (symbolp global) (boundp (psx:location global)) (psx:host-ref global))))
+			   (value (and (symbolp global) (boundp (qsx:location global)) (qsx:host-ref global))))
 		      (or (and value (gethash value *function-symbols*))
 			  *variable-marker*)))
 		   ((member kind '("global-macro" "global-macro!") :test #'string=)
 		    (let* ((loc (if (consp (cdr b)) (cddr b) (cdr b)))
-			   (transformer (and (symbolp loc) (boundp (psx:location loc)) (psx:host-ref loc))))
+			   (transformer (and (symbolp loc) (boundp (qsx:location loc)) (qsx:host-ref loc))))
 		      ;; (the symbol may be NIL: cl:nil)
 		      (multiple-value-bind (symbol found)
 			  (if transformer (gethash transformer *lisp-macro-transformers*) (values nil nil))
 			(if found
 			    symbol
-			    (ps:scheme-error "Scheme macro ~A can't be used inside a Lisp macro call"
+			    (qs:scheme-error "Scheme macro ~A can't be used inside a Lisp macro call"
 					     (string-downcase name))))))
-		   (t (let ((meaning (assoc (if (symbolp (cdr b)) (ps:scheme-symbol-name (cdr b)) "")
+		   (t (let ((meaning (assoc (if (symbolp (cdr b)) (qs:scheme-symbol-name (cdr b)) "")
 					    *scheme-syntax-in-lisp* :test #'string=)))
 			(if meaning
 			    (cdr meaning)
-			    (ps:scheme-error "Scheme syntax ~A can't be used inside a Lisp macro call"
-					     (ps:invert-case name))))))))
+			    (qs:scheme-error "Scheme syntax ~A can't be used inside a Lisp macro call"
+					     (qs:invert-case name))))))))
 	  (t (lisp-name-symbol symbol macro)))))
 
 (defun lisp-import-symbol (id)
   "If identifier ID is bound to an export of a (cl ...) library, that
 export's Lisp symbol; the second value says whether it is one (the
 symbol may be NIL)."
-  (let ((b (funcall (psx:host-ref "psyntax:identifier-binding") id)))
+  (let ((b (funcall (qsx:host-ref "psyntax:identifier-binding") id)))
     (when (consp b)
-      (let ((kind (ps:scheme-symbol-name (car b))))
+      (let ((kind (qs:scheme-symbol-name (car b))))
 	(cond ((string= kind "core-prim")
 	       (let* ((global (cdr b))
-		      (value (and (symbolp global) (boundp (psx:location global)) (psx:host-ref global))))
+		      (value (and (symbolp global) (boundp (qsx:location global)) (qsx:host-ref global))))
 		 (and value (gethash value *function-symbols*))))
 	      ((member kind '("global-macro" "global-macro!") :test #'string=)
 	       (let* ((loc (if (consp (cdr b)) (cddr b) (cdr b)))
-		      (transformer (and (symbolp loc) (boundp (psx:location loc)) (psx:host-ref loc))))
+		      (transformer (and (symbolp loc) (boundp (qsx:location loc)) (qsx:host-ref loc))))
 		 (if transformer (gethash transformer *lisp-macro-transformers*) (values nil nil)))))))))
 
 (defun process-compile-time (form placeholders)
@@ -505,19 +505,19 @@ its value.  FORM's compile-time effects happen first, as in a file
 (defun unbound-operator (e)
   "If E is psyntax's error for a call (f ...) of an unbound identifier f,
 that identifier's symbol."
-  (when (typep e 'ps-r7rs::uncaught-raise)
-    (let ((c (ps-r7rs::uncaught-payload e)))
-      (when (ps-r6rs::condition-p* c)
-	(let ((message (ps-r6rs::component-of c "&message"))
-	      (irritants (ps-r6rs::component-of c "&irritants")))
+  (when (typep e 'qs-r7rs::uncaught-raise)
+    (let ((c (qs-r7rs::uncaught-payload e)))
+      (when (qs-r6rs::condition-p* c)
+	(let ((message (qs-r6rs::component-of c "&message"))
+	      (irritants (qs-r6rs::component-of c "&irritants")))
 	  (when (and message irritants
-		     (equal (svref (ps-r6rs::record-values message) 0) "unbound identifier"))
-	    (let ((form (first (svref (ps-r6rs::record-values irritants) 0))))
+		     (equal (svref (qs-r6rs::record-values message) 0) "unbound identifier"))
+	    (let ((form (first (svref (qs-r6rs::record-values irritants) 0))))
 	      (and (consp form) (symbolp (car form)) (car form)))))))))
 
 (defun scheme-bound-p (symbol environment)
   "Does Scheme SYMBOL mean anything in psyntax ENVIRONMENT?"
-  (handler-case (progn (psx:expand symbol environment) t)
+  (handler-case (progn (qsx:expand symbol environment) t)
     (error () nil)))
 
 (defun boolean-constant-p (symbol name)
@@ -550,10 +550,10 @@ reports its name unbound, and the expansion is redone.)"
 	(late-bound '())		; Lisp symbols named by unbound calls
 	(origins (make-hash-table :test 'eq)) ; Scheme symbol -> Lisp symbol
 	(params '()) (args '()))
-    (labels ((lib-name (export) (ssym (concatenate 'string "%%lib:" (ps:scheme-symbol-name export))))
+    (labels ((lib-name (export) (ssym (concatenate 'string "%%lib:" (qs:scheme-symbol-name export))))
 	     (param (key value)
 	       (or (car (find key params :key #'cdr :test #'equal))
-		   (let ((p (ps:intern-scheme-symbol (format nil "%%lisp-~D" (length params)))))
+		   (let ((p (qs:intern-scheme-symbol (format nil "%%lisp-~D" (length params)))))
 		     (push (cons p key) params)
 		     (push value args)
 		     p)))
@@ -567,8 +567,8 @@ reports its name unbound, and the expansion is redone.)"
 		 (symbol
 		  (cond ((lexical-variable-p x env) (param x `(to-scheme ,x)))
 			((assoc x names) (lib-name (cdr (assoc x names))))
-			((eq (symbol-package x) ps:scheme-package) x)
-			((boolean-constant-p x "FALSE") ps:false)
+			((eq (symbol-package x) qs:scheme-package) x)
+			((boolean-constant-p x "FALSE") qs:false)
 			((boolean-constant-p x "TRUE") t)
 			((or (local-function-p x env) (lisp-function-p x))
 			 (param (list 'function x)
@@ -596,8 +596,8 @@ reports its name unbound, and the expansion is redone.)"
 	(setf params '() args '())
 	(let* ((call (cons (lib-name macro-name) (convert-args (cdr form))))
 	       (lambda-form (list (ssym "lambda") (mapcar #'car (reverse params)) call))
-	       (core (handler-case (psx::open-primitives (values (psx:expand lambda-form environment)))
-		       (ps-r7rs::uncaught-raise (e)
+	       (core (handler-case (qsx::open-primitives (values (qsx:expand lambda-form environment)))
+		       (qs-r7rs::uncaught-raise (e)
 			 (let ((lisp-symbol (gethash (unbound-operator e) origins)))
 			   (if (and lisp-symbol (not (member lisp-symbol late-bound)))
 			       (progn (push lisp-symbol late-bound) nil)
@@ -612,13 +612,13 @@ reports its name unbound, and the expansion is redone.)"
 		     (funcall (load-time-value (scheme-lambda-function ',lambda-form ',library))
 			      ,@(reverse args)))
 		  `(multiple-value-call #'values-to-lisp
-		     (funcall ,(scheme-translator:translate core psx:*host*) ,@(reverse args)))))))))))
+		     (funcall ,(scheme-translator:translate core qsx:*host*) ,@(reverse args)))))))))))
 
 (defun macro-environment (library)
   "The environment a Scheme macro's call from Lisp is expanded in: R7RS,
 and LIBRARY's exports prefixed %%lib:."
-  (funcall (psx:host-ref "psyntax:environment")
-	   (list (ssym "pseudoscheme") (ssym "r7rs"))
+  (funcall (qsx:host-ref "psyntax:environment")
+	   (list (ssym "quasischeme") (ssym "r7rs"))
 	   (list (ssym "prefix") library (ssym "%%lib:"))))
 
 (defun scheme-lambda-function (lambda-form library)
@@ -626,7 +626,7 @@ and LIBRARY's exports prefixed %%lib:."
 LIBRARY (MACRO-ENVIRONMENT), is: what a fasl compiled from Lisp code
 calling a Scheme macro computes when it loads (SCHEME-MACRO-EXPANSION)."
   (boot)
-  (psx:host-eval (psx::open-primitives (values (psx:expand lambda-form (macro-environment library))))))
+  (qsx:host-eval (qsx::open-primitives (values (qsx:expand lambda-form (macro-environment library))))))
 
 (defun define-scheme-macro (symbol library macro-name names)
   "Make SYMBOL a Lisp macro for Scheme macro MACRO-NAME of LIBRARY; NAMES
@@ -636,29 +636,29 @@ as for SCHEME-MACRO-EXPANSION."
 	  (scheme-macro-expansion form env library macro-name names))))
 
 ;;; ------------------------------------------------------------------
-;;; (pseudoscheme lisp): helpers for Scheme code
+;;; (quasischeme lisp): helpers for Scheme code
 
 (defun lisp-name (x)
   "A Lisp symbol or package name from a Scheme string or symbol, by the
 symbol case rule: \"equal\" and 'equal both name EQUAL."
   (etypecase x
-    (string (ps:invert-case x))
+    (string (qs:invert-case x))
     (symbol (symbol-name x))))
 
 (defun lisp-symbol (name &optional (package "common-lisp-user"))
   (let ((p (or (find-package (lisp-name package))
-	       (ps:scheme-error "lisp-symbol: no Lisp package ~A" (lisp-name package)))))
+	       (qs:scheme-error "lisp-symbol: no Lisp package ~A" (lisp-name package)))))
     (multiple-value-bind (s status) (find-symbol (lisp-name name) p)
-      (if status s (ps:scheme-error "lisp-symbol: no symbol ~A in ~A" (lisp-name name) (package-name p))))))
+      (if status s (qs:scheme-error "lisp-symbol: no symbol ~A in ~A" (lisp-name name) (package-name p))))))
 
 (defun install-lisp-primitives ()
   (let ((prims '()))
     (macrolet ((prim (name lambda-list &body body)
 		 `(let ((global (concatenate 'string "%lisp:" ,name)))
-		    (psx:defhost global ,lambda-list ,@body)
+		    (qsx:defhost global ,lambda-list ,@body)
 		    (push (cons ,name global) prims))))
-      (prim "lisp-true?" (x) (if (or (null x) (eq x ps:false)) ps:false t))
-      (prim "lisp-false?" (x) (if (or (null x) (eq x ps:false)) t ps:false))
+      (prim "lisp-true?" (x) (if (or (null x) (eq x qs:false)) qs:false t))
+      (prim "lisp-false?" (x) (if (or (null x) (eq x qs:false)) t qs:false))
       (prim "lisp-symbol" (name &optional (package "common-lisp-user")) (lisp-symbol name package))
       (prim "lisp-keyword" (name) (intern (lisp-name name) "KEYWORD"))
       ;; The function itself: Scheme calls it with no conversion.  (Not
@@ -668,26 +668,26 @@ symbol case rule: \"equal\" and 'equal both name EQUAL."
 	    ;; a Lisp symbol, or a Scheme symbol naming a function defined
 	    ;; from Scheme (cl:defun ...), or a name in PACKAGE
 	    (fdefinition (if (and (symbolp name)
-				  (or (not (eq (symbol-package name) ps:scheme-package))
+				  (or (not (eq (symbol-package name) qs:scheme-package))
 				      (fboundp name)))
 			     name
 			     (lisp-symbol name package))))
       (prim "lisp-funcall" (f &rest args) (apply (scheme-facing (to-lisp f) nil) args))
       (prim "lisp-apply" (f &rest args) (apply (scheme-facing (to-lisp f) nil) (apply #'list* args)))
       (prim "lisp-value" (s) (symbol-value s))
-      (prim "set-lisp-value!" (s v) (setf (symbol-value s) (to-lisp v)) ps:unspecific)
+      (prim "set-lisp-value!" (s v) (setf (symbol-value s) (to-lisp v)) qs:unspecific)
       (prim "call-with-lisp-bindings" (symbols values thunk)
 	    (progv symbols (mapcar #'to-lisp values) (funcall thunk)))
       (prim "lisp-eval-string" (string)
 	    (let ((*package* (find-package "COMMON-LISP-USER")))
 	      (eval (read-from-string string))))
-      (prim "lisp-require" (system) (load-lisp-system (lisp-name system)) ps:unspecific)
-      (prim "%lisp-setf!" (accessor value &rest args) (lisp-setf accessor value args) ps:unspecific)
+      (prim "lisp-require" (system) (load-lisp-system (lisp-name system)) qs:unspecific)
+      (prim "%lisp-setf!" (accessor value &rest args) (lisp-setf accessor value args) qs:unspecific)
       ;; for lisp-macro-transformer (src/interop/lisp.sls)
       (prim "%lisp-identifier" (id macro) (lisp-identifier id macro))
-      (prim "%lisp-variable-marker?" (x) (if (eq x *variable-marker*) t ps:false))
+      (prim "%lisp-variable-marker?" (x) (if (eq x *variable-marker*) t qs:false))
       (prim "%lisp-placeholder" (name) (make-symbol (symbol-name name)))
-      (prim "%lisp-literal" (x) (if (eq x ps:false) nil x))
+      (prim "%lisp-literal" (x) (if (eq x qs:false) nil x))
       (prim "%compile-lisp-form" (form placeholders) (compile-lisp-form form placeholders))
       (prim "%register-lisp-macro!" (transformer macro)
 	    ;; psyntax may store a variable transformer's procedure rather
@@ -701,15 +701,15 @@ symbol case rule: \"equal\" and 'equal both name EQUAL."
 	    transformer)
       (prim "%lisp-import-symbol" (id)
 	    (multiple-value-bind (symbol found) (lisp-import-symbol id)
-	      (if found symbol ps:false)))
+	      (if found symbol qs:false)))
       (prim "verbatim" (f) (verbatim f)))
-    (ps-r7rs::install-host-library '("pseudoscheme" "lisp" "primitives") (nreverse prims))
-    (dolist (form (ps-r7rs::read-forms
-		   (asdf:system-relative-pathname :pseudoscheme "src/interop/lisp.sls")))
-      (psx:eval-library form))))
+    (qs-r7rs::install-host-library '("quasischeme" "lisp" "primitives") (nreverse prims))
+    (dolist (form (qs-r7rs::read-forms
+		   (asdf:system-relative-pathname :quasischeme "src/interop/lisp.sls")))
+      (qsx:eval-library form))))
 
 ;;; ------------------------------------------------------------------
-;;; (pseudoscheme clos): CLOS in Scheme's syntax (src/interop/clos.sls).
+;;; (quasischeme clos): CLOS in Scheme's syntax (src/interop/clos.sls).
 ;;; Classes and generic functions are Lisp's own, named by the Scheme
 ;;; symbols, as those (cl:defclass ...) defines from Scheme are; methods
 ;;; are Scheme procedures, called by a Lisp method with what
@@ -726,7 +726,7 @@ symbol case rule: \"equal\" and 'equal both name EQUAL."
 		 (:init-thunk (setf slot (append slot (list :initform `(funcall ,value)))))
 		 (:init-keyword (setf slot (append slot (list :initarg value))))
 		 ((:getter :setter :accessor))	; made in Scheme (clos.sls)
-		 (t (ps:scheme-error "define-class: unknown slot option ~S" key))))
+		 (t (qs:scheme-error "define-class: unknown slot option ~S" key))))
       slot)))
 
 (defun clos-define-class (name supers slots)
@@ -736,8 +736,8 @@ symbol case rule: \"equal\" and 'equal both name EQUAL."
 
 (defun clos-generic (name)
   (when (and (fboundp name) (not (typep (fdefinition name) 'generic-function)))
-    (ps:scheme-error "define-generic: ~A is a function already, not a generic function"
-		     (ps:scheme-symbol-name name)))
+    (qs:scheme-error "define-generic: ~A is a function already, not a generic function"
+		     (qs:scheme-symbol-name name)))
   (ensure-generic-function name))
 
 (defun clos-add-method (name specializers procedure rest)
@@ -745,7 +745,7 @@ symbol case rule: \"equal\" and 'equal both name EQUAL."
 parameter), which calls PROCEDURE with call-next-method and
 next-method-p as procedures, then the arguments."
   (let* ((args (loop for nil in specializers collect (gensym "ARG")))
-	 (rest-var (and (not (eq rest ps:false)) (gensym "REST"))))
+	 (rest-var (and (not (eq rest qs:false)) (gensym "REST"))))
     (eval `(defmethod ,name
 	       (,@(mapcar (lambda (a c) (list a (class-name c))) args specializers)
 		,@(and rest-var (list '&rest rest-var)))
@@ -753,7 +753,7 @@ next-method-p as procedures, then the arguments."
 	      ,procedure
 	      (lambda (&rest next-args)
 		(if next-args (apply #'call-next-method next-args) (call-next-method)))
-	      (lambda () (if (next-method-p) t ps:false))
+	      (lambda () (if (next-method-p) t qs:false))
 	      ,@args ,@(and rest-var (list rest-var)))))
     (fdefinition name)))
 
@@ -770,7 +770,7 @@ next-method-p as procedures, then the arguments."
     (macrolet ((prim (name lambda-list &body body)
 		 ;; exported as %clos:name, which clos.sls wraps
 		 `(let ((global (concatenate 'string "%clos:" ,name)))
-		    (psx:defhost global ,lambda-list ,@body)
+		    (qsx:defhost global ,lambda-list ,@body)
 		    (push (cons global global) prims))))
       (prim "define-class" (name supers slots) (clos-define-class name supers slots))
       (prim "generic" (name) (clos-generic name))
@@ -780,19 +780,19 @@ next-method-p as procedures, then the arguments."
 	    (find-class (cdr (assoc name *clos-builtin-classes* :test #'string=))))
       (prim "make" (class &rest initargs) (apply #'make-instance class initargs))
       (prim "slot-ref" (object slot) (slot-value object slot))
-      (prim "slot-set!" (object slot value) (setf (slot-value object slot) value) ps:unspecific)
-      (prim "slot-bound?" (object slot) (if (slot-boundp object slot) t ps:false))
+      (prim "slot-set!" (object slot value) (setf (slot-value object slot) value) qs:unspecific)
+      (prim "slot-bound?" (object slot) (if (slot-boundp object slot) t qs:false))
       (prim "class-of" (object) (class-of object))
       (prim "class-name" (class) (class-name class))
-      (prim "class?" (x) (if (typep x 'class) t ps:false))
-      (prim "is-a?" (object class) (if (typep object class) t ps:false))
-      (prim "generic?" (x) (if (typep x 'generic-function) t ps:false))
+      (prim "class?" (x) (if (typep x 'class) t qs:false))
+      (prim "is-a?" (object class) (if (typep object class) t qs:false))
+      (prim "generic?" (x) (if (typep x 'generic-function) t qs:false))
       ;; for define-class's slot options, #:getter and the like
-      (prim "keyword-name" (x) (if (keywordp x) (string-downcase (symbol-name x)) ps:false)))
-    (ps-r7rs::install-host-library '("pseudoscheme" "clos" "primitives") (nreverse prims))
-    (dolist (form (ps-r7rs::read-forms
-		   (asdf:system-relative-pathname :pseudoscheme "src/interop/clos.sls")))
-      (psx:eval-library form))))
+      (prim "keyword-name" (x) (if (keywordp x) (string-downcase (symbol-name x)) qs:false)))
+    (qs-r7rs::install-host-library '("quasischeme" "clos" "primitives") (nreverse prims))
+    (dolist (form (qs-r7rs::read-forms
+		   (asdf:system-relative-pathname :quasischeme "src/interop/clos.sls")))
+      (qsx:eval-library form))))
 
 ;;; ------------------------------------------------------------------
 ;;; Lisp calling Scheme
@@ -801,9 +801,9 @@ next-method-p as procedures, then the arguments."
   "A library name given from Lisp -- a list like (srfi 1) or
 (|scheme| |base|), or a string \"(srfi 1)\" -- as psyntax's."
   (let ((name (if (stringp name)
-		  (with-input-from-string (in name) (funcall ps:*scheme-read* in))
+		  (with-input-from-string (in name) (funcall qs:*scheme-read* in))
 		  (schemify name))))
-    (ps-r7rs::translate-name name)))
+    (qs-r7rs::translate-name name)))
 
 (defun library-package-name (name)
   "(srfi :1) -> \"SRFI-1\", (scheme list) -> \"SCHEME-LIST\"."
@@ -816,13 +816,13 @@ next-method-p as procedures, then the arguments."
 (defun export-bindings (name)
   "((symbol kind value) ...) for library NAME: KIND is :procedure,
 :variable (VALUE a function returning the current value) or :syntax."
-  (ps-r7rs::boot)
-  (loop for (sym type val) in (funcall (psx:host-ref "psyntax:library-export-bindings") name)
-	for tname = (ps:scheme-symbol-name type)
+  (qs-r7rs::boot)
+  (loop for (sym type val) in (funcall (qsx:host-ref "psyntax:library-export-bindings") name)
+	for tname = (qs:scheme-symbol-name type)
 	collect (cond ((member tname '("global" "core-prim") :test #'string=)
 		       ;; a global's value is (library . location)
 		       (let ((getter (let ((v (if (consp val) (cdr val) val)))
-				       (lambda () (psx:host-ref v)))))
+				       (lambda () (qsx:host-ref v)))))
 			 (if (functionp (funcall getter))
 			     (list sym :procedure (funcall getter))
 			     (list sym :variable getter))))
@@ -914,7 +914,7 @@ prefix or rename."
       (multiple-value-bind (s status) (find-symbol (first b) pkg)
 	(when (and status (not (eq (symbol-package s) pkg)))
 	  (error "Importing ~A into ~A would redefine ~S; use except, prefix or rename"
-		 (ps:scheme-symbol-name (third b)) package-name s))))
+		 (qs:scheme-symbol-name (third b)) package-name s))))
     (dolist (b bindings)
       (destructuring-bind (lisp-name library export kind value) b
 	(let ((s (intern lisp-name pkg)))
@@ -931,12 +931,12 @@ prefix or rename."
 (defvar *booted-host* nil)
 
 (defun boot ()
-  "Install (pseudoscheme lisp) and the (cl ...) hook, once per host."
-  (ps-r7rs::boot)
-  (unless (eq *booted-host* psx:*host*)
-    (pushnew 'cl-library-hook ps-r7rs::*virtual-libraries*)
-    (let ((psx::*full-continuations* nil))
+  "Install (quasischeme lisp) and the (cl ...) hook, once per host."
+  (qs-r7rs::boot)
+  (unless (eq *booted-host* qsx:*host*)
+    (pushnew 'cl-library-hook qs-r7rs::*virtual-libraries*)
+    (let ((qsx::*full-continuations* nil))
       (install-lisp-primitives)
       (install-clos-primitives))
-    (setq *booted-host* psx:*host*))
+    (setq *booted-host* qsx:*host*))
   t)

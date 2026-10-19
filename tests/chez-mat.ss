@@ -1,4 +1,4 @@
-;;; chez-mat.ss: a mat.ss for Pseudoscheme's --chez mode.
+;;; chez-mat.ss: a mat.ss for Quasischeme's --chez mode.
 ;;;
 ;;; Chez Scheme's mats (vendor/chez-mats/*.ms) are run by the mat macro
 ;;; of vendor/chez-mats/mat.ss, which counts nothing and writes its
@@ -13,12 +13,12 @@
 ;;;   fail     it was false, or raised no error where one was expected
 ;;;   error    it raised an unexpected condition
 ;;;   unbound  it referred to a name not bound here (a missing export)
-;;;   unsup    it needs something Pseudoscheme won't have: a `#%$`
+;;;   unsup    it needs something Quasischeme won't have: a `#%$`
 ;;;            system primitive, the compiler's output files, the
 ;;;            inspector, ... (decided from the clause's text, by
 ;;;            `unsupported-clause?`)
 ;;;
-;;; Run it as tests/run-chez-mats.sh does: `pseudoscheme --chez
+;;; Run it as tests/run-chez-mats.sh does: `quasischeme --chez
 ;;; tests/chez-mat.ss FILE.ms`.  The helper definitions below follow
 ;;; vendor/chez-mats/mat.ss (Copyright 1984-2017 Cisco Systems, Inc.,
 ;;; Apache License 2.0; see vendor/chez-mats/LICENSE).
@@ -55,7 +55,7 @@
             [(string=? (substring s i (+ i m)) pat) #t]
             [else (loop (+ i 1))]))))
 
-;; clauses that exercise what Pseudoscheme doesn't implement: Chez's
+;; clauses that exercise what Quasischeme doesn't implement: Chez's
 ;; compiler and its files, the inspector, `#%$` system primitives
 (define unsupported-patterns
   '("#%$" "mat/cf" "compile-script"

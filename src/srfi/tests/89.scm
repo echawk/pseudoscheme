@@ -1,6 +1,6 @@
 ;;; Tests for SRFI 89, from the examples in the SRFI document.  Keywords
 ;;; are written name: in parameter lists, as in the SRFI, and passed as
-;;; #:name (Pseudoscheme has no SRFI 88; see 89.sld).
+;;; #:name (Quasischeme has no SRFI 88; see 89.sld).
 (import (scheme base) (scheme process-context) (scheme write)
         (srfi 64) (srfi 89))
 (test-begin "srfi-89")

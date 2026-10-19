@@ -7,7 +7,7 @@
 # on a tiny score:
 #   1. `reference`: on real Guile; it makes demo.pdf.
 #   2. `ours`: the same binary with LD_LIBRARY_PATH on our libguile
-#      (build/libguile), which starts Lisp on pseudoscheme-guile.core.
+#      (build/libguile), which starts Lisp on quasischeme-guile.core.
 # Each step's output is in $LOGS (/logs), as is how far ours got.  Ours
 # compiles Guile's and LilyPond's modules the first time (some 35 s) into
 # a cache in /root/.cache, as LilyPond's own XDG_CACHE_HOME is in its
@@ -23,9 +23,9 @@ cp src/libguile/missing.lisp "$LOGS/"
 make -C src/libguile core BUILD="$PWD/build/libguile" > "$LOGS/core-build.log" 2>&1 \
   || { echo "core: build failed (core-build.log)"; exit 1; }
 
-PSEUDOSCHEME_GUILE_CACHE_DIRECTORY=${PSEUDOSCHEME_GUILE_CACHE_DIRECTORY:-$HOME/.cache/pseudoscheme/lilypond-guile}
-PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=${PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY:-$HOME/.cache/pseudoscheme/lilypond-libraries}
-export PSEUDOSCHEME_GUILE_CACHE_DIRECTORY PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY
+QUASISCHEME_GUILE_CACHE_DIRECTORY=${QUASISCHEME_GUILE_CACHE_DIRECTORY:-$HOME/.cache/quasischeme/lilypond-guile}
+QUASISCHEME_LIBRARY_CACHE_DIRECTORY=${QUASISCHEME_LIBRARY_CACHE_DIRECTORY:-$HOME/.cache/quasischeme/lilypond-libraries}
+export QUASISCHEME_GUILE_CACHE_DIRECTORY QUASISCHEME_LIBRARY_CACHE_DIRECTORY
 mkdir -p "$LOGS/reference" "$LOGS/ours"
 cp tests/lilypond/demo.ly "$LOGS/reference/" && cp tests/lilypond/demo.ly "$LOGS/ours/"
 
@@ -34,8 +34,8 @@ echo "reference: real Guile"
 echo "  exit $?; $(ls "$LOGS/reference"/*.pdf 2>/dev/null | wc -l) pdf"
 
 echo "ours: LD_LIBRARY_PATH=build/libguile"
-(cd "$LOGS/ours" && PSEUDOSCHEME_LIBGUILE_TRACE=${TRACE:-0} PSEUDOSCHEME_LIBGUILE_TRACE_AFTER=${TRACE_AFTER:-0} LD_LIBRARY_PATH=$OLDPWD/build/libguile \
-   PSEUDOSCHEME_GUILE_CORE=$OLDPWD/build/libguile/pseudoscheme-guile.core \
+(cd "$LOGS/ours" && QUASISCHEME_LIBGUILE_TRACE=${TRACE:-0} QUASISCHEME_LIBGUILE_TRACE_AFTER=${TRACE_AFTER:-0} LD_LIBRARY_PATH=$OLDPWD/build/libguile \
+   QUASISCHEME_GUILE_CORE=$OLDPWD/build/libguile/quasischeme-guile.core \
    timeout "${STEP_LIMIT:-600}" "$LILYPOND" demo.ly) > "$LOGS/ours.log" 2>&1
 status=$?
 echo "  exit $status; $(ls "$LOGS/ours"/*.pdf 2>/dev/null | wc -l) pdf"

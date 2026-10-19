@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs conditions (6)) and (rnrs exceptions (6)), library report
 ;;;; chapter 7, plus the i/o condition types of 8.1 and the base library's
@@ -9,7 +9,7 @@
 ;;;; psyntax's (record-type-descriptor &foo) and DEFINE-CONDITION-TYPE
 ;;;; refer to host globals &foo-rtd and &foo-rcd, defined here.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defstruct (compound-condition (:constructor %make-compound (components)))
   components)
@@ -36,12 +36,12 @@
 (defprim "condition" (&rest conditions)
   (let ((all (loop for c in conditions
 		   do (unless (condition-p* c)
-			(ps:scheme-error "condition: not a condition: ~S" c))
+			(qs:scheme-error "condition: not a condition: ~S" c))
 		   append (components c))))
     (if (= (length all) 1) (car all) (%make-compound all))))
 
 (defprim "simple-conditions" (c)
-  (unless (condition-p* c) (ps:scheme-error "simple-conditions: not a condition: ~S" c))
+  (unless (condition-p* c) (qs:scheme-error "simple-conditions: not a condition: ~S" c))
   (copy-list (components c)))
 
 (defprim "condition?" (x) (bool (condition-p* x)))
@@ -57,7 +57,7 @@
 (defun condition-accessor* (rtd proc)
   (lambda (c)
     (let ((s (find-if (lambda (s) (rtd-descends-p (record-rtd s) rtd)) (components c))))
-      (unless s (ps:scheme-error "condition accessor: ~S has no ~A component" c (rtd-name rtd)))
+      (unless s (qs:scheme-error "condition accessor: ~S has no ~A component" c (rtd-name rtd)))
       (funcall proc s))))
 
 (defprim "condition-accessor" (rtd proc)
@@ -70,15 +70,15 @@
 (defvar *condition-types* (make-hash-table :test 'equal)
   "\"&name\" -> rtd")
 
-(defun scheme-sym (string) (ps:intern-scheme-symbol string))
+(defun scheme-sym (string) (qs:intern-scheme-symbol string))
 
 (defun define-condition-type* (name parent fields constructor predicate accessors)
   (let* ((parent-rtd (and parent (gethash parent *condition-types*)))
 	 (rtd (funcall (prim "make-record-type-descriptor")
-		       (scheme-sym name) (or parent-rtd ps:false) ps:false ps:false ps:false
+		       (scheme-sym name) (or parent-rtd qs:false) qs:false qs:false qs:false
 		       (map 'simple-vector (lambda (f) (list (scheme-sym "immutable") (scheme-sym f)))
 			    fields)))
-	 (rcd (funcall (prim "make-record-constructor-descriptor") rtd ps:false ps:false)))
+	 (rcd (funcall (prim "make-record-constructor-descriptor") rtd qs:false qs:false)))
     (setf (gethash name *condition-types*) rtd)
     (register-primitive (format nil "~A-rtd" name) rtd)
     (register-primitive (format nil "~A-rcd" name) rcd)
@@ -147,20 +147,20 @@
 (defun make-standard-condition (kind who message irritants)
   (apply (prim "condition")
 	 (append (list (funcall (prim kind)))
-		 (if (and who (not (eq who ps:false)))
+		 (if (and who (not (eq who qs:false)))
 		     (list (funcall (prim "make-who-condition") who))
 		     '())
 		 (list (funcall (prim "make-message-condition") message)
 		       (funcall (prim "make-irritants-condition") irritants)))))
 
 (defun r6rs-assertion-violation (who message &rest irritants)
-  (ps-r7rs:raise-object (make-standard-condition "make-assertion-violation" who message irritants) nil))
+  (qs-r7rs:raise-object (make-standard-condition "make-assertion-violation" who message irritants) nil))
 
 (defprim "error" (who &optional (message "" message-p) &rest irritants)
   ;; Tolerate a lone argument, which some of psyntax's own calls pass.
   (if message-p
-      (ps-r7rs:raise-object (make-standard-condition "make-error" who message irritants) nil)
-      (ps-r7rs:raise-object (make-standard-condition "make-error" ps:false who '()) nil)))
+      (qs-r7rs:raise-object (make-standard-condition "make-error" who message irritants) nil)
+      (qs-r7rs:raise-object (make-standard-condition "make-error" qs:false who '()) nil)))
 
 (defprim "assertion-violation" (who message &rest irritants)
   (apply #'r6rs-assertion-violation who message irritants))
@@ -168,25 +168,25 @@
 (defun syntax-object-p (x)
   "Whether X is one of psyntax's syntax objects (see compat.ss)."
   (and (record-p x) (rtd-uid (record-rtd x))
-       (string= (ps:scheme-symbol-name (rtd-uid (record-rtd x))) "psyntax-record-stx")))
+       (string= (qs:scheme-symbol-name (rtd-uid (record-rtd x))) "psyntax-record-stx")))
 
 (defun form-name (form)
   "Who a syntax violation is by when its WHO is #f (11.18): FORM if it's
 an identifier, or the identifier in its car."
   (flet ((datum (x) (ignore-errors (funcall (r6rs-global "psyntax:syntax->datum") x))))
     (let ((datum (datum form)))
-      (cond ((and (syntax-object-p form) (ps:scheme-symbol-p datum)) datum)
-	    ((and (consp datum) (ps:scheme-symbol-p (car datum))
+      (cond ((and (syntax-object-p form) (qs:scheme-symbol-p datum)) datum)
+	    ((and (consp datum) (qs:scheme-symbol-p (car datum))
 		  (or (syntax-object-p form) (and (consp form) (syntax-object-p (car form)))))
 	     (car datum))
-	    (t ps:false)))))
+	    (t qs:false)))))
 
-(defprim "syntax-violation" (who message form &optional (subform ps:false))
-  (when (eq who ps:false) (setq who (form-name form)))
-  (ps-r7rs:raise-object
+(defprim "syntax-violation" (who message form &optional (subform qs:false))
+  (when (eq who qs:false) (setq who (form-name form)))
+  (qs-r7rs:raise-object
    (funcall (prim "condition")
 	    (funcall (prim "make-syntax-violation") form subform)
-	    (if (eq who ps:false)
+	    (if (eq who qs:false)
 		(funcall (prim "make-message-condition") message)
 		(funcall (prim "condition")
 			 (funcall (prim "make-who-condition") who)
@@ -239,8 +239,8 @@ function (#f is a symbol) or as a type error expecting a function."
   (flet ((plain () (values (remove #\Newline (let ((*print-circle* t)) (princ-to-string c))) '())))
     (typecase c
       ((or undefined-function unbound-variable)
-       (if (eq (cell-error-name c) ps:false)
-	   (values "attempt to apply non-procedure" (list ps:false))
+       (if (eq (cell-error-name c) qs:false)
+	   (values "attempt to apply non-procedure" (list qs:false))
 	   (let ((name (unbound-source-name c)))
 	     (if name
 		 (values (format nil "variable ~a is not bound" name) '())
@@ -252,7 +252,7 @@ function (#f is a symbol) or as a type error expecting a function."
 	     ((member (type-error-expected-type c) '(cons list))
 	      (values "not a pair" (list (type-error-datum c))))
 	     (t (plain))))
-      ;; THROW to a dead tag: see PS:CALL-WITH-ESCAPE
+      ;; THROW to a dead tag: see QS:CALL-WITH-ESCAPE
       (control-error
        (values "continuation invoked after its extent ended (continuations are escape-only)" '()))
       (t (plain)))))
@@ -268,17 +268,17 @@ function (#f is a symbol) or as a type error expecting a function."
 	  (syntax (component-of c "&syntax")))
       (format stream "~:[~;~:*~A: ~]~A~{ ~S~}~@[~%  in form: ~S~]~%  [~{~A~^ ~}]"
 	      (and who (let ((w (svref (record-values who) 0)))
-			 (if (symbolp w) (ps:scheme-symbol-name w) w)))
+			 (if (symbolp w) (qs:scheme-symbol-name w) w)))
 	      (if message (svref (record-values message) 0) "")
 	      (if irritants (svref (record-values irritants) 0) '())
 	      (and syntax (svref (record-values syntax) 0))
-	      (mapcar (lambda (s) (ps:scheme-symbol-name (rtd-name (record-rtd s)))) (components c))))
+	      (mapcar (lambda (s) (qs:scheme-symbol-name (rtd-name (record-rtd s)))) (components c))))
     t))
 
 (defun install-exception-hooks ()
-  (setq ps-r7rs:*condition-describer* #'describe-condition)
-  (setq ps-r7rs:*foreign-condition-converter* #'foreign-condition
-	ps-r7rs:*non-continuable-condition*
+  (setq qs-r7rs:*condition-describer* #'describe-condition)
+  (setq qs-r7rs:*foreign-condition-converter* #'foreign-condition
+	qs-r7rs:*non-continuable-condition*
 	(lambda (obj)
 	  (funcall (prim "condition")
 		   (funcall (prim "make-non-continuable-violation"))

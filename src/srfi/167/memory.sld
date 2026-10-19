@@ -1,8 +1,8 @@
 ;;; Part of SRFI 167 (see ../167.sld): the sample implementation's
 ;;; srfi/memory.sld, with its include path pointing into
-;;; ../reference/srfi-167/.  And one change, marked PSEUDOSCHEME:
+;;; ../reference/srfi-167/.  And one change, marked QUASISCHEME:
 ;;; memory.scm's (when #f), with no body, is an error in R7RS that
-;;; Pseudoscheme reports, so when is redefined here to allow it.
+;;; Quasischeme reports, so when is redefined here to allow it.
 ;; Copyright © 2019 Amirouche BOUBEKKI <amirouche at hyper dev>
 ;;
 ;;; Permission is hereby granted, free of charge, to any person
@@ -44,8 +44,8 @@
           okvs-hook-on-transaction-commit
           make-default-engine)
 
-  (import (except (scheme base) when))  ; PSEUDOSCHEME: was (scheme base)
-  (begin                                ; PSEUDOSCHEME: added
+  (import (except (scheme base) when))  ; QUASISCHEME: was (scheme base)
+  (begin                                ; QUASISCHEME: added
     (define-syntax when
       (syntax-rules ()
         ((_ test) (if test #f))

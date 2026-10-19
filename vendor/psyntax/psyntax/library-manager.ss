@@ -24,12 +24,12 @@
     find-library-by-name install-library library-spec invoke-library 
     extend-library-subst! extend-library-env! current-library-expander
     current-library-collection
-    ;; PSEUDOSCHEME: exported so the host can set the search path and
+    ;; QUASISCHEME: exported so the host can set the search path and
     ;; the file-name mapping (see psyntax/main.ss).
     library-path file-locator library-locator
-    ;; PSEUDOSCHEME: for compiled libraries (src/library-cache.lisp).
+    ;; QUASISCHEME: for compiled libraries (src/library-cache.lisp).
     library-loader library-expanded-hook
-    ;; PSEUDOSCHEME: for Chez's library-requirements
+    ;; QUASISCHEME: for Chez's library-requirements
     library-requirements)
   (import (rnrs) (psyntax compat) (rnrs r5rs))
 
@@ -42,7 +42,7 @@
       (case-lambda
         (() set)
         ((x) (set! set (set-cons x set)))
-        ;; PSEUDOSCHEME: (collection x 'remove), for redefinition
+        ;; QUASISCHEME: (collection x 'remove), for redefinition
         ((x remove) (set! set (remq x set))))))
 
   (define current-library-collection
@@ -56,7 +56,7 @@
           (error 'current-library-collection "not a procedure" x))
         x)))
 
-;;; PSEUDOSCHEME: library NAME's requirements, as specs (id name version):
+;;; QUASISCHEME: library NAME's requirements, as specs (id name version):
   ;;; (imported visit-required invoke-required)
   (define (library-requirements name)
     (let ((lib (find-library-by-name name)))
@@ -167,7 +167,7 @@
             (error 'library-expander 
                    "not a procedure" f)))))
 
-  ;;; PSEUDOSCHEME: (library-loader) is tried before a library is
+  ;;; QUASISCHEME: (library-loader) is tried before a library is
   ;;; looked for as source: given the library's name, it may install the
   ;;; library itself (from a compiled file) and return #t, or return #f.
   (define library-loader
@@ -178,7 +178,7 @@
             f
             (error 'library-loader "not a procedure" f)))))
 
-  ;;; PSEUDOSCHEME: called by library-expander with everything
+  ;;; QUASISCHEME: called by library-expander with everything
   ;;; install-library needs, and thunks returning the visit and invoke
   ;;; code as core forms:
   ;;; (hook id name ver imp* vis* inv* subst env visit-thunk invoke-thunk).
@@ -253,7 +253,7 @@
           (inv-lib* (map find-library-by-spec/die inv*)))
       (unless (and (symbol? id) (list? name) (list? ver))
         (error 'install-library "invalid spec with id/name/ver" id name ver))
-      ;; PSEUDOSCHEME: a library defined again (at the REPL, or by
+      ;; QUASISCHEME: a library defined again (at the REPL, or by
       ;; reloading a file) replaces the old one, as in Chez Scheme;
       ;; libraries already expanded against the old one keep it.
       (let ((old (find-library-by (lambda (x) (equal? (library-name x) name)))))

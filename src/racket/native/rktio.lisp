@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; rktio: Racket's portable operating-system layer (files, sockets,
 ;;;; processes, polling), in C, which the io layer calls through its
@@ -16,7 +16,7 @@
 ;;;; non-blocking (rktio_std_fd does not), so the host's streams on the
 ;;;; same descriptors still work beside them.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defconstant +rktio-stdin+ 0)
 (defconstant +rktio-stdout+ 1)
@@ -33,8 +33,8 @@
 (defun rktio-library ()
   "The built librktio under build/external/rktio/ (utils/racket/rktio.sh),
 or NIL."
-  (let ((dir (or (uiop:getenv "PSEUDOSCHEME_RKTIO_DIRECTORY")
-		 (namestring (asdf:system-relative-pathname :pseudoscheme "build/external/rktio/")))))
+  (let ((dir (or (uiop:getenv "QUASISCHEME_RKTIO_DIRECTORY")
+		 (namestring (asdf:system-relative-pathname :quasischeme "build/external/rktio/")))))
     (loop for type in '("dylib" "so")
 	  for path = (probe-file (merge-pathnames (format nil "librktio.~A" type)
 						  (uiop:ensure-directory-pathname dir)))
@@ -155,10 +155,10 @@ written."
 		  (if (rktio-poll-read-ready fd)
 		      (let ((chunk (rktio-read fd (length bytes))))
 			(if (eq chunk :eof)
-			    ps:eof-object
+			    qs:eof-object
 			    (progn (replace bytes chunk) (length chunk))))
 		      (native-call "alarm-evt" (+ (epoch-ms) 10))))
-		ps:false
+		qs:false
 		(lambda () *void*))))
     (setf (gethash port *console-ports*) which)
     port))

@@ -1,14 +1,14 @@
 # The REPL
 
-`bin/pseudoscheme` with no program starts a REPL in its mode's language
+`bin/quasischeme` with no program starts a REPL in its mode's language
 (`--r7rs` by default, `--r6rs`, `--r5rs`, `--chez`, `--guile`, `--r4rs`
-...). Every mode shares one REPL (src/repl/, the `pseudoscheme/repl`
+...). Every mode shares one REPL (src/repl/, the `quasischeme/repl`
 system). Guile's mode runs Guile's own REPL instead, with the same line
 editor in front of it (below), and so does Racket's (`--racket`, below).
 
 ```
-$ bin/pseudoscheme
-Pseudoscheme 3.0 (r7rs) on SBCL 2.6.9
+$ bin/quasischeme
+Quasischeme 1.0 (r7rs) on SBCL 2.6.9
 Enter ,help for help.
 r7rs> (define (fact n)
         (if (= n 0) 1 (* n (fact (- n 1)))))
@@ -48,7 +48,7 @@ handles:
 - **History.** Up and Down, or Ctrl-P and Ctrl-N, move through the
   history; Up and Down move between lines first within a multi-line
   input. Ctrl-R searches backward as you type. Each language keeps its
-  history in `$XDG_STATE_HOME/pseudoscheme/history-<language>`
+  history in `$XDG_STATE_HOME/quasischeme/history-<language>`
   (`~/.local/state/...`).
 - **Emacs's editing keys:**
 
@@ -137,7 +137,7 @@ along. Completion covers the current module and the modules it uses,
 and after a comma, Guile's meta-commands. The pieces are in
 src/repl/guile.lisp:
 
-- `,mode NAME` switches to another of Pseudoscheme's languages; Guile's
+- `,mode NAME` switches to another of Quasischeme's languages; Guile's
   `,language` is about Guile's own languages.
 - `,describe` falls back, without documentation, to a procedure's
   arguments or a value's type.

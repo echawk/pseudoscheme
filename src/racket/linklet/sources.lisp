@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategy B's linklets from Racket's source tree.
 ;;;;
@@ -13,7 +13,7 @@
 ;;;; layers can be extracted the same way (docs/racket-linklet-compiler.md,
 ;;;; "Status").
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defun c-string-literals (stream)
   "The concatenation of the C string literals in STREAM, unescaped."
@@ -43,7 +43,7 @@
 				 (write-char d out))))))))
 
 (defun derived-expander-file ()
-  (asdf:system-relative-pathname :pseudoscheme "build/external/racket-derived/expander.rktl"))
+  (asdf:system-relative-pathname :quasischeme "build/external/racket-derived/expander.rktl"))
 
 (defun expander-linklet-text ()
   "The expander linklet's source: extracted (DERIVED-EXPANDER-FILE), or
@@ -228,7 +228,7 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 ;;; whose machine code is in the fasl cache (cache.lisp).  The .zo files
 ;;; go under a cache root, current-compiled-file-roots, never into
 ;;; Racket's tree: in the Racket cache's generation (cache.lisp), so a
-;;; change to our code starts afresh and the old ones are pruned.  PSEUDOSCHEME_RACKET_ZO=0 turns them off.
+;;; change to our code starts afresh and the old ones are pruned.  QUASISCHEME_RACKET_ZO=0 turns them off.
 
 (defun zo-root ()
   (uiop:merge-pathnames* "zo/" (racket-cache-directory)))
@@ -238,7 +238,7 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
   (funcall (expander-export "eval") (rsym name)))
 
 (defun install-zo-writer ()
-  (unless (member (uiop:getenv "PSEUDOSCHEME_RACKET_ZO") '("0" "no" "off") :test #'equal)
+  (unless (member (uiop:getenv "QUASISCHEME_RACKET_ZO") '("0" "no" "off") :test #'equal)
     (let* ((root (namestring (zo-root)))
 	   (current-compile (expander-export "current-compile"))
 	   (compile (funcall current-compile))
@@ -252,13 +252,13 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 		 ;; for immediate-eval? #f) to be written; the same code runs
 		 (let* ((name (funcall declare-name))
 			(file (and (truthy name) (rpath-p (funcall resolved-name name))))
-			(compiled (funcall compile stx (if file ps:false immediate-eval?))))
+			(compiled (funcall compile stx (if file qs:false immediate-eval?))))
 		   (when (truthy name)
 		     (let ((path (funcall resolved-name name)))
 		       (when (rpath-p path)
 			 (handler-case (write-zo compiled (rpath-string path) root)
 			   (error (e)
-			     (when (uiop:getenv "PSEUDOSCHEME_RACKET_BACKTRACE")
+			     (when (uiop:getenv "QUASISCHEME_RACKET_BACKTRACE")
 			       (format *error-output* "~&;; no .zo for ~A: ~A~%" (rpath-string path) e)))))))
 		   compiled))))))
 

@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Guile's VM: the machine
 ;;;;
@@ -19,7 +19,7 @@
 ;;;; and SP is the height of the frame's last local, so the frame has
 ;;;; SP - FP locals and the sp-relative slot J is at SP - J.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 ;;; ------------------------------------------------------------------
 ;;; Images: an ELF image's bytes, and its memory as 8-byte cells
@@ -100,12 +100,12 @@ pushes its return address, which would otherwise be a new one each time)."
 into IMAGE."
   (cond ((= (logand bits 3) 2) (sign-extend (ash bits -2) +fixnum-bits+))
 	((= (logand bits #xff) 12) (code-char (ash bits -8)))
-	((= bits +scm-false+) ps:false)
+	((= bits +scm-false+) qs:false)
 	((= bits +scm-null+) '())
-	((= bits +scm-true+) ps:true)
+	((= bits +scm-true+) qs:true)
 	((= bits +scm-unspecified+) *unspecified*)
 	((= bits +scm-undefined+) +unbound+)
-	((= bits +scm-eof+) ps:eof-object)
+	((= bits +scm-eof+) qs:eof-object)
 	((= bits +scm-nil+) *elisp-nil*)
 	((and (zerop (logand bits 7)) image) (image-object image bits))
 	(t (vm-error "can't decode SCM bits ~X" bits))))
@@ -117,17 +117,17 @@ its type)."
   (cond ((and (integerp x) (<= (- (ash 1 61)) x (1- (ash 1 61))))
 	 (logior (ldb (byte 64 0) (ash x 2)) 2))
 	((characterp x) (logior (ash (char-code x) 8) 12))
-	((eq x ps:false) +scm-false+)
+	((eq x qs:false) +scm-false+)
 	((null x) +scm-null+)
-	((eq x ps:true) +scm-true+)
+	((eq x qs:true) +scm-true+)
 	((eq x *unspecified*) +scm-unspecified+)
 	((eq x +unbound+) +scm-undefined+)
-	((eq x ps:eof-object) +scm-eof+)
+	((eq x qs:eof-object) +scm-eof+)
 	((eq x *elisp-nil*) +scm-nil+)
 	(t 8)))
 
 (defun vm-error (format &rest args)
-  (guile-error (ssym "vm-error") ps:false (apply #'format nil format args) '()))
+  (guile-error (ssym "vm-error") qs:false (apply #'format nil format args) '()))
 
 ;;; ------------------------------------------------------------------
 ;;; Programs: compiled procedures
@@ -138,7 +138,7 @@ its type)."
   (:metaclass sb-mop:funcallable-standard-class))
 
 (defun make-vm-program (code nfree)
-  (let ((p (make-instance 'vm-program :code code :free (make-array nfree :initial-element ps:false))))
+  (let ((p (make-instance 'vm-program :code code :free (make-array nfree :initial-element qs:false))))
     (sb-mop:set-funcallable-instance-function p (lambda (&rest args) (vm-apply p args)))
     p))
 
@@ -234,7 +234,7 @@ bits there would otherwise be taken for."
 ;;; The machine
 
 (defstruct (vm (:constructor %make-vm))
-  (stack (make-array 4096 :initial-element ps:false) :type simple-vector)
+  (stack (make-array 4096 :initial-element qs:false) :type simple-vector)
   (fp 0 :type fixnum)
   (sp 0 :type fixnum)
   (compare :none))			; :less, :equal, :none or :invalid
@@ -245,7 +245,7 @@ bits there would otherwise be taken for."
 
 (defun grow-stack (vm height)
   (let* ((stack (vm-stack vm))
-	 (new (make-array (max (* 2 (length stack)) (+ height 1024)) :initial-element ps:false)))
+	 (new (make-array (max (* 2 (length stack)) (+ height 1024)) :initial-element qs:false)))
     (replace new stack)
     (setf (vm-stack vm) new)))
 
@@ -330,7 +330,7 @@ flonum arithmetic is IEEE's whoever calls it."
   (let ((frame (gensym "FRAME")))
     `(let ((,frame (vector :vm nil *vm-activation* ,kind *vm-nested* (vm-fp ,vm) (vm-sp ,vm))))
        (declare (dynamic-extent ,frame))
-       (psx::with-frame (,frame) ,@body))))
+       (qsx::with-frame (,frame) ,@body))))
 
 (defun copy-vm-frame (frame inside)
   "FRAME, a :VM frame, captured: its heights relative to its activation's
@@ -389,12 +389,12 @@ in it, as they were.")
   (case (svref frame 0)
     (:vm (resume-vm-frame-1 (reentry-frame frame) inner))
     (:vm-prompt
-     (if (eq frame psx::*outermost-composed*)
+     (if (eq frame qsx::*outermost-composed*)
 	 ;; the frames inside, a composable continuation, end here; its
 	 ;; stack restored as its own, though composed inside another's
 	 (let ((*vm-reentries* '()))
 	   (resume-delimited frame inner))
-	 (psx::with-frame ((reentry-frame frame)) (funcall inner))))
+	 (qsx::with-frame ((reentry-frame frame)) (funcall inner))))
     ;; a composable continuation's end, captured inside it: it still ends
     ;; there
     (:vm-delimit (resume-delimited frame inner))))
@@ -409,7 +409,7 @@ continuation captured inside."
 	 (*vm-delimit* (list activation (svref frame 3) nil nil))
 	 (marker (vector :vm-delimit nil activation (svref frame 3))))
     (declare (dynamic-extent marker))
-    (psx::with-frame (marker) (funcall inner))))
+    (qsx::with-frame (marker) (funcall inner))))
 
 (defun resume-vm-frame-1 (frame inner)
   (let ((delimit *vm-delimit*))
@@ -420,7 +420,7 @@ continuation captured inside."
       (when (and (eq (svref frame 3) :extent) (eql (svref frame 5) (second delimit)))
 	(setf (fourth delimit) t))))
   (multiple-value-call (lambda (&rest values) (continue-vm-frame frame values))
-    (psx::with-frame (frame) (funcall inner))))
+    (qsx::with-frame (frame) (funcall inner))))
 
 (defun ends-prompt-body-p (ra)
   "Whether the code at RA, where a call returns, only moves the call's
@@ -493,8 +493,8 @@ returns its values."
 	      (when outer
 		(setf (vm-fp vm) (first outer) (vm-sp vm) (second outer)))))))))
 
-(setq psx::*frame-copier* 'copy-vm-frame
-      psx::*frame-resumer* 'resume-vm-frame)
+(setq qsx::*frame-copier* 'copy-vm-frame
+      qsx::*frame-resumer* 'resume-vm-frame)
 
 ;;; ------------------------------------------------------------------
 ;;; Instructions
@@ -684,7 +684,7 @@ values in the frame, and return from it."
 	 (values (multiple-value-list
 		  (if (functionp f)
 		      (with-vm-frame (vm :call) (apply f args))
-		      (guile-error (ssym "wrong-type-arg") ps:false "Wrong type to apply: ~S"
+		      (guile-error (ssym "wrong-type-arg") qs:false "Wrong type to apply: ~S"
 				   (list f) (list f))))))
     (set-frame-size vm (length values))
     (loop for v in values for i from 0 do (setf (vm-local vm i) v))
@@ -723,7 +723,7 @@ values in the frame, and return from it."
   (return-from-frame vm))
 
 (defun values-error (key message)
-  (guile-error (ssym key) ps:false message '()))
+  (guile-error (ssym key) qs:false message '()))
 
 (defop "receive" (dst proc nlocals)
   (when (< (- sp (+ fp proc)) 1) (values-error "vm-error" "Zero values returned to single-valued continuation"))
@@ -740,8 +740,8 @@ values in the frame, and return from it."
 ;;; Prologues
 
 (defun wrong-num-args (vm)
-  (guile-error (ssym "wrong-number-of-args") ps:false "Wrong number of arguments to ~A"
-	       (list (vm-local vm 0)) ps:false))
+  (guile-error (ssym "wrong-number-of-args") qs:false "Wrong number of arguments to ~A"
+	       (list (vm-local vm 0)) qs:false))
 
 (defop "assert-nargs-ee" (n) (unless (= (frame-size vm) n) (wrong-num-args vm)) next)
 (defop "assert-nargs-ge" (n) (unless (>= (frame-size vm) n) (wrong-num-args vm)) next)
@@ -855,7 +855,7 @@ values in the frame, and return from it."
 	     ((integerp x) 279)
 	     ((rationalp x) 1047)
 	     ((complexp x) 791)
-	     ((typep x 'ps-r6rs::octets) (bytevector-header x))
+	     ((typep x 'qs-r6rs::octets) (bytevector-header x))
 	     ((functionp x) 69)
 	     (t 0)))))
 
@@ -875,9 +875,9 @@ values in the frame, and return from it."
 	 (object
 	   (case (logand header #x7f)
 	     (69 (make-vm-program nil (ash header -16)))
-	     (13 (make-array (ash header -8) :initial-element ps:false))
+	     (13 (make-array (ash header -8) :initial-element qs:false))
 	     (7 (make-gvariable))
-	     (55 (make-atomic-box ps:false))
+	     (55 (make-atomic-box qs:false))
 	     (t (vm-error "allocating objects of type ~D isn't supported yet" (logand header #x7f))))))
     ;; words already written (before the header) go to their fields
     (loop for i from 1 below (length words)
@@ -903,12 +903,12 @@ values in the frame, and return from it."
     ;; a symbol: its name's buffer and its hash
     (symbol (if (and x (not (keywordp x)))
 		(ecase i
-		  (1 (make-vm-stringbuf (ps:scheme-symbol-name x)))
+		  (1 (make-vm-stringbuf (qs:scheme-symbol-name x)))
 		  (2 (guile-symbol-hash x)))
 		(vm-error "reading word ~D of ~S isn't supported yet" i x)))
     (vm-stringbuf (ecase i (1 (length (vm-stringbuf-string x)))))
     ;; a bytevector: its length, and a pointer to its contents
-    (ps-r6rs::octets
+    (qs-r6rs::octets
      (ecase i (1 (length x)) (2 (make-vm-pointer x 0))))
     (t (cond ((and (vtable-p x) (member i '(2 6 7))) (vtable-word x i))
 	     ((struct-p x) (svref (struct-slots-of x) (- i 1)))
@@ -925,7 +925,7 @@ are once made), its field count, and the bitmap of its unboxed fields."
     (7 (make-vm-pointer
 	(or (gethash vtable *unboxed-field-maps*)
 	    (setf (gethash vtable *unboxed-field-maps*)
-		  (let* ((layout (ps:scheme-symbol-name (svref (struct-slots-of vtable) +vtable-index-layout+)))
+		  (let* ((layout (qs:scheme-symbol-name (svref (struct-slots-of vtable) +vtable-index-layout+)))
 			 (n (floor (length layout) 2))
 			 (bits (make-array (* 4 (ceiling (max n 1) 32)) :element-type '(unsigned-byte 8)
 										  :initial-element 0)))
@@ -958,7 +958,7 @@ are once made), its field count, and the bitmap of its unboxed fields."
 (defun scm-store (vm obj i value)
   (if (and (raw-object-p obj) (= i 0))
       ;; a pair: its car comes first
-      (let ((pair (cons value (let ((cdr (svref (raw-object-words obj) 1))) (if (eql cdr 0) ps:false cdr)))))
+      (let ((pair (cons value (let ((cdr (svref (raw-object-words obj) 1))) (if (eql cdr 0) qs:false cdr)))))
 	(replace-in-frame vm obj pair))
       (heap-set obj i value)))
 
@@ -978,7 +978,7 @@ struct or a plain one, as VTABLE's flags say."
 (defun struct-from-raw (vm raw vtable)
   "RAW, whose first word now points to VTABLE, as a struct of VTABLE."
   (let* ((words (raw-object-words raw))
-	 (slots (make-array (1- (length words)) :initial-element ps:false)))
+	 (slots (make-array (1- (length words)) :initial-element qs:false)))
     (loop for i from 1 below (length words)
 	  for w = (svref words i)
 	  unless (eql w 0) do (setf (svref slots (1- i)) w))
@@ -1102,7 +1102,7 @@ struct or a plain one, as VTABLE's flags say."
   (unless *intrinsics*
     (let ((table (make-array 256 :initial-element nil)))
       (dolist (entry (bytecode-table "intrinsic-list"))
-	(let ((name (ps:scheme-symbol-name (car entry))))
+	(let ((name (qs:scheme-symbol-name (car entry))))
 	  (setf (svref table (cdr entry))
 		(or (gethash name *intrinsic-definitions*)
 		    (lambda (&rest args)
@@ -1172,18 +1172,18 @@ interface if PUBLIC)."
 	 (module (funcall (root-procedure (if public "resolve-interface" "resolve-module")) module-name))
 	 (v (funcall (root-procedure "module-variable") module name)))
     (unless (and (gvariable-p v) (not (eq (gvariable-value v) +unbound+)))
-      (guile-error (ssym "unbound-variable") ps:false "Unbound variable: ~S" (list name) ps:false))
+      (guile-error (ssym "unbound-variable") qs:false "Unbound variable: ~S" (list name) qs:false))
     v))
 
 (defintrinsic "lookup-bound-public" (module-name name) (lookup-bound module-name name t))
 (defintrinsic "lookup-bound-private" (module-name name) (lookup-bound module-name name nil))
 (defintrinsic "lookup" (module name)
   (let ((v (funcall (root-procedure "module-variable") module name)))
-    (if (gvariable-p v) v ps:false)))
+    (if (gvariable-p v) v qs:false)))
 (defintrinsic "lookup-bound" (module name)
   (let ((v (funcall (root-procedure "module-variable") module name)))
     (unless (and (gvariable-p v) (not (eq (gvariable-value v) +unbound+)))
-      (guile-error (ssym "unbound-variable") ps:false "Unbound variable: ~S" (list name) ps:false))
+      (guile-error (ssym "unbound-variable") qs:false "Unbound variable: ~S" (list name) qs:false))
     v))
 (defintrinsic "resolve-module" (name public)
   (funcall (root-procedure (if (eql public 0) "resolve-module" "resolve-interface")) name))
@@ -1299,7 +1299,7 @@ thunk."
 
 (defun pointer-bytes (p who)
   (let ((base (vm-pointer-base p)))
-    (unless (typep base 'ps-r6rs::octets)
+    (unless (typep base 'qs-r6rs::octets)
       (vm-error "~A of a pointer to ~S isn't supported" who base))
     base))
 
@@ -1363,7 +1363,7 @@ thunk."
 (defop "pointer-ref/immediate" (dst obj i)
   (let ((x (vm-slot vm obj)))
     (setf (vm-slot vm dst)
-	  (cond ((and (typep x 'ps-r6rs::octets) (= i 2)) (make-vm-pointer x 0))
+	  (cond ((and (typep x 'qs-r6rs::octets) (= i 2)) (make-vm-pointer x 0))
 		((and (vtable-p x) (= i 7)) (vtable-word x 7))
 		(t (vm-error "pointer-ref/immediate ~D of ~S isn't supported yet" i x)))))
   next)
@@ -1417,7 +1417,7 @@ thunk."
 (defun throw-value (vm image ip offset value data)
   (let ((v (image-object image (* 4 (+ ip offset)))))
     (funcall (root-procedure "throw") (interned (svref v 0)) (svref v 1) (svref v 2) (list value)
-	     (if data (list value) ps:false))
+	     (if data (list value) qs:false))
     (vm-error "throw returned")))
 (defop "throw/value" (value offset) (throw-value vm image ip offset (vm-slot vm value) nil))
 (defop "throw/value+data" (value offset) (throw-value vm image ip offset (vm-slot vm value) t))
@@ -1458,16 +1458,16 @@ thunk."
 	  do (let ((k (car tail)))
 	       (cond ((keywordp k)
 		      (unless (consp (cdr tail))
-			(guile-error (ssym "keyword-argument-error") ps:false "Keyword argument has no value"
+			(guile-error (ssym "keyword-argument-error") qs:false "Keyword argument has no value"
 				     '() (list k)))
 		      (let ((entry (assoc k alist)))
 			(cond (entry (setf (vm-local vm (cdr entry)) (cadr tail)))
 			      ((not allow-other-keys)
-			       (guile-error (ssym "keyword-argument-error") ps:false "Unrecognized keyword"
+			       (guile-error (ssym "keyword-argument-error") qs:false "Unrecognized keyword"
 					    '() (list k)))))
 		      (setq tail (cddr tail)))
 		     (has-rest (setq tail (cdr tail)))
-		     (t (guile-error (ssym "keyword-argument-error") ps:false "Invalid keyword"
+		     (t (guile-error (ssym "keyword-argument-error") qs:false "Invalid keyword"
 				     '() (list k))))))
     (when has-rest (setf (vm-local vm nreq-and-opt) rest)))
   next)
@@ -1499,8 +1499,8 @@ thunk."
 	   ("$struct-set!/immediate" "struct-set!" (s i x))))
 
 ;; not root bindings in Guile (they're (rnrs bytevectors)'s): the host's
-(defintrinsic "string->utf8" (x) (funcall (psx:host-ref "string->utf8") x))
-(defintrinsic "utf8->string" (x) (funcall (psx:host-ref "utf8->string") x))
+(defintrinsic "string->utf8" (x) (funcall (qsx:host-ref "string->utf8") x))
+(defintrinsic "utf8->string" (x) (funcall (qsx:host-ref "utf8->string") x))
 
 (defintrinsic "logsub" (a b) (funcall (root-procedure "logand") a (funcall (root-procedure "lognot") b)))
 (defintrinsic "lsh" (a n) (funcall (root-procedure "ash") a n))
@@ -1511,7 +1511,7 @@ thunk."
 (defintrinsic "string-utf8-length" (s) (length (sb-ext:string-to-octets s :external-format :utf-8)))
 (defintrinsic "string-set!" (s i c) (funcall (root-procedure "string-set!") s i (code-char c)))
 (defintrinsic "$allocate-struct" (vtable n)
-  (make-struct* vtable (make-list n :initial-element ps:false)))
+  (make-struct* vtable (make-list n :initial-element qs:false)))
 (defintrinsic "s64->f64" (x) (coerce (s64 x) 'double-float))
 (defintrinsic "expand-stack" (&rest args) (declare (ignore args)) nil)
 
@@ -1519,7 +1519,7 @@ thunk."
   "Converting X failed: out of LOW to HIGH if it's an integer that isn't
 within them, else of the wrong type."
   (if (and low (integerp x))
-      (guile-error (ssym "out-of-range") ps:false "Value out of range ~S to< ~S: ~S"
+      (guile-error (ssym "out-of-range") qs:false "Value out of range ~S to< ~S: ~S"
 		   (list low high x) (list x))
       (guile-error (ssym "wrong-type-arg") who "Wrong type argument in position 1: ~S" (list x) (list x))))
 
@@ -1578,8 +1578,8 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
   (make-extent-push
    (lambda (body)
      (let ((w (cons winder nil)))
-       (setf (cdr w) (lambda () (unless (eq psx::*winder-leaving-normally* w) (funcall unwinder))))
-       (psx::winder-extent w body)))))
+       (setf (cdr w) (lambda () (unless (eq qsx::*winder-leaving-normally* w) (funcall unwinder))))
+       (qsx::winder-extent w body)))))
 (defintrinsic "unwind" () :pop-extent)
 (defintrinsic "push-fluid" (fluid value)
   (make-extent-push (lambda (body) (call-with-fluid fluid value body))))
@@ -1597,14 +1597,14 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
     (apply-extent-exit
      vm activation
      (with-vm-frame (vm :extent)
-       (psx::call-with-prompt
+       (qsx::call-with-prompt
 	(vm-slot vm tag)
 	(lambda ()
 	  ;; just inside the prompt: where a composable continuation captured
 	  ;; up to it ends (the frame that returns to this one)
 	  (let ((marker (vector :vm-prompt nil activation saved-fp)))
 	    (declare (dynamic-extent marker))
-	    (psx::with-frame (marker) (run-vm vm (make-code-pointer image next) t))))
+	    (qsx::with-frame (marker) (run-vm vm (make-code-pointer image next) t))))
 	(lambda (k &rest values)
 	  ;; as if returned from a call with the procedure in PROC-SLOT, in
 	  ;; this frame, wherever its activation's stack is now
@@ -1654,7 +1654,7 @@ ESTABLISH takes the body, a thunk, and calls it in the extent."
 (defvar *symbol-hashes* (make-hash-table :test 'equal :synchronized t))
 
 (defun guile-symbol-hash (symbol)
-  (let ((name (ps:scheme-symbol-name symbol)))
+  (let ((name (qs:scheme-symbol-name symbol)))
     (or (gethash name *symbol-hashes*)
 	(setf (gethash name *symbol-hashes*)
 	      (let ((text (uiop:run-program
@@ -1706,9 +1706,9 @@ program's in its image; a Lisp procedure's made up, but the same each time."
 (defextension "scm_init_programs"
   (list (cons "program?" (lambda (x) (bool (typep x 'vm-program))))
 	(cons "program-code" #'procedure-code-address)
-	(cons "primitive-code?" (lambda (x) (declare (ignore x)) ps:false))
+	(cons "primitive-code?" (lambda (x) (declare (ignore x)) qs:false))
 	;; a frame from Lisp's stack (stacks.lisp) is named by its address
-	(cons "primitive-code-name" (lambda (x) (let ((g (lisp-frame-at x))) (if g (gframe-name g) ps:false))))
+	(cons "primitive-code-name" (lambda (x) (let ((g (lisp-frame-at x))) (if g (gframe-name g) qs:false))))
 	(cons "program-num-free-variables"
 	      (lambda (p) (length (program-free (check-program "program-num-free-variables" p)))))
 	(cons "program-free-variable-ref"
@@ -1726,7 +1726,7 @@ program's in its image; a Lisp procedure's made up, but the same each time."
 	(cons "find-mapped-elf-image"
 	      (lambda (address)
 		(let ((image (and (integerp address) (image-at address))))
-		  (if image (vm-image-bytes image) ps:false))))
+		  (if image (vm-image-bytes image) qs:false))))
 	(cons "all-mapped-elf-images" (lambda () (mapcar #'vm-image-bytes *vm-images*)))))
 
 (defparameter *builtins* #("apply" "values" "abort-to-prompt" "call-with-values"
@@ -1734,9 +1734,9 @@ program's in its image; a Lisp procedure's made up, but the same each time."
 
 (defextension "scm_init_vm_builtins"
   (list (cons "builtin-name->index"
-	      (lambda (name) (or (position (ps:scheme-symbol-name name) *builtins* :test #'string=) ps:false)))
+	      (lambda (name) (or (position (qs:scheme-symbol-name name) *builtins* :test #'string=) qs:false)))
 	(cons "builtin-index->name"
-	      (lambda (i) (if (and (integerp i) (< -1 i (length *builtins*))) (ssym (svref *builtins* i)) ps:false)))))
+	      (lambda (i) (if (and (integerp i) (< -1 i (length *builtins*))) (ssym (svref *builtins* i)) qs:false)))))
 
 ;;; A program's name, documentation, properties and arity come from its
 ;;; image's debugging information, which (system vm program) reads.
@@ -1760,12 +1760,12 @@ program's in its image; a Lisp procedure's made up, but the same each time."
   (let ((entry (assoc (ssym "name") (gethash p *procedure-properties* '()))))
     (cond (entry (cdr entry))
 	  ((program-procedure "program-name") (funcall (program-procedure "program-name") p))
-	  (t ps:false))))
+	  (t qs:false))))
 (wrap-for-programs "procedure-documentation" (p)
   (let ((entry (assoc (ssym "documentation") (gethash p *procedure-properties* '()))))
     (cond (entry (cdr entry))
 	  ((program-procedure "program-documentation") (funcall (program-procedure "program-documentation") p))
-	  (t ps:false))))
+	  (t qs:false))))
 (wrap-for-programs "procedure-properties" (p)
   (let ((own (gethash p *procedure-properties* '()))
 	(from-image (if (program-procedure "program-properties")
@@ -1775,7 +1775,7 @@ program's in its image; a Lisp procedure's made up, but the same each time."
 (wrap-for-programs "procedure-minimum-arity" (p)
   (if (program-procedure "program-minimum-arity")
       (funcall (program-procedure "program-minimum-arity") p)
-      (list 0 0 ps:true)))
+      (list 0 0 qs:true)))
 
 ;; Guile's (system vm debug) takes an image's address from its bytevector,
 ;; and objects at addresses in it with pointer->scm

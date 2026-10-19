@@ -1,6 +1,6 @@
 ;;; boot/base.scm -- utilities, tables, records and a model of Common
-;;; Lisp packages, for running Pseudoscheme's translator in a Scheme
-;;; that isn't Pseudoscheme.
+;;; Lisp packages, for running Quasischeme's translator in a Scheme
+;;; that isn't Quasischeme.
 ;;;
 ;;; Everything in boot/ outside hosts/ is written in plain R5RS, using
 ;;; only these from its host adapter (boot/hosts/<name>.scm):
@@ -166,7 +166,7 @@
 ;;;
 ;;; The translator works with CL symbols: it reads Scheme source as
 ;;; symbols in the SCHEME package, and emits code made of symbols in
-;;; PS (the Pseudoscheme package, which exports the CL symbols the
+;;; PS (the Quasischeme package, which exports the CL symbols the
 ;;; translator uses), in the target packages it creates (e.g.
 ;;; SCHEME-TRANSLATOR), and keywords.  Here every CL symbol is a host
 ;;; symbol, so that EQ?, MEMQ, ASSQ and CASE in the translator work
@@ -174,11 +174,11 @@
 ;;; BOOT:SYMBOL-INFO.  Host spellings:
 ;;;
 ;;;   SCHEME::FOO   foo         (an ordinary Scheme symbol)
-;;;   PS:CAR        ps:car      (also COMMON-LISP:CAR, PS-LISP:CAR ...)
+;;;   QS:CAR        qs:car      (also COMMON-LISP:CAR, QS-LISP:CAR ...)
 ;;;   :TEST         :test
 ;;;   P::FOO        p::foo      (any other package P)
 ;;;
-;;; with the name's case inverted, as Pseudoscheme does (core.lisp).
+;;; with the name's case inverted, as Quasischeme does (core.lisp).
 
 ;; A package's fields: #(name nicknames use-list present externals)
 (define boot:package-rtd 'package)
@@ -214,7 +214,7 @@
 (define boot:scheme-package (boot:make-package "SCHEME" '() '()))
 (define boot:keyword-package (boot:make-package "KEYWORD" '() '()))
 (define boot:ps-package
-  (boot:make-package "PS" '("PS-LISP" "PSEUDOSCHEME") '()))
+  (boot:make-package "QS" '("QS-LISP" "QUASISCHEME") '()))
 (define boot:cl-package
   (boot:make-package "COMMON-LISP" '("CL") '()))
 
@@ -255,10 +255,10 @@
     (boot:table-set! (boot:package-present (car info)) (cdr info) sym)
     info))
 
-;; Pseudoscheme's SYMBOL->STRING and STRING->SYMBOL invert case
+;; Quasischeme's SYMBOL->STRING and STRING->SYMBOL invert case
 ;; (core.lisp), and so do these spellings: then the host's own
 ;; SYMBOL->STRING and STRING->SYMBOL, which the translator uses, agree
-;; with Pseudoscheme's.
+;; with Quasischeme's.
 (define (boot:invert-case s)
   (let ((upper? (not (boot:string-every? (lambda (c) (not (char-upper-case? c))) s)))
 	(lower? (boot:has-lower-case? s)))
@@ -272,7 +272,7 @@
     (cond ((eq? package boot:scheme-package)
 	   (if (boot:string-index n #\:) (string-append "scheme::" n) n))
 	  ((eq? package boot:keyword-package) (string-append ":" n))
-	  ((eq? package boot:ps-package) (string-append "ps:" n))
+	  ((eq? package boot:ps-package) (string-append "qs:" n))
 	  ((eq? package boot:cl-package) (string-append "common-lisp:" n))
 	  (else (string-append (boot:string-downcase (boot:package-name package))
 			       "::" n)))))

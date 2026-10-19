@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Control, natively: continuation marks, prompts with tags, raise and
 ;;;; exception handlers, parameters and parameterizations (#%paramz).
@@ -17,7 +17,7 @@
 ;;;; Not yet: marks delimited by a prompt tag, composable continuations
 ;;;; (call-with-composable-continuation), barriers, breaks.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Continuation marks
@@ -30,22 +30,22 @@
 (define-primitive "#%paramz" "parameterization-key" *parameterization-key*)
 (define-primitive "#%paramz" "break-enabled-key" *break-enabled-key*)
 
-(defun current-marks () ps-r6rs::*marks*)
+(defun current-marks () qs-r6rs::*marks*)
 
 (defun marks-of (set)
-  (if (eq set ps:false) (current-marks) (ps-r6rs::mark-set-marks set)))
+  (if (eq set qs:false) (current-marks) (qs-r6rs::mark-set-marks set)))
 
-(defun first-mark (key &optional (marks (current-marks)) (none ps:false))
+(defun first-mark (key &optional (marks (current-marks)) (none qs:false))
   (let ((m (find key marks :key #'cadr :test #'eq)))
     (if m (cddr m) none)))
 
 (defnative "current-continuation-marks" (&optional prompt-tag) (:rumble "current-continuation-marks" :leaf t)
   (declare (ignore prompt-tag))
-  (ps-r6rs::make-mark-set (current-marks)))
+  (qs-r6rs::make-mark-set (current-marks)))
 
-(defnative "continuation-mark-set?" (x) (:leaf t) (bool (ps-r6rs::mark-set-p x)))
+(defnative "continuation-mark-set?" (x) (:leaf t) (bool (qs-r6rs::mark-set-p x)))
 
-(defnative "continuation-mark-set-first" (marks key &optional (none ps:false) prompt-tag)
+(defnative "continuation-mark-set-first" (marks key &optional (none qs:false) prompt-tag)
     (:rumble "continuation-mark-set-first" :leaf t)
   (declare (ignore prompt-tag))
   ;; a thread's continuation starts with the root parameterization marked
@@ -56,8 +56,8 @@
   (declare (ignore prompt-tag))
   (loop for m in (marks-of marks) when (eq (cadr m) key) collect (cddr m)))
 
-(defnative "call-with-immediate-continuation-mark" (key proc &optional (default ps:false)) ()
-  (ps-r6rs::call-with-immediate-mark key proc default))
+(defnative "call-with-immediate-continuation-mark" (key proc &optional (default qs:false)) ()
+  (qs-r6rs::call-with-immediate-mark key proc default))
 
 ;;; ------------------------------------------------------------------
 ;;; Prompts
@@ -75,7 +75,7 @@
 (defnative "continuation-prompt-tag?" (x) (:leaf t) (bool (prompt-tag-p x)))
 (defnative "continuation-prompt-available?" (tag &optional k) (:leaf t)
   (declare (ignore k))
-  (bool (psx::find-prompt tag)))
+  (bool (qsx::find-prompt tag)))
 
 (defun default-prompt-handler (tag)
   (if (eq tag *default-prompt-tag*)
@@ -85,20 +85,20 @@
 
 (defun call-with-continuation-prompt (proc tag handler &rest args)
   (let ((handler (or handler (default-prompt-handler tag))))
-    (psx::call-with-prompt tag
+    (qsx::call-with-prompt tag
 			   (lambda () (apply proc args))
 			   (lambda (k &rest values)
 			     (declare (ignore k))
 			     (apply handler values)))))
 
-(defnative "call-with-continuation-prompt" (proc &optional (tag *default-prompt-tag*) (handler ps:false) &rest args)
+(defnative "call-with-continuation-prompt" (proc &optional (tag *default-prompt-tag*) (handler qs:false) &rest args)
     (:rumble "call-with-continuation-prompt")
   (apply #'call-with-continuation-prompt proc tag (and (truthy handler) handler) args))
 
 (defnative "abort-current-continuation" (tag &rest vals) (:rumble "abort-current-continuation")
-  (unless (psx::find-prompt tag)
+  (unless (qsx::find-prompt tag)
     (racket-error "abort-current-continuation" "continuation includes no prompt with the given tag~%  tag: ~A" tag))
-  (apply #'psx::abort-to-prompt tag vals))
+  (apply #'qsx::abort-to-prompt tag vals))
 
 ;;; ------------------------------------------------------------------
 ;;; Raise
@@ -113,16 +113,16 @@
 	 (entry (find *exception-handler-key* marks :key #'cadr :test #'eq)))
     (if entry
 	(let ((handler (cddr entry)))
-	  (let ((ps-r6rs::*marks* (cdr (member entry marks :test #'eq))))
+	  (let ((qs-r6rs::*marks* (cdr (member entry marks :test #'eq))))
 	    (funcall handler v))
 	  ;; a handler that returns, for raise
-	  (let ((ps-r6rs::*marks* (cdr (member entry marks :test #'eq))))
+	  (let ((qs-r6rs::*marks* (cdr (member entry marks :test #'eq))))
 	    (do-raise (make-exn "exn:fail:contract"
 				(format nil "exception handler returned~%  exception: ~A"
-					(with-output-to-string (s) (funcall (psx:host-ref "write") v s)))))))
+					(with-output-to-string (s) (funcall (qsx:host-ref "write") v s)))))))
 	(funcall *uncaught-exception-handler* v))))
 
-(defnative "raise" (v &optional (barrier? ps:true)) (:rumble "raise")
+(defnative "raise" (v &optional (barrier? qs:true)) (:rumble "raise")
   (do-raise v (truthy barrier?)))
 
 ;;; ------------------------------------------------------------------
@@ -156,7 +156,7 @@
     (setf (gethash p *parameters*) data)
     p))
 
-(defnative "make-parameter" (&optional (value ps:false) (guard ps:false) (name ps:false) realm) ()
+(defnative "make-parameter" (&optional (value qs:false) (guard qs:false) (name qs:false) realm) ()
   (declare (ignore realm))
   (make-parameter* value (and (truthy guard) guard) name))
 
@@ -185,7 +185,7 @@
     (make-parameterization cells)))
 
 (defnative "call-with-parameterization" (paramz thunk) ()
-  (ps-r6rs::call-with-mark *parameterization-key* paramz thunk))
+  (qs-r6rs::call-with-mark *parameterization-key* paramz thunk))
 
 ;;; The port parameters.  Until a program sets or parameterizes one,
 ;;; its value is the host's (*standard-output* and so on).  Our natives
@@ -230,7 +230,7 @@ parameter holds a struct with prop:output-port or prop:input-port)."
 
 (defnative "call-with-continuation-barrier" (thunk) () (funcall thunk))
 (defnative "call-with-escape-continuation" (proc) ()
-  (funcall (psx:host-ref "call-with-current-continuation") proc))
+  (funcall (qsx:host-ref "call-with-current-continuation") proc))
 (defnative "unsafe-root-continuation-prompt-tag" () (:instance "#%unsafe" :leaf t) *default-prompt-tag*)
 (defnative "reparameterize" (paramz) (:instance "#%paramz" :leaf t) paramz)
 
@@ -270,16 +270,16 @@ parameter holds a struct with prop:output-port or prop:input-port)."
 ;; plumber?, flush handles and plumber-flush-all: threads.lisp
 
 (defstruct (logger (:constructor make-logger* (name parent))) name parent)
-(defvar *current-logger* (make-parameter* (make-logger* ps:false nil)))
+(defvar *current-logger* (make-parameter* (make-logger* qs:false nil)))
 (define-primitive "#%kernel" "current-logger" *current-logger*)
-(defnative "make-logger" (&optional (name ps:false) parent &rest more) (:leaf t)
+(defnative "make-logger" (&optional (name qs:false) parent &rest more) (:leaf t)
   (declare (ignore more))
   (make-logger* name (and parent (truthy parent) parent)))
 (defnative "logger?" (x) (:leaf t) (bool (logger-p x)))
 (defnative "logger-name" (l) (:leaf t) (logger-name l))
 ;; no log receivers yet: nothing is ever logged
-(defnative "log-level?" (l level &optional topic) (:leaf t) (declare (ignore l level topic)) ps:false)
-(defnative "log-max-level" (l &optional topic) (:leaf t) (declare (ignore l topic)) ps:false)
+(defnative "log-level?" (l level &optional topic) (:leaf t) (declare (ignore l level topic)) qs:false)
+(defnative "log-max-level" (l &optional topic) (:leaf t) (declare (ignore l topic)) qs:false)
 (defnative "log-message" (l level &rest more) (:leaf t) (declare (ignore l level more)) *void*)
 
 ;;; Events (threads.lisp has sync and the combinators): a REVT is a
@@ -297,11 +297,11 @@ parameter holds a struct with prop:output-port or prop:input-port)."
 (defstruct (mark-key (:constructor make-mark-key (name))) name)
 (defnative "make-continuation-mark-key" (&optional (name nil)) (:leaf t) (make-mark-key name))
 (defnative "continuation-mark-key?" (x) (:leaf t) (bool (mark-key-p x)))
-(defnative "continuation-mark-set->list*" (marks keys &optional (none ps:false) prompt-tag) (:leaf t)
+(defnative "continuation-mark-set->list*" (marks keys &optional (none qs:false) prompt-tag) (:leaf t)
   (declare (ignore prompt-tag))
   ;; per frame with any of KEYS: a vector of their values (NONE if absent)
   (let ((keys (coerce keys 'list)))
-    (loop for (nil . entries) in (ps-r6rs::mark-frames (marks-of marks))
+    (loop for (nil . entries) in (qs-r6rs::mark-frames (marks-of marks))
 	  when (some (lambda (k) (assoc k entries :test #'eq)) keys)
 	    collect (coerce (mapcar (lambda (k) (let ((e (assoc k entries :test #'eq))) (if e (cdr e) none))) keys)
 			    'simple-vector))))

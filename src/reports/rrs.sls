@@ -5,7 +5,7 @@
 ;;; The procedures: what the report's primitives are (it says "all the
 ;;; usual MacLISP SUBRs"; these are the ones its examples use, and the
 ;;; ones it names), and the processes.
-(library (pseudoscheme reports rrs runtime)
+(library (quasischeme reports rrs runtime)
   (export fluid-ref fluid-set! call-with-fluids
           register-expander! lookup-expander
           amapcar amaplist amapc nreverse
@@ -15,7 +15,7 @@
           procp enclose
           create!process start!process stop!process terminate **process**)
   (import (rnrs) (rnrs mutable-pairs) (rnrs eval)
-          (prefix (only (pseudoscheme host) gensym) %)
+          (prefix (only (quasischeme host) gensym) %)
           (prefix (only (rnrs) error) r6:))
 
   ;; dynamic (fluid) variables: an association list, shadowed by
@@ -98,7 +98,7 @@
   (define enclose-environment #f)
   (define (enclose lambda-expression alist)
     (unless enclose-environment
-      (set! enclose-environment (environment '(pseudoscheme reports rrs))))
+      (set! enclose-environment (environment '(quasischeme reports rrs))))
     (eval `((lambda ,(map car alist) ,lambda-expression)
             ,@(map (lambda (binding) (list 'quote (cdr binding))) alist))
           enclose-environment))
@@ -186,7 +186,7 @@
       (set! **process** 0)
       (dispatch))))
 
-(library (pseudoscheme reports rrs)
+(library (quasischeme reports rrs)
   (export lambda if quote labels define aset fluidbind fluid fluidset static catch
           block let do iterate test cond => or and amapcar amaplist amapc prog
           schmac macro
@@ -199,9 +199,9 @@
           +$ -$ *$ //$ gensym print terpri error read gcd)
   (import (except (rnrs) if cond and or do not define error)
           (prefix (only (rnrs) define) r6:)
-          (pseudoscheme reports truth)
-          (only (pseudoscheme reports extras) 1+ -1+)
-          (pseudoscheme reports rrs runtime))
+          (quasischeme reports truth)
+          (only (quasischeme reports extras) 1+ -1+)
+          (quasischeme reports rrs runtime))
 
   (r6:define t #t)
   (r6:define nil '())

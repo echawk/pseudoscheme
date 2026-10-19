@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's #%network instance, natively: TCP listeners and
 ;;;; connections, and UDP sockets (racket/src/io/network/*.rkt).
@@ -21,7 +21,7 @@
 ;;;; Not yet: custodians (sockets live until closed), listeners on more
 ;;;; than one address of a host name, IPv6 multicast, scope ids.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; The platform's constants
@@ -249,11 +249,11 @@ a list of (family . sockaddr-octets).  Failing, NIL and getaddrinfo's error code
 (defun net-listen-port-number-p (v) (and (integerp v) (<= 0 v 65535)))
 
 (defun net-check-string (who v &optional or-false)
-  (unless (or (stringp v) (and or-false (eq v ps:false)))
+  (unless (or (stringp v) (and or-false (eq v qs:false)))
     (arg-error who (if or-false "(or/c string? #f)" "string?") v)))
 
 (defun net-check-port (who v &optional or-false)
-  (unless (or (net-port-number-p v) (and or-false (eq v ps:false)))
+  (unless (or (net-port-number-p v) (and or-false (eq v qs:false)))
     (arg-error who (if or-false "(or/c port-number? #f)" "port-number?") v)))
 
 (defun net-check-bstr (who bstr start end)
@@ -265,13 +265,13 @@ a list of (family . sockaddr-octets).  Failing, NIL and getaddrinfo's error code
     (let ((len (length bstr)))
       (unless (<= start len)
 	(raise-range-error-from "raise-range-error" (rsym who) *default-realm* "byte string" "starting "
-				start bstr 0 len ps:false))
+				start bstr 0 len qs:false))
       (unless (<= start end len)
 	(raise-range-error-from "raise-range-error" (rsym who) *default-realm* "byte string" "ending "
 				end bstr 0 len start)))
     end))
 
-(defun net-opt (v) (if (eq v ps:false) nil v))
+(defun net-opt (v) (if (eq v qs:false) nil v))
 
 ;;; ------------------------------------------------------------------
 ;;; Events
@@ -319,7 +319,7 @@ a list of (family . sockaddr-octets).  Failing, NIL and getaddrinfo's error code
 	    (net-syscall (net-libc "listen" sb-alien:int (sb-alien:int fd) (sb-alien:int backlog)))
 	  (if (< r 0) e 0)))))
 
-(defnative "tcp-listen" (port &optional (backlog 4) (reuse ps:false) (hostname ps:false)) (:instance "#%network")
+(defnative "tcp-listen" (port &optional (backlog 4) (reuse qs:false) (hostname qs:false)) (:instance "#%network")
   (unless (net-listen-port-number-p port) (arg-error "tcp-listen" "listen-port-number?" port))
   (unless (and (integerp backlog) (>= backlog 0)) (arg-error "tcp-listen" "exact-nonnegative-integer?" backlog))
   (net-check-string "tcp-listen" hostname t)
@@ -428,7 +428,7 @@ a list of (family . sockaddr-octets).  Failing, NIL and getaddrinfo's error code
 	  0
 	  (loop
 	    (when (and (truthy nonblock) (not (net-ready-p fd 4)))
-	      (return ps:false))
+	      (return qs:false))
 	    (multiple-value-bind (k e)
 		(net-retry (lambda ()
 			     (with-net-sap (sap bytes start)
@@ -507,11 +507,11 @@ a list of (family . sockaddr-octets).  Failing, NIL and getaddrinfo's error code
 	     (if v v e2)))
 	  (t e))))
 
-(defnative "tcp-connect" (hostname port-no &optional (local-hostname ps:false) (local-port-no ps:false))
+(defnative "tcp-connect" (hostname port-no &optional (local-hostname qs:false) (local-port-no qs:false))
     (:instance "#%network")
   (tcp-connect-1 "tcp-connect" hostname port-no local-hostname local-port-no))
 
-(defnative "tcp-connect/enable-break" (hostname port-no &optional (local-hostname ps:false) (local-port-no ps:false))
+(defnative "tcp-connect/enable-break" (hostname port-no &optional (local-hostname qs:false) (local-port-no qs:false))
     (:instance "#%network")
   (tcp-connect-1 "tcp-connect/enable-break" hostname port-no local-hostname local-port-no))
 
@@ -582,7 +582,7 @@ a list of (family . sockaddr-octets).  Failing, NIL and getaddrinfo's error code
   (append (remove family candidates :key #'car :test #'/=)
 	  (remove family candidates :key #'car :test #'=)))
 
-(defnative "udp-open-socket" (&optional (family-hostname ps:false) (family-port-no ps:false)) (:instance "#%network")
+(defnative "udp-open-socket" (&optional (family-hostname qs:false) (family-port-no qs:false)) (:instance "#%network")
   (net-check-string "udp-open-socket" family-hostname t)
   (net-check-port "udp-open-socket" family-port-no t)
   (let* ((host (net-opt family-hostname)) (port (net-opt family-port-no))
@@ -614,7 +614,7 @@ a list of (family . sockaddr-octets).  Failing, NIL and getaddrinfo's error code
   (check-udp "udp-connected?" u)
   (bool (net-udp-connected u)))
 
-(defnative "udp-bind!" (u hostname port-no &optional (reuse ps:false)) (:instance "#%network")
+(defnative "udp-bind!" (u hostname port-no &optional (reuse qs:false)) (:instance "#%network")
   (check-udp "udp-bind!" u)
   (net-check-string "udp-bind!" hostname t)
   (unless (net-listen-port-number-p port-no) (arg-error "udp-bind!" "listen-port-number?" port-no))
@@ -818,7 +818,7 @@ there is none and not WAIT."
 				     (multiple-value-bind (n host port) (udp-recv ,name u bstr start end ,wait)
 				       (if n
 					   (values n host port)
-					   (values ps:false ps:false ps:false)))))))))
+					   (values qs:false qs:false qs:false)))))))))
   (define-receives
     ("udp-receive!" t)
     ("udp-receive!*" nil)
@@ -966,7 +966,7 @@ there is none and not WAIT."
 ;;; ------------------------------------------------------------------
 ;;; tcp-addresses: of a TCP port, a listener or a UDP socket
 
-(defnative "tcp-addresses" (p &optional (port-numbers ps:false)) (:instance "#%network")
+(defnative "tcp-addresses" (p &optional (port-numbers qs:false)) (:instance "#%network")
   (let (local peer)
     (cond ((tcp-listener-p p)
 	   (listener-live "tcp-addresses" p)

@@ -1,4 +1,4 @@
-;;; SRFI 108: Named quasi-literal constructors.  Written for Pseudoscheme.
+;;; SRFI 108: Named quasi-literal constructors.  Written for Quasischeme.
 ;;; The reader reads &name[init ...]{text} (src/quasi.lisp) as
 ;;; ($construct$:name init ... $>>$ part ...) and &name{text} as
 ;;; ($construct$:name part ...), the parts as for SRFI 109's &{text}.

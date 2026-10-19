@@ -23,25 +23,25 @@
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
     (if (find-package "QL")
-	(uiop:symbol-call "QL" "QUICKLOAD" :pseudoscheme/guile :silent t)
-	(asdf:load-system :pseudoscheme/guile))))
+	(uiop:symbol-call "QL" "QUICKLOAD" :quasischeme/guile :silent t)
+	(asdf:load-system :quasischeme/guile))))
 
 (defparameter *args* (uiop:command-line-arguments))
 (defparameter *file* (find-if (lambda (a) (search ".test" a)) *args*))
 (defparameter *verbose* (member "-v" *args* :test #'string=))
-(defparameter *suite* (asdf:system-relative-pathname :pseudoscheme "vendor/guile-test-suite/"))
+(defparameter *suite* (asdf:system-relative-pathname :quasischeme "vendor/guile-test-suite/"))
 ;; as Guile's check-guile sets it: popen.test runs tests/popen-child.scm
 (sb-posix:setenv "TEST_SUITE_DIR" (string-right-trim "/" (namestring *suite*)) 1)
 
-(setq psx::*full-continuations* t)
-(psg:boot)
+(setq qsx::*full-continuations* t)
+(qsg:boot)
 ;; --script implies --lose-on-corruption, which makes a stack overflow
 ;; fatal; Guile's tests overflow on purpose (call-with-stack-overflow-handler)
 (setf (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int) 0)
 ;; GUILE_TRACE=1: a backtrace for each Lisp error that becomes a Guile exception
-(when (uiop:getenv "GUILE_TRACE") (setq psg::*trace-lisp-errors* t))
+(when (uiop:getenv "GUILE_TRACE") (setq qsg::*trace-lisp-errors* t))
 ;; GUILE_TRACE_CACHE=1: which modules load from the compiled-file cache
-(when (uiop:getenv "GUILE_TRACE_CACHE") (setq psg::*trace-cache* t))
+(when (uiop:getenv "GUILE_TRACE_CACHE") (setq qsg::*trace-cache* t))
 ;; GUILE_VM_PRELOAD="srfi/srfi-1 ice-9/q": load those modules from the
 ;; installed Guile's compiled .go files, on the VM (src/guile/vm.lisp),
 ;; before the tests: the tests then call the VM's code
@@ -49,16 +49,16 @@
   (when preload
     (dolist (name (uiop:split-string preload :separator " "))
       (when (plusp (length name))
-	(psg::call-with-guile-catch
+	(qsg::call-with-guile-catch
 	 (lambda ()
-	   (funcall (psg::load-go-file (psg::installed-go-file name)))))))))
+	   (funcall (qsg::load-go-file (qsg::installed-go-file name)))))))))
 
 ;; A stand-in for Guile's source tree, which %guile-build-info's
 ;; top_srcdir names and ftw.test, ports.test and c-api.test look into:
 ;; test-suite/ (its tests and its library, linked to the vendored ones),
 ;; module/ (the installed Guile's Scheme sources), libguile/ (no C here)
-(defparameter *pseudoscheme-command*
-  (asdf:system-relative-pathname :pseudoscheme "bin/pseudoscheme"))
+(defparameter *quasischeme-command*
+  (asdf:system-relative-pathname :quasischeme "bin/quasischeme"))
 
 (defun make-source-tree ()
   (let ((top (sb-posix:mkdtemp "/tmp/guile-srcdir-XXXXXX")))
@@ -68,7 +68,7 @@
 					       (format nil "~A/~A" top name))))
       (mapc #'dir '("libguile" "test-suite/tests" "test-suite/test-suite" "test-suite/standalone"))
       (mapc #'file '("README" "COPYING" "Makefile.am" "test-suite/Makefile.am"))
-      (link psg::*guile-source-directory* "module")
+      (link qsg::*guile-source-directory* "module")
       (dolist (f (directory (merge-pathnames "tests/*.*" *suite*)))
 	(link f (format nil "test-suite/tests/~A.~A" (pathname-name f) (pathname-type f))))
       (dolist (f '("lib.scm" "guile-test" "lib"))
@@ -83,7 +83,7 @@
        (top (make-source-tree))
        (result
 	 (handler-case
-	     (psg:eval-string
+	     (qsg:eval-string
 	      (format nil "(set! %load-path (cons ~S %load-path))
 (use-modules (test-suite lib))
 ;; what (test-suite guile-test)'s main sets: the tests' directory, and
@@ -94,7 +94,7 @@
   (module-set! m 'tmp-dir tmp)
   (chdir tmp)
   ;; meta/guile, Guile's build tree's script (popen.test runs it): here
-  ;; bin/pseudoscheme --guile, if it's built
+  ;; bin/quasischeme --guile, if it's built
   (when (file-exists? ~S)
     (mkdir \"meta\")
     (call-with-output-file \"meta/guile\" (lambda (p) (display ~S p)))
@@ -115,11 +115,11 @@
        ((cadr %counter))))"
 		      (guile-string *suite*)
 		      (guile-string (merge-pathnames "tests/" *suite*))
-		      (guile-string *pseudoscheme-command*)
+		      (guile-string *quasischeme-command*)
 		      (format nil "#!/bin/sh
 if [ \"$1\" = -c ]; then shift; exec ~A --guile -e \"$@\"; fi
 exec ~A --guile \"$@\"
-" (guile-string *pseudoscheme-command*) (guile-string *pseudoscheme-command*))
+" (guile-string *quasischeme-command*) (guile-string *quasischeme-command*))
 		      top (concatenate 'string top "/libguile")
 		      (if *verbose* "(register-reporter user-reporter)" "")
 		      (concatenate 'string name ".test") (guile-string path)

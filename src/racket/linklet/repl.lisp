@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategy B's REPL (docs/racket.md, "The REPL"): `racket' with no
 ;;;; arguments, as Racket CS's main.sps runs it.  It requires the init
@@ -18,7 +18,7 @@
 ;;;; instead, a datum at a time as Racket's reader finds them, so that
 ;;;; "1 2" evaluates both.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defun make-input-string-port (text &optional (name "stdin"))
   (funcall (native-function (gethash "open-input-string" *natives*)) text (rsym name)))
@@ -46,12 +46,12 @@ of no arguments returning a string (the front end shows the prompt) or
 	  ;; (an error in the reader leaves no port to read again)
 	  (let* ((in pending)
 		 (datum (progn (setq pending nil) (read-interaction in))))
-	    (unless (eq datum ps:eof-object)
+	    (unless (eq datum qs:eof-object)
 	      (setq pending in)
 	      (return datum))))
 	(let ((text (funcall next-text)))
 	  (if (eq text :eof)
-	      (return ps:eof-object)
+	      (return qs:eof-object)
 	      (setq pending (make-input-string-port text))))))))
 
 (defun linklet-repl (&key next-text (banner t))
@@ -67,7 +67,7 @@ init-file loading or the loop's start failed, else 0 (as racket's)."
     ;; the base of continuations and the default prompt, as LINKLET-LOAD
     ;; runs a module: errors Lisp raises become Racket's, outside the base
     (with-racket-errors
-      (psx::call-with-continuation-base
+      (qsx::call-with-continuation-base
        (lambda ()
 	 (call-with-continuation-prompt
 	  (lambda ()

@@ -1,12 +1,12 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; write and display as Guile's: #{odd symbol}#, #:keywords, #nil,
 ;;;; Guile's character names and string escapes, #<eof> and
 ;;;; #<unspecified>, #<procedure name (args)>, records and GOOPS instances
 ;;;; through their printers, and the rest as #<type address>.  Written for
-;;;; Pseudoscheme after libguile's print.c's behaviour.
+;;;; Quasischeme after libguile's print.c's behaviour.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defun object-address-string (x)
   (format nil "~(~X~)" (logand (sb-kernel:get-lisp-obj-address x) #xffffffffff)))
@@ -41,7 +41,7 @@ INITIAL): letters, marks, numbers, punctuation and symbols."
 	(let ((c (char name 0)))
 	  (or (find c "'`,\";#")
 	      (and (char= c #\.) (= len 1))
-	      (and (find c "+-.0123456789") (ps:parse-scheme-number name 10))
+	      (and (find c "+-.0123456789") (qs:parse-scheme-number name 10))
 	      (not (identifier-char-p c t))))
 	(loop for i from 1 below len
 	      for c = (char name i)
@@ -164,10 +164,10 @@ or NIL.")
 (defun write-procedure (f stream)
   (when (and *write-program-hook* (funcall *write-program-hook* f stream))
     (return-from write-procedure))
-  (when (psx::continuation-procedure-p f)
+  (when (qsx::continuation-procedure-p f)
     (return-from write-procedure (format stream "#<continuation ~A>" (object-address-string f))))
   (let ((name (funcall (gethash "procedure-name" *guile-primitives*) f)))
-    (if (and name (not (eq name ps:false)))
+    (if (and name (not (eq name qs:false)))
 	(format stream "#<procedure ~A ~A>"
 		(with-output-to-string (s) (guile-write name s))
 		(procedure-arguments-string f))
@@ -211,21 +211,21 @@ or NIL.")
 ;;; Everything
 
 (defun guile-print (x stream display)
-  (cond ((eq x ps:false) (write-string "#f" stream))
-	((eq x ps:true) (write-string "#t" stream))
+  (cond ((eq x qs:false) (write-string "#f" stream))
+	((eq x qs:true) (write-string "#t" stream))
 	((null x) (write-string "()" stream))
 	((eq x *elisp-nil*) (write-string "#nil" stream))
-	((eq x ps:eof-object) (write-string "#<eof>" stream))
+	((eq x qs:eof-object) (write-string "#<eof>" stream))
 	((eq x *unspecified*) (write-string "#<unspecified>" stream))
 	((eq x +unbound+) (write-string "#<unbound>" stream))
 	((characterp x) (if display (write-char x stream) (write-guile-char x stream)))
 	((stringp x) (if display (write-string x stream) (write-guile-string x stream)))
 	((keywordp x) (write-string "#:" stream)
-	 (let ((name (ps:scheme-symbol-name (guile-keyword->symbol x))))
+	 (let ((name (qs:scheme-symbol-name (guile-keyword->symbol x))))
 	   (if display (write-string name stream) (write-symbol-name name stream))))
 	((symbolp x)
-	 (let ((name (ps:scheme-symbol-name x)))
-	   (if (or display (ps::photon-p x)) (write-string name stream) (write-symbol-name name stream))))
+	 (let ((name (qs:scheme-symbol-name x)))
+	   (if (or display (qs::photon-p x)) (write-string name stream) (write-symbol-name name stream))))
 	((numberp x) (write-string (funcall (gethash "number->string" *guile-primitives*) x) stream))
 	((consp x) (or (write-cycle x stream) (write-guile-list x stream display)))
 	((simple-vector-p x)
@@ -234,14 +234,14 @@ or NIL.")
 	       (write-elements "#" (coerce x 'list) stream display))))
 	((garray-p x) (write-array x stream display))
 	;; SRFI 207's notation, when the bytestrings print option is on
-	((and (typep x 'ps-r6rs::octets) (option-value *print-options* "bytestrings")
+	((and (typep x 'qs-r6rs::octets) (option-value *print-options* "bytestrings")
 	      (member (gethash x *bytevector-types* "vu8") '("vu8" "u8") :test #'equal))
 	 (write-bytestring x stream))
-	((and (typep x 'ps-r6rs::octets) (gethash x *bytevector-types*))
+	((and (typep x 'qs-r6rs::octets) (gethash x *bytevector-types*))
 	 (write-tagged-bytevector x (gethash x *bytevector-types*) stream display))
-	((typep x 'ps-r6rs::octets) (write-elements "#vu8" (coerce x 'list) stream display))
+	((typep x 'qs-r6rs::octets) (write-elements "#vu8" (coerce x 'list) stream display))
 	((bit-vector-p x) (write-string "#*" stream) (loop for b across x do (write-char (if (zerop b) #\0 #\1) stream)))
-	((and (vectorp x) (ps::numeric-vector-tag x))
+	((and (vectorp x) (qs::numeric-vector-tag x))
 	 (write-elements (format nil "#~A" (guile-uniform-tag x)) (coerce x 'list) stream display))
 	((struct-p x) (print-struct x stream))
 	((and *write-object-hook* (funcall *write-object-hook* x stream)))
@@ -251,7 +251,7 @@ or NIL.")
 	(t (let ((*print-pretty* nil)) (princ x stream)))))
 
 (defun guile-uniform-tag (v)
-  (let ((tag (ps::numeric-vector-tag v)))
+  (let ((tag (qs::numeric-vector-tag v)))
     (cond ((string= tag "c64") "c32") ((string= tag "c128") "c64") (t tag))))
 
 (defun guile-keyword->symbol (k)

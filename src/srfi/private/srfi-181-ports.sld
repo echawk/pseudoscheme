@@ -1,13 +1,13 @@
 ;;; (srfi private srfi-181-ports): what SRFIs 181 and 192 need of
-;;; Pseudoscheme's R6RS custom ports (src/r6rs/ports.lisp) beyond
-;;; (rnrs io ports).  Written for Pseudoscheme; it subclasses that file's
+;;; Quasischeme's R6RS custom ports (src/r6rs/ports.lisp) beyond
+;;; (rnrs io ports).  Written for Quasischeme; it subclasses that file's
 ;;; Gray stream classes, so it must follow it.
 ;;;
 ;;; - SRFI 181's custom output ports take an optional flush procedure,
 ;;;   called when the port is flushed; R6RS's have none.  The output
 ;;;   port constructors here make subclasses of the R6RS custom port
 ;;;   classes whose force-output and finish-output call it.
-;;; - Pseudoscheme's port-position on a custom textual input port
+;;; - Quasischeme's port-position on a custom textual input port
 ;;;   returns the get-position procedure's value even when a character
 ;;;   has been read ahead (by peek-char) and given back, so that
 ;;;   position is one character too far.  The textual input ports made
@@ -23,9 +23,9 @@
           make-custom-textual-output-port
           make-custom-binary-input/output-port
           custom-port-position)
-  (import (scheme base) (pseudoscheme lisp))
+  (import (scheme base) (quasischeme lisp))
   (begin
-    ;; The Lisp definitions, read in Pseudoscheme's R6RS package.  (The
+    ;; The Lisp definitions, read in Quasischeme's R6RS package.  (The
     ;; code must contain no double quotes or backslashes.)
     (define lisp-code "
 (progn
@@ -96,11 +96,11 @@
 
     (lisp-eval-string
      (string-append
-      "(let ((*package* (find-package :pseudoscheme-r6rs))) "
+      "(let ((*package* (find-package :quasischeme-r6rs))) "
       "(eval (read-from-string \"" lisp-code "\")))"))
 
-    (define %make (lisp-function "srfi-181-make-port" "pseudoscheme-r6rs"))
-    (define %position (lisp-function "srfi-181-port-position" "pseudoscheme-r6rs"))
+    (define %make (lisp-function "srfi-181-make-port" "quasischeme-r6rs"))
+    (define %position (lisp-function "srfi-181-port-position" "quasischeme-r6rs"))
 
     (define (flush-argument rest) (if (pair? rest) (car rest) #f))
 

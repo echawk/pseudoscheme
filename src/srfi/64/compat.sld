@@ -1,5 +1,5 @@
 ;;; (srfi 64 compat): the little of SRFI 35 and SRFI 48 that the SRFI
-;;; 64 implementation uses, written for Pseudoscheme so that SRFI 64
+;;; 64 implementation uses, written for Quasischeme so that SRFI 64
 ;;; depends on nothing else.
 ;;;
 ;;; - format: SRFI 48's (format dest control arg ...) for the

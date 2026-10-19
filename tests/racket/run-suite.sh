@@ -10,7 +10,7 @@
 # the errors; a file that prints no report crashed or ran past LIMIT
 # seconds (default 600).  J files run at a time (default 2).
 #
-# PSEUDOSCHEME names the binary to run (default: bin/pseudoscheme), so a
+# QUASISCHEME names the binary to run (default: bin/quasischeme), so a
 # long run can go on while bin/ is rebuilt; it then has a compiled-file
 # cache of its own (build/suite-cache), since each build prunes the
 # others' generations of the shared one.  REF=1 runs the installed racket on the same files instead, for the
@@ -21,15 +21,15 @@ cd "$(dirname "$0")/../.." || exit 1
 ROOT=$PWD
 T=$ROOT/build/external/racket/pkgs/racket-test-core/tests/racket
 [ -d "$T" ] || { echo "No Racket source: run utils/racket/setup.sh first." >&2; exit 1; }
-OUT=${OUT:-${TMPDIR:-/tmp}/pseudoscheme-racket-tests}
+OUT=${OUT:-${TMPDIR:-/tmp}/quasischeme-racket-tests}
 LIMIT=${LIMIT:-600}
 J=${J:-2}
 if [ -n "$REF" ]; then who=racket; else who=ours; fi
 DIR=$OUT/suite-$who
 mkdir -p "$DIR"
-if [ -n "$PSEUDOSCHEME" ] && [ -z "$PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY" ]; then
-  export PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY=$ROOT/build/suite-cache/libraries
-  mkdir -p "$PSEUDOSCHEME_LIBRARY_CACHE_DIRECTORY"
+if [ -n "$QUASISCHEME" ] && [ -z "$QUASISCHEME_LIBRARY_CACHE_DIRECTORY" ]; then
+  export QUASISCHEME_LIBRARY_CACHE_DIRECTORY=$ROOT/build/suite-cache/libraries
+  mkdir -p "$QUASISCHEME_LIBRARY_CACHE_DIRECTORY"
 fi
 
 # core-tests.rktl's files, then all.rktl's
@@ -54,7 +54,7 @@ run_one() {
   (namespace-require 'racket)
   (load "$T/$name.rktl"))
 EOF
-  if [ -n "$REF" ]; then set -- racket "$w"; else set -- "${PSEUDOSCHEME:-$ROOT/bin/pseudoscheme}" --racket=linklet "$w"; fi
+  if [ -n "$REF" ]; then set -- racket "$w"; else set -- "${QUASISCHEME:-$ROOT/bin/quasischeme}" --racket=linklet "$w"; fi
   (cd "$T" && exec "$@") > "$DIR/$name.out" 2>&1 &
   pid=$!
   ( sleep "$LIMIT"; kill -9 $pid 2>/dev/null ) &

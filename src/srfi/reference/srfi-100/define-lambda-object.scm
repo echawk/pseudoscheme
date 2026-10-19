@@ -1,6 +1,6 @@
 ;;; The define-syntax part of Joo ChurlSoo's implementation of SRFI 100
 ;;; (srfi-100.scm, up to its define-macro part), with one change marked
-;;; PSEUDOSCHEME: each constructor registers the lambda object it makes,
+;;; QUASISCHEME: each constructor registers the lambda object it makes,
 ;;; so that object-name (defined in 100.sld) can recognize it; the
 ;;; implementation leaves that predicate to the host (mzscheme's
 ;;; object-name).
@@ -212,7 +212,7 @@
                                        (if (null? (cdr args))
                                            (unquote-set! arg (car args) (fm ...) (fi ...))
                                            safe-name))))
-                               ;; PSEUDOSCHEME: was *%lambda-object%*
+                               ;; QUASISCHEME: was *%lambda-object%*
                                (register-lambda-object! *%lambda-object%*)))
                  (key-lambda () (r ...) (o ...)
                              (let* (a ...)
@@ -223,7 +223,7 @@
                                        (if (null? (cdr args))
                                            (unquote-set! arg (car args) (fm ...) (fi ...))
                                            safe-name))))
-                               ;; PSEUDOSCHEME: was *%lambda-object%*
+                               ;; QUASISCHEME: was *%lambda-object%*
                                (register-lambda-object! *%lambda-object%*))))))
        (define make-object (car makers))
        (define make-object-by-name (cdr makers))

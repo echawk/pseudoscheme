@@ -9,7 +9,7 @@
 (define-library (srfi 124)
   (export ephemeron? make-ephemeron ephemeron-broken? ephemeron-key
           ephemeron-datum reference-barrier)
-  (import (scheme base) (pseudoscheme lisp))
+  (import (scheme base) (quasischeme lisp))
   (begin
     (define-record-type ephemeron
       (wrap-table table)
@@ -17,8 +17,8 @@
       (table ephemeron-table))
 
     ;; src/r6rs/hashtables.lisp
-    (define lisp-make-table (lisp-function "make-ephemeron-table" "pseudoscheme-r6rs"))
-    (define lisp-entry (lisp-function "ephemeron-entry" "pseudoscheme-r6rs"))
+    (define lisp-make-table (lisp-function "make-ephemeron-table" "quasischeme-r6rs"))
+    (define lisp-entry (lisp-function "ephemeron-entry" "quasischeme-r6rs"))
     (define lisp-count (lisp-function "hash-table-count" "common-lisp"))
 
     (define (make-ephemeron key datum)

@@ -1,4 +1,4 @@
-;;; SRFI 2: and-let*.  Written for Pseudoscheme.
+;;; SRFI 2: and-let*.  Written for Quasischeme.
 (define-library (srfi 2)
   (export and-let*)
   (import (scheme base))

@@ -1,4 +1,4 @@
-;;; SRFI 10: #, external form.  Written for Pseudoscheme: the reader
+;;; SRFI 10: #, external form.  Written for Quasischeme: the reader
 ;;; reads #,(tag datum ...) as the result of applying the constructor
 ;;; define-reader-ctor gave tag to the data (src/read.scm, src/core.lisp).
 ;;;
@@ -9,10 +9,10 @@
 ;;; later (with read, or at the REPL), not to its own text.
 (define-library (srfi 10)
   (export define-reader-ctor)
-  (import (scheme base) (only (pseudoscheme lisp) lisp-eval-string))
+  (import (scheme base) (only (quasischeme lisp) lisp-eval-string))
   (begin
     (define %define-reader-ctor
-      (lisp-eval-string "(lambda (tag procedure) (ps:define-reader-ctor tag procedure))"))
+      (lisp-eval-string "(lambda (tag procedure) (qs:define-reader-ctor tag procedure))"))
     (define (define-reader-ctor tag procedure)
       (unless (symbol? tag) (error "define-reader-ctor: not a symbol" tag))
       (unless (procedure? procedure) (error "define-reader-ctor: not a procedure" procedure))

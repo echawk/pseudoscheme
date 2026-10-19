@@ -4,57 +4,38 @@ Where things stand and what to do next, roughly in order. The numbers
 come from the runners in `tests/` and the mode documents; re-run them
 rather than trusting this file. Updated 2026-10-18.
 
-## Before the rename: Quasischeme 1.0
+## Quasischeme 1.0
 
-At 1.0 the project becomes Quasischeme (docs/rename-quasischeme.md).
-The bar set for it, and where each part is:
+The project was renamed from Pseudoscheme on 2026-10-18
+(docs/rename-quasischeme.md), at version 1.0. The bar set for 1.0:
 
 | 1.0 requirement | state |
 |---|---|
 | Every Revised Report, R1RS to R7RS | **done**: R7RS, R6RS, R5RS suites pass in full; R4RS, IEEE, R3RS, R2RS and the Revised Report have modes of their own, with all 993 of the reports' examples passing (docs/reports.md) |
 | All the SRFIs | **done**: every final, unwithdrawn SRFI through 274 (209 of them), with 122 test programs (`make test-srfi`) |
-| Guile | **done in substance**: Guile 3.0's own boot-9, psyntax and modules; its test suite with 4 failures and 1 error left (docs/guile.md); `.go` files on a VM in Lisp; Guix computes the same `hello` derivation as real Guix; a libguile that LilyPond typesets on |
+| Guile | **done in substance**: Guile 3.0's own boot-9, psyntax and modules; its test suite with 3 failures and 1 error left (docs/guile.md); `.go` files on a VM in Lisp; Guix computes the same `hello` derivation as real Guix; a libguile that LilyPond typesets on |
 | Chez | **done in substance**: 1257 of `(chezscheme)`'s 1715 names (the missing ones are mostly Chez's internals, docs/chez.md, "Not planned"); Chez's mats; Idris 2 bootstraps and compiles programs |
 | Emacs through SLY/Slynk and SLIME/Swank | **done** (docs/emacs.md) |
-| An LSP server | moved after 1.0 (section 7) |
+| An LSP server | after 1.0 (section 7) |
 
-So the requirements are met, and `utils/rename/rename.sh` was tried
-again on 2026-10-18 (below). What is left is checking, and the
-mechanical rename itself:
+The full test run before the rename, with the optimizer's first pass
+(cp0 and cptypes) on at its default level, found no failure the
+optimizer causes: what failed fails the same with
+`QUASISCHEME_OPTIMIZE=0`. SRFI 254's test used a procedure before
+defining it, and was fixed. Left from that run:
+- Guile's `sandbox.test` hangs at its first allocation-limit test
+  (`call-with-allocation-limit 0` around a consing loop), and
+  `ecmascript.test` runs out of heap compiling its parser; `compiler`
+  passes alone but hit the time limit with 6 files at a time.
+- Chez's mat file `5_2` doesn't finish.
+- Not run again: LilyPond and Guix in the container, the benchmarks
+  (bench/RESULTS.md predates the optimizer), and Racket's own suite.
 
-1. **A full test run on the current tree.** The optimizer's first pass
-   (cp0 and cptypes, src/cp0.lisp and src/cptypes.lisp, on by default
-   at level 2) landed on 2026-10-18 and changes the code every mode
-   compiles. Every number in this file and the mode documents predates
-   it. Run `make test`, `make test-escape`, `make test-cli`,
-   `make test-srfi`, `make test-programs`, `make test-chez`,
-   `make test-guile`, `sh tests/racket/run.sh linklet`,
-   `sh tests/libguile/run.sh`, LilyPond and Guix in the container
-   (tests/lilypond/, tests/guix/run.sh), and `make bootstrap-check`.
-   Anything the optimizer breaks is fixed, or the default level is
-   lowered (`PSEUDOSCHEME_OPTIMIZE=0|1|2`) until it is.
-2. **Refresh the numbers** in README.md, this file and the mode
-   documents from that run: the Chez mats (README.md says about 17,500
-   pass; docs/chez.md's table, from 2026-10-13, has 16,391), the Guile
-   suite (docs/guile.md has both 42,702 and 43,278), Racket's suite
-   (docs/racket.md's full run predates its regexp layer), and the
-   benchmarks (bench/RESULTS.md predates the optimizer).
-3. **Decide what stays out of 1.0**, and say so in the README:
-   - Guile's last 4 failures and 1 error, the VM instructions only
-     libguile's generated code uses (docs/guile-vm.md, "Left"), and
-     Guix building `hello` rather than only its derivation;
-   - Racket, which isn't a 1.0 requirement: `racket/base` and `racket`
-     run, Racket's own suite doesn't yet (section 6);
-   - the user's open directions (section 7).
-4. **The rename**, as docs/rename-quasischeme.md describes it:
-   `sh utils/rename/rename.sh` (a dry run), then `--apply` on a clean
-   tree, `utils/rename/check.sh`, the history prose by hand, the Emacs
-   package, the version (3.0 to 1.0), regenerating the `.qso` files and
-   psyntax's image, the full test run again, and the steps outside the
-   repository (`utils/rename/out-of-repo.sh`). One commit. A trial on
-   2026-10-18, at f21e07c in a scratch worktree, rewrote 500 files,
-   moved 42, left nothing for `check.sh`, built `bin/quasischeme`, and
-   passed the CLI tests (43 of 43) and R7RS's suite (978 of 978).
+Out of 1.0: the LSP server; Guile's last failures, the VM instructions
+only libguile's generated code uses (docs/guile-vm.md, "Left"), and
+Guix building `hello` rather than only its derivation; Racket, whose
+`racket/base` and `racket` run while its own suite doesn't yet
+(section 6); the queued directions (section 7).
 
 ## Where things stand
 
@@ -65,16 +46,17 @@ mechanical rename itself:
 | `tests/run-r5rs-tests.lisp` (chibi's R5RS suite) | 189 of 189 (188 escape-only; 183 of 188 with `--classic`) |
 | the older reports (docs/reports.md) | 993 of 993 examples |
 | `tests/run-interop-tests.lisp` | 116/116 |
-| `tests/run-library-tests.lisp` | 61/61 |
+| `tests/run-library-tests.lisp` | 73/73 |
 | `tests/run-srfi-system-tests.lisp` (SRFIs 18, 106, 170, 229) | 62/62 |
 | `tests/run-syntax-case-tests.lisp` | 17/17 |
 | `tests/run-continuation-tests.lisp` | 45/45 |
-| `make -C contrib/cli test` | 43/43 |
+| `tests/libguile/run.sh` (in the container) | 6 of 6 programs print what they do on Guile |
+| `make -C contrib/cli test` | 44/44 |
 | `make test-programs` (`tests/programs/`, needs Quicklisp) | 5 of 5 programs |
 | `make test-srfi` (`src/srfi/tests/`) | 122 of 122 test programs |
-| `make test-chez` (Chez's mats) | 16,391 clauses pass, 986 fail, 391 error (docs/chez.md, 2026-10-13) |
-| `make test-guile` (Guile's suite) | 43,278 pass, 4 fail, 1 error (docs/guile.md) |
-| `tests/racket/run.sh linklet` | 6 linklets, 14 expander expressions, 18 `#lang racket/base` programs |
+| `make test-chez` (Chez's mats) | 17,645 clauses pass, 922 fail, 400 error; `5_2` doesn't finish |
+| `make test-guile` (Guile's suite) | 43,190 pass, 3 fail, 1 error; `sandbox` and `ecmascript` crash |
+| `tests/racket/run.sh linklet` | 6 linklets, 14 expander expressions, 22 `#lang racket/base` programs |
 | `tests/run-library-corpus.lisp` (real libraries) | Akku: 228 of 387; snow-fort: 91 of 130 |
 | `bench/` (r7rs-benchmarks) | 57/57; geometric mean 1.37× Chez's time, 1.30× escape-only (Guile 2.8×, Gauche 9.2×); before the optimizer |
 
@@ -127,7 +109,7 @@ Compiled libraries are cached as fasls (src/library-cache.lisp). Left:
 - Libraries not found through the library path (defined at the REPL or
   in a program, `(cl <package>)` libraries), and their dependents, aren't
   cached.
-- Nothing removes stale entries; `pseudoscheme --clear-cache` or a
+- Nothing removes stale entries; `quasischeme --clear-cache` or a
   cleanup by age would do.
 - ASDF's `:r7rs-library`/`:r6rs-library` components aren't cached.
 - The build signature changes with any source file's date, so every
@@ -207,5 +189,5 @@ chibi's or Gauche's leniency, such as duplicate pattern variables in
   listing the environment, the standard binary ports, and the CLI's
   contribs and interrupts.
 - **Bootstrapping** from other Schemes is done (boot/README.md); left
-  are an s7 adapter for the `.pso` step and stage0 adapters for more
+  are an s7 adapter for the `.qso` step and stage0 adapters for more
   hosts, if wanted.

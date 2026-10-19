@@ -1,11 +1,11 @@
 ;;; SRFI 126: R6RS-based hashtables.  Taylan Kammer's reference
 ;;; implementation (reference/srfi-126/126.body.scm; MIT licence in
-;;; reference/srfi-126/LICENSE), on Pseudoscheme's (rnrs hashtables):
+;;; reference/srfi-126/LICENSE), on Quasischeme's (rnrs hashtables):
 ;;; SRFI 126 hashtables are R6RS hashtables.  This library form follows
 ;;; the shipped srfi/126.sld, importing (rnrs hashtables) and
 ;;; (rnrs enums) where that imports (r6rs ...).
 ;;;
-;;; Modifications to the reference file, each marked PSEUDOSCHEME there:
+;;; Modifications to the reference file, each marked QUASISCHEME there:
 ;;; weak and ephemeral hashtables are supported for eq? and eqv? tables
 ;;; (make-eq-hashtable, make-eqv-hashtable, make-hashtable with no hash
 ;;; function, the alist-> constructors, hashtable-copy and

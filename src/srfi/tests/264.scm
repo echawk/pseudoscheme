@@ -2805,7 +2805,7 @@
 (test-sre (or alnum (w/nocase (w/ascii (or lower numeric)))) "{an|{?i:{?-u:l|d}}}")
 (test-sre (w/nocase (w/ascii (or lower numeric))) "(?i)(?-u){l|d}")
 
-;; Added for Pseudoscheme: matching with the compiled regexps, through
+;; Added for Quasischeme: matching with the compiled regexps, through
 ;; SRFI 115.
 (ssre-definitions *ssre-definitions*)
 (test-assert (regexp-matches? (ssre->regexp "a+b*") "aaab"))

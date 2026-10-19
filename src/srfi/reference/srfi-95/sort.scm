@@ -26,7 +26,7 @@
   (cond ((null? seq) #t)
 	((array? seq)
 	 (let ((dimax (+ -1 (car (array-dimensions seq)))))
-	   (or (<= dimax 0)  ; PSEUDOSCHEME: was 1, which took any 2-element array as sorted
+	   (or (<= dimax 0)  ; QUASISCHEME: was 1, which took any 2-element array as sorted
 	       (let loop ((idx (+ -1 dimax))
 			  (last (key (array-ref seq dimax))))
 		 (or (negative? idx)

@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; R6RS primitives written in Common Lisp.
 ;;;;
@@ -9,12 +9,12 @@
 ;;;; add or override what R6RS needs, following the R6RS libraries report
 ;;;; (rnrs-pdfs/errata-corrected-r6rs-lib.pdf).
 
-(defpackage "PSEUDOSCHEME-R6RS"
-  (:nicknames "PS-R6RS")
+(defpackage "QUASISCHEME-R6RS"
+  (:nicknames "QS-R6RS")
   (:use "COMMON-LISP")
   (:export "*PRIMITIVES*" "DEFPRIM"))
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defvar *primitives* '())
 
@@ -24,10 +24,10 @@
      (if cell (setf (cdr cell) fn)
 	 (setq *primitives* (nconc *primitives* (list (cons ,name fn)))))))
 
-; A Scheme boolean from any Lisp truth value: unlike PS:TRUE?, a true
+; A Scheme boolean from any Lisp truth value: unlike QS:TRUE?, a true
 ; value that isn't T (a MEMBER tail, a procedure) becomes #t.
 (declaim (inline bool))
-(defun bool (x) (if x t ps:false))
+(defun bool (x) (if x t qs:false))
 
 ;;; ------------------------------------------------------------------
 ;;; Numbers (11.7.4.1): div/mod and div0/mod0.  div and mod are floor
@@ -37,13 +37,13 @@
 ;;;   123 div0 10 = 12   123 div0 -10 = -12   -123 div0 10 = -12   -123 div0 -10 = 12
 
 (defun check-real (who x)
-  (unless (realp x) (ps:scheme-error "~A: not a real number: ~S" who x)))
+  (unless (realp x) (qs:scheme-error "~A: not a real number: ~S" who x)))
 
 (defun float-quotient (x y)
   "x/y for a flonum argument, IEEE-style: a NaN or infinity when the
 quotient isn't finite, else NIL to say \"go on\"."
-  (let ((q (ps:call-with-ieee-arithmetic (lambda () (/ (float x 1d0) (float y 1d0))))))
-    (values (and (or (ps:nan-p q) (ps:infinite-p q)) q) q)))
+  (let ((q (qs:call-with-ieee-arithmetic (lambda () (/ (float x 1d0) (float y 1d0))))))
+    (values (and (or (qs:nan-p q) (qs:infinite-p q)) q) q)))
 
 (defun div-of (x y)
   (if (or (floatp x) (floatp y))
@@ -62,17 +62,17 @@ quotient isn't finite, else NIL to say \"go on\"."
   `(progn
      (defprim ,name-div (x y)
        (check-real ,name-div x) (check-real ,name-div y)
-       (when (zerop y) (ps:scheme-error "~A: division by zero" ,name-div))
+       (when (zerop y) (qs:scheme-error "~A: division by zero" ,name-div))
        (values (,fn x y)))
      (defprim ,name-mod (x y)
        (check-real ,name-mod x) (check-real ,name-mod y)
-       (when (zerop y) (ps:scheme-error "~A: division by zero" ,name-mod))
-       (ps:call-with-ieee-arithmetic (lambda () (- x (* y (,fn x y))))))
+       (when (zerop y) (qs:scheme-error "~A: division by zero" ,name-mod))
+       (qs:call-with-ieee-arithmetic (lambda () (- x (* y (,fn x y))))))
      (defprim ,name-both (x y)
        (check-real ,name-both x) (check-real ,name-both y)
-       (when (zerop y) (ps:scheme-error "~A: division by zero" ,name-both))
+       (when (zerop y) (qs:scheme-error "~A: division by zero" ,name-both))
        (let ((q (,fn x y)))
-	 (values q (ps:call-with-ieee-arithmetic (lambda () (- x (* y q)))))))))
+	 (values q (qs:call-with-ieee-arithmetic (lambda () (- x (* y q)))))))))
 
 (def-division "div" "mod" "div-and-mod" div-of)
 (def-division "div0" "mod0" "div0-and-mod0" div0-of)
@@ -82,5 +82,5 @@ quotient isn't finite, else NIL to say \"go on\"."
   (cond ((realp x) x)
 	((and (complexp x) (zerop (imagpart x))) (realpart x))))
 (defprim "real-valued?" (x) (bool (real-value x)))
-(defprim "rational-valued?" (x) (bool (ps:rational-number-p (real-value x))))
-(defprim "integer-valued?" (x) (bool (ps:integer-number-p (real-value x))))
+(defprim "rational-valued?" (x) (bool (qs:rational-number-p (real-value x))))
+(defprim "integer-valued?" (x) (bool (qs:integer-number-p (real-value x))))

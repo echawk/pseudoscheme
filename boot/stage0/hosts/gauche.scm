@@ -2,7 +2,7 @@
 ;;;
 ;;; Run in a directory holding psyntax's sources (psyntax/*.ss and
 ;;; psyntax-buildscript.ss):  gosh .../boot/stage0/hosts/gauche.scm
-;;; It writes psyntax-pseudoscheme.pp there.  See boot/stage0/README.md.
+;;; It writes psyntax-quasischeme.pp there.  See boot/stage0/README.md.
 
 (define (s0:host-eval x) (eval x (interaction-environment)))
 (define (s0:make-table) (make-hash-table 'eq?))

@@ -5,7 +5,7 @@ R7RS alike. They come from *generalized stack inspection*: compiled code
 stays ordinary direct-style Lisp, and a procedure that might be
 captured in the middle of a call records, on the stack, what it would
 need to resume. `--continuations=escape` on the command line (or
-`psx::*full-continuations*` false from Lisp) compiles escape-only
+`qsx::*full-continuations*` false from Lisp) compiles escape-only
 continuations instead. `(cond-expand (full-continuations ...))` tells
 which a program is compiled with.
 
@@ -104,10 +104,10 @@ what one would write by hand:
 
 ```lisp
 (labels ((v1 (v3)
-           (if (ps:scheme< v3 '2)
+           (if (qs:scheme< v3 '2)
                v3
-               (ps:scheme+ (v1 (ps:scheme- v3 '1))
-                           (v1 (ps:scheme- v3 '2))))))
+               (qs:scheme+ (v1 (qs:scheme- v3 '1))
+                           (v1 (qs:scheme- v3 '2))))))
   #'v1)
 ```
 
@@ -196,7 +196,7 @@ something that captures:
   variables from the frame and goes to the label after the call
   (`%l2`). From there the procedure continues as if the call had just
   returned.
-- `'()` and `'#f` print as `common-lisp:nil` and `ps:false` in the real
+- `'()` and `'#f` print as `common-lisp:nil` and `qs:false` in the real
   output; they are written the Scheme way above.
 
 The translator turns the machine into one Lisp function: `labels` for
@@ -390,7 +390,7 @@ making the R6RS test libraries and the larger benchmarks compile:
   exponentially with the number of sites: a body of 20 calls took 16 s.
 - A big program (bench/'s `compiler`, 11,000 lines) exhausted an 8 GB
   heap as one component. A top-level form bigger than
-  `psx::*letrec-definitions-limit*` has its definitions hoisted into
+  `qsx::*letrec-definitions-limit*` has its definitions hoisted into
   top-level definitions (`hoist-definitions`, src/psyntax.lisp),
   compiled one by one.
 
@@ -472,11 +472,11 @@ it.
 Guile builds its exceptions, `catch`/`throw` and much of `(ice-9
 control)` on prompts, and Racket builds nearly everything on them. So
 they are native here, on the same frames as `call/cc`, rather than a
-library on top of it. `(pseudoscheme control)` (src/control.sls) has
+library on top of it. `(quasischeme control)` (src/control.sls) has
 Guile's interface:
 
 ```scheme
-(import (rnrs) (pseudoscheme control))
+(import (rnrs) (quasischeme control))
 
 (call-with-prompt 'foo
   (lambda () (+ 1 (abort-to-prompt 'foo 41)))

@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; A reader of ELF64 images, for Guile's compiled code
 ;;;;
@@ -8,7 +8,7 @@
 ;;;; dynamic section and symbols) from an image in a byte vector.
 ;;;; Written from the ELF specification (System V ABI, elf(5)).
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defstruct (elf (:constructor %make-elf))
   (bytes nil :type (simple-array (unsigned-byte 8) (*)))

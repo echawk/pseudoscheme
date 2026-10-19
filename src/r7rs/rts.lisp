@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R7RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R7RS -*-
 
 ;;;; R7RS run-time primitives written in Common Lisp
 ;;;;
@@ -10,11 +10,11 @@
 ;;;; Scheme-level derived forms and the easy list/string/vector
 ;;;; procedures are in base.scm.
 ;;;;
-;;;; Conventions: Scheme #f is the symbol PS:FALSE, #t is T, and NIL is
-;;;; the empty list, so predicates return (PS:TRUE? <cl-boolean>) and
-;;;; tests of Scheme values use PS:TRUEP.
+;;;; Conventions: Scheme #f is the symbol QS:FALSE, #t is T, and NIL is
+;;;; the empty list, so predicates return (QS:TRUE? <cl-boolean>) and
+;;;; tests of Scheme values use QS:TRUEP.
 
-(in-package "PSEUDOSCHEME-R7RS")
+(in-package "QUASISCHEME-R7RS")
 
 (defvar *primitives* '()
   "Alist of (scheme-name-string . function), in definition order.")
@@ -33,22 +33,22 @@
   (or (cdr (assoc name *primitives* :test #'string=))
       (error "no R7RS primitive ~A" name)))
 
-(defun bool (x) (ps:true? x))
+(defun bool (x) (qs:true? x))
 
 (defun scheme-error (control &rest args)
-  (apply #'ps:scheme-error control args))
+  (apply #'qs:scheme-error control args))
 
 ;;; ------------------------------------------------------------------
 ;;; Booleans, symbols
 
 (defprim "boolean=?" (a b &rest more)
-  (flet ((check (x) (unless (or (eq x t) (eq x ps:false))
+  (flet ((check (x) (unless (or (eq x t) (eq x qs:false))
 		      (scheme-error "boolean=?: not a boolean: ~S" x))))
     (check a) (check b) (mapc #'check more)
     (bool (and (eq a b) (every (lambda (x) (eq x a)) more)))))
 
 (defprim "symbol=?" (a b &rest more)
-  (flet ((check (x) (unless (ps:scheme-symbol-p x)
+  (flet ((check (x) (unless (qs:scheme-symbol-p x)
 		      (scheme-error "symbol=?: not a symbol: ~S" x))))
     (check a) (check b) (mapc #'check more)
     (bool (and (eq a b) (every (lambda (x) (eq x a)) more)))))
@@ -66,7 +66,7 @@
 
 (defun check-integers (who &rest xs)
   (dolist (x xs)
-    (unless (or (integerp x) (and (floatp x) (ps:integer-number-p x)))
+    (unless (or (integerp x) (and (floatp x) (qs:integer-number-p x)))
       (scheme-error "~A: not an integer: ~S" who x))))
 
 ;;; The integer divisions.  Inexact integers give inexact results, as
@@ -118,7 +118,7 @@
 (defprim "string-upcase" (s) (coerce (string-upcase s) 'simple-string))
 (defprim "string-downcase" (s) (coerce (string-downcase s) 'simple-string))
 (defprim "digit-value" (c)
-  (let ((w (digit-char-p c))) (if w w ps:false)))
+  (let ((w (digit-char-p c))) (if w w qs:false)))
 
 ;;; ------------------------------------------------------------------
 ;;; Bytevectors (R7RS 6.9).  CL has these natively.
@@ -167,7 +167,7 @@
   (unless (and (integerp k) (< -1 k (length bv)))
     (scheme-error "bytevector-u8-set!: index out of range: ~S" k))
   (setf (aref bv k) byte)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "bytevector-copy" (bv &optional start end)
   (check-bytevector "bytevector-copy" bv)
@@ -181,7 +181,7 @@
     (unless (<= 0 at (- (length to) (- end start)))
       (scheme-error "bytevector-copy!: destination too small"))
     (replace to from :start1 at :start2 start :end2 end)
-    ps:unspecific))
+    qs:unspecific))
 
 (defprim "bytevector-append" (&rest bvs)
   (mapc (lambda (b) (check-bytevector "bytevector-append" b)) bvs)
@@ -298,7 +298,7 @@
       (unless (= (length args) arity)
 	(scheme-error "~A constructor: expected ~D arguments, got ~D"
 		      (record-type-name type) arity (length args)))
-      (let ((values (make-array n :initial-element ps:false)))
+      (let ((values (make-array n :initial-element qs:false)))
 	(loop for i in indexes for a in args do (setf (svref values i) a))
 	(%make-record type values)))))
 
@@ -318,7 +318,7 @@
       (unless (and (record-p obj) (eq (record-rtd obj) type))
 	(scheme-error "~A modifier: not a ~A: ~S" field (record-type-name type) obj))
       (setf (svref (record-values obj) i) value)
-      ps:unspecific)))
+      qs:unspecific)))
 
 ;;; ------------------------------------------------------------------
 ;;; Exceptions (R7RS 6.11)
@@ -536,7 +536,7 @@ the context when a continuation captured in THUNK is re-entered.")
 ;;; ------------------------------------------------------------------
 ;;; Ports and files (the parts that need CL streams)
 
-(defprim "eof-object" () ps:eof-object)
+(defprim "eof-object" () qs:eof-object)
 (defprim "current-error-port" () *error-output*)
 (defprim "port?" (x) (bool (streamp x)))
 (defprim "textual-port?" (x)
@@ -545,47 +545,47 @@ the context when a continuation captured in THUNK is re-entered.")
   (bool (and (streamp x) (not (subtypep (stream-element-type x) 'character)))))
 (defprim "input-port-open?" (x) (bool (and (input-stream-p x) (open-stream-p x))))
 (defprim "output-port-open?" (x) (bool (and (output-stream-p x) (open-stream-p x))))
-(defprim "close-port" (x) (close x) ps:unspecific)
+(defprim "close-port" (x) (close x) qs:unspecific)
 (defprim "call-with-port" (port proc)
   (multiple-value-prog1 (funcall proc port) (close port)))
 (defprim "flush-output-port" (&optional (port *standard-output*))
-  (finish-output port) ps:unspecific)
+  (finish-output port) qs:unspecific)
 
 (defprim "read-line" (&optional (port *standard-input*))
   (multiple-value-bind (line missing-newline-p) (read-line port nil nil)
     (declare (ignore missing-newline-p))
-    (if line (coerce line 'simple-string) ps:eof-object)))
+    (if line (coerce line 'simple-string) qs:eof-object)))
 
 (defprim "read-string" (k &optional (port *standard-input*))
   (let* ((buf (make-string k))
 	 (n (read-sequence buf port)))
-    (if (and (zerop n) (plusp k)) ps:eof-object (coerce (subseq buf 0 n) 'simple-string))))
+    (if (and (zerop n) (plusp k)) qs:eof-object (coerce (subseq buf 0 n) 'simple-string))))
 
 (defprim "write-shared" (obj &optional (port *standard-output*))
-  (funcall ps:*scheme-write-shared* obj port)
-  ps:unspecific)
+  (funcall qs:*scheme-write-shared* obj port)
+  qs:unspecific)
 (defprim "write-simple" (obj &optional (port *standard-output*))
-  (funcall ps:*scheme-write-simple* obj port)
-  ps:unspecific)
+  (funcall qs:*scheme-write-simple* obj port)
+  qs:unspecific)
 
 (defprim "write-string" (s &optional (port *standard-output*) start end)
   (multiple-value-bind (start end) (range "write-string" (length s) start end)
     (write-string s port :start start :end end)
-    ps:unspecific))
+    qs:unspecific))
 
 ;; Chez's (and so (chezscheme)'s, the same binding) takes follow?.
 (defprim "file-exists?" (name &optional follow?)
   (declare (ignore follow?))
   (bool (and (probe-file name) t)))
-(defprim "delete-file" (name) (delete-file name) ps:unspecific)
+(defprim "delete-file" (name) (delete-file name) qs:unspecific)
 
 ;;; ------------------------------------------------------------------
 ;;; Process context and time
 
 (defprim "exit" (&optional (code 0))
-  (uiop:quit (cond ((eq code t) 0) ((eq code ps:false) 1) ((integerp code) code) (t 0))))
+  (uiop:quit (cond ((eq code t) 0) ((eq code qs:false) 1) ((integerp code) code) (t 0))))
 (defprim "emergency-exit" (&optional (code 0))
-  (uiop:quit (cond ((eq code t) 0) ((eq code ps:false) 1) ((integerp code) code) (t 0))))
+  (uiop:quit (cond ((eq code t) 0) ((eq code qs:false) 1) ((integerp code) code) (t 0))))
 (defvar *command-line* nil
   "What COMMAND-LINE returns, when set (the command-line program sets it
 to the script name and its arguments); else the process's arguments.")
@@ -598,11 +598,11 @@ for SRFI 193's script-file.")
   ;; with an argument, as Chez's command-line parameter, set it (so
   ;; parameterize can bind it)
   (if args-p
-      (progn (setq *command-line* args) ps:unspecific)
+      (progn (setq *command-line* args) qs:unspecific)
       (or *command-line*
-	  (cons "pseudoscheme" (copy-list (uiop:command-line-arguments))))))
+	  (cons "quasischeme" (copy-list (uiop:command-line-arguments))))))
 (defprim "get-environment-variable" (name)
-  (or (uiop:getenv name) ps:false))
+  (or (uiop:getenv name) qs:false))
 ;; No portability library lists the whole environment.
 (defun environment-strings ()
   "The process environment as a list of \"NAME=value\" strings."

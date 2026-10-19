@@ -27,10 +27,10 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (load-system :pseudoscheme/r7rs)))
+    (load-system :quasischeme/r7rs)))
 
 ;; IEEE inexact arithmetic: (/ 1. 0.) => +inf.0, as R6RS/R7RS expect.
-(ps:disable-float-traps)
+(qs:disable-float-traps)
 
 (defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
 (defparameter *trace* (member "-vv" (uiop:command-line-arguments) :test #'string=))
@@ -38,18 +38,18 @@
 
 (defun read-all (path)
   (with-open-file (in path)
-    (loop for form = (funcall ps:*scheme-read* in)
-	  until (eq form ps:eof-object)
+    (loop for form = (funcall qs:*scheme-read* in)
+	  until (eq form qs:eof-object)
 	  collect form)))
 
 ;; Boot psyntax and the R7RS libraries, then (chibi test), the shim next
 ;; to the tests.  With --continuations=escape, (chibi test) and the tests
 ;; are compiled with escape-only continuations (src/continuations.lisp).
-(ps-r7rs::boot)
-(setq psx::*full-continuations*
+(qs-r7rs::boot)
+(setq qsx::*full-continuations*
       (not (member "--continuations=escape" (uiop:command-line-arguments) :test #'string=)))
 (dolist (form (read-all (merge-pathnames "chibi/chibi-test.scm" *here*)))
-  (ps-r7rs::eval-at-repl form))
+  (qs-r7rs::eval-at-repl form))
 
 ;;; Split the test file into top-level data textually (honoring strings,
 ;;; comments and #\x characters) so that one unreadable datum -- say a
@@ -114,7 +114,7 @@
 (defvar *unreadable* 0)
 
 (defun chunk-form (chunk)
-  (handler-case (with-input-from-string (in chunk) (funcall ps:*scheme-read* in))
+  (handler-case (with-input-from-string (in chunk) (funcall qs:*scheme-read* in))
     (error (e)
       (incf *unreadable*)
       (when *verbose*
@@ -128,7 +128,7 @@
 	(when *trace*
 	  (format t "~&>> ~A~%" (subseq chunk 0 (min 100 (length chunk))))
 	  (finish-output))
-	(handler-case (ps-r7rs::eval-at-repl form)
+	(handler-case (qs-r7rs::eval-at-repl form)
 	  ;; SERIOUS-CONDITION, not ERROR: a runaway WRITE of a circular
 	  ;; structure (no datum labels yet) ends in heap exhaustion.
 	  (serious-condition (e)
@@ -137,7 +137,7 @@
 	      (format t "~&[ERROR] ~A~%  in ~A~%"
 		      (remove #\Newline (princ-to-string e))
 		      (subseq chunk 0 (min 90 (length chunk))))))))))
-  (let* ((counts (ps-r7rs::eval-at-repl (list (ps:intern-scheme-symbol "test-results"))))
+  (let* ((counts (qs-r7rs::eval-at-repl (list (qs:intern-scheme-symbol "test-results"))))
 	 (run (car counts)) (passed (cdr counts)))
     (format t "~&~%R7RS: ~A of ~A tests passed (~A forms raised errors, ~A unreadable).~%"
 	    passed run *harness-errors* *unreadable*)))

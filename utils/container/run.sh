@@ -4,7 +4,7 @@
 # Usage: sh utils/container/run.sh NAME COMMAND ...
 #
 # The repository is mounted read-only at /src and copied to /work (a
-# volume, so that the copy, bin/pseudoscheme and the compiled files stay
+# volume, so that the copy, bin/quasischeme and the compiled files stay
 # between runs); COMMAND runs in /work under sh -c.  Its output goes to
 # the terminal and to build/container/logs/NAME.log, and whatever
 # COMMAND writes under /logs lands in build/container/logs/NAME/.
@@ -17,7 +17,7 @@ name=$1; shift
 cd "$(dirname "$0")"
 . ./config.sh
 # One run at a time: runs share /work and the compiled files
-running=$(podman $CONNECTION ps --format '{{.Names}}' | grep '^pseudoscheme-' || true)
+running=$(podman $CONNECTION ps --format '{{.Names}}' | grep '^quasischeme-' || true)
 if [ -n "$running" ]; then
   echo "Another run is in progress ($running); wait for it, or: podman $CONNECTION kill $running" >&2
   exit 1
@@ -27,16 +27,16 @@ mkdir -p "$LOGS/$name"
 log=$LOGS/$name.log
 {
   echo "# $(date -u +%Y-%m-%dT%H:%M:%SZ) $*"
-  podman $CONNECTION run --rm --privileged --name "pseudoscheme-$name" \
+  podman $CONNECTION run --rm --privileged --name "quasischeme-$name" \
     -v "$ROOT:/src:ro" -v "$LOGS/$name:/logs" \
-    -v pseudoscheme-work:/work -v pseudoscheme-cache:/root/.cache \
-    -v pseudoscheme-gnu:/gnu -v pseudoscheme-var-guix:/var/guix \
+    -v quasischeme-work:/work -v quasischeme-cache:/root/.cache \
+    -v quasischeme-gnu:/gnu -v quasischeme-var-guix:/var/guix \
     "$IMAGE" sh -c 'rsync -a --delete --files-from=/logs/files.list /src/ /work/ \
                       && rm /logs/files.list && cd /work && exec sh -c "$0" ' "$*" &
   pid=$!
   sleeper=
   if [ -n "$LIMIT" ]; then
-    ( sleep "$LIMIT"; podman $CONNECTION kill "pseudoscheme-$name" ) > /dev/null 2>&1 &
+    ( sleep "$LIMIT"; podman $CONNECTION kill "quasischeme-$name" ) > /dev/null 2>&1 &
     sleeper=$!
   fi
   status=0

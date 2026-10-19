@@ -1,4 +1,4 @@
-# Racket's schemified linklets on Pseudoscheme
+# Racket's schemified linklets on Quasischeme
 
 Racket CS compiles Racket's own runtime (the expander, io, thread,
 regexp, and schemify, its compiler pass from linklets to Chez Scheme)
@@ -8,7 +8,7 @@ that runs on Racket's "rumble" layer, about 21,000 lines of Chez Scheme
 built on Chez's internals (continuation attachments, `$record`
 primitives, engines, stencil vectors).
 
-This directory runs some of those linklets on Pseudoscheme's Chez mode,
+This directory runs some of those linklets on Quasischeme's Chez mode,
 unmodified, on a small stand-in for rumble:
 
 - `racket-lite.sls`, the library `(racket-lite)`: Racket's primitives as
@@ -21,7 +21,7 @@ unmodified, on a small stand-in for rumble:
   `parameterization-key` binds parameters); Racket's error procedures;
   Racket-style input ports (`make-input-port`); and the linklet runtime
   a schemified linklet's `lambda` expects (variables, the module
-  prompt). Written for Pseudoscheme, not derived from rumble's source.
+  prompt). Written for Quasischeme, not derived from rumble's source.
 - `load-linklet.ss FILE EXPR ...`: evaluates a linklet's body at a Chez
   top level with `(racket-lite)` imported, then the expressions.
 - `rx-tests.ss`: Racket's own regexp tests, from

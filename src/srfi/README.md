@@ -1,10 +1,10 @@
 # SRFIs
 
-The SRFI libraries that ship with Pseudoscheme: every final SRFI that
+The SRFI libraries that ship with Quasischeme: every final SRFI that
 hasn't been withdrawn, as of SRFI 274. Each `N.sld` is an R7RS
 `define-library` for `(srfi N)` (a few are R6RS `library` forms). psyntax finds them with no setup:
-`psx:*system-library-path*` roots every name that starts with `srfi` here.
-That root is searched after the user's `psx:*library-path*`, so a project
+`qsx:*system-library-path*` roots every name that starts with `srfi` here.
+That root is searched after the user's `qsx:*library-path*`, so a project
 can still supply its own SRFIs, for instance Akku's chez-srfi.
 
 Other names resolve to these libraries as well (`src/r7rs/front.lisp`,
@@ -28,15 +28,15 @@ Other names resolve to these libraries as well (`src/r7rs/front.lisp`,
 Each `N.sld` here also makes `srfi-N` a feature for `cond-expand` (SRFI
 0), as do the SRFIs built into the reader, the expander and the command
 line, which have no library: 0, 22, 30, 46, 62, 97, 105, 138 and 169
-(`psl:*scheme-features*`, src/environments.lisp). Some others are mostly
+(`qsl:*scheme-features*`, src/environments.lisp). Some others are mostly
 built in, their libraries holding what procedures they have: the reader
 syntax of 10, 49, 58, 88, 107, 108, 109, 110, 119, 163, 207 and 270
 (`src/read.scm`, `src/quasi.lisp`), and the expander forms of 139, 149,
 212, 213 and 251 (`vendor/psyntax`).
 
 `make precompile-srfi` compiles all of them into the compiled-library
-cache ahead of time (`bin/pseudoscheme --precompile-srfi` for one
-continuation mode; `pseudoscheme-api:precompile-libraries` from Lisp).
+cache ahead of time (`bin/quasischeme --precompile-srfi` for one
+continuation mode; `quasischeme-api:precompile-libraries` from Lisp).
 
 `tests/N.scm` tests SRFI N, an R7RS program that exits with 0 when its
 tests pass; `make test-srfi` runs them all, in order, a line each
@@ -50,7 +50,7 @@ Some SRFIs are built on Common Lisp libraries, imported as `(cl
 build) and 229 (closer-mop). The Lisp system is loaded, through
 Quicklisp when it's present, the first time the SRFI is imported, so
 nothing is loaded into an image that doesn't use them, and none of them
-is a dependency of Pseudoscheme's ASDF systems.
+is a dependency of Quasischeme's ASDF systems.
 
 Where possible, a library uses the SRFI's reference implementation,
 unmodified, from `reference/`, and pulls it in with `include`. Each
@@ -77,22 +77,22 @@ throughout:
 |---|---|---|
 | 0, 6, 9, 11, 16, 23, 34, 39, 87, 98, 244 | Re-export R7RS's bindings | — |
 | 1 | Olin Shivers' reference implementation | MIT-style (Shivers) |
-| 2, 8, 26, 28, 31, 61, 145 | Written for Pseudoscheme (26 follows its reference implementation) | Pseudoscheme's |
-| 4 | Written for Pseudoscheme: CL specialized vectors (src/r6rs/numeric-vectors.lisp), with reader and writer syntax | Pseudoscheme's |
+| 2, 8, 26, 28, 31, 61, 145 | Written for Quasischeme (26 follows its reference implementation) | Quasischeme's |
+| 4 | Written for Quasischeme: CL specialized vectors (src/r6rs/numeric-vectors.lisp), with reader and writer syntax | Quasischeme's |
 | 5 | Andy Gaynor's syntax-rules implementation (2003 revision), from the SRFI document | SRFI copyright notice |
 | 7 | Richard Kelsey's process-program, from the SRFI document; program runs the result as an R7RS program | MIT |
-| 10, 88, 105, 107, 108, 109, 169 | Written for Pseudoscheme: reader syntax (`src/read.scm`, `src/quasi.lisp`), with the libraries' procedures | Pseudoscheme's |
+| 10, 88, 105, 107, 108, 109, 169 | Written for Quasischeme: reader syntax (`src/read.scm`, `src/quasi.lisp`), with the libraries' procedures | Quasischeme's |
 | 13 | Olin Shivers' reference implementation (minor changes, see `13.sld`) | MIT Scheme licence + scsh BSD |
-| 14 | Written for Pseudoscheme: range-vector char-sets over all of Unicode, the standard sets by general category from cl-unicode; the interface after Olin Shivers' reference implementation | Pseudoscheme's |
+| 14 | Written for Quasischeme: range-vector char-sets over all of Unicode, the standard sets by general category from cl-unicode; the interface after Olin Shivers' reference implementation | Quasischeme's |
 | 17 | Lars Thomas Hansen's Twobit sample implementation and the document's getter-with-setter (adapted, see `17.sld`) | MIT (Per Bothner) |
-| 18 | Written for Pseudoscheme, on bordeaux-threads | Pseudoscheme's; bordeaux-threads MIT |
+| 18 | Written for Quasischeme, on bordeaux-threads | Quasischeme's; bordeaux-threads MIT |
 | 19 | Will Fitzgerald's reference implementation (five changes, see `19.sld`); the local time zone from CL's `decode-universal-time` | MIT |
-| 21 | Written for Pseudoscheme, on SRFI 18 | Pseudoscheme's |
-| 22, 138, 176, 193 | Written for Pseudoscheme: the command-line program (`contrib/cli`), with libraries for 176 and 193 | Pseudoscheme's |
+| 21 | Written for Quasischeme, on SRFI 18 | Quasischeme's |
+| 22, 138, 176, 193 | Written for Quasischeme: the command-line program (`contrib/cli`), with libraries for 176 and 193 | Quasischeme's |
 | 25 | Jussi Piitulainen's reference implementation | MIT |
 | 27 | Sebastian Egner's reference implementation (integer MRG32k3a) | MIT |
 | 29 | Scott G. Miller's reference implementation, from the SRFI document; locale from LC_ALL/LC_MESSAGES/LANG | MIT |
-| 35, 36 | Written for Pseudoscheme on R6RS conditions: the types are R6RS record types, and SRFI 36's I/O types are R6RS's where they match (see `36.sld`) | Pseudoscheme's |
+| 35, 36 | Written for Quasischeme on R6RS conditions: the types are R6RS record types, and SRFI 36's I/O types are R6RS's where they match (see `36.sld`) | Quasischeme's |
 | 37 | Anthony Carrico's reference implementation | 3-clause BSD |
 | 38 | Ray Dillinger's reference write-with-shared-structure; read-with-shared-structure is R7RS read | MIT |
 | 41 | Philip L. Bewig's R6RS reference implementation, with the library names changed | MIT |
@@ -100,42 +100,42 @@ throughout:
 | 43 | Taylor Campbell's reference implementation, corrected by Will Clinger | Public domain |
 | 44 | Antero Mejr's R7RS implementation (contrib); SRFI 256 records on R6RS records (see `44.sld`) | MIT |
 | 45 | `lazy` and `eager` defined on R7RS's `delay-force` and `make-promise` | — |
-| 47 | Re-exports SRFI 63; prototypes written for Pseudoscheme | MIT (Jaffer); Pseudoscheme's |
+| 47 | Re-exports SRFI 63; prototypes written for Quasischeme | MIT (Jaffer); Quasischeme's |
 | 48 | Kenneth A Dickey's reference implementation, revised by Hamayama | MIT |
 | 49 | The reader of `sugar.scm`, the implementation in the SRFI document (Egil Möller), adapted (see `49.sld`) | MIT |
 | 51, 54 | Joo ChurlSoo's implementations, from the SRFI documents | MIT |
-| 55 | Written for Pseudoscheme (require-extension as import at the REPL) | Pseudoscheme's |
+| 55 | Written for Quasischeme (require-extension as import at the REPL) | Quasischeme's |
 | 57 | André van Tonder's reference implementation; 7 macros replaced (see `57.sld`) | MIT |
-| 58, 163 | Written for Pseudoscheme: array literals in the reader, made SRFI 164 arrays | Pseudoscheme's |
+| 58, 163 | Written for Quasischeme: array literals in the reader, made SRFI 164 arrays | Quasischeme's |
 | 59 | Aubrey Jaffer's implementation from the SRFI document (SLIB), included with include-ci | MIT |
-| 60 | Written for Pseudoscheme, on SRFI 151 | Pseudoscheme's |
+| 60 | Written for Quasischeme, on SRFI 151 | Quasischeme's |
 | 63 | Aubrey Jaffer's SLIB array.scm, from the SRFI document; SLIB records on R6RS records | SLIB permissive notice + MIT |
 | 64 | Taylan Kammer's implementation (after Per Bothner's) | MIT |
-| 66 | Written for Pseudoscheme on bytevectors (SRFI 4's u8vectors) and R6RS bytevector=?/bytevector-copy! | Pseudoscheme's |
+| 66 | Written for Quasischeme on bytevectors (SRFI 4's u8vectors) and R6RS bytevector=?/bytevector-copy! | Quasischeme's |
 | 67 | Sebastian Egner and Jens Axel Søgaard's reference implementation | MIT |
-| 69 | Written for Pseudoscheme on R6RS hashtables, with the interface of Panu Kalliokoski's reference implementation | Pseudoscheme's |
-| 70 | Written for Pseudoscheme from the SRFI document: R7RS's arithmetic re-exported; exact-floor etc., rational gcd/lcm and expt of exact 0 added | Pseudoscheme's |
+| 69 | Written for Quasischeme on R6RS hashtables, with the interface of Panu Kalliokoski's reference implementation | Quasischeme's |
+| 70 | Written for Quasischeme from the SRFI document: R7RS's arithmetic re-exported; exact-floor etc., rational gcd/lcm and expt of exact 0 added | Quasischeme's |
 | 71 | Sebastian Egner's reference implementation (the generic part) | MIT |
-| 72 | Written for Pseudoscheme, approximately, on psyntax's syntax-case | Pseudoscheme's |
-| 74 | Written for Pseudoscheme on R6RS bytevectors | Pseudoscheme's |
+| 72 | Written for Quasischeme, approximately, on psyntax's syntax-case | Quasischeme's |
+| 74 | Written for Quasischeme on R6RS bytevectors | Quasischeme's |
 | 78 | Sebastian Egner's reference implementation | MIT |
 | 89 | Marc Feeley's implementation from the SRFI document, its expander ported from define-macro to syntax-case | MIT |
-| 90 | Written for Pseudoscheme on SRFI 69, after Marc Feeley's implementation in the SRFI document | MIT; Pseudoscheme's |
+| 90 | Written for Quasischeme on SRFI 69, after Marc Feeley's implementation in the SRFI document | MIT; Quasischeme's |
 | 94 | Aubrey Jaffer's implementation from the SRFI document, copied into `94.sld` with the self-referential redefinitions renamed | MIT |
 | 95 | SLIB's `sort.scm` (Richard O'Keefe, Aubrey Jaffer), with one fix (see `95.sld`) | Public domain |
-| 96 | Written for Pseudoscheme, after the specification | Pseudoscheme's |
+| 96 | Written for Quasischeme, after the specification | Quasischeme's |
 | 99 | William D Clinger's reference implementation, on R6RS records (2 changes, see `99/records/syntactic.sld`) | MIT |
 | 100 | Joo ChurlSoo's implementation (define-syntax part; object registration added) | MIT |
 | 101 | David Van Horn's R6RS reference implementation, with the library name changed | MIT |
-| 106 | Written for Pseudoscheme, on usocket | Pseudoscheme's; usocket MIT |
+| 106 | Written for Quasischeme, on usocket | Quasischeme's; usocket MIT |
 | 110 | David A. Wheeler and Alan Manuel K. Gloria's `kernel.scm` (two changes, see `110.sld`) | MIT |
 | 111 | Re-exports SRFI 195's boxes | — |
-| 112 | Written for Pseudoscheme, on CL's software-type, machine-type, ... | Pseudoscheme's |
+| 112 | Written for Quasischeme, on CL's software-type, machine-type, ... | Quasischeme's |
 | 113 | John Cowan's reference implementation, on SRFIs 69 and 128 | MIT |
-| 115 | Written for Pseudoscheme, on cl-ppcre; the match-iteration procedures follow Alex Shinn's chibi-scheme implementation | Pseudoscheme's; cl-ppcre BSD; chibi BSD |
+| 115 | Written for Quasischeme, on cl-ppcre; the match-iteration procedures follow Alex Shinn's chibi-scheme implementation | Quasischeme's; cl-ppcre BSD; chibi BSD |
 | 116 | John Cowan's reference implementation (two changes, see `116.sld`) | MIT |
 | 117 | John Cowan's reference implementation, with R7RS shims from chibi-scheme | MIT; 3-clause BSD |
-| 118 | Written for Pseudoscheme: an approximation by macros (strings are fixed-size; see `118.sld`) | Pseudoscheme's |
+| 118 | Written for Quasischeme: an approximation by macros (strings are fixed-size; see `118.sld`) | Quasischeme's |
 | 119 | Arne Babenhauserheide's `wisp-scheme.scm`, with Guile's procedures supplied (see `119.sld`) | MIT |
 | 120 | Takashi Kato's sample implementation (four changes, see `120.sld`) | 2-clause BSD |
 | 121 | Re-exports SRFI 158, which extends it | — |
@@ -154,15 +154,15 @@ throughout:
 | 135 | William D Clinger's sample implementation (kernel0: texts are strings) | MIT |
 | 136 | Marc Nieper-Wißkirchen's sample implementation, on SRFI 137 | MIT |
 | 137 | John Cowan and Marc Nieper-Wißkirchen's implementation | MIT |
-| 139, 149, 212, 213, 251 | Written for Pseudoscheme, in psyntax's expander (`vendor/psyntax`) | Pseudoscheme's; psyntax's |
-| 140 | Written for Pseudoscheme: William D Clinger's SRFI 135 sample implementation on a string kernel (see `140.sld`); test suite by Per Bothner and Clinger | MIT; Pseudoscheme's |
+| 139, 149, 212, 213, 251 | Written for Quasischeme, in psyntax's expander (`vendor/psyntax`) | Quasischeme's; psyntax's |
+| 140 | Written for Quasischeme: William D Clinger's SRFI 135 sample implementation on a string kernel (see `140.sld`); test suite by Per Bothner and Clinger | MIT; Quasischeme's |
 | 141 | Taylor R. Campbell's reference implementation | 2-clause BSD |
 | 143 | John Cowan's reference implementation (two changes, see `143.sld`) | MIT |
 | 144 | William D Clinger's sample implementation, on `(rnrs arithmetic flonums)`; the exponent, sign and adjacency procedures on CL's `decode-float` and float-features (see `144.sld`) | MIT |
 | 146 | Marc Nieper-Wißkirchen's mappings (red-black trees); Arthur A. Gleckler's hashmaps (HAMTs) | MIT |
 | 147 | Marc Nieper-Wißkirchen's sample implementation, adapted to psyntax (see `private/srfi-147-implementation.sld`) | MIT |
 | 148 | Marc Nieper-Wißkirchen's sample implementation, split into three libraries | MIT |
-| 150 | Written for Pseudoscheme (syntax-case, on R6RS records), after Marc Nieper-Wißkirchen's sample implementation | Pseudoscheme's |
+| 150 | Written for Quasischeme (syntax-case, on R6RS records), after Marc Nieper-Wißkirchen's sample implementation | Quasischeme's |
 | 151 | John Cowan's reference implementation; bitwise-33 by Olin Shivers, bitwise-60 by Aubrey Jaffer | MIT; public domain; SLIB licence |
 | 152 | John Cowan's sample implementation, after Olin Shivers' SRFI 13 | MIT; MIT Scheme licence + scsh BSD |
 | 153 | John Cowan's sample implementation, on SRFIs 128 and 146 | MIT |
@@ -171,12 +171,12 @@ throughout:
 | 160 | John Cowan's reference implementation, expanded per type by its `atexpander.sh`; `(srfi 160 base)` on SRFI 4's host procedures | MIT |
 | 161 | Marc Nieper-Wißkirchen's sample implementation | MIT |
 | 162 | John Cowan's sample implementation, on (srfi 128), which it re-exports | MIT |
-| 164 | Written for Pseudoscheme from the SRFI document (Kawa's implementation is Java) | Pseudoscheme's |
+| 164 | Written for Quasischeme from the SRFI document (Kawa's implementation is Java) | Quasischeme's |
 | 165 | Marc Nieper-Wißkirchen's sample implementation | MIT |
 | 166 | Alex Shinn's chibi-scheme implementation, on SRFI 165 | 3-clause BSD |
 | 167 | Amirouche Boubekki's sample implementation (in-memory engine) | MIT |
 | 168 | Amirouche Boubekki's sample implementation (one misplaced parenthesis fixed) | MIT |
-| 170 | Written for Pseudoscheme, on osicat | Pseudoscheme's; osicat MIT |
+| 170 | Written for Quasischeme, on osicat | Quasischeme's; osicat MIT |
 | 171 | Linus Björnstam's reference implementation | MIT |
 | 172 | John Cowan's sample libraries, renamed | MIT |
 | 173 | Amirouche Boubekki's sample implementation | MIT |
@@ -185,11 +185,11 @@ throughout:
 | 178 | Wolfgang Corcoran-Mathe's sample implementation | MIT |
 | 179 | Alex Shinn's chibi-scheme implementation (two fixes, see `179.sld`) | 3-clause BSD |
 | 180 | Amirouche Boubekki's sample implementation; its chibi helpers rewritten on SRFI 115 | MIT (test files MIT; jsonl samples BSD) |
-| 181, 192 | Written for Pseudoscheme on its R6RS ports; tests from Shiro Kawai's sample | Pseudoscheme's; tests MIT |
+| 181, 192 | Written for Quasischeme on its R6RS ports; tests from Shiro Kawai's sample | Quasischeme's; tests MIT |
 | 185 | The portable implementation in the SRFI document (Per Bothner, John Cowan) | MIT |
 | 188 | Re-exports R6RS's let-syntax and letrec-syntax | — |
 | 189 | Wolfgang Corcoran-Mathe's reference implementation | MIT |
-| 190 | Written for Pseudoscheme after the SRFI document's sample, with a parameter in place of a syntax parameter | Pseudoscheme's (sample MIT) |
+| 190 | Written for Quasischeme after the SRFI document's sample, with a parameter in place of a syntax parameter | Quasischeme's (sample MIT) |
 | 194 | Sample implementation by Arvydas Silanskas, Bradley Lucier, Linas Vepštas and John Cowan | MIT |
 | 195 | Marc Nieper-Wißkirchen's sample implementation | MIT |
 | 196 | John Cowan / Wolfgang Corcoran-Mathe | MIT |
@@ -197,12 +197,12 @@ throughout:
 | 201 | Panicz Maciej Godek's Guile sample implementation (adapted), on Alex Shinn's match | MIT; match public domain |
 | 202 | Panicz Maciej Godek's Guile sample implementation, on Alex Shinn's match | MIT |
 | 203 | Vasilij Schneidermann's SVG implementation (the SRFI repository's contrib), with changes; Rogers image CC0 | BSD-3-Clause, CC0 |
-| 206 | Written for Pseudoscheme (partial); (srfi 206 all) after the SRFI's "poor man's" implementation | MIT |
+| 206 | Written for Quasischeme (partial); (srfi 206 all) after the SRFI's "poor man's" implementation | MIT |
 | 207 | Wolfgang Corcoran-Mathe's sample implementation | MIT |
-| 208, 254, 258, 260 | Written for Pseudoscheme (258 and 260 after their sample implementations) | Pseudoscheme's |
+| 208, 254, 258, 260 | Written for Quasischeme (258 and 260 after their sample implementations) | Quasischeme's |
 | 209 | Wolfgang Corcoran-Mathe's sample implementation | MIT |
 | 210 | Marc Nieper-Wißkirchen's reference implementation | MIT |
-| 211 | Written for Pseudoscheme, on psyntax's syntax-case | Pseudoscheme's |
+| 211 | Written for Quasischeme, on psyntax's syntax-case | Quasischeme's |
 | 214 | Adam Nelson's sample implementation | MIT |
 | 215 | Göran Weinholt's sample implementation | MIT |
 | 216 | Vladimir Nikishkin's sample implementation (runtime fixed) | MIT |
@@ -216,7 +216,7 @@ throughout:
 | 226 | Marc Nieper-Wißkirchen's sample implementation, its Chez Scheme parts replaced (see `226.sld`) | MIT |
 | 227 | Daphne Preston-Kendal's R7RS implementation | MIT |
 | 228 | Daphne Preston-Kendal's implementation | MIT |
-| 229 | Written for Pseudoscheme, on closer-mop funcallable instances | Pseudoscheme's; closer-mop MIT |
+| 229 | Written for Quasischeme, on closer-mop funcallable instances | Quasischeme's; closer-mop MIT |
 | 230 | Marc Nieper-Wißkirchen's sample implementation, on SRFI 18 | MIT |
 | 231 | Alex Shinn's portable implementation from chibi-scheme (the SRFI's own is Gambit-only) | 3-clause BSD |
 | 232 | Wolfgang Corcoran-Mathe's sample implementation (its import form removed) | MIT |
@@ -225,23 +225,23 @@ throughout:
 | 235 | John Cowan and Arvydas Silanskas's implementation | MIT |
 | 236 | Marc Nieper-Wißkirchen's implementation, from the SRFI document | MIT |
 | 237 | Marc Nieper-Wißkirchen's sample implementation, on R6RS records (changes in `237/records.sld`) | MIT |
-| 238 | Written for Pseudoscheme after Lassi Kortela's sample implementation | MIT |
+| 238 | Written for Quasischeme after Lassi Kortela's sample implementation | MIT |
 | 239 | Marc Nieper-Wißkirchen's syntax-case sample implementation | MIT |
 | 240 | Marc Nieper-Wißkirchen's sample implementation, on SRFI 237 | MIT |
 | 241 | Marc Nieper-Wißkirchen's R6RS sample implementation, converted to define-library | MIT |
 | 242 | Marc Nieper-Wißkirchen's reference implementation, converted to R7RS libraries, with an SRFI 213 emulation | MIT |
 | 247 | Marc Nieper-Wißkirchen's R6RS sample implementation, converted to define-library (one change, see `247.sld`) | MIT |
-| 248 | Written for Pseudoscheme; `guard` from Marc Nieper-Wißkirchen's sample implementation | Pseudoscheme's; MIT |
+| 248 | Written for Quasischeme; `guard` from Marc Nieper-Wißkirchen's sample implementation | Quasischeme's; MIT |
 | 250 | Daphne Preston-Kendal's sample implementation | MIT |
 | 252 | Antero Mejr's sample implementation (library renamed) | MIT |
 | 253 | Artyom Bologov's sample implementation (impl.scm, unmodified) | MIT |
 | 255 | Wolfgang Corcoran-Mathe and Marc Nieper-Wißkirchen's R6RS sample implementation, converted to define-library | MIT |
 | 257 | Sergei Egorov's R7RS sample libraries (main, misc, box; not rx) | MIT |
 | 259 | Daphne Preston-Kendal's sample implementation, on SRFI 229 | MIT |
-| 261 | The library system's names (`src/r7rs/front.lisp`) | Pseudoscheme's |
+| 261 | The library system's names (`src/r7rs/front.lisp`) | Quasischeme's |
 | 263 | Daniel Ziltener's reference implementation, with fixes | MIT |
 | 264 | Sergei Egorov's sample implementation, on SRFI 115 | MIT |
-| 270 | Peter McGoron's `write-hexadecimal-float`; hexadecimal floats in `string->number` | MIT; Pseudoscheme's |
+| 270 | Peter McGoron's `write-hexadecimal-float`; hexadecimal floats in `string->number` | MIT; Quasischeme's |
 | 271 | Wolfgang Corcoran-Mathe's sample implementation; xoshiro256++ moved from Gauche classes to R6RS custom ports | MIT |
 | 274 | Peter McGoron's sample implementation | MIT |
 

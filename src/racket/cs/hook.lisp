@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Strategies A and C: the one hook we replace in Racket CS's linklet
 ;;;; layer, the step that turns a schemified linklet into code
@@ -7,12 +7,12 @@
 ;;;;            translator, SBCL (what contrib/racket-linklets did);
 ;;;;   stage B  the schemified form straight to the translator's core
 ;;;;            forms (translate-core), skipping psyntax.
-;;;; PSEUDOSCHEME_RACKET_STAGE=a|b chooses; b once it works.
+;;;; QUASISCHEME_RACKET_STAGE=a|b chooses; b once it works.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defun hook-stage ()
-  (if (equal (uiop:getenv "PSEUDOSCHEME_RACKET_STAGE") "a") :a :b))
+  (if (equal (uiop:getenv "QUASISCHEME_RACKET_STAGE") "a") :a :b))
 
 (defun compile-schemified (form)
   "FORM, a schemified linklet (a lambda over its imports and exports), as

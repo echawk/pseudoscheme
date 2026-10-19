@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Racket's regexp layer as a linklet.
 ;;;;
@@ -14,7 +14,7 @@
 ;;;; INSTALL-REGEXP-LAYER compiles and instantiates it, and makes its
 ;;;; exports the natives of those names (regexp.lisp's, on CL-PPCRE,
 ;;;; stay as the fallback when the file is absent, or when
-;;;; PSEUDOSCHEME_RACKET_REGEXP=native).  Compiled code calls a native by
+;;;; QUASISCHEME_RACKET_REGEXP=native).  Compiled code calls a native by
 ;;;; its host global racket:NAME, so replacing the global replaces it
 ;;;; for the expander's linklet too.  The compiled form is cached, as
 ;;;; the expander's is, keyed by the linklet's text.
@@ -23,7 +23,7 @@
 ;;;; quoted data and compiled code) isn't one of the layer's regexps; the
 ;;;; replacements turn it into one, compiled once.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defparameter *regexp-layer-exports*
   '("regexp" "pregexp" "byte-regexp" "byte-pregexp"
@@ -44,7 +44,7 @@ regexp-place-init!, for a new place: there are none).")
   "Export name -> the layer's own procedure.")
 
 (defun derived-regexp-file ()
-  (asdf:system-relative-pathname :pseudoscheme "build/external/racket-derived/regexp.rktl"))
+  (asdf:system-relative-pathname :quasischeme "build/external/racket-derived/regexp.rktl"))
 
 (defun regexp-linklet-text ()
   "The regexp linklet's source, if it has been extracted; else NIL."
@@ -96,16 +96,16 @@ regexp-place-init!, for a new place: there are none).")
     (when native
       (setf (native-function native) wrapper)
       (define-primitive (native-instance native) name wrapper))
-    (psx:host-set! (concatenate 'string "racket:" name) wrapper)))
+    (qsx:host-set! (concatenate 'string "racket:" name) wrapper)))
 
 (defun install-regexp-layer (&key (stream nil))
   "Compile and instantiate the regexp layer, and make its exports the
 natives of their names; true if that's done.  NIL, leaving the
 CL-PPCRE natives, if the layer hasn't been extracted, or isn't wanted
-\(PSEUDOSCHEME_RACKET_REGEXP=native), or doesn't instantiate."
+\(QUASISCHEME_RACKET_REGEXP=native), or doesn't instantiate."
   (flet ((seconds (start) (/ (- (get-internal-real-time) start) internal-time-units-per-second)))
     (cond (*regexp-instance* t)
-	  ((equal (uiop:getenv "PSEUDOSCHEME_RACKET_REGEXP") "native") nil)
+	  ((equal (uiop:getenv "QUASISCHEME_RACKET_REGEXP") "native") nil)
 	  (t
 	   (let ((text (regexp-linklet-text)))
 	     (when text

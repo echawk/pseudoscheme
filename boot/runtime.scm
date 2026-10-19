@@ -193,11 +193,11 @@
 
 (define (intern string package) (boot:intern string package))
 
-;;; Elsewhere in Pseudoscheme's run-time system
+;;; Elsewhere in Quasischeme's run-time system
 
-(define (ps:symbol-name sym) (boot:symbol-name sym))
+(define (qs:symbol-name sym) (boot:symbol-name sym))
 
-(define (ps:scheme-error msg . irritants)
+(define (qs:scheme-error msg . irritants)
   (apply boot:host-error msg irritants))
 
 (define (warn msg . irritants)
@@ -210,11 +210,11 @@
 ;; cells, for MAKE-SCHEME-USER-ENVIRONMENT; nothing here calls it.
 (define (boot:unavailable name)
   (lambda args (boot:die "not available while bootstrapping" name)))
-(define ps:boundp (boot:unavailable 'boundp))
-(define ps:symbol-value (boot:unavailable 'symbol-value))
-(define ps:setf (boot:unavailable 'setf))
-(define ps:set-function-from-value (boot:unavailable 'set-function-from-value))
-(define ps:eval (boot:unavailable 'eval))
+(define qs:boundp (boot:unavailable 'boundp))
+(define qs:symbol-value (boot:unavailable 'symbol-value))
+(define qs:setf (boot:unavailable 'setf))
+(define qs:set-function-from-value (boot:unavailable 'set-function-from-value))
+(define qs:eval (boot:unavailable 'eval))
 
 ;;; Translated files.  These replace the translator's own
 ;;; COMPILING-TO-FILE (translate.scm), which leans on CL's FRESH-LINE to
@@ -245,7 +245,7 @@
 	      (newline port)
 	      (write-message port)
 	      (newline port)
-	      (display "(ps:in-package " port)
+	      (display "(qs:in-package " port)
 	      (display (boot:string->cl-string (package-name package)) port)
 	      (display ")" port)
 	      (newline port)
@@ -279,7 +279,7 @@
 ;;; rewrites a form of the translator's into one for the host:
 ;;;
 ;;;  - A few CL forms occur as code (not as data to be emitted) outside
-;;;    p-record.scm and p-utils.scm: #'f and (ps-lisp:if ...).
+;;;    p-record.scm and p-utils.scm: #'f and (qs-lisp:if ...).
 ;;;  - Calls and LETs evaluate their operands left to right, and MAP is
 ;;;    BOOT:MAP (see above).
 ;;;

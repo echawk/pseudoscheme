@@ -1,4 +1,4 @@
-;;; SRFI 74: octet-addressed binary blocks.  Written for Pseudoscheme, as
+;;; SRFI 74: octet-addressed binary blocks.  Written for Quasischeme, as
 ;;; a thin layer over R6RS bytevectors, which grew out of this SRFI: a
 ;;; blob is a bytevector (and so a SRFI 4/66 u8vector).  The procedures
 ;;; are R6RS's with SRFI 74's argument order (size and endianness

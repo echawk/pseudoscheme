@@ -24,7 +24,7 @@
 ;; OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
 ;; THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-(library (srfi :101 random-access-lists)  ; PSEUDOSCHEME: renamed from (srfi :101)
+(library (srfi :101 random-access-lists)  ; QUASISCHEME: renamed from (srfi :101)
   (export (rename (ra:quote quote)
                   (ra:pair? pair?) 
                   (ra:cons cons)

@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; Errors, handlers and the small parameters, natively: the raisers
 ;;;; (raise-argument-error and its family), the error parameters and
@@ -21,14 +21,14 @@
 ;;;; remembered by a continuation (continuation-marks gives the current
 ;;;; ones for one the Chez mode's hook hasn't noted).
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 ;;; ------------------------------------------------------------------
 ;;; Small helpers
 
 (defun racket-symbol-p (x)
   "Whether X is a Racket symbol (the host's symbol?, which says so with a Scheme boolean)."
-  (let ((r (funcall (psx:host-ref "symbol?") x)))
+  (let ((r (funcall (qsx:host-ref "symbol?") x)))
     (and r (truthy r))))
 
 (defun who-string (who)
@@ -150,7 +150,7 @@ kind of adjustment."
 	  ((string= m "contract") (lambda (string realm) (values string realm)))
 	  ((string= m "message")
 	   (lambda (from from-realm msg msg-realm) (values from from-realm msg msg-realm)))
-	  (t ps:false))))
+	  (t qs:false))))
 
 (define-param *current-error-message-adjuster* "current-error-message-adjuster"
   #'default-error-message-adjuster
@@ -198,7 +198,7 @@ the adjusters, as the message \"name: msg\"."
 			    (let ((results (multiple-value-list
 					    (funcall proc (svref v 0) (svref v 1) (svref v 2) (svref v 3)))))
 			      (unless (= (length results) 4)
-				(result-arity-error (concatenate 'string who "message") 4 ps:false results))
+				(result-arity-error (concatenate 'string who "message") 4 qs:false results))
 			      (destructuring-bind (name name-realm msg msg-realm) results
 				(unless (or (not (truthy name)) (racket-symbol-p name))
 				  (result-error (concatenate 'string who "message") "(or/c symbol? #f)" name))
@@ -213,7 +213,7 @@ the adjusters, as the message \"name: msg\"."
 			  (lambda (proc v)
 			    (let ((results (multiple-value-list (funcall proc (svref v 0) (svref v 1)))))
 			      (unless (= (length results) 2)
-				(result-arity-error (concatenate 'string who "name") 2 ps:false results))
+				(result-arity-error (concatenate 'string who "name") 2 qs:false results))
 			      (destructuring-bind (name name-realm) results
 				(unless (or (not (truthy name)) (racket-symbol-p name))
 				  (result-error (concatenate 'string who "name") "(or/c symbol? #f)" name))
@@ -238,7 +238,7 @@ the adjusters, as the message \"name: msg\"."
 			    (let ((results (multiple-value-list (funcall proc (car v) (cdr v)))))
 			      (unless (= (length results) 2)
 				(result-arity-error "current-error-message-adjuster for contract" 2
-							  ps:false results))
+							  qs:false results))
 			      (destructuring-bind (ctc realm) results
 				(unless (stringp ctc)
 				  (result-error "current-error-message-adjuster for contract" "string?" ctc))
@@ -404,11 +404,11 @@ the position of the bad one among MORE's arguments."
 		realm))))
 
 (defnative "raise-range-error" (in-who type-description index-prefix index in-value
-				       lower-bound upper-bound &optional (alt-lower-bound ps:false)) ()
+				       lower-bound upper-bound &optional (alt-lower-bound qs:false)) ()
   (raise-range-error-from "raise-range-error" in-who *default-realm* type-description index-prefix
 			  index in-value lower-bound upper-bound alt-lower-bound))
 (defnative "raise-range-error*" (in-who realm type-description index-prefix index in-value
-					lower-bound upper-bound &optional (alt-lower-bound ps:false)) ()
+					lower-bound upper-bound &optional (alt-lower-bound qs:false)) ()
   (raise-range-error-from "raise-range-error*" in-who realm type-description index-prefix
 			  index in-value lower-bound upper-bound alt-lower-bound))
 
@@ -527,7 +527,7 @@ the adjuster's name for itself)."
 	     (and s (parse-integer s :junk-allowed t)))))
     (if (and n (>= n 0)) n 16))
   (guard-check "error-print-context-length" #'nonnegative-integer-p "exact-nonnegative-integer?"))
-(define-param *error-print-source-location* "error-print-source-location" ps:true #'boolean-guard)
+(define-param *error-print-source-location* "error-print-source-location" qs:true #'boolean-guard)
 
 ;;; The handlers (exn.lisp has the display and escape handlers' defaults)
 (define-primitive "#%kernel" "error-display-handler" *error-display-handler*)
@@ -539,8 +539,8 @@ the adjuster's name for itself)."
 	(parameter-data-guard (gethash *error-escape-handler* *parameters*)) escape-guard
 	(parameter-data-name (gethash *error-escape-handler* *parameters*)) (rsym "error-escape-handler")))
 
-(defun default-error-syntax->srcloc-handler (v) (declare (ignore v)) ps:false)
-(defun default-error-syntax->name-handler (v) (declare (ignore v)) ps:false)
+(defun default-error-syntax->srcloc-handler (v) (declare (ignore v)) qs:false)
+(defun default-error-syntax->name-handler (v) (declare (ignore v)) qs:false)
 (defun default-error-syntax->string-handler (v len)
   (truncated-string (with-output-to-string (s) (print-value v s :write)) len))
 (defun default-error-module-path->string-handler (v len)
@@ -563,7 +563,7 @@ the adjuster's name for itself)."
 
 (define-param *exit-handler* "exit-handler" #'default-exit-handler (guard-arity "exit-handler" 1))
 
-(defnative "exit" (&optional (v ps:true)) ()
+(defnative "exit" (&optional (v qs:true)) ()
   (funcall (funcall *exit-handler*) v)
   *void*)
 
@@ -584,7 +584,7 @@ no source."
 	 (source (svref fields 0)) (line (svref fields 1)) (column (svref fields 2))
 	 (position (svref fields 3)))
     (if (not (truthy source))
-	ps:false
+	qs:false
 	(let ((where (cond ((stringp source) source)
 			   ((rpath-p source) (rpath-string source))
 			   ((racket-symbol-p source) (rname source))
@@ -633,7 +633,7 @@ source locations, if it has any and error-print-context-length isn't 0."
 ;;; ------------------------------------------------------------------
 ;;; Properties, procedures and values that say what they are
 
-(defnative "true-object?" (x) (:leaf t) (bool (eq x ps:true)))
+(defnative "true-object?" (x) (:leaf t) (bool (eq x qs:true)))
 
 (defnative "unquoted-printing-string" (s) (:leaf t)
   (unless (stringp s) (arg-error "unquoted-printing-string" "string?" s))
@@ -691,7 +691,7 @@ accessor) to remember the predicate and the accessor."
 
 (defnative "struct-type-property-accessor-procedure?" (f) (:leaf t)
   (bool (eq (property-procedure-p f :accessor) :struct)))
-(defnative "struct-type-property-predicate-procedure?" (f &optional (property ps:false)) (:leaf t)
+(defnative "struct-type-property-predicate-procedure?" (f &optional (property qs:false)) (:leaf t)
   (bool (eq (property-procedure-p f :predicate (and (truthy property) property)) :struct)))
 (defnative "impersonator-property-accessor-procedure?" (f) (:leaf t)
   (bool (eq (property-procedure-p f :accessor) :impersonator)))
@@ -710,8 +710,8 @@ accessor) to remember the predicate and the accessor."
 (defvar *renamed-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
   "A procedure procedure-rename made -> its name, a symbol.")
 (defvar *rename-makers* (make-hash-table :test 'equal :synchronized t))
-(defvar *names-package* (or (find-package "PSEUDOSCHEME-RACKET-NAMES")
-			    (make-package "PSEUDOSCHEME-RACKET-NAMES" :use '())))
+(defvar *names-package* (or (find-package "QUASISCHEME-RACKET-NAMES")
+			    (make-package "QUASISCHEME-RACKET-NAMES" :use '())))
 
 (defun rename-maker (name)
   "A function of a procedure, its arity mask and name for messages, that
@@ -744,20 +744,20 @@ makes the procedure NAME names."
 
 (defnative "continuation-marks" (k &optional prompt-tag) ()
   (declare (ignore prompt-tag))
-  (cond ((not (truthy k)) (ps-r6rs::make-mark-set '()))
-	((rthread-p k) (ps-r6rs::make-mark-set (if (eq k *main-thread*) (current-marks) '())))
-	((and (functionp k) (or (psx::continuation-procedure-p k) (gethash k *composable-continuations*)))
-	 (multiple-value-bind (marks found) (gethash k ps-r6rs::*continuation-marks*)
-	   (ps-r6rs::make-mark-set (if found marks (current-marks)))))
+  (cond ((not (truthy k)) (qs-r6rs::make-mark-set '()))
+	((rthread-p k) (qs-r6rs::make-mark-set (if (eq k *main-thread*) (current-marks) '())))
+	((and (functionp k) (or (qsx::continuation-procedure-p k) (gethash k *composable-continuations*)))
+	 (multiple-value-bind (marks found) (gethash k qs-r6rs::*continuation-marks*)
+	   (qs-r6rs::make-mark-set (if found marks (current-marks)))))
 	(t (arg-error "continuation-marks" "(or/c continuation? thread? #f)" k))))
 
 (defnative "continuation-mark-set->context" (marks) (:leaf t)
-  (unless (ps-r6rs::mark-set-p marks)
+  (unless (qs-r6rs::mark-set-p marks)
     (arg-error "continuation-mark-set->context" "continuation-mark-set?" marks))
   ;; no record of the calls: the context is empty
   '())
 
-(defnative "continuation-mark-set->iterator" (marks keys &optional (none ps:false) prompt-tag) (:leaf t)
+(defnative "continuation-mark-set->iterator" (marks keys &optional (none qs:false) prompt-tag) (:leaf t)
   (declare (ignore prompt-tag))
   (let ((keys (coerce keys 'list)))
     (labels ((iterator (frames)
@@ -771,27 +771,27 @@ makes the procedure NAME names."
 							    keys)
 						    'simple-vector)
 					    (iterator (cdr rest))))
-		       finally (return (values ps:false (iterator '())))))))
-      (iterator (ps-r6rs::mark-frames (marks-of marks))))))
+		       finally (return (values qs:false (iterator '())))))))
+      (iterator (qs-r6rs::mark-frames (marks-of marks))))))
 
 (defun capture-composable-continuation (tag)
   "The continuation from the call of this native up to the nearest prompt
 tagged TAG, as a procedure that calls it on top of its own caller (as
 the aborts abort-current-continuation makes do, without the throw)."
-  (let ((prompt (psx::find-prompt tag)))
+  (let ((prompt (qsx::find-prompt tag)))
     (unless prompt
       (raise-exn "exn:fail:contract:continuation"
 		 (format nil "call-with-composable-continuation: no corresponding prompt in the continuation~%  tag: ~A"
 			 (with-output-to-string (s) (print-value tag s :display)))))
     (let* ((frames (loop with inside = '()
-			 for frame in psx::*fstack*
+			 for frame in qsx::*fstack*
 			 until (eq frame prompt)
-			 collect (prog1 (psx::fresh-frame frame inside) (push frame inside))))
-	   (winders (ldiff psx::*winders* (svref prompt 4)))
+			 collect (prog1 (qsx::fresh-frame frame inside) (push frame inside))))
+	   (winders (ldiff qsx::*winders* (svref prompt 4)))
 	   (k (lambda (&rest values)
-		(unless psx::*full-continuations*
+		(unless qsx::*full-continuations*
 		  (racket-error "continuation" "a composable continuation can't be called without full continuations"))
-		(psx::compose-continuation frames winders values))))
+		(qsx::compose-continuation frames winders values))))
       (setf (gethash k *composable-continuations*) t)
       k)))
 
@@ -803,10 +803,10 @@ the aborts abort-current-continuation makes do, without the throw)."
   (funcall proc (capture-composable-continuation tag)))
 
 (defnative "continuation?" (x) (:leaf t)
-  (bool (and (functionp x) (or (psx::continuation-procedure-p x) (gethash x *composable-continuations*)))))
+  (bool (and (functionp x) (or (qsx::continuation-procedure-p x) (gethash x *composable-continuations*)))))
 
 (defnative "call-in-continuation" (k proc) ()
-  (unless (and (functionp k) (or (psx::continuation-procedure-p k) (gethash k *composable-continuations*)))
+  (unless (and (functionp k) (or (qsx::continuation-procedure-p k) (gethash k *composable-continuations*)))
     (arg-error "call-in-continuation" "continuation?" k))
   (unless (accepts-arity-p proc 0)
     (arg-error "call-in-continuation" "(procedure-arity-includes/c 0)" proc))
@@ -857,7 +857,7 @@ the aborts abort-current-continuation makes do, without the throw)."
 (defun log-level>= (a b) (>= (log-level-value a) (log-level-value b)))
 (defun log-level-max (a b) (if (< (log-level-value a) (log-level-value b)) b a))
 (defun log-level-min (a b) (if (< (log-level-value a) (log-level-value b)) a b))
-(defun user-log-level (level) (if (string= (rname level) "none") ps:false level))
+(defun user-log-level (level) (if (string= (rname level) "none") qs:false level))
 
 (defun parse-log-filters (who args default)
   "ARGS (level topic level topic ... [level]) as filters ending in DEFAULT."
@@ -923,7 +923,7 @@ through their filters, wants of messages about TOPIC (any, if #f)."
   (check-logger "logger-name" logger)
   (rlogger-topic logger))
 
-(defnative "make-logger" (&optional (topic ps:false) (parent ps:false) &rest filters) (:leaf t)
+(defnative "make-logger" (&optional (topic qs:false) (parent qs:false) &rest filters) (:leaf t)
   (unless (or (not (truthy topic)) (racket-symbol-p topic)) (arg-error "make-logger" "(or/c symbol? #f)" topic))
   (unless (or (not (truthy parent)) (rlogger-p parent)) (arg-error "make-logger" "(or/c logger? #f)" parent))
   (let ((parent (and (truthy parent) parent)))
@@ -933,7 +933,7 @@ through their filters, wants of messages about TOPIC (any, if #f)."
 ;;; the root logger, for current-logger: it has no receivers, and a
 ;;; logger is what its guard asks for
 (let ((data (gethash *current-logger* *parameters*)))
-  (setf (car (parameter-data-cell data)) (make-rlogger ps:false nil (rsym "none") (list nil))
+  (setf (car (parameter-data-cell data)) (make-rlogger qs:false nil (rsym "none") (list nil))
 	(parameter-data-guard data) (guard-check "current-logger" #'rlogger-p "logger?")))
 
 (defun add-log-receiver (logger receiver)
@@ -951,14 +951,14 @@ through their filters, wants of messages about TOPIC (any, if #f)."
     receiver))
 (defnative "log-receiver?" (x) (:leaf t) (bool (log-receiver-p x)))
 
-(defnative "log-level?" (logger level &optional (topic ps:false)) (:leaf t)
+(defnative "log-level?" (logger level &optional (topic qs:false)) (:leaf t)
   (check-logger "log-level?" logger)
   (check-log-level "log-level?" level)
   (check-log-topic "log-level?" topic)
   (bool (and (string/= (rname level) "none")
 	     (log-level>= (logger-wanted-level logger topic) level))))
 
-(defnative "log-max-level" (logger &optional (topic ps:false)) (:leaf t)
+(defnative "log-max-level" (logger &optional (topic qs:false)) (:leaf t)
   (check-logger "log-max-level" logger)
   (check-log-topic "log-max-level" topic)
   (user-log-level (logger-wanted-level logger topic)))
@@ -978,9 +978,9 @@ through their filters, wants of messages about TOPIC (any, if #f)."
 	(let ((parent (rlogger-parent current)))
 	  (unless parent (return))
 	  (setq max-default (log-level-min max-default
-					   (filters-level-for-topic (rlogger-filters current) ps:false))
+					   (filters-level-for-topic (rlogger-filters current) qs:false))
 		current parent))))
-    (list* (user-log-level default) ps:false
+    (list* (user-log-level default) qs:false
 	   (loop for topic in topics
 		 append (list (user-log-level (logger-wanted-level logger topic)) topic)))))
 
@@ -993,7 +993,7 @@ through their filters, wants of messages about TOPIC (any, if #f)."
 (defun send-log-message (logger level topic message data prefix?)
   "Deliver a message to the receivers that want it."
   (let ((msg nil))
-    (when (log-level>= (logger-wanted-level logger ps:false) level)
+    (when (log-level>= (logger-wanted-level logger qs:false) level)
       (loop while logger
 	    do (dolist (r (rlogger-receivers logger))
 		 (when (log-level>= (filters-level-for-topic (log-receiver-filters r) topic) level)
@@ -1024,20 +1024,20 @@ through their filters, wants of messages about TOPIC (any, if #f)."
   ;; (... data/prefix?), or all six arguments; a string third argument is
   ;; the message, with the logger's own name as the topic
   (let ((n (+ 2 (length more)))
-	(logger-topic (if (rlogger-p logger) (rlogger-topic logger) ps:false)))
+	(logger-topic (if (rlogger-p logger) (rlogger-topic logger) qs:false)))
     (flet ((bad-topic (x)
 	     (check-logger "log-message" logger)
 	     (check-log-level "log-message" level)
 	     (arg-error "log-message" "(or/c string? symbol?)" x)))
       (case n
-	(3 (do-log-message logger level logger-topic (first more) ps:false ps:true))
+	(3 (do-log-message logger level logger-topic (first more) qs:false qs:true))
 	(4 (let ((tm (first more)) (md (second more)))
-	     (cond ((stringp tm) (do-log-message logger level logger-topic tm md ps:true))
-		   ((or (not (truthy tm)) (racket-symbol-p tm)) (do-log-message logger level tm md ps:false ps:true))
+	     (cond ((stringp tm) (do-log-message logger level logger-topic tm md qs:true))
+		   ((or (not (truthy tm)) (racket-symbol-p tm)) (do-log-message logger level tm md qs:false qs:true))
 		   (t (bad-topic tm)))))
 	(5 (let ((tm (first more)) (md (second more)) (dp (third more)))
 	     (cond ((stringp tm) (do-log-message logger level logger-topic tm md dp))
-		   ((or (not (truthy tm)) (racket-symbol-p tm)) (do-log-message logger level tm md dp ps:true))
+		   ((or (not (truthy tm)) (racket-symbol-p tm)) (do-log-message logger level tm md dp qs:true))
 		   (t (bad-topic tm)))))
 	(6 (apply #'do-log-message logger level more))
 	(t (racket-arity-error "log-message" n))))))
@@ -1167,12 +1167,12 @@ hashes of its parts by RECUR."
 ;;; ------------------------------------------------------------------
 ;;; Parameters that say how Racket runs
 
-(define-param *compile-allow-set!-undefined* "compile-allow-set!-undefined" ps:false #'boolean-guard)
+(define-param *compile-allow-set!-undefined* "compile-allow-set!-undefined" qs:false #'boolean-guard)
 (define-param *compile-context-preservation-enabled* "compile-context-preservation-enabled"
-  ps:false #'boolean-guard)
-(define-param *compile-enforce-module-constants* "compile-enforce-module-constants" ps:true #'boolean-guard)
-(define-param *load-on-demand-enabled* "load-on-demand-enabled" ps:true #'boolean-guard)
-(define-param *current-force-delete-permissions* "current-force-delete-permissions" ps:true #'boolean-guard)
+  qs:false #'boolean-guard)
+(define-param *compile-enforce-module-constants* "compile-enforce-module-constants" qs:true #'boolean-guard)
+(define-param *load-on-demand-enabled* "load-on-demand-enabled" qs:true #'boolean-guard)
+(define-param *current-force-delete-permissions* "current-force-delete-permissions" qs:true #'boolean-guard)
 
 (defun target-machine-symbol () (rsym *vm-name*))
 
@@ -1189,11 +1189,11 @@ hashes of its parts by RECUR."
 (define-param *current-compile-realm* "current-compile-realm" (rsym "racket")
   (guard-check "current-compile-realm" #'racket-symbol-p "symbol?"))
 
-(define-param *read-accept-bar-quote* "read-accept-bar-quote" ps:true #'boolean-guard)
-(define-param *read-case-sensitive* "read-case-sensitive" ps:true #'boolean-guard)
-(define-param *read-on-demand-source* "read-on-demand-source" ps:false
+(define-param *read-accept-bar-quote* "read-accept-bar-quote" qs:true #'boolean-guard)
+(define-param *read-case-sensitive* "read-case-sensitive" qs:true #'boolean-guard)
+(define-param *read-on-demand-source* "read-on-demand-source" qs:false
   (guard-check "read-on-demand-source"
-	       (lambda (v) (or (not (truthy v)) (eq v ps:true) (rpath-p v) (stringp v)))
+	       (lambda (v) (or (not (truthy v)) (eq v qs:true) (rpath-p v) (stringp v)))
 	       "(or/c #f #t (and/c path-string? complete-path?))"))
 
 (define-param *current-command-line-arguments* "current-command-line-arguments" (immutable! (vector))
@@ -1211,7 +1211,7 @@ hashes of its parts by RECUR."
   (guard-check "current-thread-initial-stack-size" (lambda (v) (and (integerp v) (plusp v)))
 	       "exact-positive-integer?"))
 
-(define-param *current-subprocess-custodian-mode* "current-subprocess-custodian-mode" ps:false
+(define-param *current-subprocess-custodian-mode* "current-subprocess-custodian-mode" qs:false
   (guard-check "current-subprocess-custodian-mode"
 	       (lambda (v) (or (not (truthy v))
 			       (and (racket-symbol-p v) (member (rname v) '("kill" "interrupt") :test #'string=))))
@@ -1275,7 +1275,7 @@ hashes of its parts by RECUR."
 ;;; ------------------------------------------------------------------
 ;;; Statistics, and printing's default handler
 
-(defnative "vector-set-performance-stats!" (vec &optional (thread ps:false)) (:leaf t)
+(defnative "vector-set-performance-stats!" (vec &optional (thread qs:false)) (:leaf t)
   (unless (and (simple-vector-p vec) (not (immutable-p vec)))
     (arg-error "vector-set-performance-stats!" "(and/c vector? (not/c immutable?))" vec))
   (unless (or (not (truthy thread)) (rthread-p thread))
@@ -1283,7 +1283,7 @@ hashes of its parts by RECUR."
   (flet ((set-stat (i v) (when (< i (length vec)) (setf (svref vec i) v))))
     (if (truthy thread)
 	;; running, dead, blocked, continuation size
-	(progn (set-stat 0 ps:true) (set-stat 1 ps:false) (set-stat 2 ps:false) (set-stat 3 0))
+	(progn (set-stat 0 qs:true) (set-stat 1 qs:false) (set-stat 2 qs:false) (set-stat 3 0))
 	(progn
 	  (set-stat 0 (floor (get-internal-run-time) (/ internal-time-units-per-second 1000)))
 	  (set-stat 1 (floor (get-internal-real-time) (/ internal-time-units-per-second 1000)))

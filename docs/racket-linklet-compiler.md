@@ -195,7 +195,7 @@ What remains for us, grouped:
 | pairs and lists | immutable pairs; `mcons` mutable pairs as a separate type; `list?` | CL conses (Racket can't mutate them anyway); mpairs, a struct |
 | numbers | `#%kernel`'s arithmetic, `#%flfxnum`, `exact->inexact` and friends; no single-flonums or extflonums | the numeric tower; `#%extfl` as stubs, as Racket CS has |
 | strings, bytes, characters | mutable and immutable strings and byte strings, `string->immutable-string` | read-only strings (Guile mode); bytevectors |
-| symbols and keywords | interned, uninterned and unreadable symbols; keywords as their own type | Pseudoscheme's symbols; CL keywords (as Guile mode does) |
+| symbols and keywords | interned, uninterned and unreadable symbols; keywords as their own type | Quasischeme's symbols; CL keywords (as Guile mode does) |
 | structs | `make-struct-type` with properties, guards, inspectors, prefab structs, `prop:procedure` (applicable structs) | new, on funcallable instances; record machinery to borrow from |
 | impersonators and chaperones | of procedures, structs, vectors, boxes, hash tables | new: wrapper procedures, and checks in the accessors |
 | hash tables | mutable `equal`/`eqv`/`eq` and weak; **immutable hash tables** with Racket's persistent semantics; `equal-hash` | the mutable ones exist; a persistent map (a HAMT) is new |
@@ -331,14 +331,14 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
     raises "not implemented yet" when it is called, not when it is
     referenced.
 
-- **The expander evaluates.** `bin/pseudoscheme --racket=linklet -e
+- **The expander evaluates.** `bin/quasischeme --racket=linklet -e
   '...'` reads each form with Racket's datum syntax and evaluates it
   through Racket's expander, in a namespace with `#%kernel`. That is the
   `boot`, `namespace-require` and `eval` that Racket CS's main.sps
   does. tests/racket/expander.rktd holds the expressions and values
   tests/racket/run.sh checks: 10 of 10 pass.
 - **The compiled expander is cached** (src/racket/cache.lisp): a 21 MB
-  fasl under `~/.cache/pseudoscheme/racket/`. It is keyed by
+  fasl under `~/.cache/quasischeme/racket/`. It is keyed by
   the linklet's text, the build signature and src/racket/'s file dates.
   The first process compiles it (about 30 s); after that,
   `--racket=linklet -p '(+ 1 2)'` takes 0.4 s.
@@ -354,7 +354,7 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   - `printer.lisp`;
   - `regexp.lisp`, on CL-PPCRE.
 
-- **Programs run**: `bin/pseudoscheme --racket=linklet prog.rkt` runs a
+- **Programs run**: `bin/quasischeme --racket=linklet prog.rkt` runs a
   module as `racket prog.rkt` does, its `#lang`, its body and its `main`
   submodule (tests/racket/programs/). Every linklet's compiled code is
   cached, keyed by its text, so a `#lang racket/base` program starts in
@@ -363,13 +363,13 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
 
 - **.zo files.** A module file is compiled serializable as it loads, and
   its `.zo` is written under a cache root (`current-compiled-file-roots`,
-  `~/.cache/pseudoscheme/racket/zo-SIGNATURE/`), never into Racket's tree.
+  `~/.cache/quasischeme/racket/zo-SIGNATURE/`), never into Racket's tree.
   The expander's own load handler finds it next time. Our
   `write-linklet-bundle-hash` and `read-linklet-bundle-hash` write and
   read a bundle as Racket data; the expander's machine-independent
   bundles it writes itself. With both caches warm, a `#lang
   racket/base` program runs in 1.3 s.
-  `PSEUDOSCHEME_RACKET_ZO=0` turns `.zo` writing off.
+  `QUASISCHEME_RACKET_ZO=0` turns `.zo` writing off.
 
 - **Safety for continuations, within a linklet.** A whole linklet's
   definitions are a `letrec*`, which `cc-transform` sees into (its

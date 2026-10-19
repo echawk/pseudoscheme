@@ -1,5 +1,5 @@
 ;;; SRFI 164: enhanced multi-dimensional arrays.  Written for
-;;; Pseudoscheme from the SRFI document: the SRFI's only implementation
+;;; Quasischeme from the SRFI document: the SRFI's only implementation
 ;;; is Kawa's, in Java.  The design follows the document's description
 ;;; of Kawa's: an array is a view onto storage through an index mapping,
 ;;; either affine (a backing vector, an offset and a stride per

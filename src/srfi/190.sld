@@ -1,11 +1,11 @@
-;;; SRFI 190: coroutine generators.  Written for Pseudoscheme after the
+;;; SRFI 190: coroutine generators.  Written for Quasischeme after the
 ;;; sample implementation in the SRFI document (kept in
 ;;; reference/srfi-190/srfi-190.scm; MIT licence, in
 ;;; reference/srfi-190/LICENSE), on SRFI 158's make-coroutine-generator
-;;; and so on Pseudoscheme's re-entrant continuations.
+;;; and so on Quasischeme's re-entrant continuations.
 ;;;
 ;;; The sample binds yield as a SRFI 139 syntax parameter, which
-;;; Pseudoscheme does not have.  Here yield is identifier syntax for the
+;;; Quasischeme does not have.  Here yield is identifier syntax for the
 ;;; value of a parameter object that coroutine-generator binds, with
 ;;; parameterize, around its body (the parameterization is re-entered
 ;;; whenever the generator resumes the body).  So yield, however it is

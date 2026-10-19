@@ -1,6 +1,6 @@
 # Scheme and Common Lisp, both ways
 
-Pseudoscheme compiles Scheme *to* Lisp, so most of the bridge is just
+Quasischeme compiles Scheme *to* Lisp, so most of the bridge is just
 "use the same objects". This document covers what is shared, what gets
 converted at the boundary and why, the API in each direction, and how
 libraries are found and distributed. The code is in `src/interop.lisp`,
@@ -27,7 +27,7 @@ libraries in `tests/programs/` (`make test-programs`); examples are in
 | multiple values | multiple values | except from a Lisp function treated as a predicate (section 2), which returns its first value only |
 | `dynamic-wind` | `unwind-protect` | |
 
-**Booleans** are the one real mismatch: `#f` is the symbol `PS:FALSE`,
+**Booleans** are the one real mismatch: `#f` is the symbol `QS:FALSE`,
 `#t` is `T`, and `NIL` is the empty list. Making `#f` the same as `NIL`
 would break `(if '() 'yes 'no)`, which must be `yes`. Giving the empty
 list its own object would break the most valuable sharing, which is
@@ -105,7 +105,7 @@ of `COMMON-LISP`. After that, a `(cl ...)` import costs nothing.
 ### 3.2 Finding the Lisp code: autoloading
 
 If the package doesn't exist, importing `(cl foo)` first loads the
-*system* `foo` by calling `pseudoscheme-interop:*lisp-system-loader*`.
+*system* `foo` by calling `quasischeme-interop:*lisp-system-loader*`.
 The default loader:
 
 - uses `ql:quickload` if Quicklisp is loaded, which also downloads
@@ -119,8 +119,8 @@ ASDF is the common denominator of every Lisp distribution tool, so it is
 the default; Quicklisp is used only when the user has already chosen it
 by loading it. Set `*autoload-lisp-systems*` to NIL to turn autoloading
 off, or replace the loader. From the command line:
-- `pseudoscheme -l cl-ppcre prog.scm` preloads a system;
-- `pseudoscheme --quicklisp prog.scm` loads Quicklisp first.
+- `quasischeme -l cl-ppcre prog.scm` preloads a system;
+- `quasischeme --quicklisp prog.scm` loads Quicklisp first.
 
 When a package name differs from its system name (package `BT`, system
 `bordeaux-threads`), load the system first: `(lisp-require
@@ -139,7 +139,7 @@ use it for their own keywords.
 (cl:make-hash-table #:test cl:equal)
 ```
 
-### 3.4 `(pseudoscheme lisp)`
+### 3.4 `(quasischeme lisp)`
 
 | | |
 |---|---|
@@ -190,7 +190,7 @@ class or function defined from Scheme is named by Scheme's symbol:
 `'circle` is the class above, and `(lisp-function 'radius)` is its
 reader.
 
-`(lisp form ...)`, from `(pseudoscheme lisp)`, is the same mechanism
+`(lisp form ...)`, from `(quasischeme lisp)`, is the same mechanism
 with `progn`: Lisp code anywhere in Scheme.
 
 A program or library is expanded before any of it runs, so each Lisp
@@ -215,14 +215,14 @@ whatever installs systems for the user resolves them like any other
 dependency: Quicklisp, ocicl, qlot, CLPM, or a source registry. Scheme
 sources are components of the system (section 5).
 
-### 3.7 CLOS in Scheme's syntax: `(pseudoscheme clos)`
+### 3.7 CLOS in Scheme's syntax: `(quasischeme clos)`
 
 `cl:defclass` and `cl:defmethod` work from Scheme through 3.5, in Lisp's
-syntax. `(pseudoscheme clos)` gives CLOS GOOPS's Scheme syntax, with
+syntax. `(quasischeme clos)` gives CLOS GOOPS's Scheme syntax, with
 method bodies in Scheme:
 
 ```scheme
-(import (scheme base) (scheme write) (pseudoscheme clos))
+(import (scheme base) (scheme write) (quasischeme clos))
 
 (define-class <point> ()
   (x #:init-value 0 #:init-keyword #:x #:accessor point-x)
@@ -261,7 +261,7 @@ syntax and src/interop.lisp the primitives under it.
 ## 4. Lisp calling Scheme
 
 `(asdf:load-system :r7rs)` loads the API. `:r6rs` and `:r5rs` are the
-same system, `pseudoscheme/api`.
+same system, `quasischeme/api`.
 
 ### 4.1 Importing, defining, and libraries written in Lisp
 
@@ -345,7 +345,7 @@ Limits:
   `lambda` it expanded to, which is expanded and compiled again when
   the fasl loads (`load-time-value`). The translation would refer to
   the compiling session's psyntax. So the fasl loads into a fresh image
-  that has Pseudoscheme, with the library imported again (as
+  that has Quasischeme, with the library imported again (as
   `r7rs:import` does at load time). Compiled with `compile` or
   evaluated, the translation is used as it is.
 
@@ -368,7 +368,7 @@ Each of `R7RS`, `R6RS` and `R5RS` has:
 `*library-path*` and `add-library-directory`. These names shadow CL's,
 so use them package-qualified (`r7rs:eval`).
 
-`(pseudoscheme-api:precompile-libraries &key directory output)` expands
+`(quasischeme-api:precompile-libraries &key directory output)` expands
 and compiles the libraries (`.sld` files) under a directory into the
 compiled-library cache, the bundled SRFIs by default; the command
 line's `--precompile-srfi` and `--precompile DIR` call it.
@@ -376,14 +376,14 @@ line's `--precompile-srfi` and `--precompile DIR` call it.
 ### 4.4 Errors
 
 An uncaught Scheme `raise` is a Lisp error of type
-`ps-r7rs::uncaught-raise`, printed with the condition's message and
+`qs-r7rs::uncaught-raise`, printed with the condition's message and
 irritants. Lisp code can `handler-case` it.
 
 ## 5. Scheme sources in ASDF systems
 
 ```lisp
 (defsystem :my-app
-  :defsystem-depends-on (:pseudoscheme/asdf)
+  :defsystem-depends-on (:quasischeme/asdf)
   :depends-on (:alexandria)
   :components ((:r7rs-library "lib/stats")     ; lib/stats.sld
                (:r7rs-file "setup")            ; setup.scm, run at load time

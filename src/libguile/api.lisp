@@ -1,10 +1,10 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-LIBGUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-LIBGUILE -*-
 
 ;;;; The DEFC entries' implementations (table.lisp, docs/libguile.md).
 ;;;; Mostly they call Guile mode's procedures, as libguile's C would
 ;;;; call its own.
 
-(in-package "PSEUDOSCHEME-LIBGUILE")
+(in-package "QUASISCHEME-LIBGUILE")
 
 (defvar *procedures* (make-hash-table :test 'equal))
 
@@ -15,13 +15,13 @@
 	 args))
 
 (defun sym (name) (funcall (pg ssym) name))
-(defun truthy (x) (not (eq x ps:false)))
-(defun bool (x) (if x ps:true ps:false))
+(defun truthy (x) (not (eq x qs:false)))
+(defun bool (x) (if x qs:true qs:false))
 
-(defun guile-error (key subr message args &optional (rest ps:false))
-  (funcall (pg guile-error) (sym key) (if subr subr ps:false) message args rest))
+(defun guile-error (key subr message args &optional (rest qs:false))
+  (funcall (pg guile-error) (sym key) (if subr subr qs:false) message args rest))
 
-(defun c-string-or-false (address) (if (zerop address) ps:false (c-string address)))
+(defun c-string-or-false (address) (if (zerop address) qs:false (c-string address)))
 
 (defun current-module () (scm "current-module"))
 
@@ -41,14 +41,14 @@
 (defun exit-from-c (status)
   "Leave the program as C's exit(STATUS) does, after Guile's ports are
 flushed."
-  (psg::flush-all-ports)
+  (qsg::flush-all-ports)
   (finish-output *standard-output*)
   (finish-output *error-output*)
   (c-call "exit" sb-alien:void sb-alien:int status))
 
 ;; Guile's own start: the C main_func with the arguments, then an exit
 (defimpl "scm_boot_guile" (argc argv fptr closure)
-  (setq psg:*program-arguments* (c-argv argc argv))
+  (setq qsg:*program-arguments* (c-argv argc argv))
   (c-funcall
    (sb-alien:sap-alien (address-sap fptr)
 		       (function sb-alien:void sb-alien:unsigned-long sb-alien:int sb-alien:unsigned-long))
@@ -57,7 +57,7 @@ flushed."
 
 ;; The REPL, Guile's command line's when there are no switches
 (defimpl "scm_shell" (argc argv)
-  (setq psg:*program-arguments* (c-argv argc argv))
+  (setq qsg:*program-arguments* (c-argv argc argv))
   (scm "eval-string" "((@ (ice-9 top-repl) top-repl))")
   (exit-from-c 0))
 
@@ -163,9 +163,9 @@ flushed."
 
 (defimpl "scm_is_true" (x) (truthy x))
 (defimpl "scm_is_false" (x) (not (truthy x)))
-(defimpl "scm_is_bool" (x) (or (eq x ps:true) (eq x ps:false)))
+(defimpl "scm_is_bool" (x) (or (eq x qs:true) (eq x qs:false)))
 (defimpl "scm_to_bool" (x)
-  (cond ((eq x ps:false) nil) ((eq x ps:true) t)
+  (cond ((eq x qs:false) nil) ((eq x qs:true) t)
 	(t (guile-error "wrong-type-arg" "scm_to_bool" "Wrong type argument: ~S" (list x) (list x)))))
 (defimpl "scm_from_bool" (i) (bool (/= i 0)))
 (defimpl "scm_is_eq" (a b) (eq a b))
@@ -184,7 +184,7 @@ flushed."
 (defimpl "scm_is_inexact" (x) (truthy (scm "inexact?" x)))
 (defimpl "scm_is_vector" (x) (simple-vector-p x))
 (defimpl "scm_is_simple_vector" (x) (simple-vector-p x))
-(defimpl "scm_is_bytevector" (x) (typep x 'ps-r6rs::octets))
+(defimpl "scm_is_bytevector" (x) (typep x 'qs-r6rs::octets))
 (defimpl "scm_is_signed_integer" (x min max) (and (integerp x) (<= min x max)))
 (defimpl "scm_is_unsigned_integer" (x min max) (and (integerp x) (<= min x max)))
 
@@ -274,7 +274,7 @@ flushed."
 (defimpl "scm_c_string_set_x" (s i c) (setf (char s i) c) nil)
 (defimpl "scm_c_make_string" (n c) (make-string n :initial-element (if (characterp c) c #\Space)))
 (defimpl "scm_c_substring" (s start end) (subseq s start end))
-(defimpl "scm_c_symbol_length" (s) (length (ps:scheme-symbol-name s)))
+(defimpl "scm_c_symbol_length" (s) (length (qs:scheme-symbol-name s)))
 
 ;;; Symbols and keywords
 (defimpl "scm_from_utf8_symbol" (a) (sym (c-string a)))
@@ -341,7 +341,7 @@ flushed."
 	       "Wrong type argument in position ~A (expecting ~A): ~S"
 	       (list pos (c-string-or-false expected) x) (list x)))
 (defimpl "scm_wrong_num_args" (proc)
-  (guile-error "wrong-number-of-args" ps:false "Wrong number of arguments to ~A" (list proc)))
+  (guile-error "wrong-number-of-args" qs:false "Wrong number of arguments to ~A" (list proc)))
 (defimpl "scm_out_of_range" (subr x)
   (guile-error "out-of-range" (c-string-or-false subr) "Value out of range: ~S" (list x) (list x)))
 (defimpl "scm_out_of_range_pos" (subr x pos)
@@ -436,7 +436,7 @@ flushed."
 (defimpl "scm_permanent_object" (x) (protect x))
 (defimpl "scm_remember_upto_here_1" (x) (declare (ignore x)) nil)
 (defimpl "scm_remember_upto_here_2" (x y) (declare (ignore x y)) nil)
-(defimpl "scm_gc" () (sb-ext:gc :full t) (c-call "psg_collect" sb-alien:void) ps:unspecific)
+(defimpl "scm_gc" () (sb-ext:gc :full t) (c-call "psg_collect" sb-alien:void) qs:unspecific)
 
 ;;; ------------------------------------------------------------------
 ;;; Smobs: the descriptors are in scm_smobs (data.c), which inline
@@ -481,7 +481,7 @@ flushed."
 	 (n (and (= (logand (word a 0) #x7f) +tc7-smob+) (smob-number (word a 0))))
 	 (fptr (if n (sb-sys:sap-ref-64 (address-sap (smob-field n :apply)) 0) 0)))
     (when (zerop fptr)
-      (guile-error "wrong-type-arg" ps:false "Wrong type to apply: ~S" (list o) (list o)))
+      (guile-error "wrong-type-arg" qs:false "Wrong type to apply: ~S" (list o) (list o)))
     (destructuring-bind (req opt rest) (gethash n *smob-apply-arguments*)
       (apply (make-subr "smob-apply" (1+ req) opt rest fptr) o args))))
 
@@ -505,7 +505,7 @@ flushed."
 
 (defimpl "scm_assert_smob_type" (tag x)
   (unless (and (smob-p x) (= (logand (word (c-object-address x) 0) #xffff) tag))
-    (guile-error "wrong-type-arg" ps:false "Wrong type argument: ~S" (list x) (list x)))
+    (guile-error "wrong-type-arg" qs:false "Wrong type argument: ~S" (list x) (list x)))
   nil)
 
 (defun smob-p (o) (and (c-object-p o) (= (logand (word (c-object-address o) 0) #x7f) +tc7-smob+)))
@@ -552,7 +552,7 @@ flushed."
 
 (defimpl "scm_assert_foreign_object_type" (type x)
   (unless (and (funcall (pg struct-p) x) (eq (funcall (pg struct-vtable-of) x) type))
-    (guile-error "wrong-type-arg" ps:false "Wrong type (expecting ~A): ~S"
+    (guile-error "wrong-type-arg" qs:false "Wrong type (expecting ~A): ~S"
 		 (list (scm "struct-vtable-name" type) x) (list x)))
   nil)
 (defimpl "scm_foreign_object_ref" (x n) (svref (foreign-slots x "foreign-object-ref") n))
@@ -638,7 +638,7 @@ flushed."
 	 (name (port-type-name type)))
     ;; a Guile port of Guile mode's own, bivalent (bytes and characters)
     ;; as Guile's ports are, with the C type's functions as its backend
-    (setq port (psg::make-port :kind name
+    (setq port (qsg::make-port :kind name
 			       :input (logtest mode +rdng+) :output (logtest mode +wrtng+)
 			       :buffering :full :encoding "UTF-8"
 			       :read (and (logtest mode +rdng+) read!)
@@ -656,13 +656,13 @@ flushed."
 (defimpl "scm_c_read" (port buffer size)
   (let* ((bv (make-array size :element-type '(unsigned-byte 8)))
 	 (n (scm "get-bytevector-n!" port bv 0 size)))
-    (if (eq n ps:eof-object)
+    (if (eq n qs:eof-object)
 	0
 	(progn (dotimes (i n) (setf (sb-sys:sap-ref-8 (address-sap buffer) i) (aref bv i)))
 	       n))))
 (defimpl "scm_c_read_bytes" (port bv start count)
   (let ((n (scm "get-bytevector-n!" port bv start count)))
-    (if (eq n ps:eof-object) 0 n)))
+    (if (eq n qs:eof-object) 0 n)))
 (defimpl "scm_c_write_bytes" (port bv start count)
   (scm "put-bytevector" port bv start count)
   nil)
@@ -756,5 +756,5 @@ flushed."
 (defimpl "scm_append_x" (lists) (apply #'scm "append!" lists))
 
 ;; a smob that can be applied is still written by its print function
-(setq psg::*write-object-hook*
+(setq qsg::*write-object-hook*
       (lambda (x stream) (when (c-object-p x) (print-object x stream) t)))

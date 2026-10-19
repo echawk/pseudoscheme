@@ -221,7 +221,7 @@
   (if (and (zero? start) (= end (string-length s))) s
       (substring s start end)))
 
-;;; Pseudoscheme: R7RS's definition is the same; commented out here.
+;;; Quasischeme: R7RS's definition is the same; commented out here.
 ;(define (string-copy s . maybe-start+end)
 ;  (let-string-start+end (start end) string-copy s maybe-start+end
 ;    (substring s start end)))
@@ -1253,7 +1253,7 @@
 ;;; string-copy! to tstart from [fstart fend]
 ;;; 	Guaranteed to work, even if s1 eq s2.
 
-;;; Pseudoscheme: R7RS's definition is the same; commented out here.
+;;; Quasischeme: R7RS's definition is the same; commented out here.
 ;(define (string-fill! s char . maybe-start+end)
 ;  (check-arg char? char string-fill!)
 ;  (let-string-start+end (start end) string-fill! s maybe-start+end
@@ -1261,7 +1261,7 @@
 ;	((< i start))
 ;      (string-set! s i char))))
 
-;;; Pseudoscheme: R7RS's definition is the same; commented out here.
+;;; Quasischeme: R7RS's definition is the same; commented out here.
 ;(define (string-copy! to tstart from . maybe-fstart+fend)
 ;  (let-string-start+end (fstart fend) string-copy! from maybe-fstart+fend
 ;    (check-arg integer? tstart string-copy!)
@@ -1517,7 +1517,7 @@
 ;(define (string->list s . maybe-start+end)
 ;  (apply string-fold-right cons '() s maybe-start+end))
 
-;;; Pseudoscheme: R7RS's definition is the same; commented out here.
+;;; Quasischeme: R7RS's definition is the same; commented out here.
 ;(define (string->list s . maybe-start+end)
 ;  (let-string-start+end (start end) string->list s maybe-start+end
 ;    (do ((i (- end 1) (- i 1))

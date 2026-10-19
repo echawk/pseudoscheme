@@ -1,5 +1,5 @@
 ;;; SRFI 14: character-set library, over all of Unicode.  Written for
-;;; Pseudoscheme: the implementation is (srfi private char-set), in
+;;; Quasischeme: the implementation is (srfi private char-set), in
 ;;; private/char-set.sld, which represents a char set as an inversion
 ;;; list and defines the standard sets by Unicode general category (via
 ;;; cl-unicode), as the SRFI's Unicode definitions specify.  The

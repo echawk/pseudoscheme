@@ -2,7 +2,7 @@
 ;;; (reference/srfi-237/tests.sps, with its (example dictionary)
 ;;; library, reference/srfi-237/dictionary.sls), as SRFI 64 tests,
 ;;; plus a few more.  Most definitions are internal ones, in several
-;;; procedures: Pseudoscheme compiles many definitions and calls in one
+;;; procedures: Quasischeme compiles many definitions and calls in one
 ;;; body slowly (see ../57.sld).
 
 (define-library (srfi-237-test dictionary)

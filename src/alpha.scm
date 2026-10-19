@@ -124,7 +124,7 @@
 	  (con  (alpha (caddr exp) s-env (lose context)))
 	  (alt (alpha (let ((tail (cdddr exp)))
 			(if (null? tail)
-			    'ps:unspecific
+			    'qs:unspecific
 			    (car tail)))
 		      s-env
 		      (lose context))))
@@ -144,7 +144,7 @@
     (if (null? (cdr exp))
 	(begin (if (not (eq? context top-level-context))
 		   (note "(begin) disallowed in this context" exp))
-	       (alpha 'ps:unspecific s-env context))
+	       (alpha 'qs:unspecific s-env context))
 	(alpha-beginify (cdr exp) s-env context))))
 
 (define (alpha-beginify exp-list s-env context)
@@ -181,7 +181,7 @@
   (lambda (form s-env context)
     (cond ((eq? context top-level-context)
 	   (process-define-syntax form s-env) ;side effect
-	   (make-call (alpha 'ps:%define-syntax! s-env value-context)
+	   (make-call (alpha 'qs:%define-syntax! s-env value-context)
 		      (list (make-constant (cdr form) #t))))
 	  (else 
 	   (alpha (syntax-error
@@ -245,7 +245,7 @@
 
 (define (syntax-error msg form)
   (note msg form)
-  `(ps:scheme-error ',msg ',form))
+  `(qs:scheme-error ',msg ',form))
 
 ; Code generation utilities:
 

@@ -1,5 +1,5 @@
 ;;; (srfi private char-set): SRFI 14 character sets over all of Unicode.
-;;; Written for Pseudoscheme.  (srfi 14) re-exports it; (srfi 115) also
+;;; Written for Quasischeme.  (srfi 14) re-exports it; (srfi 115) also
 ;;; uses char-set-ranges, to compile a char set into a cl-ppcre class.
 ;;;
 ;;; A char set is a record holding an inversion list: a vector of
@@ -11,7 +11,7 @@
 ;;; as char-set:letter or complements cost a few hundred numbers.
 ;;;
 ;;; The standard sets follow the SRFI's Unicode definitions, by general
-;;; category, taken from cl-unicode (a dependency of Pseudoscheme's
+;;; category, taken from cl-unicode (a dependency of Quasischeme's
 ;;; R6RS runtime) in one pass over the code space when the library is
 ;;; loaded:
 ;;;   lower-case Ll; upper-case Lu; title-case Lt; letter L*; digit Nd;
@@ -45,7 +45,7 @@
           ;; Not SRFI 14:
           char-set-ranges ranges->char-set char-set-general-category)
   (import (scheme base) (scheme case-lambda)
-          (pseudoscheme lisp)
+          (quasischeme lisp)
           (prefix (cl cl-unicode) u:))
   (begin
 

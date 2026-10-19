@@ -1,6 +1,6 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-API -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-API -*-
 
-;;;; The Common Lisp face of Pseudoscheme: packages R5RS, R6RS and R7RS.
+;;;; The Common Lisp face of Quasischeme: packages R5RS, R6RS and R7RS.
 ;;;;
 ;;;;   (r7rs:eval "(import (scheme base)) (exact-integer-sqrt 17)")
 ;;;;   (r7rs:scheme (let-values (((q r) (floor/ 17 5))) (list q r)))  ; => (3 2)
@@ -48,19 +48,19 @@
 ;;;; and functions are converted between the languages is described in
 ;;;; src/interop.lisp and docs/interop.md.
 
-(defpackage "PSEUDOSCHEME-API"
+(defpackage "QUASISCHEME-API"
   (:use "COMMON-LISP")
   (:shadow "WRITE-TO-STRING")
-  (:import-from "PSEUDOSCHEME-INTEROP" "SCHEMIFY" "VERBATIM")
+  (:import-from "QUASISCHEME-INTEROP" "SCHEMIFY" "VERBATIM")
   (:export "SCHEMIFY" "READ-SCHEME-FORMS" "TRUE-P" "REPL-LOOP" "VERBATIM" "ERROR-MESSAGE"
 	   "WRITE-TO-STRING" "ADD-LIBRARY-DIRECTORY" "PRECOMPILE-LIBRARIES"))
 
 (macrolet ((dialect-package (name &rest extra)
 	     `(defpackage ,name
 		(:use)
-		(:import-from "PSEUDOSCHEME-API" "TRUE-P" "VERBATIM" "WRITE-TO-STRING"
+		(:import-from "QUASISCHEME-API" "TRUE-P" "VERBATIM" "WRITE-TO-STRING"
 			      ,@(when extra '("ADD-LIBRARY-DIRECTORY")))
-		,@(when extra '((:import-from "PSEUDOSCHEME-PSYNTAX" "*LIBRARY-PATH*")))
+		,@(when extra '((:import-from "QUASISCHEME-PSYNTAX" "*LIBRARY-PATH*")))
 		(:export "EVAL" "LOAD" "REPL" "EXPAND" "TRANSLATE" "SCHEME" "PROCEDURE"
 			 "READ-FROM-STRING" "WRITE-TO-STRING" "TRUE-P" "FALSE" "TRUE" "VERBATIM"
 			 "DEFINE"
@@ -71,24 +71,24 @@
 		   "IMPORT" "LIBRARY")
   (dialect-package "R5RS"))
 
-(in-package "PSEUDOSCHEME-API")
+(in-package "QUASISCHEME-API")
 
-(defconstant r7rs:false 'ps::false "Scheme's #f.  In Scheme code written in Lisp (R7RS:SCHEME,
+(defconstant r7rs:false 'qs::false "Scheme's #f.  In Scheme code written in Lisp (R7RS:SCHEME,
 R7RS:DEFINE, Scheme macros), the symbol R7RS:FALSE also means #f.")
-(defconstant r6rs:false 'ps::false "Scheme's #f.")
-(defconstant r5rs:false 'ps::false "Scheme's #f.")
+(defconstant r6rs:false 'qs::false "Scheme's #f.")
+(defconstant r5rs:false 'qs::false "Scheme's #f.")
 (defconstant r7rs:true t "Scheme's #t (which is T).")
 (defconstant r6rs:true t "Scheme's #t (which is T).")
 (defconstant r5rs:true t "Scheme's #t (which is T).")
 
 (defun true-p (x)
   "Scheme truth: everything but #f is true."
-  (ps:truep x))
+  (qs:truep x))
 
 (defun read-scheme-forms (string)
   (with-input-from-string (in string)
-    (loop for form = (funcall ps:*scheme-read* in)
-	  until (eq form ps:eof-object)
+    (loop for form = (funcall qs:*scheme-read* in)
+	  until (eq form qs:eof-object)
 	  collect form)))
 
 (defun as-forms (source)
@@ -99,32 +99,32 @@ R7RS:DEFINE, Scheme macros), the symbol R7RS:FALSE also means #f.")
   (let ((forms (as-forms source)))
     (if (and forms (null (cdr forms)))
 	(car forms)
-	(cons (ps:intern-scheme-symbol "begin") forms))))
+	(cons (qs:intern-scheme-symbol "begin") forms))))
 
 (defun write-to-string (object)
   "OBJECT as Scheme's WRITE prints it."
-  (with-output-to-string (s) (funcall ps:*scheme-write* object s)))
+  (with-output-to-string (s) (funcall qs:*scheme-write* object s)))
 
 (defun lisp-values (values)
   "VALUES (a list) as Lisp multiple values, #f as NIL."
-  (values-list (mapcar #'pseudoscheme-interop:to-lisp values)))
+  (values-list (mapcar #'quasischeme-interop:to-lisp values)))
 
 (defun precompile-libraries (&rest options &key directory output)
   "Expand and compile every library in the .sld files under DIRECTORY
 (by default the bundled SRFIs, src/srfi/) into the compiled-library
 cache, so that later sessions load them compiled; a line for each goes
 to OUTPUT (default *STANDARD-OUTPUT*; NIL for none).  For the current
-continuation mode (psx:*full-continuations*), which the cache keeps
+continuation mode (qsx:*full-continuations*), which the cache keeps
 apart.  Returns how many compiled and how many failed."
   (declare (ignore directory output))
   (ensure-psyntax)
-  (apply #'ps-r7rs::precompile-libraries options))
+  (apply #'qs-r7rs::precompile-libraries options))
 
 (defun add-library-directory (directory)
   "Search DIRECTORY for Scheme libraries too, after the directories
 already on *LIBRARY-PATH*."
   (let ((dir (namestring (uiop:ensure-directory-pathname directory))))
-    (setf psx:*library-path* (append (remove dir psx:*library-path* :test #'string=) (list dir)))
+    (setf qsx:*library-path* (append (remove dir qsx:*library-path* :test #'string=) (list dir)))
     dir))
 
 ;;; ------------------------------------------------------------------
@@ -133,56 +133,56 @@ already on *LIBRARY-PATH*."
 (defun ensure-psyntax ()
   ;; Boots psyntax and installs the R7RS, compatibility and interop
   ;; libraries.
-  (pseudoscheme-interop:boot))
+  (quasischeme-interop:boot))
 
 (defun r6rs-eval-forms (forms)
   (ensure-psyntax)
-  (cond ((null forms) ps:unspecific)
-	((or (psl:keyword-head-p (car forms) "import")
-	     (psl:keyword-head-p (car forms) "library"))
-	 (psx:eval-forms forms))
-	(t (let ((v ps:unspecific))
+  (cond ((null forms) qs:unspecific)
+	((or (qsl:keyword-head-p (car forms) "import")
+	     (qsl:keyword-head-p (car forms) "library"))
+	 (qsx:eval-forms forms))
+	(t (let ((v qs:unspecific))
 	     (dolist (form forms v)
-	       (setq v (psx:eval-top-level form)))))))
+	       (setq v (qsx:eval-top-level form)))))))
 
 (defun r7rs-eval-forms (forms)
   (ensure-psyntax)
-  (cond ((null forms) ps:unspecific)
+  (cond ((null forms) qs:unspecific)
 	;; only imports and libraries: the REPL's imports, not a program's
 	((every (lambda (form)
-		  (or (psl:keyword-head-p form "import") (psl:keyword-head-p form "define-library")))
+		  (or (qsl:keyword-head-p form "import") (qsl:keyword-head-p form "define-library")))
 		forms)
-	 (dolist (form forms ps:unspecific)
-	   (ps-r7rs::eval-at-repl form)))
-	((or (psl:keyword-head-p (car forms) "import")
-	     (psl:keyword-head-p (car forms) "define-library")
-	     (psl:keyword-head-p (car forms) "library"))
-	 (ps-r7rs::eval-forms forms))
-	(t (let ((v ps:unspecific))
+	 (dolist (form forms qs:unspecific)
+	   (qs-r7rs::eval-at-repl form)))
+	((or (qsl:keyword-head-p (car forms) "import")
+	     (qsl:keyword-head-p (car forms) "define-library")
+	     (qsl:keyword-head-p (car forms) "library"))
+	 (qs-r7rs::eval-forms forms))
+	(t (let ((v qs:unspecific))
 	     (dolist (form forms v)
-	       (setq v (ps-r7rs::eval-at-repl form)))))))
+	       (setq v (qs-r7rs::eval-at-repl form)))))))
 
 (defun psyntax-environment (library)
-  (funcall (psx:host-ref "psyntax:environment")
-	   (mapcar #'ps:intern-scheme-symbol library)))
+  (funcall (qsx:host-ref "psyntax:environment")
+	   (mapcar #'qs:intern-scheme-symbol library)))
 
 (defun r7rs-repl-eval (forms)
   "Evaluate FORMS one by one at the R7RS REPL top level, (import ...)
 included; the last one's values."
   (ensure-psyntax)
-  (let ((values (list ps:unspecific)))
+  (let ((values (list qs:unspecific)))
     (dolist (form forms (values-list values))
-      (setq values (multiple-value-list (ps-r7rs::eval-at-repl form))))))
+      (setq values (multiple-value-list (qs-r7rs::eval-at-repl form))))))
 
 (defun r6rs-repl-eval (forms)
   (ensure-psyntax)
-  (let ((values (list ps:unspecific)))
+  (let ((values (list qs:unspecific)))
     (dolist (form forms (values-list values))
-      (setq values (multiple-value-list (psx:eval-top-level form))))))
+      (setq values (multiple-value-list (qsx:eval-top-level form))))))
 
 (defun psyntax-expand (source library)
   (ensure-psyntax)
-  (values (psx:expand (as-form source) (psyntax-environment library))))
+  (values (qsx:expand (as-form source) (psyntax-environment library))))
 
 (defun r7rs:eval (source)
   "Evaluate SOURCE (Scheme text, or a Lisp datum) as R7RS."
@@ -195,76 +195,76 @@ included; the last one's values."
 (defun r7rs:load (path)
   "Load the R7RS source file PATH (a program, or library definitions)."
   (ensure-psyntax)
-  (ps-r7rs::load-file path))
+  (qs-r7rs::load-file path))
 
 (defun r6rs:load (path)
   "Load the R6RS source file PATH (a program, or library definitions)."
   (ensure-psyntax)
-  (psx:load-file path))
+  (qsx:load-file path))
 
 (defun r7rs:expand (source)
   "The core Scheme that psyntax expands SOURCE to, in the R7RS REPL
 environment."
-  (psyntax-expand source '("pseudoscheme" "r7rs")))
+  (psyntax-expand source '("quasischeme" "r7rs")))
 
 (defun r6rs:expand (source)
   "The core Scheme that psyntax expands SOURCE to, in the R6RS REPL
 environment."
-  (psyntax-expand source '("pseudoscheme")))
+  (psyntax-expand source '("quasischeme")))
 
 (defun r7rs:translate (source)
   "The Lisp code SOURCE translates to."
-  (scheme-translator:translate (psx::open-primitives (r7rs:expand source)) psx:*host*))
+  (scheme-translator:translate (qsx::open-primitives (r7rs:expand source)) qsx:*host*))
 
 (defun r6rs:translate (source)
   "The Lisp code SOURCE translates to."
-  (scheme-translator:translate (psx::open-primitives (r6rs:expand source)) psx:*host*))
+  (scheme-translator:translate (qsx::open-primitives (r6rs:expand source)) qsx:*host*))
 
 (defun r7rs:read-from-string (string)
   "The first datum in STRING, read by the Scheme reader."
-  (funcall ps:*scheme-read* (make-string-input-stream string)))
+  (funcall qs:*scheme-read* (make-string-input-stream string)))
 
 (defun r6rs:read-from-string (string)
   "The first datum in STRING, read by the Scheme reader."
-  (funcall ps:*scheme-read* (make-string-input-stream string)))
+  (funcall qs:*scheme-read* (make-string-input-stream string)))
 
 (defun r7rs:use-library (name &key package (convert t))
   "Make R7RS library NAME, e.g. '(srfi 1), a Lisp package.  See
-PSEUDOSCHEME-INTEROP:USE-LIBRARY."
+QUASISCHEME-INTEROP:USE-LIBRARY."
   (ensure-psyntax)
-  (pseudoscheme-interop:use-library name :package package :convert convert))
+  (quasischeme-interop:use-library name :package package :convert convert))
 
 (defun r6rs:use-library (name &key package (convert t))
   "Make R6RS library NAME, e.g. '(rnrs sorting), a Lisp package.  See
-PSEUDOSCHEME-INTEROP:USE-LIBRARY."
+QUASISCHEME-INTEROP:USE-LIBRARY."
   (ensure-psyntax)
-  (pseudoscheme-interop:use-library name :package package :convert convert))
+  (quasischeme-interop:use-library name :package package :convert convert))
 
 (defun r7rs:library-exports (name)
   "What library NAME exports: a list of (scheme-symbol . kind)."
   (ensure-psyntax)
-  (pseudoscheme-interop:library-exports name))
+  (quasischeme-interop:library-exports name))
 
 (defun r6rs:library-exports (name)
   "What library NAME exports: a list of (scheme-symbol . kind)."
   (ensure-psyntax)
-  (pseudoscheme-interop:library-exports name))
+  (quasischeme-interop:library-exports name))
 
 ;;; ------------------------------------------------------------------
 ;;; R5RS: psyntax too, at a top level of its own whose bindings are
-;;; (pseudoscheme r5rs), reading with case folding.  (The translator's
-;;; own classic front end, ps:scheme-user-environment, is what the
+;;; (quasischeme r5rs), reading with case folding.  (The translator's
+;;; own classic front end, qs:scheme-user-environment, is what the
 ;;; translator is bootstrapped with; it isn't used here.)
 
 (defun r5rs-eval-forms (forms)
   (ensure-psyntax)
-  (let ((values (list ps:unspecific)))
+  (let ((values (list qs:unspecific)))
     (dolist (form forms (values-list values))
-      (setq values (multiple-value-list (ps-r7rs::eval-at-r5rs-repl form))))))
+      (setq values (multiple-value-list (qs-r7rs::eval-at-r5rs-repl form))))))
 
 (defun r5rs-forms (source)
   (if (stringp source)
-      (let ((ps:*fold-case* t)) (read-scheme-forms source))
+      (let ((qs:*fold-case* t)) (read-scheme-forms source))
       (list (schemify source))))
 
 (defun r5rs:eval (source)
@@ -274,24 +274,24 @@ R5RS."
 
 (defun r5rs:load (path)
   "Load the R5RS source file PATH."
-  (let ((ps:*fold-case* t))
-    (r5rs-eval-forms (psl:read-forms-from-file path))))
+  (let ((qs:*fold-case* t))
+    (r5rs-eval-forms (qsl:read-forms-from-file path))))
 
 (defun r5rs:expand (source)
   "The core Scheme that psyntax expands SOURCE, an expression, to in
 R5RS's environment."
   (let ((forms (r5rs-forms source)))
-    (psyntax-expand (if (cdr forms) (cons (ps:intern-scheme-symbol "begin") forms) (car forms))
-		    '("pseudoscheme" "r5rs"))))
+    (psyntax-expand (if (cdr forms) (cons (qs:intern-scheme-symbol "begin") forms) (car forms))
+		    '("quasischeme" "r5rs"))))
 
 (defun r5rs:translate (source)
   "The Lisp code SOURCE translates to."
-  (scheme-translator:translate (psx::open-primitives (r5rs:expand source)) psx:*host*))
+  (scheme-translator:translate (qsx::open-primitives (r5rs:expand source)) qsx:*host*))
 
 (defun r5rs:read-from-string (string)
   "The first datum in STRING, read by the Scheme reader, case-folded."
-  (let ((ps:*fold-case* t))
-    (funcall ps:*scheme-read* (make-string-input-stream string))))
+  (let ((qs:*fold-case* t))
+    (funcall qs:*scheme-read* (make-string-input-stream string))))
 
 ;;; ------------------------------------------------------------------
 ;;; SCHEME and PROCEDURE
@@ -312,18 +312,18 @@ environment; return the last one's values, #f as NIL."
   `(lisp-values (multiple-value-list (r5rs-eval-forms (mapcar #'schemify ',forms)))))
 
 (defun procedure (evaluator name library convert)
-  (let* ((sym (if (stringp name) (ps:intern-scheme-symbol name) (schemify name)))
+  (let* ((sym (if (stringp name) (qs:intern-scheme-symbol name) (schemify name)))
 	 (proc (if library
-		   (let ((b (find sym (pseudoscheme-interop:export-bindings
-				       (pseudoscheme-interop:parse-library-name library))
+		   (let ((b (find sym (quasischeme-interop:export-bindings
+				       (quasischeme-interop:parse-library-name library))
 				  :key #'first)))
 		     (unless (and b (eq (second b) :procedure))
-		       (error "~A exports no procedure ~A" library (ps:scheme-symbol-name sym)))
+		       (error "~A exports no procedure ~A" library (qs:scheme-symbol-name sym)))
 		     (third b))
 		   (funcall evaluator (list sym)))))
     (unless (functionp proc)
-      (error "~A is not a procedure" (ps:scheme-symbol-name sym)))
-    (if convert (pseudoscheme-interop:lisp-facing proc) proc)))
+      (error "~A is not a procedure" (qs:scheme-symbol-name sym)))
+    (if convert (quasischeme-interop:lisp-facing proc) proc)))
 
 (defun r7rs:procedure (name &key library (convert t))
   "The R7RS procedure NAME (a string, \"string-pad\", or a symbol) from
@@ -363,9 +363,9 @@ environment, as a Lisp function (see R7RS:PROCEDURE)."
 it's a procedure (converting booleans), else a symbol macro."
   (let ((value (funcall evaluator (list (schemify symbol)))))
     (if (functionp value)
-	(setf (fdefinition symbol) (pseudoscheme-interop:lisp-facing value))
+	(setf (fdefinition symbol) (quasischeme-interop:lisp-facing value))
 	(eval `(define-symbol-macro ,symbol
-		   (pseudoscheme-interop:to-lisp (,evaluator (list ',(schemify symbol)))))))
+		   (quasischeme-interop:to-lisp (,evaluator (list ',(schemify symbol)))))))
     symbol))
 
 (defmacro r7rs:import (&rest import-sets)
@@ -377,13 +377,13 @@ macros.  Names that would redefine an inherited symbol (CL's FIND,
 REMOVE, ...) are an error: use except, prefix or rename."
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (ensure-psyntax)
-     (pseudoscheme-interop:import-into-package ',import-sets ,(package-name *package*))))
+     (quasischeme-interop:import-into-package ',import-sets ,(package-name *package*))))
 
 (defmacro r6rs:import (&rest import-sets)
   "Bring R6RS libraries into the current package; see R7RS:IMPORT."
   `(eval-when (:compile-toplevel :load-toplevel :execute)
      (ensure-psyntax)
-     (pseudoscheme-interop:import-into-package ',import-sets ,(package-name *package*))))
+     (quasischeme-interop:import-into-package ',import-sets ,(package-name *package*))))
 
 (defmacro r7rs:define (spec &body body)
   "A Scheme definition, written in Lisp: defines SPEC's name at the R7RS
@@ -426,19 +426,19 @@ and when it's loaded, so R7RS:IMPORT can follow it in the same file."
 
 (defun print-values (values stream)
   (dolist (v values)
-    (unless (eq v ps:unspecific)
-      (funcall ps:*scheme-write* v stream)
+    (unless (eq v qs:unspecific)
+      (funcall qs:*scheme-write* v stream)
       (terpri stream))))
 
 (defun error-message (e)
   "How to show condition E to a Scheme user: an uncaught Scheme raise as
 it prints itself (message, irritants, condition types), a Lisp error as
 the message a Scheme handler would see (e.g. \"not a pair 5\")."
-  (if (typep e 'ps-r7rs::uncaught-raise)
+  (if (typep e 'qs-r7rs::uncaught-raise)
       (string-trim '(#\Newline #\Space) (princ-to-string e))
-      (multiple-value-bind (message irritants) (ps-r6rs::foreign-condition-message e)
+      (multiple-value-bind (message irritants) (qs-r6rs::foreign-condition-message e)
 	(format nil "~A~{ ~A~}" message
-		(mapcar (lambda (x) (with-output-to-string (s) (funcall ps:*scheme-write* x s)))
+		(mapcar (lambda (x) (with-output-to-string (s) (funcall qs:*scheme-write* x s)))
 			irritants)))))
 
 (defun report-error (e stream)
@@ -446,8 +446,8 @@ the message a Scheme handler would see (e.g. \"not a pair 5\")."
 
 (defun quit-command-p (form)
   ;; ,q reads as (unquote q)
-  (and (consp form) (psl:keyword-head-p form "unquote") (symbolp (cadr form))
-       (member (ps:scheme-symbol-name (cadr form)) '("q" "quit" "exit") :test #'string=)))
+  (and (consp form) (qsl:keyword-head-p form "unquote") (symbolp (cadr form))
+       (member (qs:scheme-symbol-name (cadr form)) '("q" "quit" "exit") :test #'string=)))
 
 (defun repl-loop (evaluator &key (prompt "> ") (input *standard-input*) (output *standard-output*))
   "Read Scheme forms from INPUT, evaluate each with EVALUATOR (a
@@ -455,9 +455,9 @@ function of one form), print the results.  ,q or end of file exits."
   (loop
     (format output "~A" prompt)
     (finish-output output)
-    (let ((form (handler-case (funcall ps:*scheme-read* input)
+    (let ((form (handler-case (funcall qs:*scheme-read* input)
 		  (error (e) (report-error e output) (clear-input input) nil))))
-      (cond ((eq form ps:eof-object) (terpri output) (return))
+      (cond ((eq form qs:eof-object) (terpri output) (return))
 	    ((quit-command-p form) (return))
 	    (form
 	     (handler-case
@@ -467,7 +467,7 @@ function of one form), print the results.  ,q or end of file exits."
 (defun r7rs:repl ()
   "An R7RS read-eval-print loop (,q quits)."
   (ensure-psyntax)
-  (repl-loop (lambda (form) (ps-r7rs::eval-at-repl form)) :prompt "r7rs> "))
+  (repl-loop (lambda (form) (qs-r7rs::eval-at-repl form)) :prompt "r7rs> "))
 
 (defun r6rs:repl ()
   "An R6RS read-eval-print loop (,q quits)."
@@ -476,5 +476,5 @@ function of one form), print the results.  ,q or end of file exits."
 
 (defun r5rs:repl ()
   "An R5RS read-eval-print loop (,q quits)."
-  (let ((ps:*fold-case* t))
+  (let ((qs:*fold-case* t))
     (repl-loop (lambda (form) (r5rs-eval-forms (list form))) :prompt "r5rs> ")))

@@ -10,15 +10,15 @@ These runs predate the optimizer's first pass (cp0 and cptypes,
 | implementation | version | geometric mean vs Chez | benchmarks completed |
 |---|---|---|---|
 | Chez Scheme (with akku-r7rs; `--optimize-level 2`) | 10.4.1 | 1.0× | 57/57 |
-| **Pseudoscheme** (SBCL 2.6.9; full continuations, the default) | 3.0 | **1.37×** (1.55× before the second pass) | **57/57** |
-| Pseudoscheme, `--continuations=escape` | 3.0 | 1.30× (1.44× before) | 57/57 |
+| **Quasischeme** (SBCL 2.6.9; full continuations, the default) | 3.0 | **1.37×** (1.55× before the second pass) | **57/57** |
+| Quasischeme, `--continuations=escape` | 3.0 | 1.30× (1.44× before) | 57/57 |
 | Guile | 3.0.11 | 2.8× | 56/57 |
 | Gauche | 0.9.15 | 9.2× | 57/57 |
 | Chibi (a bytecode interpreter) | 0.12.0 | 35.7× | 49/57 |
 
 The table under "All benchmarks" is the first run. In the second
 pass's run (next
-section), with full continuations, Pseudoscheme is at or ahead of Chez
+section), with full continuations, Quasischeme is at or ahead of Chez
 on 15 benchmarks, within 1.5× on 33 and within 2× on 41. Its worst
 ratios are `conform` (3.6×), `ack` (3.6×), `fibc` (3.6×), `divrec`
 (3.5×), `browse` (3.4×) and `matrix` (3.4×); `ack`, `divrec` and
@@ -33,10 +33,10 @@ cost is in programs that call unknown procedures in tight loops
 
 **Caveats.**
 - Chez, Guile, Gauche and Chibi are from an earlier run, in which the
-  implementations ran three at a time (Pseudoscheme, Chez and Guile;
+  implementations ran three at a time (Quasischeme, Chez and Guile;
   then Chibi and Gauche), so that each could have a performance core.
-  Pseudoscheme's figures here are from a later run of its own.
-- The times cover each benchmark's own loop. Pseudoscheme's expansion
+  Quasischeme's figures here are from a later run of its own.
+- The times cover each benchmark's own loop. Quasischeme's expansion
   and SBCL compilation are excluded, as are other implementations'
   compile steps.
 - Racket wasn't run: it needs its `r7rs` package, which isn't installed
@@ -46,7 +46,7 @@ cost is in programs that call unknown procedures in tight loops
 - ecraven's published results (<https://ecraven.github.io/r7rs-benchmarks/>)
   cover more implementations on different hardware.
 
-Reproduce with `bench/run.sh pseudoscheme chez-akku guile gauche-local chibi`,
+Reproduce with `bench/run.sh quasischeme chez-akku guile gauche-local chibi`,
 then `python3 bench/summarize.py`.
 
 ## A second pass, later in October 2026
@@ -114,12 +114,12 @@ Biggest gains: `lattice` 23.2 → 2.9 s, `parsing` 11.2 → 1.4 s, `takl`
 
 ## All benchmarks
 
-Times in seconds; in parentheses, the ratio to Chez. "pseudoscheme" is
+Times in seconds; in parentheses, the ratio to Chez. "quasischeme" is
 escape-only continuations (`--continuations=escape`), "full" full
 continuations (now the default), both from the first run, before the
 second pass; the other columns are from the earlier run.
 
-| benchmark | chez | pseudoscheme | full | chibi | gauche | guile |
+| benchmark | chez | quasischeme | full | chibi | gauche | guile |
 |---|---|---|---|---|---|---|
 | browse | 0.65 (1.0x) | 2.23 (3.4x) | 2.23 (3.4x) | crashed | 10.87 (16.9x) | 2.27 (3.5x) |
 | deriv | 0.51 (1.0x) | 1.05 (2.1x) | 1.05 (2.1x) | 39.76 (78.5x) | 13.83 (27.3x) | 3.41 (6.7x) |

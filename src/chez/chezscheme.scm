@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; The first part of the body of Pseudoscheme's (chezscheme) library:
+;;;; The first part of the body of Quasischeme's (chezscheme) library:
 ;;;; the Chez Scheme extensions the Chez variants of Akku packages
 ;;;; (foo.chezscheme.sls) use.  The library form around this and the
 ;;;; other src/chez/*.scm files, which re-exports R6RS as Chez's does, is

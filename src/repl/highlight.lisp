@@ -1,4 +1,4 @@
-;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-REPL -*-
+;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-REPL -*-
 
 ;;;; A lexer for Scheme text good enough to color it: rainbow
 ;;;; parentheses, strings, comments, characters, numbers, syntactic
@@ -7,7 +7,7 @@
 ;;;; It knows every mode's syntax only roughly; the mode's own reader
 ;;;; decides what the text means.
 
-(in-package "PSEUDOSCHEME-REPL")
+(in-package "QUASISCHEME-REPL")
 
 (defstruct (token (:constructor make-token (start end kind &optional depth)))
   start end kind depth)

@@ -18,7 +18,7 @@
 ;;; FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 ;;; DEALINGS IN THE SOFTWARE. 
 
-;;; PSEUDOSCHEME: replaces the original main, which ran a script named
+;;; QUASISCHEME: replaces the original main, which ran a script named
 ;;; on the command line and exited.  Instead, hand the expander's entry
 ;;; points to the host as global variables (PSYNTAX:...) for
 ;;; src/psyntax.lisp to call.
@@ -45,7 +45,7 @@
   (set-symbol-value! 'psyntax:mixed-bodies mixed-bodies)
   ;; One expanded, not run: ((lib-spec ...) core), for compile-program.
   (set-symbol-value! 'psyntax:expand-r6rs-top-level expand-r6rs-top-level)
-  ;; One REPL form, in the extensible (pseudoscheme interaction) library.
+  ;; One REPL form, in the extensible (quasischeme interaction) library.
   (set-symbol-value! 'psyntax:eval-top-level eval-top-level)
   ;; Expand and install one (library ...) form.
   (set-symbol-value! 'psyntax:library-expander (current-library-expander))

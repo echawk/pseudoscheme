@@ -1,14 +1,14 @@
 ;;; Run tests/guile-vm/bench.scm's compiled procedures on Guile's VM, with
-;;; the backend PSEUDOSCHEME_GUILE_VM_BACKEND names: the best of 3 runs.
+;;; the backend QUASISCHEME_GUILE_VM_BACKEND names: the best of 3 runs.
 ;;; Usage: sbcl --script tests/guile-vm/bench.lisp BENCH.go
 (require :asdf)
 (let ((setup (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname))))
   (when (probe-file setup) (load setup)))
 (push (merge-pathnames "../../" (make-pathname :name nil :type nil :defaults *load-truename*))
       asdf:*central-registry*)
-(handler-bind ((warning #'muffle-warning)) (asdf:load-system :pseudoscheme/guile))
-(psg:boot)
-(in-package "PSEUDOSCHEME-GUILE")
+(handler-bind ((warning #'muffle-warning)) (asdf:load-system :quasischeme/guile))
+(qsg:boot)
+(in-package "QUASISCHEME-GUILE")
 (let* ((file (second sb-ext:*posix-argv*))
        (bytes (with-open-file (in file :element-type '(unsigned-byte 8))
 		(let ((v (make-array (file-length in) :element-type '(unsigned-byte 8))))

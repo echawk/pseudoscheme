@@ -144,7 +144,7 @@
 (define (make-local-variable uname)
   (vector 'local-variable
 	  uname				;1 user's name
-	  #f     			;2 type (not used by pseudoscheme)
+	  #f     			;2 type (not used by quasischeme)
 	  #f				;3 substitution
 	  #f				;4 path - obsolete
 	  #f				;5 value-refs?

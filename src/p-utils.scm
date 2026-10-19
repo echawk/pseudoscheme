@@ -6,45 +6,45 @@
 ; last-pair (was in r^3, flushed for r^4)
 
 (define (last-pair x)
-  (ps-lisp:last x))
+  (qs-lisp:last x))
 
 ; posq
 
 (define (vector-posq thing v)
-  (ps-lisp:or (ps-lisp:position thing (ps-lisp:the ps-lisp:simple-vector v))
+  (qs-lisp:or (qs-lisp:position thing (qs-lisp:the qs-lisp:simple-vector v))
 	   #f))
 
 (define (string-posq c s)
-  (ps-lisp:or (ps-lisp:position c (ps-lisp:the ps-lisp:simple-string s))
+  (qs-lisp:or (qs-lisp:position c (qs-lisp:the qs-lisp:simple-string s))
 	   #f))
 
 ; Fluids
 
 (define (make-fluid top-level-value)
-  (let ((f (ps-lisp:gensym "FLUID")))
-    (ps-lisp:set f top-level-value)
+  (let ((f (qs-lisp:gensym "FLUID")))
+    (qs-lisp:set f top-level-value)
     f))
 
 (define (fluid f)
-  (ps-lisp:symbol-value f))
+  (qs-lisp:symbol-value f))
 
 (define (set-fluid! f val)
-  (ps-lisp:set f val))
+  (qs-lisp:set f val))
 
 (define (let-fluid f val thunk)
-  (ps-lisp:progv (list f) (list val) (thunk)))
+  (qs-lisp:progv (list f) (list val) (thunk)))
 
 ; Tables
 
 (define (make-table)
   ;; Default size in VAX LISP is 71, which seems rather large.
-  (ps-lisp:values (ps-lisp:make-hash-table :size 20 :rehash-size 2.0)))
+  (qs-lisp:values (qs-lisp:make-hash-table :size 20 :rehash-size 2.0)))
 
 (define (table-set! table key val)
-  (ps-lisp:setf (ps-lisp:gethash key table) val))
+  (qs-lisp:setf (qs-lisp:gethash key table) val))
 
 (define (table-ref table key)
-  (ps-lisp:gethash key table #f))
+  (qs-lisp:gethash key table #f))
 
 ; Pretty-printer used by translator
 ; Two cases:
@@ -53,31 +53,31 @@
 ;  - Otherwise, the opposite, and the package prefix for unqualified
 ;    symbols ought to be 
 
-(define cl-readtable (ps-lisp:copy-readtable 'ps-lisp:nil))
+(define cl-readtable (qs-lisp:copy-readtable 'qs-lisp:nil))
 
-(ps-lisp:defun write-pretty (form port package)
-  (ps-lisp:let ((ps-lisp:*package* package)
-	     (ps-lisp:*print-case* :upcase)
-	     (ps-lisp:*readtable* cl-readtable))
-    (ps-lisp:declare (ps-lisp:special cl-readtable))
-    (ps-lisp:format port "~&")
-    (ps-lisp:write form :stream port
-		     :pretty ps-lisp:t
-		     :length 'ps-lisp:nil
-		     :level 'ps-lisp:nil)
-    (ps-lisp:values)))
+(qs-lisp:defun write-pretty (form port package)
+  (qs-lisp:let ((qs-lisp:*package* package)
+	     (qs-lisp:*print-case* :upcase)
+	     (qs-lisp:*readtable* cl-readtable))
+    (qs-lisp:declare (qs-lisp:special cl-readtable))
+    (qs-lisp:format port "~&")
+    (qs-lisp:write form :stream port
+		     :pretty qs-lisp:t
+		     :length 'qs-lisp:nil
+		     :level 'qs-lisp:nil)
+    (qs-lisp:values)))
 
 ; Package stuff, etc.
 
 (define (intern-renaming-perhaps string package)
-  (ps-lisp:intern (if (eq? package scheme-package)
+  (qs-lisp:intern (if (eq? package scheme-package)
 		      string
 		      (perhaps-rename string))
 		  package))
 
 (define (perhaps-rename string)  ;Cf. defune in rts.lisp
-  (if (or (ps-lisp:multiple-value-bind (sym status) ;Good candidate for caching
-	      (ps-lisp:find-symbol string lisp-package)
+  (if (or (qs-lisp:multiple-value-bind (sym status) ;Good candidate for caching
+	      (qs-lisp:find-symbol string lisp-package)
 	      sym ;ignore
 	    (eq? status :external))
 	  (and (> (string-length string) 0)
@@ -85,68 +85,68 @@
       (string-append "." string)
       string))
 
-(define lisp-package (ps-lisp:find-package "PS-LISP"))
+(define lisp-package (qs-lisp:find-package "QS-LISP"))
 
 (define (qualified-symbol? sym)
-  (ps-lisp:if (ps-lisp:symbolp sym)
-	      (not (eq? (ps-lisp:symbol-package sym) scheme-package))
+  (qs-lisp:if (qs-lisp:symbolp sym)
+	      (not (eq? (qs-lisp:symbol-package sym) scheme-package))
 	      #f))
 
-(define scheme-package (ps-lisp:symbol-package 'askdjfh))
+(define scheme-package (qs-lisp:symbol-package 'askdjfh))
 
-;; NB: PS-LISP:SYMBOL-NAME, not SYMBOL->STRING -- these name real CL
+;; NB: QS-LISP:SYMBOL-NAME, not SYMBOL->STRING -- these name real CL
 ;; packages, which must stay canonical (fold-cased) regardless of
 ;; SYMBOL->STRING's own case-preserving behavior for Scheme-visible
 ;; use (see rts.lisp).
 
 (define (make-package-using id use-list)
-  (let* ((name (ps-lisp:symbol-name id))
-	 (probe (ps-lisp:find-package name))
+  (let* ((name (qs-lisp:symbol-name id))
+	 (probe (qs-lisp:find-package name))
 	 (package
-	  (cond ((not (eq? probe 'ps-lisp:nil))
+	  (cond ((not (eq? probe 'qs-lisp:nil))
 	         (for-each (lambda (use)
 			     (if (not (or (eq? use lisp-package)
 					  (memq use use-list)))
-				 (ps-lisp:unuse-package use probe)))
-			   (ps-lisp:package-use-list probe))
+				 (qs-lisp:unuse-package use probe)))
+			   (qs-lisp:package-use-list probe))
 		 probe)
-		(else (ps-lisp:make-package name :use use-list)))))
-    (ps-lisp:use-package (if (eq? id 'scheme)
+		(else (qs-lisp:make-package name :use use-list)))))
+    (qs-lisp:use-package (if (eq? id 'scheme)
 			  use-list	;Kludge
 			  (cons lisp-package use-list))
 		      package)
     package))
 
 (define (make-package-exporting id syms)
-  (let* ((name (ps-lisp:symbol-name id))
-	 (new (ps-lisp:or (ps-lisp:find-package name)
-		       (ps-lisp:make-package name :use '()))))
-    (ps-lisp:import syms new)
-    (ps-lisp:export syms new)
+  (let* ((name (qs-lisp:symbol-name id))
+	 (new (qs-lisp:or (qs-lisp:find-package name)
+		       (qs-lisp:make-package name :use '()))))
+    (qs-lisp:import syms new)
+    (qs-lisp:export syms new)
     new))
 
 
-; ps-lisp:namestring
-; ps-lisp:truename
-; ps-lisp:merge-pathnames
-; ps-lisp:make-pathname
-; ps-lisp:package-name
+; qs-lisp:namestring
+; qs-lisp:truename
+; qs-lisp:merge-pathnames
+; qs-lisp:make-pathname
+; qs-lisp:package-name
 
 ; Etc.
 
 (define (scheme-implementation-version)
-  (string-append (#'ps-lisp:lisp-implementation-type)
+  (string-append (#'qs-lisp:lisp-implementation-type)
 		 " "
-		 (#'ps-lisp:lisp-implementation-version)))
+		 (#'qs-lisp:lisp-implementation-version)))
 
 (define (defined-as-CL-macro? CL-sym)
-  (ps-lisp:if (ps-lisp:macro-function CL-sym)
+  (qs-lisp:if (qs-lisp:macro-function CL-sym)
 	      #t
 	      #f))
 
 (define (true-name source-file-name)
-  (ps-lisp:namestring (ps-lisp:truename source-file-name)))
+  (qs-lisp:namestring (qs-lisp:truename source-file-name)))
 
-(define package-name #'ps-lisp:package-name)
+(define package-name #'qs-lisp:package-name)
 
-(define intern #'ps-lisp:intern)
+(define intern #'qs-lisp:intern)

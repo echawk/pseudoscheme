@@ -1,5 +1,5 @@
 ;;; SRFI 115: Scheme regular expressions (SREs).  Written for
-;;; Pseudoscheme on cl-ppcre (Edi Weitz, BSD licence), which is loaded
+;;; Quasischeme on cl-ppcre (Edi Weitz, BSD licence), which is loaded
 ;;; (through Quicklisp or ASDF) when this library is first imported.
 ;;;
 ;;; An SRE is compiled to a cl-ppcre parse tree (:sequence, :register,
@@ -37,7 +37,7 @@
           regexp-match->list)
   (import (scheme base) (scheme char) (scheme cxr)
           (srfi private char-set)
-          (pseudoscheme lisp)
+          (quasischeme lisp)
           (prefix (cl common-lisp) cl:)
           (prefix (cl cl-unicode) u:)
           (prefix (cl cl-ppcre) re:))

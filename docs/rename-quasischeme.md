@@ -11,8 +11,10 @@ a different system. 1.0 means:
 
 An LSP server for other editors comes after 1.0 (ROADMAP.md, section 7).
 
-As of 2026-10-18 every requirement is met;
-ROADMAP.md, "Before the rename", lists what is left to check first.
+**Done 2026-10-18**, in the commit "Rename to Quasischeme; version
+1.0". ROADMAP.md, "Quasischeme 1.0", has the test run before it. The
+steps outside the repository (section 5) and the container's teardown
+are the user's to do.
 
 There are no outside users, so nothing old is kept for compatibility:
 no package nicknames or system aliases, and no `PSEUDOSCHEME_*` variables

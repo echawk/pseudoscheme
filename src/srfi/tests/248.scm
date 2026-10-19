@@ -109,7 +109,7 @@
      (+ 1 (get)))
    9))
 
-;; PSEUDOSCHEME: an ordinary continuation captured inside a delimited
+;; QUASISCHEME: an ordinary continuation captured inside a delimited
 ;; computation, called while a reinstatement of it runs, should return
 ;; to the prompt as it was when captured; here it returns as the
 ;; reinstatement does (see 248.sld).

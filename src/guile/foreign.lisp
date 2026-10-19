@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; The C half of (system foreign) and (system foreign-library), on the
 ;;;; foreign-function layer the Schemes share (src/ffi.lisp): pointer
@@ -14,7 +14,7 @@
 ;;;; don't reach C.  It returns the bytevector itself for a pointer to
 ;;;; the whole of one.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defvar *bytevector-address-hook* nil
   "A function giving a bytevector's address, or NIL: the VM's, for the
@@ -38,7 +38,7 @@ static objects of its images.")
   "What the shared layer takes: an address, or (bytevector . offset)."
   (if (gpointer-backing p) (cons (gpointer-backing p) (gpointer-offset p)) (gpointer-address p)))
 
-(defun pointer-address* (p) (psffi:call-with-address (pointer-place p) #'identity))
+(defun pointer-address* (p) (qsffi:call-with-address (pointer-place p) #'identity))
 
 (defmethod print-object ((p gpointer) stream)
   (format stream "#<pointer 0x~(~X~)>" (pointer-address* p)))
@@ -117,7 +117,7 @@ static objects of its images.")
 		     ((struct-p x)
 		      (let* ((vtable (struct-vtable-of x))
 			     (name (svref (gstruct-slots vtable) +vtable-index-name+))
-			     (result (funcall make-struct name ps:false)))
+			     (result (funcall make-struct name qs:false)))
 			(visit x result)
 			(funcall set-fields result
 				 (map 'list #'convert (subseq (struct-slots-of x) 0 (vtable-nfields vtable))))
@@ -161,7 +161,7 @@ static objects of its images.")
   #(:void :float :double :uint8 :int8 :uint16 :int16 :uint32 :int32 :uint64 :int64))
 
 (defun pointer-type-p (type)
-  (and (symbolp type) (not (keywordp type)) (string= (ps:scheme-symbol-name type) "*")))
+  (and (symbolp type) (not (keywordp type)) (string= (qs:scheme-symbol-name type) "*")))
 
 (defun ffi-type (subr type)
   "The shared layer's type for Guile's foreign TYPE."
@@ -180,7 +180,7 @@ static objects of its images.")
 	((listp type) (struct-layout type))
 	((eql type 11) 8)
 	((eql type 12) 16)
-	((and (integerp type) (<= 1 type 10)) (psffi:type-size (svref *code-ctypes* type)))
+	((and (integerp type) (<= 1 type 10)) (qsffi:type-size (svref *code-ctypes* type)))
 	(t (wrong-type "sizeof" 1 type))))
 
 (defun type-alignment* (type)
@@ -202,7 +202,7 @@ static objects of its images.")
 ;;; Strings
 
 (defun encoding-name (encoding)
-  (if (or (null encoding) (eq encoding ps:false))
+  (if (or (null encoding) (eq encoding qs:false))
       :utf-8
       (let ((name (string-upcase encoding)))
 	(cond ((member name '("UTF-8" "UTF8") :test #'string=) :utf-8)
@@ -215,7 +215,7 @@ static objects of its images.")
 go as %default-port-conversion-strategy says."
   (let ((limit (case encoding (:latin-1 256) (:ascii 128))))
     (when (and limit (find-if (lambda (c) (>= (char-code c) limit)) string))
-      (let ((strategy (ps:scheme-symbol-name (fluid-value (root-value "%default-port-conversion-strategy")))))
+      (let ((strategy (qs:scheme-symbol-name (fluid-value (root-value "%default-port-conversion-strategy")))))
 	(setq string
 	      (with-output-to-string (out)
 		(loop for c across string
@@ -250,7 +250,7 @@ go as %default-port-conversion-strategy says."
 				     (set-pointer-finalizer (check-pointer "set-pointer-finalizer!" p) finalizer)
 				     *unspecified*))
     (cons "bytevector->pointer" (lambda (bv &optional (offset 0))
-				  (unless (typep bv 'ps-r6rs::octets) (wrong-type "bytevector->pointer" 1 bv))
+				  (unless (typep bv 'qs-r6rs::octets) (wrong-type "bytevector->pointer" 1 bv))
 				  (let ((base (and *bytevector-address-hook* (funcall *bytevector-address-hook* bv))))
 				    (if base
 					(make-pointer* (+ base offset))
@@ -263,24 +263,24 @@ go as %default-port-conversion-strategy says."
 					   (funcall *address-dereference-hook* (pointer-address* p)))
 				    (if found
 					(make-pointer* (object-address object))
-					(make-pointer* (psffi:call-with-address
+					(make-pointer* (qsffi:call-with-address
 							(pointer-place p)
-							(lambda (a) (psffi:mem-ref :pointer a))))))))
+							(lambda (a) (qsffi:mem-ref :pointer a))))))))
     (cons "string->pointer" (lambda (string &optional encoding)
 			      (%make-gpointer nil (encode-string "string->pointer" string (encoding-name encoding)))))
     (cons "pointer->string" (lambda (p &optional (length -1) encoding)
 			      (check-non-null "pointer->string" p)
-			      (psffi:call-with-address
+			      (qsffi:call-with-address
 			       (pointer-place p)
 			       (lambda (a)
-				 (psffi:read-c-string a :length (and (>= length 0) length)
+				 (qsffi:read-c-string a :length (and (>= length 0) length)
 							:encoding (encoding-name encoding))))))
     (cons "sizeof" #'type-size*)
     (cons "alignof" #'type-alignment*)
     (cons "pointer->procedure" #'pointer->procedure)
     (cons "procedure->pointer" (lambda (return procedure arg-types)
 				 (make-pointer*
-				  (psffi:foreign-callback
+				  (qsffi:foreign-callback
 				   procedure
 				   (mapcar (lambda (type) (ffi-type "procedure->pointer" type)) arg-types)
 				   (ffi-type "procedure->pointer" return))))))))
@@ -300,7 +300,7 @@ go as %default-port-conversion-strategy says."
   (let ((bv (gpointer-backing p)))
     (if (and bv (zerop (+ offset (gpointer-offset p))) (= length (length bv)))
 	bv
-	(psffi:call-with-address
+	(qsffi:call-with-address
 	 (pointer-place p)
 	 (lambda (a)
 	   (let ((octets (make-array length :element-type '(unsigned-byte 8)))
@@ -312,8 +312,8 @@ go as %default-port-conversion-strategy says."
   (check-pointer "pointer->procedure" p 2)
   (let ((errno (loop for (k v) on options by #'cddr
 		     thereis (and (keywordp k) (string-equal (symbol-name k) "RETURN-ERRNO?")
-				  (not (eq v ps:false))))))
-    (psffi:foreign-function (pointer-address* p)
+				  (not (eq v qs:false))))))
+    (qsffi:foreign-function (pointer-address* p)
 			    (mapcar (lambda (type) (ffi-type "pointer->procedure" type)) arg-types)
 			    (let ((r (ffi-type "pointer->procedure" return)))
 			      (if (eq (second r) :void) (list :void :void) r))
@@ -358,24 +358,24 @@ digits compare as numbers (a run with leading zeros as a fraction)."
   (list
    (cons "dlopen" (lambda (name flags)
 		    (multiple-value-bind (handle message)
-			(psffi:dlopen (if (eq name ps:false) nil name) flags)
+			(qsffi:dlopen (if (eq name qs:false) nil name) flags)
 		      (if handle
 			  (make-pointer* handle)
 			  (guile-error (ssym "misc-error") "dlopen" "file: ~S, message: ~S"
 				       (list name message))))))
    (cons "dlsym" (lambda (handle name)
 		   (multiple-value-bind (address message)
-		       (psffi:dlsym (pointer-address* (check-pointer "dlsym" handle)) name)
+		       (qsffi:dlsym (pointer-address* (check-pointer "dlsym" handle)) name)
 		     (let ((fallback (and (not address) (stringp name)
 					  (cdr (assoc name *libc-fallbacks* :test #'string=)))))
 		       (cond (address (make-pointer* address))
 			     (fallback (make-pointer* (cffi:pointer-address (funcall fallback))))
 			     (t (guile-error (ssym "misc-error") "dlsym" "Error resolving ~S: ~S"
 					     (list name message))))))))
-   (cons "RTLD_LAZY" psffi:+rtld-lazy+)
-   (cons "RTLD_NOW" psffi:+rtld-now+)
-   (cons "RTLD_GLOBAL" psffi:+rtld-global+)
-   (cons "RTLD_LOCAL" psffi:+rtld-local+)))
+   (cons "RTLD_LAZY" qsffi:+rtld-lazy+)
+   (cons "RTLD_NOW" qsffi:+rtld-now+)
+   (cons "RTLD_GLOBAL" qsffi:+rtld-global+)
+   (cons "RTLD_LOCAL" qsffi:+rtld-local+)))
 
 ;;; The older dynamic-link interface, as libguile defines it (dynl.c): the
 ;;; root's procedures, calling (system foreign-library)'s.

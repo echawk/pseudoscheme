@@ -1014,7 +1014,7 @@
 (test 3.0 (inexact (sqrt 9)))
 (test 1.4142135623731 (sqrt 2))
 (test 0.0+1.0i (inexact (sqrt -1)))
-;; PSEUDOSCHEME: chibi's test expected 0.0+1.0i, but the imaginary part
+;; QUASISCHEME: chibi's test expected 0.0+1.0i, but the imaginary part
 ;; -0.0 puts the argument just below the branch cut on the negative real
 ;; axis, where sqrt is -i: IEEE 754 / C99 csqrt(-1-0i) = 0-1i, and so do
 ;; Chez, Guile, Racket and Chicken.  (Gauche and Chibi lose the sign of

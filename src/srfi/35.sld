@@ -1,4 +1,4 @@
-;;; SRFI 35: conditions.  Written for Pseudoscheme, on R6RS conditions.
+;;; SRFI 35: conditions.  Written for Quasischeme, on R6RS conditions.
 ;;;
 ;;; A SRFI 35 condition type is an R6RS record-type descriptor that
 ;;; descends from &condition, and a SRFI 35 condition is an R6RS

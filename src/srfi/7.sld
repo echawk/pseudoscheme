@@ -4,11 +4,11 @@
 ;;; turns a program into its Scheme forms for the features at hand
 ;;; (those of R7RS's (features)).  The SRFI leaves running them to the
 ;;; implementation.  Here they run as an R7RS program, through the R7RS
-;;; front end (Lisp's pseudoscheme-r7rs::eval-forms), whose imports are:
+;;; front end (Lisp's quasischeme-r7rs::eval-forms), whose imports are:
 ;;;
 ;;;   - each library (srfi N) for a feature srfi-N named in a reached
 ;;;     REQUIRES clause or in the requirement of a chosen FEATURE-COND
-;;;     clause, when Pseudoscheme has that library;
+;;;     clause, when Quasischeme has that library;
 ;;;   - all of R7RS-small, except for the names those SRFI libraries
 ;;;     export, so a SRFI's definition wins over R7RS's (SRFI 13's
 ;;;     string-map, SRFI 43's vector-map, ...).
@@ -36,8 +36,8 @@
           (scheme eval)
           (scheme read)
           (scheme file)
-          (only (pseudoscheme host) psyntax:environment-symbols)
-          (only (pseudoscheme lisp) lisp-function))
+          (only (quasischeme host) psyntax:environment-symbols)
+          (only (quasischeme lisp) lisp-function))
   (include "reference/srfi-7/process-program.scm")
   (begin
     (define r7rs-small-libraries
@@ -46,7 +46,7 @@
         (scheme lazy) (scheme load) (scheme process-context) (scheme read)
         (scheme repl) (scheme time) (scheme write)))
 
-    (define eval-forms (lisp-function "eval-forms" "pseudoscheme-r7rs"))
+    (define eval-forms (lisp-function "eval-forms" "quasischeme-r7rs"))
 
     ;; The features that PROCESS-PROGRAM's choices rest on: those in
     ;; reached REQUIRES clauses and in the requirements of the chosen

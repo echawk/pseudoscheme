@@ -9,7 +9,7 @@
 ;;;                   letrec-syntax syntax-rules)
 ;;;           (srfi 147))
 ;;;
-;;; and Pseudoscheme doesn't claim the feature custom-macro-transformers.
+;;; and Quasischeme doesn't claim the feature custom-macro-transformers.
 ;;; (psyntax's own define-syntax already takes a macro use that expands
 ;;; into syntax-rules or a procedure, but not one that expands into a
 ;;; keyword or a (begin <definition> ... <transformer spec>).)

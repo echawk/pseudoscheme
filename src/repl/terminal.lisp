@@ -1,17 +1,17 @@
-;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-REPL -*-
+;;; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-REPL -*-
 
 ;;;; The terminal under the REPL's line editor (editor.lisp): raw mode,
 ;;;; keys, the window's width and ANSI output.  Raw mode needs SBCL's
 ;;;; sb-posix; elsewhere, or when the standard input or output isn't a
 ;;;; terminal, the REPL reads lines as before (repl.lisp).
 
-(defpackage "PSEUDOSCHEME-REPL"
+(defpackage "QUASISCHEME-REPL"
   (:use "COMMON-LISP")
   (:export "RUN-REPL" "MAKE-LANGUAGE" "LANGUAGE" "*LANGUAGES*" "FIND-LANGUAGE"
 	   "READ-INPUT" "INTERACTIVE-P" "*OPTIONS*" "OPTION"
 	   "DEFINE-LANGUAGE" "DEFINE-COMMAND" "HIGHLIGHT" "*QUIET*"))
 
-(in-package "PSEUDOSCHEME-REPL")
+(in-package "QUASISCHEME-REPL")
 
 (defun interactive-p ()
   "Are the standard input and output both terminals, and does $TERM

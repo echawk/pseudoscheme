@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; Guile's VM: SBCL VOPs for translated code (the :vop backend)
 ;;;;
@@ -21,17 +21,17 @@
 ;;;;   that branch -- or by typed Lisp, which SBCL's own VOPs compile.
 ;;;;   tests/guile-vm/vops.lisp tests the VOPs.
 ;;;;
-;;;; The VOPs are for SBCL on arm64 only (the feature :PSEUDOSCHEME-VOPS);
+;;;; The VOPs are for SBCL on arm64 only (the feature :QUASISCHEME-VOPS);
 ;;;; elsewhere :vop is :jit.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  #+(and sbcl arm64) (pushnew :pseudoscheme-vops *features*))
+  #+(and sbcl arm64) (pushnew :quasischeme-vops *features*))
 
 (defvar *vm-vops* nil "True once the VOPs are defined (SBCL, arm64).")
 
-#+pseudoscheme-vops
+#+quasischeme-vops
 (progn
   (sb-ext:unlock-package "SB-VM")
   (sb-ext:unlock-package "SB-C")
@@ -558,8 +558,8 @@ where the instruction does.")
 ;;; Type tests: Guile's tags, as tests of the Lisp objects
 
 (defparameter +immediate-constants+
-  `((,+scm-false+ . ps:false) (,+scm-nil+ . *elisp-nil*) (,+scm-null+ . nil) (,+scm-true+ . ps:true)
-    (,+scm-unspecified+ . *unspecified*) (,+scm-undefined+ . +unbound+) (,+scm-eof+ . ps:eof-object))
+  `((,+scm-false+ . qs:false) (,+scm-nil+ . *elisp-nil*) (,+scm-null+ . nil) (,+scm-true+ . qs:true)
+    (,+scm-unspecified+ . *unspecified*) (,+scm-undefined+ . +unbound+) (,+scm-eof+ . qs:eof-object))
   "The SCM bits of Guile's immediate constants, and forms whose values are
 their objects here.")
 
@@ -983,9 +983,9 @@ into a simple octet vector and in it; else GENERAL."
   "A form making the object whose first word is HEADER, as REALIZE, or NIL."
   (case (logand header #x7f)
     (69 `(make-vm-program nil ,(ash header -16)))	; a closure
-    (13 `(make-array ,(ash header -8) :initial-element ps:false)) ; a vector
+    (13 `(make-array ,(ash header -8) :initial-element qs:false)) ; a vector
     (7 '(make-gvariable))				; a variable (a box)
-    (55 '(make-atomic-box ps:false))))
+    (55 '(make-atomic-box qs:false))))
 
 (setf (gethash "allocate-words/immediate" *vop-peepholes*)
       (lambda (instructions goto)
@@ -996,7 +996,7 @@ into a simple octet vector and in it; else GENERAL."
 	      ;; a pair: its car stored first
 	      ((and (= count 2) (named second "scm-set!/immediate") (eql (first second) next)
 		    (destructuring-bind (obj i val) (third second) (and (= obj dst) (= i 0) (/= val dst))))
-	       `(progn (setf (vm-slot vm ,dst) (cons (vm-slot vm ,(third (third second))) ps:false))
+	       `(progn (setf (vm-slot vm ,dst) (cons (vm-slot vm ,(third (third second))) qs:false))
 		       ,(funcall goto (fourth second))))
 	      ;; its header, a constant
 	      ((and (named second "load-u64") (named third "word-set!/immediate")
@@ -1188,7 +1188,7 @@ the middle of an instruction, say)."
 			    `(let* ((vtable (vm-slot vm ,val))
 				    ;; making a vtable might run Scheme code
 				    (struct ,(out-call `(make-struct-of-vtable
-							 vtable (make-array ,(1- count) :initial-element ps:false)))))
+							 vtable (make-array ,(1- count) :initial-element qs:false)))))
 			       (setf (vm-slot vm ,dst) struct)
 			       ,(funcall goto (fourth second)))))))
 	      (funcall others instructions goto)))))
@@ -1336,7 +1336,7 @@ the middle of an instruction, say)."
   (destructuring-bind (dst obj i) operands
     (and (= i 2)
 	 `(let ((x (vm-slot vm ,obj)))
-	    (if (typep x 'ps-r6rs::octets)
+	    (if (typep x 'qs-r6rs::octets)
 		(progn (setf (vm-slot vm ,dst) (make-vm-pointer x 0)) ,next)
 		,(instruction-form (gethash "pointer-ref/immediate" *vm-ops-by-name*) ip operands next))))))
 

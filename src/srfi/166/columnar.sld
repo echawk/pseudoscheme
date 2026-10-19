@@ -1,5 +1,5 @@
 ;;; Part of SRFI 166 (see ../166.sld): chibi-scheme's lib/srfi/166/columnar.sld,
-;;; with the changes described there, marked PSEUDOSCHEME.
+;;; with the changes described there, marked QUASISCHEME.
 
 (define-library (srfi 166 columnar)
   (import (scheme base)
@@ -11,7 +11,7 @@
           (srfi 166 base)
           )
   (begin
-    ;; PSEUDOSCHEME: (chibi optional) supplied let-optionals*; this is
+    ;; QUASISCHEME: (chibi optional) supplied let-optionals*; this is
     ;; base.sld's portable definition.
     (define-syntax let-optionals*
       (syntax-rules ()

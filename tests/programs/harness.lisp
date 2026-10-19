@@ -1,5 +1,5 @@
 ;;;; What the Lisp programs in tests/programs/ load first: Quicklisp,
-;;;; Pseudoscheme, tests/programs/lib/ on the Scheme library path, and a
+;;;; Quasischeme, tests/programs/lib/ on the Scheme library path, and a
 ;;;; few checks that report the way SRFI 64 does in the Scheme programs
 ;;;; (tests/run-program-tests.sh reads the tally).
 
@@ -29,7 +29,7 @@
       (uiop:symbol-call "QL" "QUICKLOAD" systems :silent t))))
 
 (quickload :r7rs)
-(ps:disable-float-traps)
+(qs:disable-float-traps)
 (r7rs:add-library-directory (merge-pathnames "tests/programs/lib/" *root*))
 
 (defvar *passes* 0)

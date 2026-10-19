@@ -6,7 +6,7 @@
 ;;; reference/srfi-44/LICENSE); this library form is that file's, with
 ;;; these changes:
 ;;; - It imported (srfi 256) for define-record-type with subtypes, which
-;;;   Pseudoscheme lacks; (srfi private srfi-44-records) provides that
+;;;   Quasischeme lacks; (srfi private srfi-44-records) provides that
 ;;;   define-record-type, on R6RS records.
 ;;; - Its export list named map->list twice, and exported
 ;;;   sequence-fold-keys-left as flexible-sequence-fold-keys-right; the

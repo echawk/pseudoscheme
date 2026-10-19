@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-R6RS -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-R6RS -*-
 
 ;;;; (rnrs hashtables (6)), library report chapter 13.
 ;;;;
@@ -8,7 +8,7 @@
 ;;;; predicate -- portable, unlike implementation-specific custom hash
 ;;;; table tests.
 
-(in-package "PSEUDOSCHEME-R6RS")
+(in-package "QUASISCHEME-R6RS")
 
 (defstruct (hashtable (:constructor %make-hashtable (table kind hash equiv mutable &optional weakness side)))
   table		; CL hash table
@@ -63,16 +63,16 @@
       (hash-table-count (hashtable-table h))))
 
 (defun check-hashtable (who h)
-  (unless (hashtable-p h) (ps:scheme-error "~A: not a hashtable: ~S" who h)))
+  (unless (hashtable-p h) (qs:scheme-error "~A: not a hashtable: ~S" who h)))
 
 (defun check-mutable (who h)
   (check-hashtable who h)
-  (unless (hashtable-mutable h) (ps:scheme-error "~A: hashtable is immutable" who)))
+  (unless (hashtable-mutable h) (qs:scheme-error "~A: hashtable is immutable" who)))
 
 (defun check-hashtable-size (who k)
   "K, a hashtable's initial capacity if given, is a nonnegative exact integer."
   (unless (or (null k) (typep k '(integer 0)))
-    (ps:scheme-error "~A: invalid size ~S" who k)))
+    (qs:scheme-error "~A: invalid size ~S" who k)))
 
 (defprim "make-eq-hashtable" (&optional k)
   (check-hashtable-size "make-eq-hashtable" k)
@@ -93,7 +93,7 @@
 (defun custom-hash (h key)
   (let ((v (funcall (hashtable-hash h) key)))
     (unless (and (integerp v) (>= v 0))
-      (ps:scheme-error "hashtable: hash function returned ~S" v))
+      (qs:scheme-error "hashtable: hash function returned ~S" v))
     v))
 
 (defun custom-cell (h key)
@@ -149,12 +149,12 @@
 (defprim "hashtable-set!" (h key value)
   (check-mutable "hashtable-set!" h)
   (table-set h key value)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "hashtable-delete!" (h key)
   (check-mutable "hashtable-delete!" h)
   (table-delete h key)
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "hashtable-contains?" (h key)
   (check-hashtable "hashtable-contains?" h)
@@ -164,7 +164,7 @@
 (defprim "hashtable-update!" (h key proc default)
   (check-mutable "hashtable-update!" h)
   (table-set h key (funcall proc (table-ref h key default)))
-  ps:unspecific)
+  qs:unspecific)
 
 (defun make-table-like (h mutable)
   "An empty hashtable of H's kind and weakness."
@@ -190,7 +190,7 @@
   (check-mutable "hashtable-clear!" h)
   (clrhash (hashtable-table h))
   (when (hashtable-side h) (clrhash (hashtable-side h)))
-  ps:unspecific)
+  qs:unspecific)
 
 (defprim "hashtable-keys" (h)
   (check-hashtable "hashtable-keys" h)
@@ -211,7 +211,7 @@
 
 (defprim "hashtable-hash-function" (h)
   (check-hashtable "hashtable-hash-function" h)
-  (if (eq (hashtable-kind h) :custom) (hashtable-hash h) ps:false))
+  (if (eq (hashtable-kind h) :custom) (hashtable-hash h) qs:false))
 
 (defprim "hashtable-mutable?" (h)
   (check-hashtable "hashtable-mutable?" h)
@@ -269,4 +269,4 @@ for the few primitives that hand back other standard procedures.")
   "The key and datum of TABLE's entry, or #f and #f if it has none."
   (block nil
     (maphash (lambda (k v) (return (values k v))) table)
-    (values ps:false ps:false)))
+    (values qs:false qs:false)))

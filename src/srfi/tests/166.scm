@@ -1,13 +1,13 @@
 ;;; Tests for SRFI 166: chibi-scheme's lib/srfi/166/test.sld
 ;;; (reference/srfi-166/test.sld).  Its run-tests body is here, with
 ;;; chibi's (test [name] expected expr) defined as test-equal, and these
-;;; changes, marked PSEUDOSCHEME: a cond-expand on the feature complex,
-;;; which Pseudoscheme lacks though it has complex numbers, is dropped;
+;;; changes, marked QUASISCHEME: a cond-expand on the feature complex,
+;;; which Quasischeme lacks though it has complex numbers, is dropped;
 ;;; two expected strings follow the host's write and number->string; and
 ;;; one test that depends on number->string's format is an expected
 ;;; failure.  The tests stay in a procedure, run-tests, as in chibi: at
 ;;; the top level of a program this long, trimmed/lazy's re-entered
-;;; continuation loses the rest of the program (a Pseudoscheme bug).
+;;; continuation loses the rest of the program (a Quasischeme bug).
 (import (scheme base) (scheme char) (scheme read) (scheme file)
         (scheme process-context)
         (only (srfi 1) circular-list)
@@ -32,7 +32,7 @@
       (test "hi" (show #f "hi"))
       (test "\"hi\"" (show #f (written "hi")))
       (test "\"hi \\\"bob\\\"\"" (show #f (written "hi \"bob\"")))
-      ;; PSEUDOSCHEME: was "\"hello\\nworld\"": written uses the host's
+      ;; QUASISCHEME: was "\"hello\\nworld\"": written uses the host's
       ;; write, which writes a newline in a string as itself (R7RS allows
       ;; either).
       (test "\"hello\nworld\"" (show #f (written "hello\nworld")))
@@ -89,7 +89,7 @@
       (test "0.000004" (show #f (with ((precision 6)) 0.000004)))
       (test "0.0000040" (show #f (with ((precision 7)) 0.000004)))
       (test "0.00000400" (show #f (with ((precision 8)) 0.000004)))
-      ;; PSEUDOSCHEME: was "-6.0371e-06"; the exponent comes from the
+      ;; QUASISCHEME: was "-6.0371e-06"; the exponent comes from the
       ;; host's number->string, which writes e-6.
       (test "-6.0371e-6" (show #f (with ((precision 4)) -6.0371e-06)))
       (test "1.00" (show #f (with ((precision 2)) .997554209949891)))
@@ -164,7 +164,7 @@
           (show #f (with ((comma-rule '(3 2))) (numeric -299792458))))
       (test "299.792.458"
           (show #f (with ((comma-rule 3) (comma-sep #\.)) (numeric 299792458))))
-      ;; PSEUDOSCHEME: an expected failure: the host's number->string
+      ;; QUASISCHEME: an expected failure: the host's number->string
       ;; writes 299792458.0 as 2.99792458e8, and numeric keeps the exponent,
       ;; giving "2,99792458e8".
       (test-expect-fail 1)

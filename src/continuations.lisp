@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-PSYNTAX -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-PSYNTAX -*-
 
 ;;;; Full continuations from generalized stack inspection
 ;;;;
@@ -42,7 +42,7 @@
 ;;;; (src/interop.lisp, LISP-FACING).  Known gap: Scheme code compiled
 ;;;; without the transformation (escape-only) isn't a barrier.
 
-(in-package "PSEUDOSCHEME-PSYNTAX")
+(in-package "QUASISCHEME-PSYNTAX")
 
 ;;; ------------------------------------------------------------------
 ;;; The run-time side
@@ -239,12 +239,12 @@ after runs however THUNK is left."
   (let* ((handlers (heap-cons handler outer))	; on the heap: a copy of the frame keeps it
 	 (frame (vector :handler nil handlers)))
     (declare (dynamic-extent frame))
-    (ps-r7rs::call-with-handler handler outer (lambda () (with-frame (frame) (funcall thunk))))))
+    (qs-r7rs::call-with-handler handler outer (lambda () (with-frame (frame) (funcall thunk))))))
 
 (defun handlers-extent (handlers thunk)
   (let ((frame (vector :handlers nil handlers)))
     (declare (dynamic-extent frame))
-    (let ((ps-r7rs::*handlers* handlers))
+    (let ((qs-r7rs::*handlers* handlers))
       (with-frame (frame) (funcall thunk)))))
 
 (defun full-call-handler (handler outer obj continuable)
@@ -257,10 +257,10 @@ after runs however THUNK is left."
 	 (handlers-extent
 	  outer
 	  (lambda ()
-	    (ps-r7rs:raise-object (funcall ps-r7rs::*non-continuable-condition* obj) nil)))))))
+	    (qs-r7rs:raise-object (funcall qs-r7rs::*non-continuable-condition* obj) nil)))))))
 
-(setq ps-r7rs::*call-handler* 'full-call-handler
-      ps-r7rs::*call-with-handler* 'handler-extent)
+(setq qs-r7rs::*call-handler* 'full-call-handler
+      qs-r7rs::*call-with-handler* 'handler-extent)
 
 ;;; Other dynamic contexts a Lisp primitive sets up around a call of a
 ;;; Scheme procedure (parameterize's) go in an :EXTENT frame holding the
@@ -273,7 +273,7 @@ ESTABLISH again when rebuilt."
     (declare (dynamic-extent frame))
     (funcall establish (lambda () (with-frame (frame) (funcall thunk))))))
 
-(setq ps-r7rs::*call-in-extent* 'call-in-extent)
+(setq qs-r7rs::*call-in-extent* 'call-in-extent)
 
 ;;; Loops written in Lisp that call Scheme procedures (map, for-each,
 ;;; vector-map, ...): each call is made in a :RESUME frame holding a
@@ -343,13 +343,13 @@ ESTABLISH again when rebuilt."
   (mapn-loop f (list-cdrs lists) (cons value acc) t))
 
 (defun full-map (f list &rest lists)
-  (ps-r6rs::check-map-arguments "map" f (cons list lists))
+  (qs-r6rs::check-map-arguments "map" f (cons list lists))
   (if lists (mapn-loop f (cons list lists) '() nil) (map1-loop f list '() nil)))
 
 (defun for-each-loop (f lists)
   ;; LISTS: a list of lists
   (loop
-    (when (some #'atom lists) (return ps:unspecific))
+    (when (some #'atom lists) (return qs:unspecific))
     (let ((xs (list-cars lists)))
       (with-resume-frame (frame 'for-each-continue f lists)
 	(if (cdr xs) (apply f xs) (funcall f (car xs)))))
@@ -364,14 +364,14 @@ ESTABLISH again when rebuilt."
 	do (let ((x (car l)))
 	     (with-resume-frame (frame 'for-each1-continue f l)
 	       (funcall f x)))
-	finally (return ps:unspecific)))
+	finally (return qs:unspecific)))
 
 (defun for-each1-continue (value f list)
   (declare (ignore value))
   (for-each1-loop f (cdr list)))
 
 (defun full-for-each (f list &rest lists)
-  (ps-r6rs::check-map-arguments "for-each" f (cons list lists))
+  (qs-r6rs::check-map-arguments "for-each" f (cons list lists))
   (if lists (for-each-loop f (cons list lists)) (for-each1-loop f list)))
 
 ;;; vector-map, vector-for-each, string-map, string-for-each: KIND says
@@ -384,7 +384,7 @@ ESTABLISH again when rebuilt."
 		(case kind
 		  (:vector-map (coerce acc 'simple-vector))
 		  (:string-map (coerce acc 'simple-string))
-		  (t ps:unspecific)))))
+		  (t qs:unspecific)))))
     (let ((promoted nil) (j i))
       (let ((value (let ((frame (vector :resume nil 'index-continue kind f sequences i n acc)))
 		     (declare (dynamic-extent frame))
@@ -405,20 +405,20 @@ ESTABLISH again when rebuilt."
 
 (defun full-index-loop (kind f sequence more)
   (let ((sequences (cons sequence more)))
-    (when ps:*chez-reader* (check-index-loop-arguments kind f sequences))
+    (when qs:*chez-reader* (check-index-loop-arguments kind f sequences))
     (index-loop kind f sequences 0 (reduce #'min sequences :key #'length) '() nil)))
 
 (defun check-index-loop-arguments (kind f sequences)
   "Chez's checks: a procedure, and vectors (or strings) of one length."
   (let ((who (string-downcase (symbol-name kind)))
 	(type (if (member kind '(:vector-map :vector-for-each)) 'simple-vector 'string)))
-    (ps-r6rs::check-procedure who f)
+    (qs-r6rs::check-procedure who f)
     (dolist (s sequences)
       (unless (typep s type)
-	(ps-r6rs::r6rs-assertion-violation (ps:intern-scheme-symbol who)
+	(qs-r6rs::r6rs-assertion-violation (qs:intern-scheme-symbol who)
 					   (format nil "~~s is not a ~A" (if (eq type 'string) "string" "vector")) s)))
     (unless (every (lambda (s) (= (length s) (length (car sequences)))) sequences)
-      (ps-r6rs::r6rs-assertion-violation (ps:intern-scheme-symbol who) "lengths differ" sequences))))
+      (qs-r6rs::r6rs-assertion-violation (qs:intern-scheme-symbol who) "lengths differ" sequences))))
 
 ;;; Calls to the other primitives that call procedures (*BARRIER-PRIMITIVES*)
 ;;; are made in a :BARRIER frame: re-entering a continuation captured in
@@ -445,7 +445,7 @@ inside is re-entered (and so the continuation still works there)."
     (catch tag
       (with-frame (frame)
 	(funcall f (note-continuation (caller-frame) (lambda (&rest values)
-		     (if (and values (eq (car values) :pseudoscheme-continuation-query))
+		     (if (and values (eq (car values) :quasischeme-continuation-query))
 			 (cons tag nil)	; its identity (CONTINUATION=)
 			 (throw tag (values-list values))))))))))
 
@@ -535,8 +535,8 @@ call returns, then continue the frame."
 		 (apply (svref frame 2) value (coerce (subseq frame 3) 'list))))
       (:barrier (let ((what (svref frame 2)))
 		  (if (consp what)	; (:reason . text)
-		      (ps:scheme-error "~A" (cdr what))
-		      (ps:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
+		      (qs:scheme-error "~A" (cdr what))
+		      (qs:scheme-error "a continuation can't be re-entered through ~A: it's written in Lisp"
 				       what))))
       ((:vm :vm-prompt :vm-delimit) (funcall *frame-resumer* frame inner))
       (t (let ((value (with-frame (frame) (funcall inner))))
@@ -575,7 +575,7 @@ with-continuation-barrier).  Other barriers only block re-entry."
 	until (eq s here)
 	when (and (vectorp (car s)) (eq (svref (car s) 0) :barrier)
 		  (> (length (car s)) 3) (eq (svref (car s) 3) :escapes))
-	  do (ps:scheme-error "a continuation can't cross the continuation barrier of ~A"
+	  do (qs:scheme-error "a continuation can't cross the continuation barrier of ~A"
 			      (svref (car s) 2))))
 
 (defun full-call/cc (f)
@@ -586,7 +586,7 @@ with-continuation-barrier).  Other barriers only block re-entry."
 	  (tag (list 'continuation)))
       (flet ((k (&rest values)
 	       ;; asked its identity (CONTINUATION=)
-	       (when (and values (eq (car values) :pseudoscheme-continuation-query))
+	       (when (and values (eq (car values) :quasischeme-continuation-query))
 		 (return-from k (cons frames winders)))
 	       (setq *shared-winders* '())
 	       (cond ((car live) (check-no-barrier here) (throw tag (values-list values)))
@@ -654,7 +654,7 @@ VALUES to the innermost."
 (defun abort-to-prompt (tag &rest values)
   (let ((prompt (find-prompt tag)))
     (unless prompt
-      (ps:scheme-error "abort-to-prompt: no prompt with tag ~S in the current continuation" tag))
+      (qs:scheme-error "abort-to-prompt: no prompt with tag ~S in the current continuation" tag))
     (let* ((frames (loop with inside = '()
 			 for frame in *fstack*
 			 until (eq frame prompt)
@@ -663,7 +663,7 @@ VALUES to the innermost."
 	   (full *full-continuations*))
       (flet ((k (&rest values)
 	       (unless full
-		 (ps:scheme-error "a delimited continuation can't be called without full continuations"))
+		 (qs:scheme-error "a delimited continuation can't be called without full continuations"))
 	       (compose-continuation frames winders values)))
 	(throw (svref prompt 2) (cons #'k values))))))
 
@@ -673,8 +673,8 @@ nothing pushed or wound between (as a call in tail position is).
 SRFI 226's sample implementation tells tail calls so."
   (or (eq a b)
       (and (functionp a) (functionp b)
-	   (let ((ia (ignore-errors (funcall a :pseudoscheme-continuation-query)))
-		 (ib (ignore-errors (funcall b :pseudoscheme-continuation-query))))
+	   (let ((ia (ignore-errors (funcall a :quasischeme-continuation-query)))
+		 (ib (ignore-errors (funcall b :quasischeme-continuation-query))))
 	     (and (consp ia) (consp ib)
 		  (eq (car ia) (car ib)) (eq (cdr ia) (cdr ib)))))))
 
@@ -863,8 +863,8 @@ MAKE-LEXICAL made."
 (defun primitive-names ()
   (or *primitive-names*
       (let ((table (make-hash-table :test 'equal)))
-	(dolist (s (all-primitive-names)) (setf (gethash (ps:scheme-symbol-name s) table) t))
-	(dolist (p ps-r6rs:*primitives*) (setf (gethash (car p) table) t))
+	(dolist (s (all-primitive-names)) (setf (gethash (qs:scheme-symbol-name s) table) t))
+	(dolist (p qs-r6rs:*primitives*) (setf (gethash (car p) table) t))
 	(dolist (p *full-replacements*)
 	  (setf (gethash (car p) table) t (gethash (cdr p) table) t))
 	(setf (gethash "%call-with-frame" table) t (gethash "%escape-call/cc" table) t
@@ -884,9 +884,9 @@ procedure, so that calls to them aren't call sites.")
 (defun primitive-name (x)
   "The name of primitive X, if X refers to one: a host global with a
 primitive's name (psyntax renames everything else), or (primitive x)."
-  (cond ((and (consp x) (keyword-p (car x) "PRIMITIVE")) (ps:scheme-symbol-name (cadr x)))
+  (cond ((and (consp x) (keyword-p (car x) "PRIMITIVE")) (qs:scheme-symbol-name (cadr x)))
 	((scheme-symbol-p x)
-	 (let ((name (ps:scheme-symbol-name x)))
+	 (let ((name (qs:scheme-symbol-name x)))
 	   ;; %builtin:NAME is R5RS's NAME where the host's NAME is an
 	   ;; extension of it (src/psyntax.lisp, DEFINE-BUILTIN-ALIAS)
 	   (when (and (> (length name) 9) (string= name "%builtin:" :end1 9))
@@ -976,7 +976,7 @@ can't capture, as SAFE-LOCATION-P."
 			   (symbolp (cadr e)) (cadr e) (get (cadr e) 'library-location))
 		      ;; (define location '#f) only declares it
 		      (unless (and (keyword-p (car e) "DEFINE")
-				   (equal (caddr e) `(,(sym "quote") ,ps:false)))
+				   (equal (caddr e) `(,(sym "quote") ,qs:false)))
 			(incf (gethash (cadr e) assignments 0))
 			(push (cons (cadr e) (caddr e)) values))
 		      (walk (caddr e)))
@@ -1024,7 +1024,7 @@ are Lisp symbols are the transformation's own, or the translator's."
 	(lambdas (make-hash-table :test 'eq))		; variable -> its lambda, if known
 	(placeholders (make-hash-table :test 'eq)))	; variable -> bound to '#f
     (labels ((false-p (x)		; a placeholder: '#f, or --racket's 'unassigned
-	       (or (equal x `(,(sym "quote") ,ps:false)) (equal x `(,(sym "quote") ,ps:unassigned))))
+	       (or (equal x `(,(sym "quote") ,qs:false)) (equal x `(,(sym "quote") ,qs:unassigned))))
 	     (scan (e)
 	       (cond ((atom e))
 		     ((quote-form-p e))
@@ -1314,7 +1314,7 @@ procedure's last parameter is a rest list), and with PROCEDURE-NAME (a
 Scheme symbol), the procedure's, after a |."
   (let* ((g (fresh))
 	 (name (format nil "~A~:[~;*~]~A~@[|~A~]" +machine-prefix+ rest (symbol-name g)
-		       (and procedure-name (ps:scheme-symbol-name procedure-name)))))
+		       (and procedure-name (qs:scheme-symbol-name procedure-name)))))
     (if (symbol-package g) (intern name (symbol-package g)) (make-symbol name))))
 
 (defun machine-rest-p (machine)
@@ -1395,7 +1395,7 @@ Scheme symbol), the procedure's, after a |."
 	     (note-letrec* (e)
 	       ;; ((lambda (v ...) (begin (set! v e) ... body)) '#f ...)
 	       (let ((vars (cadr (car e))) (body (caddr (car e))))
-		 (when (and (every (lambda (a) (equal a `(,(sym "quote") ,ps:false))) (cdr e))
+		 (when (and (every (lambda (a) (equal a `(,(sym "quote") ,qs:false))) (cdr e))
 			    (consp body) (keyword-p (car body) "BEGIN"))
 		   (loop for s in (cdr body)
 			 while (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) vars))
@@ -1534,10 +1534,10 @@ spot)."
   (let ((v (fresh))) (push v (m-locals *m*)) v))
 
 (defun new-label-named (name)
-  (intern name "PSEUDOSCHEME-PSYNTAX"))
+  (intern name "QUASISCHEME-PSYNTAX"))
 
 (defun new-label ()
-  (intern (format nil "%L~D" (incf (m-labels *m*))) "PSEUDOSCHEME-PSYNTAX"))
+  (intern (format nil "%L~D" (incf (m-labels *m*))) "QUASISCHEME-PSYNTAX"))
 
 (defun finish (x k)
   (cond ((eq k :return) (emit `(%return ,(keep-frame x))))
@@ -1587,7 +1587,7 @@ spot)."
 (defun flat-if (e k)
   (let ((c (value-of (cadr e)))
 	(else (new-label)))
-    (emit `(,(sym "if") ,c (,(sym "quote") ,ps:false) (%go ',else)))
+    (emit `(,(sym "if") ,c (,(sym "quote") ,qs:false) (%go ',else)))
     (if (eq k :return)
 	(progn (flat (caddr e) :return)
 	       (emit `',else)
@@ -1731,9 +1731,9 @@ name, which its machine's is made with, for backtraces."
 		     (if (m-letrecs *m*)
 			 `(,(sym "letrec") ,(reverse (m-letrecs *m*)) ,body)
 			 body)))
-		 ,@(mapcar (lambda (v) (declare (ignore v)) `(,(sym "quote") ,ps:false)) locals)))))
+		 ,@(mapcar (lambda (v) (declare (ignore v)) `(,(sym "quote") ,qs:false)) locals)))))
 	  (,(sym "lambda") ,formals
-	   (,m 0 (,(sym "quote") ,ps:false) (,(sym "quote") ,ps:false) ,@params)))))))
+	   (,m 0 (,(sym "quote") ,qs:false) (,(sym "quote") ,qs:false) ,@params)))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Keeping machines small
@@ -1882,7 +1882,7 @@ its own, of the chunk's free variables."
   "The lambda VALUE is, possibly under (%guile-with-meta lambda props)."
   (cond ((lambda-form-p value) value)
 	((and (consp value) (scheme-symbol-p (car value))
-	      (equal (ps:scheme-symbol-name (car value)) "%guile-with-meta")
+	      (equal (qs:scheme-symbol-name (car value)) "%guile-with-meta")
 	      (consp (cdr value)) (lambda-form-p (cadr value)))
 	 (cadr value))))
 
@@ -1897,7 +1897,7 @@ procedure in *SAFE-FUNCTIONS*."
 		       ((quote-form-p e) e)
 		       ((lambda-form-p e) e)	; a definition inside isn't top-level
 		       ((and (scheme-symbol-p (car e))
-			     (member (ps:scheme-symbol-name (car e)) *definition-operators* :test #'string=)
+			     (member (qs:scheme-symbol-name (car e)) *definition-operators* :test #'string=)
 			     (= (length e) 4))
 			(let ((l (defined-lambda (fourth e))))
 			  (if (and l (not (may-capture-p (caddr l))))
@@ -1965,7 +1965,7 @@ as safe (%note-safe) as NOTE-SAFE-DEFINITIONS records a lambda."
 			 ((quote-form-p e) e)
 			 ((lambda-form-p e) e)
 			 ((and (scheme-symbol-p (car e))
-			       (member (ps:scheme-symbol-name (car e)) *definition-operators* :test #'string=)
+			       (member (qs:scheme-symbol-name (car e)) *definition-operators* :test #'string=)
 			       (= (length e) 4))
 			  (or (and (or (eq only :all) (member e only :test #'eq))
 				   (guard-definition e (lambda (f) (push (cons e f) guarded))))
@@ -2141,7 +2141,7 @@ left as they are, so continuations captured in them are escape-only.")
 	     `(,(car form) ,(cadr form) ,(transform-bound-lambda (cadr form) (prepare (caddr form))))
 	     ;; defined first, so that the assignment can be in a frame
 	     `(,(sym "begin")
-	       (,(car form) ,(cadr form) (,(sym "quote") ,ps:false))
+	       (,(car form) ,(cadr form) (,(sym "quote") ,qs:false))
 	       ,(cc-transform-1 `(,(sym "set!") ,(cadr form) ,(caddr form))))))
 	(t (let* ((prepared (prepare form))
 		  (transformed (if (tail-simple-p prepared)

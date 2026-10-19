@@ -1,6 +1,6 @@
 ; Compatibility mode for use with Abelson & Sussman's book,
 ; Structure & Interpretation of Computer Programs.
-; This is intended to be loaded into Pseudoscheme.
+; This is intended to be loaded into Quasischeme.
 
 (define-syntax cons-stream
   (lambda (e r c) `(,(r 'cons) ,(cadr e) (,(r 'delay) ,(caddr e)))))
@@ -44,10 +44,10 @@
 (define (-1+ x) (- x 1))
 
 (define (get sym ind)
-  (ps-lisp:or (ps-lisp:get sym ind) #f))
+  (qs-lisp:or (qs-lisp:get sym ind) #f))
 
 (define (put sym ind val)
-  (ps-lisp:setf (ps-lisp:get sym ind) val))
+  (qs-lisp:setf (qs-lisp:get sym ind) val))
 
 
 ; AND and OR are procedures according to SICP.  Replace references

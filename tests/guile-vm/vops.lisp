@@ -6,8 +6,8 @@
   (when (probe-file setup) (load setup)))
 (push (merge-pathnames "../../" (make-pathname :name nil :type nil :defaults *load-truename*))
       asdf:*central-registry*)
-(handler-bind ((warning #'muffle-warning)) (asdf:load-system :pseudoscheme/guile))
-(in-package "PSEUDOSCHEME-GUILE")
+(handler-bind ((warning #'muffle-warning)) (asdf:load-system :quasischeme/guile))
+(in-package "QUASISCHEME-GUILE")
 (unless *vm-vops*
   (format t "no VOPs here (SBCL on arm64 only)~%")
   (sb-ext:exit))

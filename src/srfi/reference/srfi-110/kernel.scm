@@ -179,7 +179,7 @@
     ; this ensures that the user's module does not get contaminated with
     ; our compatibility procedures/macros
     (define-module (readable kernel)))
-  ; PSEUDOSCHEME: an empty else, since no clause applying is an error
+  ; QUASISCHEME: an empty else, since no clause applying is an error
   (else))
 (cond-expand
 ; -----------------------------------------------------------------------------
@@ -457,7 +457,7 @@
     ; Not strictly R5RS but we expect at least some Schemes
     ; to allow this somehow.
     (define (replace-read-with f)
-      ; PSEUDOSCHEME: was (set! read f), but read is imported here
+      ; QUASISCHEME: was (set! read f), but read is imported here
       (error "replace-read-with: not supported" f))
 
     ; R5RS has no hash extensions

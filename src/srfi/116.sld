@@ -5,7 +5,7 @@
 ;;; ilists/ilists.sld, renamed (srfi 116), with its include paths changed
 ;;; and its Gauche-only cond-expand clause dropped.
 ;;;
-;;; Two changes to ilists-impl.scm, marked PSEUDOSCHEME there: it defined
+;;; Two changes to ilists-impl.scm, marked QUASISCHEME there: it defined
 ;;; iappend-reverse twice and imap a second time (after ilists-base.scm),
 ;;; and a library may not define a name twice, so the earlier
 ;;; iappend-reverse and the second imap (both equivalent) are commented

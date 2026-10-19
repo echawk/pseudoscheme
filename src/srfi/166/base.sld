@@ -1,5 +1,5 @@
 ;;; Part of SRFI 166 (see ../166.sld): chibi-scheme's lib/srfi/166/base.sld,
-;;; with the changes described there, marked PSEUDOSCHEME.
+;;; with the changes described there, marked QUASISCHEME.
 
 (define-library (srfi 166 base)
   (import (scheme base)
@@ -16,7 +16,7 @@
                   (computation-with! with!)
                   (computation-forked forked)
                   (make-computation-environment-variable make-state-variable))
-          (srfi private srfi-166-shared))  ; PSEUDOSCHEME: was (chibi show shared)
+          (srfi private srfi-166-shared))  ; QUASISCHEME: was (chibi show shared)
   (cond-expand
    (chibi
     (import (only (chibi) let-optionals*)))

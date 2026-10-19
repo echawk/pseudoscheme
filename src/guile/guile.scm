@@ -1,7 +1,7 @@
 ;;; -*- Mode: Scheme -*-
 ;;;; (guile): the body of the library, which src/guile/guile.lisp makes
 ;;;; when (guile) is first imported, exporting R6RS and these.  Built on
-;;;; what Pseudoscheme already has: (pseudoscheme control)'s prompts
+;;;; what Quasischeme already has: (quasischeme control)'s prompts
 ;;;; (src/control.sls), (chezscheme)'s format, SRFI 1 and SRFI 13.
 
 (define-syntax define-syntax-rule

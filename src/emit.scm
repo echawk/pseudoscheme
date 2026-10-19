@@ -28,15 +28,15 @@
 
 (define (emit-program-variable-set! var CL-sym rhs-code)
   (cond ((mutable-program-variable? var)
-	 `(ps-lisp:setq ,CL-sym ,rhs-code))
+	 `(qs-lisp:setq ,CL-sym ,rhs-code))
 	(else
-	 `(ps:set!-aux
-	   (ps-lisp:quote ,(program-variable-name var))
+	 `(qs:set!-aux
+	   (qs-lisp:quote ,(program-variable-name var))
 	   ,rhs-code
-	   (ps-lisp:quote ,CL-sym)))))
+	   (qs-lisp:quote ,CL-sym)))))
 
 ; SUBSTITUTE-AND-PEEP
-; PS-LISP:SUBLIS would suffice here, but this additionally does some
+; QS-LISP:SUBLIS would suffice here, but this additionally does some
 ; peephole optimizations.  Careful -- this is semantically blind!
 ; In particular, never put lambda-bindings in SUBST-type definitions.
 
@@ -47,7 +47,7 @@
 	((pair? cl-form)
 	 (let ((yow (map (lambda (z) (substitute-and-peep alist z)) cl-form)))
 	   (case (car yow)
-	     ((ps-lisp:funcall) (funcallify (cadr yow) (cddr yow)))
+	     ((qs-lisp:funcall) (funcallify (cadr yow) (cddr yow)))
 	     (else yow))))))
 
 
@@ -55,7 +55,7 @@
 
 (define (insert-&rest l)
   (if (null? (cdr l))
-      `(ps-lisp:&rest ,@l)
+      `(qs-lisp:&rest ,@l)
       (cons (car l) (insert-&rest (cdr l)))))
 
 (define (cl-externalize-locals vars env)
@@ -102,7 +102,7 @@
 (define (mutable-program-variable? var)
   (let ((name (program-variable-name var)))
     (and (not (qualified-symbol? name))
-	 (let* ((s (ps-lisp:symbol-name name))
+	 (let* ((s (qs-lisp:symbol-name name))
 		(n (string-length s)))
 	   (and (>= n 3)
 		(char=? (string-ref s 0) #\*)
@@ -118,7 +118,7 @@
 
 (define (change-package sym package)
   (if (and package (not (qualified-symbol? sym)))
-      (intern-renaming-perhaps (ps-lisp:symbol-name sym) package)
+      (intern-renaming-perhaps (qs-lisp:symbol-name sym) package)
       sym))
 
 ; Code emission utilities; peephole optimizers
@@ -126,29 +126,29 @@
 (define (prognify form-list)
   (if (null? (cdr form-list))
       (car form-list)
-      `(ps-lisp:progn ,@form-list)))
+      `(qs-lisp:progn ,@form-list)))
 
 (define (deprognify cl-form)
-  (if (car-is? cl-form 'ps-lisp:progn)
+  (if (car-is? cl-form 'qs-lisp:progn)
       (cdr cl-form)
       (list cl-form)))
 
 (define (deandify cl-form)
-  (if (car-is? cl-form 'ps-lisp:and)
+  (if (car-is? cl-form 'qs-lisp:and)
       (cdr cl-form)
       (list cl-form)))
 
 (define (deorify cl-form)
-  (if (car-is? cl-form 'ps-lisp:or)
+  (if (car-is? cl-form 'qs-lisp:or)
       (cdr cl-form)
       (list cl-form)))
 
 (define (funcallify fun args)
-  (cond ((car-is? fun 'ps-lisp:function)
+  (cond ((car-is? fun 'qs-lisp:function)
 	 ;; Peephole optimization
 	 (let ((fun (cadr fun)))
-	   (cond ((and (car-is? fun 'ps-lisp:lambda)
-		       (not (memq 'ps-lisp:&rest (cadr fun)))
+	   (cond ((and (car-is? fun 'qs-lisp:lambda)
+		       (not (memq 'qs-lisp:&rest (cadr fun)))
 		       (= (length (cadr fun))
 			  (length args)))
 		  (letify (map list (cadr fun) args)
@@ -156,18 +156,18 @@
 		 (else
 		  `(,fun ,@args)))))
 	(else
-	 `(ps-lisp:funcall ,fun ,@args))))
+	 `(qs-lisp:funcall ,fun ,@args))))
 
 ;+++ To do: turn nested singleton LET's into LET*
 
 (define (letify specs body)
   (if (null? specs)
       body
-      `(ps-lisp:let ,specs ,@(deprognify body))))
+      `(qs-lisp:let ,specs ,@(deprognify body))))
 
 (define (sharp-quote-lambda? exp)
-  (and (car-is? exp 'ps-lisp:function)
-       (car-is? (cadr exp) 'ps-lisp:lambda)))
+  (and (car-is? exp 'qs-lisp:function)
+       (car-is? (cadr exp) 'qs-lisp:lambda)))
 
 ; The following hack has the express purpose of suppressing obnoxious
 ; warnings from losing Common Lisp compilers.  The problem would be
@@ -186,16 +186,16 @@
 	    (and (pair? form-list)
 		 (pair? (car form-list))
 		 (memq (caar form-list)
-		       '(ps-lisp:defun ps-lisp:defstruct ps-lisp:deftype))))
+		       '(qs-lisp:defun qs-lisp:defstruct qs-lisp:deftype))))
 	form-list
-	`((ps-lisp:locally (ps-lisp:declare
-			  (ps-lisp:special ,@(map program-variable-CL-symbol
+	`((qs-lisp:locally (qs-lisp:declare
+			  (qs-lisp:special ,@(map program-variable-CL-symbol
 					       vars)))
 	    ,@form-list)))))
 
 (define (emit-top-level code)		;form* -> form
   (if (fluid @lambda-encountered?)
-      `(ps:at-top-level ,@code)
+      `(qs:at-top-level ,@code)
       (prognify code)))
 
 ; Continuation management
@@ -210,7 +210,7 @@
 (define (deliver-value-to-cont result-exp cont)
   (case (continuation-type cont)
     ((cont/value cont/ignore) result-exp)
-    ((cont/return) `(ps-lisp:return ,result-exp)) ;not return-from?
+    ((cont/return) `(qs-lisp:return ,result-exp)) ;not return-from?
     ((cont/test) (value-form->test-form result-exp))
     (else (error "unrecognized continuation" cont))))
 
@@ -218,12 +218,12 @@
 (define (deliver-test-to-cont test-exp cont)
   (case (continuation-type cont)
     ((cont/test cont/ignore) test-exp)
-    ((cont/return) `(ps-lisp:return ,(test-form->value-form test-exp)))
+    ((cont/return) `(qs-lisp:return ,(test-form->value-form test-exp)))
     ((cont/value) (test-form->value-form test-exp))
     (else (error "unrecognized continuation" cont))))
 
 (define (test-form->value-form cl-form)
-  `(ps:true? ,cl-form))
+  `(qs:true? ,cl-form))
       
 ; (truep (true? x)) is not equivalent to x in general, but as the result
 ; is being used as a test form, only its non-nilness matters.
@@ -245,7 +245,7 @@
 ; (truep (true? x)) => x  is safe for present purposes.
 
 (define (value-form->test-form cl-form)
-  (cond ((car-is? cl-form 'ps:true?)
+  (cond ((car-is? cl-form 'qs:true?)
 	 (cadr cl-form))
 	(else
-	 `(ps:truep ,cl-form))))
+	 `(qs:truep ,cl-form))))

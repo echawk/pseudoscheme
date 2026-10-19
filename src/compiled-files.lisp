@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-PSYNTAX -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-PSYNTAX -*-
 
 ;;;; Compiled files of top-level code: core forms translated to Lisp as
 ;;;; HOST-EVAL translates them, compiled with COMPILE-FILE into a fasl
@@ -16,15 +16,15 @@
 ;;;; memory than its biggest definition does.  SBCL loads concatenated
 ;;;; fasls one after another, so the chunks' fasls are one file.
 
-(in-package "PSEUDOSCHEME-PSYNTAX")
+(in-package "QUASISCHEME-PSYNTAX")
 
 ;;; ------------------------------------------------------------------
 ;;; Load forms for the literals of compiled code
 
 (defvar *named-photons*
-  (list (cons "unspecific" ps:unspecific) (cons "eof" ps:eof-object)
+  (list (cons "unspecific" qs:unspecific) (cons "eof" qs:eof-object)
 	;; a letrec variable's value before its init (compile.lisp)
-	(cons "unassigned" ps:unassigned))
+	(cons "unassigned" qs:unassigned))
   "The photons compiled code may hold, by name: they are unique objects.")
 
 (defun register-named-photon (name photon)
@@ -34,7 +34,7 @@
   (or (cdr (assoc name *named-photons* :test #'string=))
       (error "no photon named ~S" name)))
 
-(defmethod make-load-form ((p ps::photon) &optional environment)
+(defmethod make-load-form ((p qs::photon) &optional environment)
   (declare (ignore environment))
   (let ((entry (rassoc p *named-photons* :test #'eq)))
     (if entry
@@ -96,8 +96,8 @@ is never reached.")
 
 (defun compile-forms-chunk (forms lisp fasl source)
   (with-open-file (out lisp :direction :output :if-exists :supersede)
-    (format out ";;; ~A, compiled by Pseudoscheme~%(cl:in-package \"SCHEME\")~%" source)
-    (dotimes (i (length forms)) (format out "(pseudoscheme-psyntax::compiled-form ~D)~%" i)))
+    (format out ";;; ~A, compiled by Quasischeme~%(cl:in-package \"SCHEME\")~%" source)
+    (dotimes (i (length forms)) (format out "(quasischeme-psyntax::compiled-form ~D)~%" i)))
   (let ((*compiled-forms* (coerce forms 'simple-vector)))
     (handler-bind ((warning #'muffle-warning))
       (with-standard-io-syntax
@@ -139,7 +139,7 @@ compiled (a literal with no load form, say)."
 		   (when chunk (push (nreverse chunk) chunks))
 		   (nreverse chunks)))
 	 (dir (uiop:ensure-directory-pathname
-	       (uiop:merge-pathnames* (format nil "pseudoscheme-compile-~36R/" (random (expt 36 8) (make-random-state t)))
+	       (uiop:merge-pathnames* (format nil "quasischeme-compile-~36R/" (random (expt 36 8) (make-random-state t)))
 				      (uiop:temporary-directory))))
 	 (temp (make-pathname :name (format nil "~A-~36R" (pathname-name path) (random (expt 36 8) (make-random-state t)))
 			      :type (pathname-type path) :defaults path)))
@@ -177,4 +177,4 @@ compiled (a literal with no load form, say)."
 (defun load-compiled-file (path)
   (handler-bind ((warning #'muffle-warning))
     (load path))
-  ps:unspecific)
+  qs:unspecific)

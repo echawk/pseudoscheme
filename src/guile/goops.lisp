@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; The C half of GOOPS (scm_init_goops_builtins), under Guile's own
 ;;;; oop/goops.scm.  GOOPS 3.0 is Scheme on structs: a class is a vtable,
@@ -11,7 +11,7 @@
 ;;;; write) dispatches to its generic, through its root variable, when it
 ;;;; is called on arguments it doesn't take.  See ENABLE-PRIMITIVE-GENERIC.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defconstant +vtable-flag-validated+ 1)
 (defconstant +vtable-flag-goops-class+ 512)
@@ -43,8 +43,8 @@ type, say): made the first time, as scm_i_define_class_for_vtable does."
   (or (gethash vtable *vtables*)
       (let* ((name (svref (gstruct-slots vtable) +vtable-index-name+))
 	     (flags (vtable-flags vtable))
-	     (class-name (ssym (if (and (symbolp name) name (not (eq name ps:false)))
-				   (format nil "<~A>" (ps:scheme-symbol-name name))
+	     (class-name (ssym (if (and (symbolp name) name (not (eq name qs:false)))
+				   (format nil "<~A>" (qs:scheme-symbol-name name))
 				   "<>"))))
 	(multiple-value-bind (meta super)
 	    (cond ((logtest flags +vtable-flag-setter+)
@@ -92,7 +92,7 @@ applicable), and what is an instance of each here.")
   (cond ((struct-p x) (struct-class x))
 	((null x) (goops-class "<null>"))
 	((consp x) (goops-class "<pair>"))
-	((or (eq x ps:true) (eq x ps:false)) (goops-class "<boolean>"))
+	((or (eq x qs:true) (eq x qs:false)) (goops-class "<boolean>"))
 	((characterp x) (goops-class "<char>"))
 	((integerp x) (goops-class "<integer>"))
 	((typep x 'ratio) (goops-class "<fraction>"))
@@ -100,11 +100,11 @@ applicable), and what is an instance of each here.")
 	((complexp x) (goops-class "<complex>"))
 	((stringp x) (goops-class "<string>"))
 	((keywordp x) (goops-class "<keyword>"))
-	((and (symbolp x) (not (ps::photon-p x))) (goops-class "<symbol>"))
+	((and (symbolp x) (not (qs::photon-p x))) (goops-class "<symbol>"))
 	((simple-vector-p x) (goops-class "<vector>"))
-	((typep x 'ps-r6rs::octets) (goops-class "<bytevector>"))
+	((typep x 'qs-r6rs::octets) (goops-class "<bytevector>"))
 	((bit-vector-p x) (goops-class "<bitvector>"))
-	((and (vectorp x) (ps::numeric-vector-tag x)) (goops-class "<uvec>"))
+	((and (vectorp x) (qs::numeric-vector-tag x)) (goops-class "<uvec>"))
 	((arrayp x) (goops-class "<array>"))
 	((ghash-p x) (goops-class "<hashtable>"))
 	((fluid-p x) (goops-class "<fluid>"))
@@ -126,15 +126,15 @@ applicable), and what is an instance of each here.")
 (defun make-vtable-vtable (layout)
   "A vtable of LAYOUT (a string) that is its own vtable: GOOPS's <class>."
   (let* ((layout (layout-symbol (layout-string layout)))
-	 (string (ps:scheme-symbol-name layout)))
+	 (string (qs:scheme-symbol-name layout)))
     (multiple-value-bind (n hidden) (parse-layout layout)
       (let* ((slots (make-array n))
 	     (v (%make-vtable nil slots)))
 	(dotimes (i n) (setf (svref slots i) (field-default string i)))
 	(setf (gstruct-vtable v) v
 	      (svref slots +vtable-index-layout+) layout
-	      (svref slots +vtable-index-printer+) ps:false
-	      (svref slots +vtable-index-name+) ps:false
+	      (svref slots +vtable-index-printer+) qs:false
+	      (svref slots +vtable-index-name+) qs:false
 	      (svref slots +vtable-index-size+) n
 	      (vtable-nfields v) n
 	      (vtable-hidden v) hidden)
@@ -163,7 +163,7 @@ applicable), and what is an instance of each here.")
   (unless (struct-p obj) (wrong-type "%clear-fields!" 1 obj))
   (let* ((slots (struct-slots-of obj))
 	 (layout (svref (gstruct-slots (struct-vtable-of obj)) +vtable-index-layout+))
-	 (string (and (symbolp layout) (ps:scheme-symbol-name layout))))
+	 (string (and (symbolp layout) (qs:scheme-symbol-name layout))))
     (dotimes (i (length slots))
       (unless (and string (< (1+ (* 2 i)) (length string)) (char= (char string (* 2 i)) #\u))
 	(setf (svref slots i) unbound))))
@@ -233,7 +233,7 @@ fails on its arguments; return the generic."
 			      (wrong-type-dispatch () (apply generic args))
 			      ((or type-error guile-throw) (c)
 				(if (and (typep c 'guile-throw)
-					 (not (string= (ps:scheme-symbol-name (guile-throw-key c)) "wrong-type-arg")))
+					 (not (string= (qs:scheme-symbol-name (guile-throw-key c)) "wrong-type-arg")))
 				    (error c)
 				    (apply generic args)))))))
 	(setf (gethash f *primitive-generics*) generic
@@ -371,4 +371,4 @@ to be equal, as equal? does for pairs and vectors.")
 		     (and (= (length x) (length y))
 			  (every recur x y))))))))
 
-(setq ps::*equal-extension* 'struct-equal)
+(setq qs::*equal-extension* 'struct-equal)

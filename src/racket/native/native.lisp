@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-RACKET -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-RACKET -*-
 
 ;;;; The native runtime: Racket's primitives written in Lisp, for SBCL.
 ;;;;
@@ -16,7 +16,7 @@
 ;;;; in *HOST-SHARED* rather than written again: compiled code calls the
 ;;;; host's, which the translator open-codes.
 
-(in-package "PSEUDOSCHEME-RACKET")
+(in-package "QUASISCHEME-RACKET")
 
 (defstruct (native (:constructor make-native (name function &key instance rumble leaf)))
   name function (instance "#%kernel") rumble
@@ -70,7 +70,7 @@ behaviour.")
   "B: make each native procedure a primitive of its instance, and a host
 global; the host-shared ones primitives too."
   (dolist (name *host-shared*)
-    (let ((f (ignore-errors (psx:host-ref name))))
+    (let ((f (ignore-errors (qsx:host-ref name))))
       (if (functionp f)
 	  (define-primitive "#%kernel" name f)
 	  (warn "--racket: *host-shared* names ~A, which the host doesn't have" name))))
@@ -79,7 +79,7 @@ global; the host-shared ones primitives too."
 	       (define-primitive (native-instance n) name (native-function n))
 	       (when (native-leaf n) (push (concatenate 'string "racket:" name) leaves)))
 	     *natives*)
-    (psx::register-primitive-names leaves))
+    (qsx::register-primitive-names leaves))
   (install-host-aliases)
   (install-compiler-helpers))
 
@@ -90,7 +90,7 @@ linklets (after every instance is filled: #%linklet's too)."
 	     (declare (ignore instance))
 	     (maphash (lambda (name value)
 			(unless (or (member name *host-shared* :test #'string=) (host-alias name))
-			  (psx:host-set! (concatenate 'string "racket:" name) value)))
+			  (qsx:host-set! (concatenate 'string "racket:" name) value)))
 		      table))
 	   *primitive-instances*))
 
@@ -98,27 +98,27 @@ linklets (after every instance is filled: #%linklet's too)."
 ;;; What compiled linklets call (compiler.lisp)
 
 (defun install-compiler-helpers ()
-  (psx:defhost "racket:variable-ref" (v) (variable-ref v))
-  (psx:defhost "racket:variable-set!" (v value) (variable-set v value))
+  (qsx:defhost "racket:variable-ref" (v) (variable-ref v))
+  (qsx:defhost "racket:variable-set!" (v value) (variable-set v value))
   ;; a reference to a procedure that can't capture (SAFE-CELLS)
-  (psx:defhost "racket:safe-variable-ref" (v) (variable-ref v))
-  (psx:defhost "racket:variable-reference" (instance name)
+  (qsx:defhost "racket:safe-variable-ref" (v) (variable-ref v))
+  (qsx:defhost "racket:variable-reference" (instance name)
     (make-variable-reference instance name))
-  (psx:defhost "racket:unknown-primitive" (name)
+  (qsx:defhost "racket:unknown-primitive" (name)
     (racket-error (rname name) "undefined;~% cannot reference an identifier before its definition"))
-  (psx:defhost "racket:assign-error" (name)
+  (qsx:defhost "racket:assign-error" (name)
     (racket-error "set!" "assignment disallowed;~% cannot assign a primitive or imported variable: ~A" (rname name)))
-  (psx:defhost "racket:with-arity" (mask f &optional name)
+  (qsx:defhost "racket:with-arity" (mask f &optional name)
     (setf (gethash f *arity-masks*) mask)
     (when name (setf (gethash f *renamed-procedures*) name))
     f)
-  (psx:defhost "racket:arity-error" (args)
+  (qsx:defhost "racket:arity-error" (args)
     (racket-arity-error "#<procedure>" (length args)))
-  (psx:defhost "racket:note-split-function" (i f)
+  (qsx:defhost "racket:note-split-function" (i f)
     (setf (svref *loading-split-functions* i) f))
-  (psx:defhost "racket:call-with-mark" (key value thunk)
-    (ps-r6rs::call-with-mark key value thunk))
-  (psx::register-primitive-names
+  (qsx:defhost "racket:call-with-mark" (key value thunk)
+    (qs-r6rs::call-with-mark key value thunk))
+  (qsx::register-primitive-names
    '("racket:variable-ref" "racket:safe-variable-ref" "racket:variable-set!" "racket:variable-reference"
      "racket:unknown-primitive" "racket:assign-error" "racket:arity-error" "racket:with-arity")))
 
@@ -129,8 +129,8 @@ linklets (after every instance is filled: #%linklet's too)."
 (defstruct (rbox (:constructor make-rbox (&key value))) value)
 (defstruct (mpair (:constructor make-mpair (&key car cdr))) car cdr)
 
-(defnative "add1" (z) (:leaf t) (ps:scheme+ z 1))
-(defnative "sub1" (z) (:leaf t) (ps:scheme- z 1))
+(defnative "add1" (z) (:leaf t) (qs:scheme+ z 1))
+(defnative "sub1" (z) (:leaf t) (qs:scheme- z 1))
 (defnative "void" (&rest args) (:leaf t) (declare (ignore args)) *void*)
 (defnative "void?" (x) (:leaf t) (bool (eq x *void*)))
 (defnative "box" (x) (:leaf t) (make-rbox :value x))

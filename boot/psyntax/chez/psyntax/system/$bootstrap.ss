@@ -11,7 +11,7 @@
                   annotation? annotation-expression annotation-stripped))
 
   ;; Interned, so the expanded code they end up in can be written out
-  ;; and read back.  Distinct from the names Pseudoscheme's own gensym
+  ;; and read back.  Distinct from the names Quasischeme's own gensym
   ;; makes (src/psyntax.lisp).
   (define count 0)
   (define (gensym . ignore)
@@ -46,7 +46,7 @@
   (define (symbol-value x) (top-level-value x (eval-env)))
   (define (set-symbol-value! x v) (set-top-level-value! x v (eval-env)))
 
-  ;; One form per line, as Pseudoscheme's writer does.
+  ;; One form per line, as Quasischeme's writer does.
   (define (pretty-print x . port)
     (let ((p (if (null? port) (current-output-port) (car port))))
       (parameterize ((print-gensym #f) (print-graph #f))

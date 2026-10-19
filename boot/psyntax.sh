@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate vendor/psyntax/psyntax-pseudoscheme.pp, psyntax's expanded
+# Regenerate vendor/psyntax/psyntax-quasischeme.pp, psyntax's expanded
 # image, from psyntax's sources.  See boot/README.md.
 #
 # Usage: boot/psyntax.sh [--no-install] [--seed=chez|stage0]
@@ -16,18 +16,18 @@
 #      The seeds differ, but step 2 rebuilds until the image reproduces
 #      itself, so every seed must end in the same image.
 #      PSYNTAX_SEED=<file.pp> uses that image instead: one built from
-#      these sources, e.g. a previous vendor/psyntax/psyntax-pseudoscheme.pp.
+#      these sources, e.g. a previous vendor/psyntax/psyntax-quasischeme.pp.
 #      (Not vendor/psyntax/pre-built/psyntax-scheme48.pp: the sources
 #      have outgrown it; it lacks the lisp-keyword? primitive compat.ss
 #      imports.)
-#   2. Pseudoscheme, loaded from src/ (so run boot/bootstrap.sh first
-#      for .pso files made from source), rebuilds psyntax with the seed,
+#   2. Quasischeme, loaded from src/ (so run boot/bootstrap.sh first
+#      for .qso files made from source), rebuilds psyntax with the seed,
 #      then with its own result, until it reproduces itself
 #      (boot/psyntax.lisp).
 #   3. That image is copied to vendor/psyntax/, unless --no-install.
 #
 # Work happens in boot/build/psyntax/, with logs alongside; the result
-# is boot/build/psyntax/psyntax-pseudoscheme.pp.
+# is boot/build/psyntax/psyntax-quasischeme.pp.
 
 set -eu
 
@@ -64,7 +64,7 @@ stage0_command() {
 mkdir -p "$build"
 
 # A copy of the sources to run the build script in: it reads psyntax/*.ss
-# and writes psyntax-pseudoscheme.pp in the current directory.
+# and writes psyntax-quasischeme.pp in the current directory.
 copy_sources() {
     rm -rf "$1"
     mkdir -p "$1"
@@ -83,12 +83,12 @@ if [ -z "$seed" ] && [ "$seed_kind" = stage0 ]; then
     copy_sources "$dir"
     cp -R boot/stage0 "$dir/stage0"
     if ! (cd "$dir" && sh -c "$command") >"$build/stage0-$STAGE0_HOST.log" 2>&1 \
-	 || [ ! -s "$dir/psyntax-pseudoscheme.pp" ]; then
+	 || [ ! -s "$dir/psyntax-quasischeme.pp" ]; then
 	echo "failed; see $build/stage0-$STAGE0_HOST.log"
 	exit 1
     fi
     echo ok
-    seed=$dir/psyntax-pseudoscheme.pp
+    seed=$dir/psyntax-quasischeme.pp
 fi
 if [ -z "$seed" ]; then
     command -v "$CHEZ" >/dev/null 2>&1 || {
@@ -101,25 +101,25 @@ if [ -z "$seed" ]; then
     copy_sources "$dir"
     libdirs="$PWD/$dir:$PWD/boot/psyntax/chez"
     if ! (cd "$dir" && "$CHEZ" --libdirs "$libdirs" --program psyntax-buildscript.ss) \
-	 >"$build/chez.log" 2>&1 || [ ! -s "$dir/psyntax-pseudoscheme.pp" ]; then
+	 >"$build/chez.log" 2>&1 || [ ! -s "$dir/psyntax-quasischeme.pp" ]; then
 	echo "failed; see $build/chez.log"
 	exit 1
     fi
     echo ok
-    seed=$dir/psyntax-pseudoscheme.pp
+    seed=$dir/psyntax-quasischeme.pp
 fi
 
-printf 'Rebuilding psyntax on Pseudoscheme until it reproduces itself ... '
+printf 'Rebuilding psyntax on Quasischeme until it reproduces itself ... '
 if ! "$SBCL" --dynamic-space-size 4GB --control-stack-size 500MB \
-     --script boot/psyntax.lisp "$seed" >"$build/pseudoscheme.log" 2>&1; then
-    echo "failed; see $build/pseudoscheme.log"
+     --script boot/psyntax.lisp "$seed" >"$build/quasischeme.log" 2>&1; then
+    echo "failed; see $build/quasischeme.log"
     exit 1
 fi
-image=$(sed -n 's/^Stage [0-9]* reproduced stage [0-9]*: //p' "$build/pseudoscheme.log")
-cp "$image" "$build/psyntax-pseudoscheme.pp"
+image=$(sed -n 's/^Stage [0-9]* reproduced stage [0-9]*: //p' "$build/quasischeme.log")
+cp "$image" "$build/psyntax-quasischeme.pp"
 echo "ok ($image)"
 
 if [ "$install" = yes ]; then
-    cp "$image" vendor/psyntax/psyntax-pseudoscheme.pp
-    echo "Installed it as vendor/psyntax/psyntax-pseudoscheme.pp."
+    cp "$image" vendor/psyntax/psyntax-quasischeme.pp
+    echo "Installed it as vendor/psyntax/psyntax-quasischeme.pp."
 fi

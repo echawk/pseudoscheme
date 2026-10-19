@@ -1,6 +1,6 @@
 ;;; Scheme using Common Lisp libraries: Alexandria and CL-PPCRE.
 ;;;
-;;;   bin/pseudoscheme --quicklisp examples/scheme-uses-lisp-libraries.scm
+;;;   bin/quasischeme --quicklisp examples/scheme-uses-lisp-libraries.scm
 ;;;
 ;;; Importing (cl <package>) for a package that isn't loaded loads the
 ;;; system of the same name first: with Quicklisp's QUICKLOAD when

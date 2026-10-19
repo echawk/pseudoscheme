@@ -21,7 +21,7 @@ import sys
 
 
 def short(impl):
-    # "chez-10.4.1+akku-r7rs" -> "chez", "pseudoscheme-0.2" -> "pseudoscheme"
+    # "chez-10.4.1+akku-r7rs" -> "chez", "quasischeme-0.2" -> "quasischeme"
     return impl.split("-")[0]
 
 
@@ -42,8 +42,8 @@ def main():
             if line.startswith("+!CSVLINE!+"):
                 rows.append(line[len("+!CSVLINE!+"):].strip().split(",")[:3])
         # a timed line names the implementation as the program does
-        # ("pseudoscheme_racket-3.0"); a failure line, as the harness
-        # names the system ("pseudoscheme-racket"): that is the file's
+        # ("quasischeme_racket-3.0"); a failure line, as the harness
+        # names the system ("quasischeme-racket"): that is the file's
         # implementation, from its timed lines, if it has any, or else
         # the system's name with _ for - (as -r6rs and the like's programs
         # name themselves)
@@ -62,7 +62,7 @@ def main():
             if bench not in benches:
                 benches.append(bench)
 
-    impls.sort(key=lambda i: (i != baseline, i != "pseudoscheme", i))
+    impls.sort(key=lambda i: (i != baseline, i != "quasischeme", i))
     print("| benchmark | " + " | ".join(impls) + " |")
     print("|---|" + "---|" * len(impls))
     logs = {i: [] for i in impls}

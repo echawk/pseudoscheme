@@ -2,9 +2,9 @@
 ;;; William D Clinger's reference implementation of this library
 ;;; (reference/srfi-99/syntactic.scm, split out of
 ;;; reference/srfi-99/srfi-99.sls; licence in reference/srfi-99/LICENSE),
-;;; with two changes marked PSEUDOSCHEME there: the reference code
+;;; with two changes marked QUASISCHEME there: the reference code
 ;;; assumes that the syntax object for a list is a list, and that the
-;;; one for a parent clause #f is #f; Pseudoscheme's psyntax wraps both,
+;;; one for a parent clause #f is #f; Quasischeme's psyntax wraps both,
 ;;; as R6RS allows.
 ;;;
 ;;; As in the reference implementation, the record type is made from

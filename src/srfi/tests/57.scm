@@ -3,7 +3,7 @@
 ;;;
 ;;; The record definitions come first, at top level as the SRFI
 ;;; requires, and the tests are in procedures: with full continuations,
-;;; Pseudoscheme compiles many top-level calls to non-primitive
+;;; Quasischeme compiles many top-level calls to non-primitive
 ;;; procedures slowly (see 57.sld), and calls inside procedure bodies
 ;;; don't have that cost.
 (import (except (scheme base) define-record-type) (scheme process-context)

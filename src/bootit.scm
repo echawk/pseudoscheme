@@ -1,9 +1,9 @@
 ; File bootit.scm / -*- Mode: Scheme; Syntax: Scheme; Package: Scheme; -*-
 ; Copyright (c) 1991-1994 Jonathan Rees / See file COPYING
 
-; Bootstrapping a new Pseudoscheme
+; Bootstrapping a new Quasischeme
 
-; You must do (SETQ *USE-SCHEME-READ* NIL) before loading Pseudoscheme
+; You must do (SETQ *USE-SCHEME-READ* NIL) before loading Quasischeme
 ; in order for this to work!
 
 ; In a Scheme-in-Common-Lisp implementation, load this file and do
@@ -14,13 +14,13 @@
 ; not Common-Lisp based, but that would require a fair amount of
 ; hacking: e.g. all the routines in p-utils.scm would have to be rewritten.
 
-(define *pseudoscheme-directory* #f)
+(define *quasischeme-directory* #f)
 
 (define (bootit . dir-option)
   (cond ((not (null? dir-option))
-	 (set! *pseudoscheme-directory* (cl:pathname (car dir-option))))
-	((not *pseudoscheme-directory*)
-	 (set! *pseudoscheme-directory*
+	 (set! *quasischeme-directory* (cl:pathname (car dir-option))))
+	((not *quasischeme-directory*)
+	 (set! *quasischeme-directory*
 	       (cl:make-pathname :name 'cl:nil
 				 :type 'cl:nil
 				 :defaults cl:*default-pathname-defaults*))))
@@ -44,7 +44,7 @@
 
 (define (pseudo-pathname name)
   (cl:make-pathname :name (filename-preferred-case name)
-		    :defaults *pseudoscheme-directory*))
+		    :defaults *quasischeme-directory*))
 
 (define (filename-preferred-case name)
   #+unix (cl:string-downcase name)
@@ -52,7 +52,7 @@
   )
 
 (define *scheme-file-type*     (filename-preferred-case "scm"))
-(define *translated-file-type* (filename-preferred-case "pso"))
+(define *translated-file-type* (filename-preferred-case "qso"))
 
 (define translator-files #f)
 

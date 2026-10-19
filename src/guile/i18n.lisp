@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-GUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-GUILE -*-
 
 ;;;; The C half of (ice-9 i18n), on the C library's locales (newlocale,
 ;;;; nl_langinfo_l, localeconv_l, wcscoll_l, strtod_l) through CFFI.  A
@@ -7,7 +7,7 @@
 ;;;; SBCL's Unicode ones, with the locale's language for Turkish,
 ;;;; Azerbaijani and Lithuanian, as libunistring's are in Guile.
 
-(in-package "PSEUDOSCHEME-GUILE")
+(in-package "QUASISCHEME-GUILE")
 
 (defstruct (glocale (:constructor %make-glocale (pointer name)) (:copier nil))
   pointer				; a locale_t address, or NIL for the global locale
@@ -48,7 +48,7 @@
 
 (defun locale-arg (locale)
   "The locale_t pointer of LOCALE (an optional argument), or NIL for the global one."
-  (cond ((or (null locale) (eq locale ps:false)) nil)
+  (cond ((or (null locale) (eq locale qs:false)) nil)
 	((glocale-p locale) (glocale-pointer locale))
 	(t (wrong-type "locale" 2 locale))))
 
@@ -173,7 +173,7 @@
 			   (loop for i from 0
 				 for b = (cffi:mem-aref g :int8 i)
 				 while (and (> b 0) (/= b 127)) collect b)))
-	      (:digits (let ((b (cffi:mem-ref conv :int8 offset))) (if (= b 127) ps:false b)))
+	      (:digits (let ((b (cffi:mem-ref conv :int8 offset))) (if (= b 127) qs:false b)))
 	      (:boolean (bool (/= 0 (cffi:mem-ref conv :int8 offset))))
 	      (:posn (ssym (case (cffi:mem-ref conv :int8 offset)
 			     (0 "parenthesize") (1 "sign-before") (2 "sign-after")
@@ -182,7 +182,7 @@
 	(let ((r (if p
 		     (cffi:foreign-funcall "nl_langinfo_l" :int item :pointer (sb-sys:int-sap p) :pointer)
 		     (cffi:foreign-funcall "nl_langinfo" :int item :pointer))))
-	  (if (cffi:null-pointer-p r) ps:false (c-string-in r (locale-codeset p)))))))
+	  (if (cffi:null-pointer-p r) qs:false (c-string-in r (locale-codeset p)))))))
 
 ;;; Numbers
 
@@ -196,7 +196,7 @@ locale) on S: the number and the characters it took, or #f and 0."
       (let* ((value (funcall function buf end (if p (sb-sys:int-sap p) (cffi:null-pointer))))
 	     (used (- (cffi:pointer-address (cffi:mem-ref end :pointer)) (cffi:pointer-address buf))))
 	(if (zerop used)
-	    (values ps:false 0)
+	    (values qs:false 0)
 	    (values value (length (sb-ext:octets-to-string octets :end used :external-format :utf-8))))))))
 
 (defextension "scm_init_i18n"
@@ -253,9 +253,9 @@ locale) on S: the number and the characters it took, or #f and 0."
   (list (cons "char->formal-name"
 	      (lambda (c)
 		(unless (characterp c) (wrong-type "char->formal-name" 1 c))
-		(or (char-formal-name c) ps:false)))
+		(or (char-formal-name c) qs:false)))
 	(cons "formal-name->char"
 	      (lambda (name)
 		(unless (stringp name) (wrong-type "formal-name->char" 1 name))
 		(let ((c (name-char (substitute #\_ #\Space name))))
-		  (if (and c (equal (char-formal-name c) (string-upcase name))) c ps:false))))))
+		  (if (and c (equal (char-formal-name c) (string-upcase name))) c qs:false))))))

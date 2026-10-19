@@ -1,10 +1,10 @@
 ;;; SRFI 150: hygienic ERR5RS record syntax (reduced).  Written for
-;;; Pseudoscheme with syntax-case, on R6RS procedural records, following
+;;; Quasischeme with syntax-case, on R6RS procedural records, following
 ;;; the design of Marc Nieper-Wißkirchen's sample implementation
 ;;; (reference/srfi-150/150.scm, kept for reference; MIT licence in
 ;;; reference/srfi-150/LICENSE).  The sample implementation isn't used:
 ;;; it needs SRFI 147 (custom macro transformers) and SRFI 148 (eager
-;;; syntax-rules), which Pseudoscheme doesn't have.
+;;; syntax-rules), which Quasischeme doesn't have.
 ;;;
 ;;; As in the sample implementation, the <type name> is bound to a macro
 ;;; that carries the type's fields for subtypes' definitions.  Used as an

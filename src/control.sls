@@ -1,5 +1,5 @@
 ;;; -*- Mode: Scheme -*-
-;;;; (pseudoscheme control): delimited continuations, as Guile has them
+;;;; (quasischeme control): delimited continuations, as Guile has them
 ;;;; (its core prompts and (ice-9 control)).  The prompts themselves are
 ;;;; host primitives over the continuation frames (src/continuations.lisp,
 ;;;; "Delimited continuations"); this is the rest, in Scheme.
@@ -13,11 +13,11 @@
 ;;;;   (reset body ...), (shift k body ...), reset*, shift*
 ;;;;   call-with-escape-continuation, call/ec, let/ec
 
-(library (pseudoscheme control)
+(library (quasischeme control)
   (export call-with-prompt abort-to-prompt make-prompt-tag default-prompt-tag prompt-tag?
           % default-prompt-handler reset shift reset* shift*
           call-with-escape-continuation call/ec let/ec)
-  (import (rnrs) (prefix (pseudoscheme host) host:))
+  (import (rnrs) (prefix (quasischeme host) host:))
 
   (define call-with-prompt host:call-with-prompt)
   (define abort-to-prompt host:abort-to-prompt)

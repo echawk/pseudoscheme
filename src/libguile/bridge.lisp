@@ -1,4 +1,4 @@
-; -*- Mode: Lisp; Syntax: Common-Lisp; Package: PSEUDOSCHEME-LIBGUILE -*-
+; -*- Mode: Lisp; Syntax: Common-Lisp; Package: QUASISCHEME-LIBGUILE -*-
 
 ;;;; The bridge between Guile mode's objects and C's (docs/libguile.md).
 ;;;;
@@ -32,9 +32,9 @@
 ;;;; exported again meanwhile.  A C-OBJECT keeps its C memory alive with
 ;;;; a root cell until the C-OBJECT is collected by SBCL.
 
-(in-package "PSEUDOSCHEME-LIBGUILE")
+(in-package "QUASISCHEME-LIBGUILE")
 
-(defmacro pg (name) `(load-time-value (intern ,(string name) "PSEUDOSCHEME-GUILE")))
+(defmacro pg (name) `(load-time-value (intern ,(string name) "QUASISCHEME-GUILE")))
 
 ;;; ------------------------------------------------------------------
 ;;; The library
@@ -42,8 +42,8 @@
 (defvar *library* nil "The loaded libguile-3.0.so.1's path, once loaded.")
 
 (defun library-path ()
-  (or (uiop:getenv "PSEUDOSCHEME_LIBGUILE")
-      (namestring (asdf:system-relative-pathname :pseudoscheme "build/libguile/libguile-3.0.so.1"))))
+  (or (uiop:getenv "QUASISCHEME_LIBGUILE")
+      (namestring (asdf:system-relative-pathname :quasischeme "build/libguile/libguile-3.0.so.1"))))
 
 (defmacro c-call (name return &rest args)
   "Call our libguile's C function NAME; ARGS alternate types and values."
@@ -208,11 +208,11 @@ Lisp code runs.")
   (cond ((and (integerp x) (<= (- -1 +most-positive-fixnum+) x +most-positive-fixnum+))
 	 (ldb (byte 64 0) (logior (ash x 2) +fixnum-tag+)))
 	((characterp x) (logior (ash (char-code x) 8) +char-tag+))
-	((eq x ps:false) +false+)
-	((eq x ps:true) +true+)
+	((eq x qs:false) +false+)
+	((eq x qs:true) +true+)
 	((null x) +null+)
-	((eq x ps:unspecific) +unspecified+)
-	((eq x ps:eof-object) +eof+)
+	((eq x qs:unspecific) +unspecified+)
+	((eq x qs:eof-object) +eof+)
 	((eq x (symbol-value (pg *elisp-nil*))) +elisp-nil+)
 	((eq x (symbol-value (pg +unbound+))) +undefined+)
 	(t nil)))
@@ -226,11 +226,11 @@ Lisp code runs.")
   (cond ((= (logand bits 3) +fixnum-tag+)
 	 (values (let ((n (ash bits -2))) (if (logbitp 61 n) (- n (ash 1 62)) n)) t))
 	((= (logand bits #xff) +char-tag+) (values (code-char (ash bits -8)) t))
-	((= bits +false+) (values ps:false t))
-	((= bits +true+) (values ps:true t))
+	((= bits +false+) (values qs:false t))
+	((= bits +true+) (values qs:true t))
 	((= bits +null+) (values '() t))
-	((= bits +unspecified+) (values ps:unspecific t))
-	((= bits +eof+) (values ps:eof-object t))
+	((= bits +unspecified+) (values qs:unspecific t))
+	((= bits +eof+) (values qs:eof-object t))
 	((= bits +elisp-nil+) (values (symbol-value (pg *elisp-nil*)) t))
 	((= bits +undefined+) (values (symbol-value (pg +unbound+)) t))
 	((/= (logand bits 7) 0) (error "libguile: can't decode the SCM ~X" bits))
@@ -260,7 +260,7 @@ Lisp code runs.")
 		     (t (entry-address (make-mirror x))))))))))
 
 (defun mutable-p (x)
-  (or (consp x) (simple-vector-p x) (typep x 'ps-r6rs::octets)
+  (or (consp x) (simple-vector-p x) (typep x 'qs-r6rs::octets)
       (typep x (pg gvariable)) (funcall (pg struct-p) x)))
 
 (defun make-mirror (x)
@@ -275,7 +275,7 @@ Lisp code runs.")
 	     a)))
     (cond ((consp x) (alloc 16))
 	  ((simple-vector-p x) (cell (1+ (length x)) (logior (ash (length x) 8) +tc7-vector+)))
-	  ((typep x 'ps-r6rs::octets)
+	  ((typep x 'qs-r6rs::octets)
 	   (let ((a (cell 4 (logior +bytevector-u8-flags+ +tc7-bytevector+ #x80)))
 		 (buffer (alloc (max 1 (length x)) t)))
 	     (setf (word a 1) (length x) (word a 2) buffer (word a 3) +false+)
@@ -338,7 +338,7 @@ Lisp code runs.")
 	       (setf (svref snapshot i) (export-scm (svref x i))
 		     (word a (1+ i)) (svref snapshot i)))
 	     (setf (entry-snapshot e) snapshot)))
-	  ((typep x 'ps-r6rs::octets)
+	  ((typep x 'qs-r6rs::octets)
 	   (let ((buffer (word a 2)))
 	     (dotimes (i (length x))
 	       (setf (sb-sys:sap-ref-8 (address-sap buffer) i) (aref x i)))
@@ -364,7 +364,7 @@ Lisp code runs.")
   "A bit mask of the slots of VTABLE's structs that are unboxed words
 (layout letter u) rather than SCM values."
   (let* ((layout (svref (funcall (pg struct-slots-of) vtable) 0))
-	 (s (if (symbolp layout) (ps:scheme-symbol-name layout) (princ-to-string layout)))
+	 (s (if (symbolp layout) (qs:scheme-symbol-name layout) (princ-to-string layout)))
 	 (mask 0))
     (dotimes (i (min n (floor (length s) 2)) mask)
       (when (char= (char s (* 2 i)) #\u) (setq mask (logior mask (ash 1 i)))))))
@@ -388,7 +388,7 @@ Lisp code runs.")
 (defun import-c-object (a)
   "C's object at A, which has no entry: what it is in Lisp."
   (when (< a 4096)			; an SCM C never set: not an object
-    (return-from import-c-object ps:unspecific))
+    (return-from import-c-object qs:unspecific))
   (let ((w0 (word a 0)))
     (cond ((zerop (logand w0 1))	; a pair C made
 	   (if (heap-object-p a)
@@ -452,7 +452,7 @@ two words, and its children's to DEPTH-1 levels."
 	       (if (= w (svref snapshot i))
 		   (when *deep* (sync-child (svref x i)))
 		   (setf (svref x i) (import-scm w) (svref snapshot i) w)))))
-	  ((typep x 'ps-r6rs::octets)
+	  ((typep x 'qs-r6rs::octets)
 	   (let ((buffer (address-sap (word a 2))))
 	     (dotimes (i (length x))
 	       (let ((b (sb-sys:sap-ref-8 buffer i)))

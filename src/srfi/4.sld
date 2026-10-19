@@ -26,4 +26,4 @@
           (rename %f32vector-ref f32vector-ref) (rename %f32vector-set! f32vector-set!) (rename %f32vector->list f32vector->list) (rename %list->f32vector list->f32vector)
           (rename %f64vector? f64vector?) (rename %make-f64vector make-f64vector) (rename %f64vector f64vector) (rename %f64vector-length f64vector-length)
           (rename %f64vector-ref f64vector-ref) (rename %f64vector-set! f64vector-set!) (rename %f64vector->list f64vector->list) (rename %list->f64vector list->f64vector))
-  (import (prefix (pseudoscheme host) %)))
+  (import (prefix (quasischeme host) %)))

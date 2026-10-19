@@ -13,7 +13,7 @@
 ;;; (The Martin Becze implementation in the SRFI repository's contrib/
 ;;; is GPL, and isn't used.)
 ;;;
-;;; Keywords: Pseudoscheme has no SRFI 88, so keyword objects are the
+;;; Keywords: Quasischeme has no SRFI 88, so keyword objects are the
 ;;; self-evaluating #:name keywords (docs/interop.md 3.3).  In a
 ;;; parameter list a keyword may be written #:name or name: (as in the
 ;;; SRFI); both mean #:name.  Calls pass #:name:

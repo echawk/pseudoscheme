@@ -1,6 +1,6 @@
 ;;; Scheme calling C through CFFI: zlib and the C library.
 ;;;
-;;;   bin/pseudoscheme --quicklisp tests/programs/c-libraries.scm
+;;;   bin/quasischeme --quicklisp tests/programs/c-libraries.scm
 ;;;
 ;;; CFFI's macros (defcfun, defcstruct, defcallback, with-foreign-object,
 ;;; foreign-funcall) are used from Scheme as Lisp macros; their bodies
@@ -12,7 +12,7 @@
 
 (import (scheme base) (scheme inexact) (scheme process-context)
         (srfi 1) (srfi 64) (only (srfi 151) bitwise-xor bitwise-and arithmetic-shift)
-        (pseudoscheme lisp)
+        (quasischeme lisp)
         (prefix (cl common-lisp) cl:)
         (prefix (cl cffi) ffi:))
 
@@ -255,7 +255,7 @@
                   (strtol "  -42" (ffi:null-pointer) 10) (strtol "755" (ffi:null-pointer) 8)))
 (test-equal "getenv: C and Scheme see the same environment"
             (get-environment-variable "HOME") (getenv/c "HOME"))
-(test-equal "a NULL char* is ()" '() (getenv/c "PSEUDOSCHEME_SURELY_UNSET_VARIABLE"))
+(test-equal "a NULL char* is ()" '() (getenv/c "QUASISCHEME_SURELY_UNSET_VARIABLE"))
 (test-equal "snprintf, a varargs function"
             "pi is about 3.14159, 255 is ff"
             (ffi:with-foreign-object (buffer #:char 64)

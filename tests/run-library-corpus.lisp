@@ -1,6 +1,6 @@
 ; -*- Mode: Lisp; Syntax: Common-Lisp; Package: CL-USER -*-
 
-;;;; Can Pseudoscheme load real-world Scheme libraries?
+;;;; Can Quasischeme load real-world Scheme libraries?
 ;;;;
 ;;;; Point this at a directory of library sources laid out the R6RS/R7RS
 ;;;; way -- (foo bar) in foo/bar.sls or .sld -- such as the .akku/lib of a
@@ -41,9 +41,9 @@
 (let ((*standard-output* (make-broadcast-stream))
       (*error-output* (make-broadcast-stream)))
   (handler-bind ((warning #'muffle-warning))
-    (load-system :pseudoscheme/api)))
+    (load-system :quasischeme/api)))
 
-(ps:disable-float-traps)
+(qs:disable-float-traps)
 
 (defparameter *verbose* (member "-v" (uiop:command-line-arguments) :test #'string=))
 (defparameter *extra-dirs*
@@ -74,16 +74,16 @@
 (defun library-names-in (path)
   "Names of the libraries a file defines (R6RS library or R7RS define-library)."
   (handler-case
-      (let ((forms (ps-r7rs::read-forms path)))
+      (let ((forms (qs-r7rs::read-forms path)))
 	(loop for f in forms
-	      when (or (ps-r7rs::head-is f "library") (ps-r7rs::head-is f "define-library"))
-		collect (ps-r7rs::library-name-of f)))
+	      when (or (qs-r7rs::head-is f "library") (qs-r7rs::head-is f "define-library"))
+		collect (qs-r7rs::library-name-of f)))
     (error () nil)))
 
 (defun try-import (name)
   (handler-case
       (progn
-	(ps-r7rs::eval-forms (list (list (ps:intern-scheme-symbol "import") name)))
+	(qs-r7rs::eval-forms (list (list (qs:intern-scheme-symbol "import") name)))
 	:ok)
     (serious-condition (e)
       ;; Errors can carry whole expander environments: print them short.
@@ -98,14 +98,14 @@
 			 (remove-if-not #'portable-file-p (directory (merge-pathnames "**/*.*" dir)))))
        (names (remove-duplicates (loop for f in files append (library-names-in f)) :test #'equal))
        (ok 0) (failures '()))
-  (setf psx:*library-path* (cons (namestring dir) *extra-dirs*))
-  (pseudoscheme-interop:boot)		; R7RS, and the bridge's (pseudoscheme lisp)
+  (setf qsx:*library-path* (cons (namestring dir) *extra-dirs*))
+  (quasischeme-interop:boot)		; R7RS, and the bridge's (quasischeme lisp)
   (dolist (name (sort names #'string< :key (lambda (n) (format nil "~S" n))))
     (let ((result (try-import name)))
       (cond ((eq result :ok) (incf ok)
-	     (when *verbose* (format t "~&ok   ~A~%" (ps-r7rs::write-scheme-to-string name))))
+	     (when *verbose* (format t "~&ok   ~A~%" (qs-r7rs::write-scheme-to-string name))))
 	    (t (push (cons name result) failures)
-	       (format t "~&FAIL ~A~%     ~A~%" (ps-r7rs::write-scheme-to-string name)
+	       (format t "~&FAIL ~A~%     ~A~%" (qs-r7rs::write-scheme-to-string name)
 		       (subseq result 0 (min 200 (length result))))))
       (finish-output)))
   (format t "~&~%~D of ~D libraries load.~%" ok (+ ok (length failures))))

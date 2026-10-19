@@ -6,7 +6,7 @@
 ;;; licence in reference/srfi-231/LICENSE).  The .scm files are in
 ;;; reference/srfi-231/, unmodified; (srfi 231 base) is in 231/base.sld.
 ;;;
-;;; Changes, marked PSEUDOSCHEME: (chibi assert) is replaced by R6RS's
+;;; Changes, marked QUASISCHEME: (chibi assert) is replaced by R6RS's
 ;;; assert, and the u1vectors behind u1-storage-class, a chibi extension
 ;;; to SRFI 160, come from (srfi 231 private u1vector) (231/private/).
 ;;; As in chibi on other hosts, f8- and f16-storage-class are
@@ -23,9 +23,9 @@
           (scheme vector)
           (scheme sort)
           (srfi 160 base)
-          (srfi 231 private u1vector)  ; PSEUDOSCHEME: added
+          (srfi 231 private u1vector)  ; QUASISCHEME: added
           (srfi 231 base)
-          (only (rnrs base) assert))  ; PSEUDOSCHEME: was (chibi assert)
+          (only (rnrs base) assert))  ; QUASISCHEME: was (chibi assert)
   (export
    ;; Miscellaneous Functions
    translation? permutation?

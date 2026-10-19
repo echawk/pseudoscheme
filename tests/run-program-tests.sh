@@ -6,22 +6,22 @@
 # file runs on the command-line Scheme, with tests/programs/lib/ on the
 # library path; a .lisp file in SBCL, loading tests/programs/harness.lisp.
 #
-#   sh tests/run-program-tests.sh [PSEUDOSCHEME [NAME ...]]
+#   sh tests/run-program-tests.sh [QUASISCHEME [NAME ...]]
 #
-# PSEUDOSCHEME is the command-line program (default bin/pseudoscheme);
+# QUASISCHEME is the command-line program (default bin/quasischeme);
 # NAME ... the programs to run (default: all), as file names without the
 # directory (c-libraries.scm).  Each runs in a scratch directory of its
 # own, at most $PROGRAM_TEST_TIMEOUT seconds (default 300); a failure's
 # output is kept there, as NAME.out.
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-ps=${1:-$root/bin/pseudoscheme}
+ps=${1:-$root/bin/quasischeme}
 case $ps in /*) ;; *) ps=$(pwd)/$ps ;; esac
 [ $# -gt 0 ] && shift
 sbcl=${SBCL:-sbcl}
 limit=${PROGRAM_TEST_TIMEOUT:-300}
 dir=$root/tests/programs
-work=$(mktemp -d "${TMPDIR:-/tmp}/pseudoscheme-program-tests.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/quasischeme-program-tests.XXXXXX")
 
 if [ -t 1 ]; then
   green=$(printf '\033[32m'); red=$(printf '\033[31m'); dim=$(printf '\033[2m'); off=$(printf '\033[0m')
