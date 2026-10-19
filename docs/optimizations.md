@@ -361,17 +361,37 @@ through our generic calls. The user approved this list, in this order:
    result types (`(pair? x)` → `car` unchecked; fixnum loop counters;
    `fl` results are flonums), emitted as `truly-the`, typed bindings or
    specialized primitives. *First pass done 2026-10-18, with 1*
-   (src/cptypes.lisp).
+   (src/cptypes.lisp). *2026-10-19:* expressions as well as variables:
+   a generic operation's result cptypes knows is a flonum or fixnum is
+   wrapped so (`%cp-assume-flonum`) where another operation takes it or
+   a let binds it. cp0 also, since then: an `or` or `and` in a test is
+   two tests, with no temporary (`(if (or (null? l) (null? (cdr l))) l
+   ...)`), and `(car (cons a b))`, `(cdr (cons a b))` and `(apply f
+   (list a ...))` are simplified.
 3. **Unboxed flonums**: flonum-typed loop variables declared
    `double-float`, so SBCL keeps them in registers (fibfp, mbrot,
-   nucleic, fft, ray box every intermediate).
+   nucleic, fft, ray box every intermediate). *Done 2026-10-19*
+   (DECLARE-LOOP-TYPES, src/cptypes.lisp): the translator makes a loop a
+   PROG; a PROG variable every value assigned to which is of one type
+   (a literal, a value cptypes marked, what `fl+` or `fx+` returns) is
+   declared so. It applies where the types are known from the program:
+   bench/'s flonum benchmarks start their loops from values `read`
+   returns, so their types are unknown, and their instruction counts
+   didn't change; Chez's answer, run-time tests choosing a specialized
+   copy of a loop, is the next step.
 4. **Closed world**: in a `--compile` executable, and inside a library
    body, top-level definitions are constant, so calls between them are
    direct `labels` calls without capture frames; "may capture"
    summaries across the program or library extend the self-call guard
    (idea 9; src/continuations.lisp) to every known call. Outside those,
    the same is the opt-in "declarative top level" (pending: a flag, an
-   environment variable or an importable declaration).
+   environment variable or an importable declaration). R6RS and R7RS
+   programs and libraries were already one letrec. *Done 2026-10-19 for
+   `--compile` at the late-bound top levels* (Chez scripts, R5RS and the
+   older reports; CLOSE-TOP-LEVEL, src/cpletrec.lisp): a procedure
+   defined once and never assigned is bound in a letrec around the
+   file's forms, its global still defined; `fib 32` in a compiled Chez
+   script 56 ms to 20 ms. `QUASISCHEME_CLOSED_WORLD=0` turns it off.
 5. **Escape analysis** (idea 5): `dynamic-extent` for closures and rest
    lists that don't escape (a lambda passed to a known `for-each`,
    `map`, `vector-for-each`; `apply`'s lists); closures with no free
@@ -381,9 +401,22 @@ through our generic calls. The user approved this list, in this order:
    with no free variables once, so lifting isn't needed.
 6. **cpletrec**: `letrec`, named `let` and internal defines of lambdas
    as `labels` everywhere, without letrec checks when the inits are
-   lambdas (Racket's linklet compiler does this already).
+   lambdas (Racket's linklet compiler does this already). *Done
+   2026-10-19* (src/cpletrec.lisp, the first step of OPTIMIZE-CORE):
+   lambdas were `labels` already; now a body's other definitions are
+   nested lets, each bound once, as soon as what its init refers to is
+   bound, instead of variables assigned in order, so SBCL can infer
+   their types. `QUASISCHEME_CPLETREC=0` turns it off. Inside a
+   full-continuation state machine variables live across capture sites
+   are assigned again, so it helps code with no capture sites. It made
+   SRFI 14's library body one machine, inside which a million-deep
+   recursive merge then overflowed the stack; the merge is a loop now.
 7. **Representation**: records as one object (idea 2); boxes only for
-   assigned variables a closure captures.
+   assigned variables a closure captures. *Records done 2026-10-19*
+   (src/r6rs/records.lisp): a record is one SBCL instance with its
+   fields after the type slot (`%make-instance` at the full length), and
+   R7RS constructors build it without a vector; `gcbench` 14% fewer
+   instructions.
 
 Where: 1, 2, 3, 5 and 6 are one new pass on core forms (after psyntax,
 before the translator); 4 is src/continuations.lisp; 7 is the record
@@ -435,9 +468,9 @@ modes' cold time is in compiling procedures, which `auto` compiles too.
 | # | idea | status | effect where it applies |
 |---|---|---|---|
 | 1 | an optimization level | not started | 8% at level 2; more at 3 |
-| 2 | records as one object | not started | about halves record allocation and access |
+| 2 | records as one object | done | about halves record allocation and access; gcbench 14% fewer instructions |
 | 3 | cross-library knowledge | partly (per form) | inlining and fewer capture sites across libraries |
-| 4 | type inference into declarations | partly (cptypes, first pass) | fixnum and unboxed-flonum loops |
+| 4 | type inference into declarations | partly (cptypes; typed loop variables) | fixnum and unboxed-flonum loops |
 | 5 | `dynamic-extent` | partly (cpdx: closures passed to primitives, rest lists only read) | rest lists and non-escaping closures |
 | 6 | inlining small known procedures | partly (small `labels` functions; cp0, first pass) | calls to small helpers |
 | 7 | boolean results | partly | small |

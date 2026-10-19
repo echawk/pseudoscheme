@@ -432,6 +432,7 @@ NIL if nothing of E need remain."
       (loop while (and else-p (equal (primitive-call-name test) "not") (= (length test) 2))
 	    do (setq test (cadr test))
 	       (rotatef then else))
+      (setq test (simplify-or-test test))
       (multiple-value-bind (known value) (constant-p test)
 	(cond (known
 	       (if (scheme-true-p value)
@@ -443,8 +444,58 @@ NIL if nothing of E need remain."
 		     (else (and else-p (cp else ctx))))
 		 (if (and (eq ctx :effect) (null then) (null else))
 		     (cp-effect-of test)
-		     `(,(car e) ,test ,(or then (cp-void))
-			,@(when (or else-p (eq ctx :effect)) (list (or else (cp-void)))))))))))))
+		     (or (and else-p then else (if-of-if (car e) test then else))
+			 `(,(car e) ,test ,(or then (cp-void))
+			   ,@(when (or else-p (eq ctx :effect)) (list (or else (cp-void))))))))))))))
+
+;;; An or or an and in a test (Chez's cp0 does the like).  (or a b) is
+;;; (let ((t a)) (if t t b)), whose value a test uses only for its truth:
+;;; (if a #t b).  And an if whose test is an if with a constant branch
+;;; becomes two tests, copying a branch that is small and binds nothing:
+;;;   (if (if a #t b) X Y)  =>  (if a X (if b X Y))
+;;;   (if (if a b #f) X Y)  =>  (if a (if b X Y) Y)
+;;; so (if (or (null? l) (null? (cdr l))) l ...) makes no temporary.
+
+(defparameter *if-copy-limit* 8
+  "The largest branch, in conses, IF-OF-IF copies.")
+
+(defun simplify-or-test (test)
+  "TEST, an optimized test, with an or's let made an if (see above)."
+  (if (and (consp test) (cp-lambda-p (car test)) (= (length test) 2)
+	   (let ((l (car test)))
+	     (and (consp (cadr l)) (null (cdr (cadr l))) (null (cdddr l))
+		  (let ((v (car (cadr l))) (body (caddr l)))
+		    (and (consp body) (eq (cp-keyword (car body)) :if) (= (length body) 4)
+			 (eq (second body) v) (eq (third body) v)
+			 (not (occurs-in-p v (fourth body))))))))
+      (let ((body (caddr (car test))))
+	(list (car body) (cadr test) (cp-quote t) (fourth body)))
+      test))
+
+(defun copyable-branch-p (x)
+  "Whether X is small and binds nothing, so that it can be copied."
+  (labels ((binds-p (e)
+	     (and (consp e)
+		  (or (member (cp-keyword (car e)) '(:lambda :case-lambda :letrec :letrec*))
+		      (and (consp (car e)) (cp-lambda-p (car e)))
+		      (and (not (quote-p e)) (some #'binds-p (remove-if-not #'consp e)))))))
+    (and (<= (tree-size x) *if-copy-limit*) (not (binds-p x)))))
+
+(defun if-of-if (if test then else)
+  "(IF TEST THEN ELSE) as two tests when TEST is an if with a constant
+branch (see above), or NIL."
+  (when (and (consp test) (eq (cp-keyword (car test)) :if) (= (length test) 4))
+    (destructuring-bind (a b c) (cdr test)
+      (multiple-value-bind (b-known b-value) (constant-p b)
+	(multiple-value-bind (c-known c-value) (constant-p c)
+	  (cond ((and b-known (scheme-true-p b-value) (copyable-branch-p then))
+		 `(,if ,a ,then (,if ,c ,then ,else)))
+		((and b-known (not (scheme-true-p b-value)) (copyable-branch-p else))
+		 `(,if ,a ,else (,if ,c ,then ,else)))
+		((and c-known (not (scheme-true-p c-value)) (copyable-branch-p else))
+		 `(,if ,a (,if ,b ,then ,else) ,else))
+		((and c-known (scheme-true-p c-value) (copyable-branch-p then))
+		 `(,if ,a (,if ,b ,then ,else) ,then))))))))
 
 (defun cp-effect-of (e)
   "Already-optimized E for its effect only, or NIL."
@@ -590,9 +641,25 @@ with NARGS arguments, if it takes exactly NARGS fixed arguments."
 	(and name (string= name "values") (= (length args) 1) (not (eq ctx :effect)) (car args))
 	(and name (string= name "call-with-values") (= (length args) 2)
 	     (cp-call-with-values (first args) (second args)))
+	(and name (simplify-primitive-call name op args))
 	(if (and (eq ctx :effect) name (primitive-in-p name :pure))
 	    (make-sequence-form (remove nil (mapcar #'cp-effect-of args)))
 	    (cons op args)))))
+
+(defun simplify-primitive-call (name op args)
+  "A simpler form for the primitive call (OP . ARGS) to NAME, or NIL:
+(car (cons a b)) is a when b is pure, (cdr (cons a b)) likewise, and
+(apply f (list a ...)) is (f a ...)."
+  (declare (ignore op))
+  (let ((arg (first args)))
+    (cond ((and (member name '("car" "cdr") :test #'string=) (= (length args) 1)
+		(equal (primitive-call-name arg) "cons") (= (length arg) 3))
+	   (let ((keep (if (string= name "car") (second arg) (third arg)))
+		 (drop (if (string= name "car") (third arg) (second arg))))
+	     (and (pure-p drop) keep)))
+	  ((and (string= name "apply") (= (length args) 2)
+		(equal (primitive-call-name (second args)) "list"))
+	   (cons arg (cdr (second args)))))))
 
 (defun cp-call-with-values (producer consumer)
   "(call-with-values (lambda () (values a ...)) (lambda (v ...) body)),

@@ -83,12 +83,16 @@ bench/RESULTS.md has the last runs and what made the difference;
 docs/optimizations.md has the ideas, their status and the optimizer's
 plan. Next:
 
-- **The optimizer's plan, next items** (docs/optimizations.md, "Plan"):
-  unboxed flonums, a closed world for `--compile` executables and
-  library bodies, cpletrec, records as one object. cp0, cptypes and
-  cpdx (escape analysis, 2026-10-19) run on every mode's core forms
-  (`QUASISCHEME_OPTIMIZE_STATS=1` shows it); cpdx is neutral on
-  bench/.
+- **The optimizer** (docs/optimizations.md, "Plan"): cpletrec, cp0,
+  cptypes and cpdx run on every mode's core forms
+  (`QUASISCHEME_OPTIMIZE_STATS=1` shows it); records are one object;
+  loop variables of a known type are declared; `--compile` at a
+  late-bound top level is a closed world (all 2026-10-19). Next: loop
+  versioning for flonum loops whose types come from input (bench/'s
+  fibfp, sumfp, mbrot), boxes only for captured assigned variables, a
+  declarative top level outside `--compile`. Measure with instructions
+  retired (`/usr/bin/time -l`): wall-clock times on this machine vary by
+  30% from run to run.
 - **The slowest benchmarks**, `ack`, `fibc`, `divrec`, `browse` (about
   3.5×): what's left is SBCL's call and allocation costs.
 - **R6RS overrides of open-coded primitives** (`list-tail`,
