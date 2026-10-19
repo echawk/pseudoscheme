@@ -7,6 +7,7 @@
 ;;;; never finds it missing or half written).
 
 (defsystem :quasischeme-cli
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :description "A standalone Scheme (R7RS, R6RS, R5RS) on Quasischeme"
   :depends-on (:quasischeme/api :quasischeme/guile :quasischeme/libguile :quasischeme/racket :quasischeme/repl)

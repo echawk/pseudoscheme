@@ -39,6 +39,7 @@
 ;;; :quasischeme/r5rs below.
 
 (defsystem :quasischeme/rts
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -59,6 +60,7 @@
      ))
 
 (defsystem :quasischeme/translator
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -91,6 +93,7 @@
    ))
 
 (defsystem :quasischeme/evaluator
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -98,6 +101,7 @@
   :components ((:file "eval")))
 
 (defsystem :quasischeme
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -126,6 +130,7 @@
 ;;; always forces the CL-reader bridge back on for that regardless of
 ;;; what this system has set globally (see bootstrap.lisp).
 (defsystem :quasischeme/reader
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -142,6 +147,7 @@
 ;;; gates this system's R5RS claim -- see its header comment and the
 ;;; project README for remaining known gaps.
 (defsystem :quasischeme/r5rs
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -151,6 +157,7 @@
 ;;; Building and filling program environments from Lisp; see
 ;;; src/environments.lisp.
 (defsystem :quasischeme/environments
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -161,6 +168,7 @@
 ;;; The foreign-function layer the Schemes share, on CFFI: Chez's FFI
 ;;; and Guile's (system foreign) are made of it.  See src/ffi.lisp.
 (defsystem :quasischeme/cffi
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :pathname #p"src/"
   :depends-on (:quasischeme/rts :cffi)
@@ -171,6 +179,7 @@
 ;;; files of src/r6rs/ are the primitives those libraries refer to.  See
 ;;; src/psyntax.lisp.
 (defsystem :quasischeme/r6rs
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -228,6 +237,7 @@
 ;;; Lisp packages.  See src/api.lisp, src/interop.lisp, docs/interop.md.
 ;;; The systems r5rs, r6rs and r7rs (r7rs.asd etc.) are shorthands.
 (defsystem :quasischeme/api
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -241,6 +251,7 @@
 ;;; :r6rs-file, :r5rs-file, :r7rs-library, :r6rs-library.  See
 ;;; src/asdf.lisp.
 (defsystem :quasischeme/asdf
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -250,6 +261,7 @@
 ;;; The R7RS procedures (and the native R7RS environment they're built
 ;;; in, which the psyntax host copies).  See src/r7rs/*.
 (defsystem :quasischeme/r7rs-runtime
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/r7rs/"
@@ -261,6 +273,7 @@
 ;;; R7RS-small on psyntax: define-library, the (scheme ...) libraries,
 ;;; programs and the REPL.  See src/r7rs/front.lisp.
 (defsystem :quasischeme/r7rs
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/r7rs/"
@@ -283,6 +296,7 @@
 ;;; Regenerates translator.files' .qso bootstrap artifacts from their
 ;;; .scm sources using the already-loaded translator. See bootstrap.lisp.
 (defsystem :quasischeme/bootstrap
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :author "Jonathan Rees"
   :pathname #p"src/"
@@ -293,6 +307,7 @@
 ;;; installation, on libguile's primitives written in Lisp and a
 ;;; Tree-IL compiler.  See src/guile/boot.lisp, docs/guile.md.
 (defsystem :quasischeme/guile
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :pathname #p"src/guile/"
   :depends-on (:quasischeme/api :quasischeme/cffi
@@ -326,6 +341,7 @@
 ;;; that C programs and extensions built against GNU Guile 3.0 use.  The
 ;;; C half is built apart: make -C src/libguile.
 (defsystem :quasischeme/libguile
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :pathname #p"src/libguile/"
   :depends-on (:quasischeme/guile)
@@ -348,6 +364,7 @@
 ;;; Skeleton: --racket=NAME is accepted and each strategy reports what
 ;;; isn't implemented yet.
 (defsystem :quasischeme/racket
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :pathname #p"src/racket/"
   :depends-on (:quasischeme/api :cl-ppcre #+sbcl :sb-introspect #+sbcl :sb-posix)
@@ -378,6 +395,7 @@
 ;;; The REPL every mode shares: a line editor, meta-commands, ,language;
 ;;; Guile's own REPL for --guile (src/repl/).
 (defsystem :quasischeme/repl
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :pathname #p"src/repl/"
   :depends-on (:quasischeme/api :quasischeme/guile :quasischeme/racket

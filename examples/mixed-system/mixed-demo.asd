@@ -11,6 +11,7 @@
 ;;; dependency.
 
 (defsystem "mixed-demo"
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :description "Quasischeme example: a Scheme library used by Lisp code"
   :defsystem-depends-on ("quasischeme/asdf")
   :components ((:r7rs-library "lib/demo/stats")         ; lib/demo/stats.sld

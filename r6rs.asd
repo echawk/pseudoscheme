@@ -4,6 +4,7 @@
 ;;; Scheme (see src/api.lisp).  The same as :quasischeme/api.
 
 (defsystem :r6rs
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :description "R6RS Scheme in Common Lisp (Quasischeme): shorthand for quasischeme/api"
   :depends-on (:quasischeme/api))
