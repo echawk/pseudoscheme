@@ -112,10 +112,13 @@
 (defprim "greatest-fixnum" () most-positive-fixnum)
 
 (defmacro def-fx-compare (name op)
+  ;; two arguments, the usual case, without consing a list for APPLY
   `(defprim ,name (a b &rest more)
-     (let ((all (list* a b more)))
-       (dolist (x all) (check-fx ,name x))
-       (bool (apply #',op all)))))
+     (if (null more)
+	 (progn (check-fx ,name a) (check-fx ,name b) (bool (,op a b)))
+	 (let ((all (list* a b more)))
+	   (dolist (x all) (check-fx ,name x))
+	   (bool (apply #',op all))))))
 (def-fx-compare "fx=?" =)
 (def-fx-compare "fx>?" >)
 (def-fx-compare "fx<?" <)
@@ -242,10 +245,13 @@
 (defprim "fixnum->flonum" (x) (check-fx "fixnum->flonum" x) (coerce x 'double-float))
 
 (defmacro def-fl-compare (name op)
+  ;; two arguments, the usual case, without consing a list for APPLY
   `(defprim ,name (a b &rest more)
-     (let ((all (list* a b more)))
-       (dolist (x all) (check-fl ,name x))
-       (bool (apply #',op all)))))
+     (if (null more)
+	 (progn (check-fl ,name a) (check-fl ,name b) (bool (,op a b)))
+	 (let ((all (list* a b more)))
+	   (dolist (x all) (check-fl ,name x))
+	   (bool (apply #',op all))))))
 (def-fl-compare "fl=?" =)
 (def-fl-compare "fl<?" <)
 (def-fl-compare "fl>?" >)

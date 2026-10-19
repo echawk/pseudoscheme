@@ -77,8 +77,22 @@
   (invert-case (symbol-name symbol)))
 
 (defun intern-scheme-symbol (string)
-  "The Scheme symbol named STRING (STRING->SYMBOL)."
-  (values (intern (invert-case string) scheme-package)))
+  "The Scheme symbol named STRING (STRING->SYMBOL).  The inverted name is
+made on the stack and looked up, and copied only for a new symbol:
+readers intern every symbol they read, nearly all of them existing ones."
+  (let ((upper nil) (lower nil))
+    (loop for c across string
+	  do (cond ((upper-case-p c) (setq upper t))
+		   ((lower-case-p c) (setq lower t))))
+    (if (eq upper lower)		; mixed, or no letters: as it is
+	(values (intern string scheme-package))
+	(let* ((n (length string))
+	       (name (make-string n)))
+	  (declare (dynamic-extent name))
+	  (dotimes (i n)
+	    (setf (schar name i) (if upper (char-downcase (char string i)) (char-upcase (char string i)))))
+	  (multiple-value-bind (symbol status) (find-symbol name scheme-package)
+	    (if status symbol (values (intern (copy-seq name) scheme-package))))))))
 
 ;;; Collecting symbols.  A package never lets go of a symbol, but the
 ;;; symbols Scheme code makes and drops -- gensyms, macro expanders'

@@ -1330,7 +1330,7 @@ identity; or NIL."
 (defun subprocess-stream-arg (who x direction)
   "The Lisp stream (or T) to hand run-program for the port X (a file-stream port), or :stream if X is #f."
   (cond ((not (truthy x)) :stream)
-	((and (routport-p x) (eq (routport-kind x) :file)) (routport-stream x))
+	((and (routport-p x) (eq (routport-kind x) :file)) (file-outport-stream x))
 	((and (rinport-p x) (eq (rinport-kind x) :host)) t)
 	((and (eq direction :output) (not (routport-p x)) (not (rinport-p x))) t)
 	(t (racket-error who "contract violation~%  expected: (or/c (and/c output-port? file-stream-port?) #f)~%  given: ~A" (written x)))))

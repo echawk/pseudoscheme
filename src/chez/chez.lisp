@@ -431,16 +431,19 @@ calls with those are still open-coded."
 		    "string-ci=?" "string-ci<?" "string-ci>?" "string-ci<=?" "string-ci>=?"))
       (extend-host-procedure name
 			     (lambda (old)
-			       (lambda (x &rest more)
-				 (if more
-				     (apply old x more)
-				     ;; the comparison of x with itself checks its type
-				     (progn (funcall old x x) qs:true))))
+			       (lambda (x &optional (y nil y-p) &rest more)
+				 (cond (more (apply old x y more))
+				       ;; two arguments, the usual case: no list
+				       (y-p (funcall old x y))
+				       ;; the comparison of x with itself checks its type
+				       (t (funcall old x x) qs:true))))
 			     '(2 nil)))
     (flet ((arithmetic (name zero one)
 	     (extend-host-procedure name
 				    (lambda (old)
 				      (lambda (&rest args)
+					;; only read: on the stack (fx+ is every mode's)
+					(declare (dynamic-extent args))
 					(cond ((null args)
 					       (if zero zero (qs:scheme-error "~A: no arguments" name)))
 					      ((null (cdr args)) (funcall one old (car args)))

@@ -53,22 +53,34 @@
 	  do (cond ((and (eql p #\|) (char= c #\#)) (when (zerop (decf depth)) (return)) (setq c nil))
 		   ((and (eql p #\#) (char= c #\|)) (incf depth) (setq c nil))))))
 
+(defvar *token-buffer* nil
+  "(thread . buffer): the last thread to read a token, and its buffer for
+READ-TOKEN's characters.  Another thread, even one that preempts a
+thread in the middle of a token, makes a buffer of its own.")
+
 (defun read-token (in &optional (prefix ""))
   "Characters up to a delimiter, with | | and \\ quoting; and whether any
-were quoted (then it's a symbol whatever it looks like)."
-  (let ((quoted nil))
-    (values
-     (with-output-to-string (out)
-       (write-string prefix out)
-       (loop for c = (peek-char nil in nil)
-	     until (delimiter-p c)
-	     do (read-char in)
-		(cond ((char= c #\|)
-		       (setq quoted t)
-		       (loop for d = (read-char in) until (char= d #\|) do (write-char d out)))
-		      ((char= c #\\) (setq quoted t) (write-char (read-char in) out))
-		      (t (write-char c out)))))
-     quoted)))
+were quoted (then it's a symbol whatever it looks like).  Collected in a
+buffer the thread reuses, then copied once: a string output stream for
+each token costs more than the token."
+  (let ((quoted nil)
+	(out (let ((cell *token-buffer*))
+	       (if (and cell (eq (car cell) sb-thread:*current-thread*))
+		   (cdr cell)
+		   (cdr (setq *token-buffer*
+			      (cons sb-thread:*current-thread*
+				    (make-array 64 :element-type 'character :adjustable t :fill-pointer 0))))))))
+    (setf (fill-pointer out) 0)
+    (loop for c across prefix do (vector-push-extend c out))
+    (loop for c = (peek-char nil in nil)
+	  until (delimiter-p c)
+	  do (read-char in)
+	     (cond ((char= c #\|)
+		    (setq quoted t)
+		    (loop for d = (read-char in) until (char= d #\|) do (vector-push-extend d out)))
+		   ((char= c #\\) (setq quoted t) (vector-push-extend (read-char in) out))
+		   (t (vector-push-extend c out))))
+    (values (coerce out 'simple-string) quoted)))
 
 (defun parse-number (token)
   (and (plusp (length token))

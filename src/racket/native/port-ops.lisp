@@ -508,13 +508,24 @@ count, eof or a special); 0 for none yet."
 		(sb-posix:syscall-error (e2) (open-output-error who name (sb-posix:syscall-errno e2))))
 	      (open-output-error who name errno)))))))
 
+(defvar *file-outports* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "The file output ports open, which FLUSH-FILE-OUTPORTS flushes at exit.")
+
 (defun make-file-outport (name fd)
   (let ((p (finish-outport (make-routport (make-rpath name)))))
     (setf (routport-kind p) :file
 	  (routport-path p) name
 	  (routport-stream p) (sb-sys:make-fd-stream fd :output t :element-type '(unsigned-byte 8)
 							:buffering :full :file name))
+    (setf (gethash p *file-outports*) t)
     p))
+
+(defun flush-file-outports ()
+  (loop for p being the hash-keys of *file-outports*
+	do (unless (routport-closed p)
+	     (ignore-errors (finish-output (file-outport-stream p))))))
+
+(pushnew 'flush-file-outports sb-ext:*exit-hooks*)
 
 (defun file-follower (name)
   "The fill function of an input port that follows the file NAME as it grows."
@@ -582,7 +593,7 @@ count, eof or a special); 0 for none yet."
 
 (defun file-stream-fd (p)
   "The descriptor of file output port P."
-  (sb-sys:fd-stream-fd (routport-stream p)))
+  (sb-sys:fd-stream-fd (file-outport-stream p)))
 
 (defnative "file-stream-buffer-mode" (port &optional (mode nil mode-p)) ()
   (let ((c (cond ((rinport-p port) (rinport-custom port))
@@ -614,7 +625,7 @@ count, eof or a special); 0 for none yet."
   (check-count "file-truncate" pos)
   (when (routport-closed port)
     (racket-error "file-truncate" "output port is closed~%  output port: ~A" (port-desc port)))
-  (finish-output (routport-stream port))
+  (finish-output (file-outport-stream port))
   (sb-posix:ftruncate (file-stream-fd port) pos)
   *void*)
 
@@ -704,7 +715,7 @@ count, eof or a special); 0 for none yet."
   (cond ((and (routport-p port) (eq (routport-kind port) :file))
 	 (when (routport-closed port)
 	   (racket-error who "output port is closed~%  output port: ~A" (port-desc port)))
-	 (finish-output (routport-stream port))
+	 (finish-output (file-outport-stream port))
 	 (sb-posix:fstat (file-stream-fd port)))
 	((and (rinport-p port) (rpath-p (rinport-name port)))
 	 (when (rinport-closed port)

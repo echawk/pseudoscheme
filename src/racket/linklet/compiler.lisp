@@ -165,7 +165,10 @@ is what get-import told us about the imported linklets' variables
 	     (and v (case (variable-info-kind v)
 		      ((:defined :defined-exported)
 		       ;; a lexical; in a split linklet, a cell
-		       (or (variable-info-core v)
+		       (or (let ((c (variable-info-core v)))
+			     (and c (if (eq (variable-info-known v) :safe-struct)
+					(list (core "racket:safe-ref") c)
+					c)))
 			   (list (core (if (eq (variable-info-known v) :safe-candidate)
 					   "racket:safe-variable-ref"
 					   "racket:variable-ref"))
@@ -451,6 +454,66 @@ one definition is a lambda."
 		   (not (variable-info-mutated v)))
 	  (setf (variable-info-known v) :safe-candidate))))))
 
+;;; Struct procedures (as Racket CS's schemify knows them): a definition
+;;;
+;;;   (define-values (struct:s make-s s? s-a ...)
+;;;     (let-values (((S M P R W) (let-values () ... (make-struct-type ...))))
+;;;       (values S M P (make-struct-field-accessor R 0 'a) ...)))
+;;;
+;;; of a type with no guard, whose parent is #f or such a type of the
+;;; same linklet, makes a constructor, a predicate, accessors and mutators
+;;; that call no procedure of the program's (an impersonator's
+;;; redirections aside), so that calls of them aren't capture sites.  In
+;;; a whole linklet their references are (racket:safe-ref lexical).
+
+(defun strip-empty-let-values (x)
+  (loop while (and (form-p x "let-values") (null (cadr x)) (null (cdddr x)))
+	do (setq x (caddr x)))
+  x)
+
+(defun false-literal-p (x)
+  (or (eq x qs:false) (and (form-p x "quote") (eq (cadr x) qs:false))))
+
+(defun struct-safe-ids (form guard-free-types)
+  "For a definition of FORM's shape (above): the ids that are safe struct
+procedures, and the struct type's id if its type has no guard; or NIL."
+  (when (and (form-p form "define-values") (consp (cadr form)))
+    (let ((ids (cadr form)) (rhs (caddr form)))
+      (when (and (form-p rhs "let-values") (= (length (cadr rhs)) 1) (null (cdddr rhs)))
+	(destructuring-bind ((names inner)) (cadr rhs)
+	  (let ((make (strip-empty-let-values inner))
+		(vals (caddr rhs)))
+	    (when (and (form-p make "make-struct-type") (consp names) (= (length names) 5)
+		       (form-p vals "values") (= (length (cdr vals)) (length ids)))
+	      (let ((parent (nth 2 make)) (guard (nth 10 make)))
+		(when (and (or (null guard) (false-literal-p guard))
+			   (or (false-literal-p parent) (member parent guard-free-types)))
+		  (destructuring-bind (s m p r w) names
+		    (let ((safe '()) (type nil))
+		      (loop for id in ids for v in (cdr vals)
+			    do (cond ((eq v s) (setq type id))
+				     ((or (eq v m) (eq v p)) (push id safe))
+				     ((and (or (form-p v "make-struct-field-accessor") (form-p v "make-struct-field-mutator"))
+					   (member (cadr v) (list r w)))
+				      (push id safe))))
+		      (values safe type))))))))))))
+
+(defun safe-struct-procedures (parsed info)
+  "Mark as :SAFE-STRUCT each defined variable, never assigned, that
+STRUCT-SAFE-IDS finds."
+  (let ((types '()))
+    (dolist (form (parsed-linklet-body parsed))
+      (multiple-value-bind (safe type) (struct-safe-ids form types)
+	(when type (push type types))
+	(dolist (id safe)
+	  (let ((v (info-of info id)))
+	    (when (and (member (variable-info-kind v) '(:defined :defined-exported))
+		       (not (variable-info-mutated v)))
+	      (setf (variable-info-known v) :safe-struct))))))))
+
+(defun safe-ref-p (form)
+  (and (consp form) (eq (car form) (core "racket:safe-ref"))))
+
 (defun safe-variable-ref-p (form)
   (and (consp form) (eq (car form) (core "racket:safe-variable-ref"))))
 
@@ -459,7 +522,7 @@ one definition is a lambda."
 continuation transformation."
   (let ((qsx::*safe-operator-hook*
 	  (let ((outer qsx::*safe-operator-hook*))
-	    (lambda (form) (or (safe-variable-ref-p form) (and outer (funcall outer form)))))))
+	    (lambda (form) (or (safe-variable-ref-p form) (safe-ref-p form) (and outer (funcall outer form)))))))
     (funcall thunk)))
 
 (defun settle-safe-cells (forms info)
@@ -541,6 +604,7 @@ then exports), whose body is a letrec* of the definitions; or, for a big
 one, LOWER-SPLIT's form."
   (when (> (qsx::tree-size (parsed-linklet-body parsed)) *split-size*)
     (return-from lower (lower-split parsed info)))
+  (safe-struct-procedures parsed info)
   (let ((*info* info))
     ;; core names: a lexical per definition, a variable object per
     ;; import and export

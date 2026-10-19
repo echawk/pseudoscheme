@@ -78,6 +78,63 @@ of Racket's own implementation as possible. Racket code then becomes one
 more thing a Common Lisp program can call, as Scheme is today
 (docs/interop.md).
 
+## Speed (2026-10-19)
+
+bench/ in `--racket` against R7RS mode, in instructions retired (wall
+time on the development machine varies by 30%), after this round:
+
+| benchmark | R7RS | Racket before | Racket now |
+|---|---|---|---|
+| gcbench | 11.3G | (7.05 s) | 45.8G (1.94 s) |
+| dynamic | 47.1G | (33.5 s) | 323.6G (17.5 s) |
+| deriv | 21.2G | | 144.7G |
+| lattice | 107.8G | | 623.0G |
+| cat | 43.9G | 562G (timed out at 300 s before the first fix) | 261G |
+| read1 | 32.1G | 634G | 425G |
+| sum1 | 34.5G | 363G | 269G |
+| tail | 6.5G | 137G | 136G |
+
+What changed:
+- **File output ports** buffered their bytes but flushed the stream at
+  every write: a system call per character. They now keep a 64 KB
+  buffer of their own, written out when it fills, by `flush-output`,
+  closing, positioning, and at exit (all open file ports are flushed by
+  an exit hook), as Racket's block-buffered file ports are.
+- **write-char** encoded each character into a string and then its bytes;
+  an ASCII character to a file port goes straight into the buffer now.
+  **read-char** of an ASCII byte already buffered returns it directly.
+- **open-input-file** of a regular file reads it with one `read(2)` into
+  a vector of its size, with no stream.
+- **Struct constructors** took `&rest` arguments and split the list; a
+  type with no guard or auto fields gets a constructor of fixed arity
+  (up to 10 fields) making the fields vector directly. **Field
+  accessors and mutators** made by `make-struct-field-accessor` read a
+  plain instance's slot at an index computed once.
+- **Struct procedures are known to the compiler** (SAFE-STRUCT-PROCEDURES,
+  src/racket/linklet/compiler.lisp): a definition of the shape Racket's
+  `struct` expands to, for a type with no guard, makes a constructor,
+  predicate, accessors and mutators whose calls aren't continuation
+  capture sites, as Racket CS's schemify knows them. (An impersonator's
+  redirection that captures a continuation, re-entered later, then
+  doesn't see its caller's frame.) The benchmarks' prelude defines R7RS
+  records in that shape now, with literal field indexes; before, it
+  computed them at run time.
+- **Arity** for `procedure-arity-includes?`, which Racket's `map` asks at
+  every call, is read from the function's stored lambda list, not through
+  `sb-introspect`.
+- Smaller: two-argument paths for `fx=?` and the like, `char=?` and the
+  other Chez-extended comparisons (every mode); interning an existing
+  symbol allocates nothing (every mode); the reader's tokens are collected
+  in a per-thread buffer.
+
+Left: what remains is mostly Racket's own code compiled from linklets
+(the expander's reader for `read`, racket/base's `map` and friends),
+whose calls of imported procedures are capture sites: cross-linklet
+knowledge (which exports can't capture, read through `compile-linklet`'s
+`get-import`, which is ignored now) would let the continuation
+transformation see through them. Structs are still two objects, an
+instance and its fields vector, which chaperones share.
+
 ## The REPL
 
 `bin/quasischeme --racket` with no file starts Racket's REPL as `racket`

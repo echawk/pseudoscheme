@@ -78,7 +78,10 @@
   (count-lines nil)
   (line 1) (column 0) (position 1)
   (buffer-mode nil)
-  (path nil))
+  (path nil)
+  (obuf nil)				; a file's bytes not yet written to its stream
+  (opos 0 :type fixnum)
+  (cbuf nil))				; a character's bytes, for write-char
 
 (defun name-string (name)
   (cond ((rpath-p name) (rpath-string name))
@@ -402,6 +405,15 @@ procedure, a special."
 (defun inport-peek-char (p skip &optional (who "peek-char") special-ok)
   "The character SKIP bytes after P's position, and its byte length; NIL
 at eof (or a special, and 1)."
+  ;; the character's bytes already in P's buffer (a file's, a pipe's, a
+  ;; custom port's without a peek procedure): read there, with no
+  ;; temporary byte string
+  (let* ((pos (+ (rinport-pos p) skip))
+	 (end (ip-end p)))
+    (when (and (< pos end) (not (peek-proc-port-p p)))
+      (let ((n (utf-8-lead-length (aref (rinport-bytes p) pos))))
+	(when (and (<= 1 n) (<= (+ pos n) end))
+	  (return-from inport-peek-char (utf-8-char-at (rinport-bytes p) pos))))))
   (if (and (null (rinport-fill p)) (null (rinport-custom p)))
       (let ((pos (+ (rinport-pos p) skip)))
 	(if (>= pos (ip-end p))
@@ -422,6 +434,14 @@ at eof (or a special, and 1)."
 	      (t nil)))))
 
 (defun inport-read-char (p &optional (who "read-char") special-ok)
+  ;; an ASCII byte already in the buffer, of a port not counting lines
+  (let ((pos (rinport-pos p)))
+    (when (and (< pos (ip-end p)) (not (rinport-count-lines p)) (not (peek-proc-port-p p)))
+      (let ((b (aref (rinport-bytes p) pos)))
+	(when (< b #x80)
+	  (setf (rinport-pos p) (1+ pos))
+	  (when (rinport-progress p) (ip-progress p))
+	  (return-from inport-read-char (code-char b))))))
   (multiple-value-bind (c n) (inport-peek-char p 0 who special-ok)
     (cond ((null c) qs:eof-object)
 	  ((functionp c) (ip-skip p 1) (note-special p) c)
@@ -499,10 +519,26 @@ at eof (or a special, and 1)."
       (when (sb-posix:s-isdir (sb-posix:stat-mode st))
 	(sb-posix:close fd)
 	(raise-errno who "cannot open input file" name 21))
-      (let ((stream (sb-sys:make-fd-stream fd :input t :element-type '(unsigned-byte 8)
-						 :buffering :full :file name)))
-	(unwind-protect (slurp-stream stream (sb-posix:stat-size st))
-	  (close stream))))))
+      (or (read-regular-file fd st)
+	  (let ((stream (sb-sys:make-fd-stream fd :input t :element-type '(unsigned-byte 8)
+						     :buffering :full :file name)))
+	    (unwind-protect (slurp-stream stream (sb-posix:stat-size st))
+	      (close stream)))))))
+
+(defun read-regular-file (fd st)
+  "A regular file's bytes, read from FD straight into a vector of its size
+(no stream, with its buffer and finalizer, for one read), and FD closed;
+NIL, FD open, for anything else."
+  (let ((size (sb-posix:stat-size st)))
+    (when (and (sb-posix:s-isreg (sb-posix:stat-mode st)) (plusp size))
+      (let ((bytes (make-octets size)) (got 0))
+	(declare (fixnum got))
+	(sb-sys:with-pinned-objects (bytes)
+	  (loop while (< got size)
+		do (let ((n (sb-unix:unix-read fd (sb-sys:sap+ (sb-sys:vector-sap bytes) got) (- size got))))
+		     (if (and n (plusp n)) (incf got n) (return)))))
+	(sb-posix:close fd)
+	(if (= got size) bytes (subseq bytes 0 got))))))
 
 (defnative "open-input-file" (path &rest mode) ()
   (declare (ignore mode))
@@ -721,8 +757,8 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 	 *void*)
 	((and pos-p (routport-p p))
 	 (when (eq (routport-kind p) :file)
-	   (finish-output (routport-stream p))
-	   (file-position (routport-stream p) (if (eq pos qs:eof-object) (file-length (routport-stream p)) pos)))
+	   (finish-output (file-outport-stream p))
+	   (file-position (file-outport-stream p) (if (eq pos qs:eof-object) (file-length (file-outport-stream p)) pos)))
 	 *void*)
 	((rinport-p p)
 	 (let ((c (rinport-custom p)))
@@ -787,7 +823,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   "The bytes written to P, for file-position."
   (ecase (routport-kind p)
     (:bytes (fill-pointer (routport-buffer p)))
-    (:file (finish-output (routport-stream p)) (file-position (routport-stream p)))
+    (:file (finish-output (file-outport-stream p)) (file-position (file-outport-stream p)))
     (:pipe (routport-written p))
     (:custom (let* ((c (routport-custom p)) (init (custom-out-init-position c)))
 	       (if (and init (not (integerp init)))
@@ -837,6 +873,42 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 					  (written r)))))
 	      finally (racket-error "write" "would block forever (one thread)"))))))
 
+;;; A file output port's bytes go to a buffer of its own, written to its
+;;; stream 64 KB at a time: an SBCL fd-stream written a byte or a
+;;; character at a time costs a call through its buffering each time.
+;;; Whatever uses the stream gets it with FILE-OUTPORT-STREAM, which
+;;; writes the buffer out first.
+
+(defconstant +file-outport-buffer-size+ 65536)
+
+(defun file-outport-write (p vec start end)
+  (let ((buf (or (routport-obuf p)
+		 (setf (routport-obuf p) (make-octets +file-outport-buffer-size+))))
+	(n (- end start)))
+    (declare (type (simple-array (unsigned-byte 8) (*)) buf) (fixnum n))
+    (when (> (+ (routport-opos p) n) +file-outport-buffer-size+)
+      (file-outport-drain p))
+    (if (> n +file-outport-buffer-size+)
+	(write-sequence vec (routport-stream p) :start start :end end)
+	(let ((pos (routport-opos p)))
+	  (declare (fixnum pos))
+	  (if (< n 16)
+	      (loop for i fixnum from start below end
+		    for j fixnum from pos
+		    do (setf (aref buf j) (aref vec i)))
+	      (replace buf vec :start1 pos :start2 start :end2 end))
+	  (setf (routport-opos p) (+ pos n))))))
+
+(defun file-outport-drain (p)
+  (when (plusp (routport-opos p))
+    (write-sequence (routport-obuf p) (routport-stream p) :end (routport-opos p))
+    (setf (routport-opos p) 0)))
+
+(defun file-outport-stream (p)
+  "File output port P's stream, its buffered bytes written to it."
+  (file-outport-drain p)
+  (routport-stream p))
+
 (defun out-write-some (p vec start end nonblock)
   "Write some of VEC[START,END) to our output port P: how many bytes, or :block."
   (if (>= start end)
@@ -846,8 +918,13 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 		  (:bytes (let ((buffer (routport-buffer p)))
 			    (loop for i from start below end do (vector-push-extend (aref vec i) buffer)))
 			  n)
-		  (:file (write-sequence vec (routport-stream p) :start start :end end)
-			 (finish-output (routport-stream p))
+		  ;; into the stream's buffer, flushed when it fills, by
+		  ;; flush-output or closing, and at exit (FLUSH-FILE-OUTPORTS),
+		  ;; as Racket's block-buffered file ports are; unbuffered only
+		  ;; in buffer mode none
+		  (:file (file-outport-write p vec start end)
+			 (when (eq (routport-buffer-mode p) (load-time-value (rsym "none")))
+			   (finish-output (file-outport-stream p)))
 			 n)
 		  (:pipe (pipe-write p vec start end))
 		  (:custom (custom-write p vec start end nonblock)))))
@@ -891,11 +968,50 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 (defnative "write-string" (s &optional port (start 0) end) ()
   (port-write-string (subseq s start end) port "write-string")
   (- (or end (length s)) start))
+(defun encode-utf-8-char (c buf)
+  "C's UTF-8 bytes into BUF, at least 4 long: how many."
+  (let ((code (char-code c)))
+    (cond ((< code #x80) (setf (aref buf 0) code) 1)
+	  ((< code #x800)
+	   (setf (aref buf 0) (logior #xC0 (ash code -6))
+		 (aref buf 1) (logior #x80 (logand code #x3F)))
+	   2)
+	  ((< code #x10000)
+	   (setf (aref buf 0) (logior #xE0 (ash code -12))
+		 (aref buf 1) (logior #x80 (logand (ash code -6) #x3F))
+		 (aref buf 2) (logior #x80 (logand code #x3F)))
+	   3)
+	  (t (setf (aref buf 0) (logior #xF0 (ash code -18))
+		   (aref buf 1) (logior #x80 (logand (ash code -12) #x3F))
+		   (aref buf 2) (logior #x80 (logand (ash code -6) #x3F))
+		   (aref buf 3) (logior #x80 (logand code #x3F)))
+	     4))))
+
+(defun port-write-char (c port who)
+  "Character C to PORT: its bytes from the port's own 4-byte buffer, which
+every kind of port copies (Racket threads run one at a time here), not a
+string and then its bytes, as WRITE-STRING would."
+  (let ((p (output-port port who)))
+    (cond ((not (routport-p p)) (funcall (qsx:host-ref "write-char") c p))
+	  ;; an ASCII character to a file port that isn't counting lines:
+	  ;; the byte into its buffer, directly
+	  ((and (eq (routport-kind p) :file) (< (char-code c) #x80)
+		(not (routport-count-lines p)) (routport-obuf p)
+		(< (routport-opos p) +file-outport-buffer-size+)
+		(not (eq (routport-buffer-mode p) (load-time-value (rsym "none")))))
+	   (let ((buf (routport-obuf p)))
+	     (declare (type (simple-array (unsigned-byte 8) (*)) buf))
+	     (setf (aref buf (routport-opos p)) (char-code c))
+	     (incf (routport-opos p))
+	     (incf (routport-written p))))
+	  (t (let ((buf (or (routport-cbuf p) (setf (routport-cbuf p) (make-octets 4)))))
+	       (out-emit p buf 0 (encode-utf-8-char c buf)))))))
+
 (defnative "write-char" (c &optional port) ()
-  (port-write-string (string c) port "write-char")
+  (port-write-char c port "write-char")
   *void*)
 (defnative "newline" (&optional port) ()
-  (port-write-string (string #\Newline) port "newline")
+  (port-write-char #\Newline port "newline")
   *void*)
 (defnative "write-bytes" (b &optional port (start 0) end) ()
   (let* ((p (output-port port "write-bytes")) (end (or end (length b))))
@@ -914,7 +1030,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (when (routport-closed p)
     (racket-error "flush-output" "output port is closed~%  output port: ~A" (port-desc p)))
   (case (routport-kind p)
-    (:file (finish-output (routport-stream p)))
+    (:file (finish-output (file-outport-stream p)))
     (:custom
      (let ((w (custom-out-write-out (routport-custom p))))
        (cond
@@ -941,7 +1057,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (unless (routport-closed p)
     (ecase (routport-kind p)
       (:bytes nil)
-      (:file (finish-output (routport-stream p)) (close (routport-stream p)))
+      (:file (finish-output (file-outport-stream p)) (close (file-outport-stream p)))
       (:pipe (setf (rinport-writer-closed (routport-peer p)) t))
       (:custom (funcall (custom-out-close (routport-custom p)))))
     (setf (routport-closed p) t)

@@ -88,6 +88,25 @@ a case-lambda of several clauses, procedure-reduce-arity's.")
       (lambda-list-arity-mask function)))
 
 (defun lambda-list-arity-mask (function)
+  ;; a closure's or a function's own: its code's lambda list, which SBCL
+  ;; keeps, read directly (Racket's map asks the arity of the procedure
+  ;; it's given at every call; SB-INTROSPECT's way costs ten times more)
+  (let ((code (if (sb-kernel:closurep function) (sb-kernel:%closure-fun function) function)))
+    (if (sb-kernel:simple-fun-p code)
+	(lambda-list-mask (sb-kernel:%simple-fun-arglist code))
+	(lambda-list-arity-mask-1 function))))
+
+(defun lambda-list-mask (lambda-list)
+  (let ((required 0) (optional 0) (state :required))
+    (declare (fixnum required optional))
+    (dolist (p lambda-list (loop for n from required to (+ required optional) sum (ash 1 n)))
+      (case p
+	(&optional (setq state :optional))
+	((&rest &key &more) (return (- (ash 1 required))))
+	(&aux (return (loop for n from required to (+ required optional) sum (ash 1 n))))
+	(t (case state (:required (incf required)) (:optional (incf optional))))))))
+
+(defun lambda-list-arity-mask-1 (function)
   (multiple-value-bind (required optional rest)
       (let ((required 0) (optional 0) (rest nil) (state :required))
 	(dolist (p (sb-introspect:function-lambda-list function) (values required optional rest))

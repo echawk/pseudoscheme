@@ -179,9 +179,50 @@ to VALUE, after PROPERTY's guard."
 		    -1))
 	  s))))
 
+(defun simple-type-p (type)
+  "Whether TYPE and its ancestors have no guards and no auto fields: a
+constructor's arguments are then the fields, in order."
+  (loop for ty = type then (struct-type-parent ty)
+	while ty
+	always (and (null (struct-type-guard ty)) (zerop (struct-type-auto-field-count ty)))))
+
 (defun constructor (type)
   (let ((n-init (loop for ty = type then (struct-type-parent ty)
 		      while ty sum (struct-type-init-field-count ty))))
+    (if (and (simple-type-p type) (null (applicable-procedure type)))
+	;; the common case: the arguments are the fields, and the instance
+	;; a plain one; the argument list on the stack, copied
+	(with-arity-mask (ash 1 n-init) (simple-constructor type n-init))
+	(general-constructor type n-init))))
+
+(defvar +missing+ (make-symbol "MISSING"))
+
+(defmacro fixed-constructors (max)
+  "A CASE on N choosing, for N fields up to MAX, a constructor taking N
+optional arguments (so a wrong count is Racket's arity error, not
+SBCL's) and making the fields vector from them with no list."
+  `(case n
+     ,@(loop for k from 0 to max
+	     collect (let ((vars (loop for i below k collect (intern (format nil "A~D" i)))))
+		       `(,k (lambda (&optional ,@(mapcar (lambda (v) `(,v +missing+)) vars) &rest more)
+			      (declare (dynamic-extent more))
+			      (when (or more ,@(and vars `((eq ,(car (last vars)) +missing+))))
+				(arity-error (list* ,@(remove-if (lambda (v) (declare (ignore v)) nil) vars) more)))
+			      (make-rstruct type (vector ,@vars))))))
+     (t nil)))
+
+(defun simple-constructor (type n)
+  "The constructor of TYPE, simple (SIMPLE-TYPE-P, no prop:procedure),
+whose instances have N fields, all its arguments."
+  (flet ((arity-error (args)
+	   (racket-arity-error (rname (or (struct-type-constructor-name type) (struct-type-name type)))
+			       (count-if-not (lambda (x) (eq x +missing+)) args) n)))
+    (or (fixed-constructors 10)
+	(lambda (&rest args)
+	  (unless (= (length args) n) (arity-error args))
+	  (make-rstruct type (coerce args 'simple-vector))))))
+
+(defun general-constructor (type n-init)
     (with-arity-mask
 	(ash 1 n-init)
       (lambda (&rest args)
@@ -200,7 +241,7 @@ to VALUE, after PROPERTY's guard."
 		  do (setf (svref fields i) (pop rest)) (incf i))
 	    (loop repeat (struct-type-auto-field-count ty)
 		  do (setf (svref fields i) (struct-type-auto-value ty)) (incf i)))
-	  (make-instance-of type fields)))))))
+	  (make-instance-of type fields))))))
 
 (defun with-arity-mask (mask function)
   "FUNCTION, which procedure-arity and the like see as taking MASK's
@@ -355,19 +396,46 @@ numbers of arguments."
 				   (nth-value 1 (property-value x p)))))
 	    accessor)))
 
+(defun plain-instance-of-p (s type)
+  "Whether S is a plain instance (not a chaperone, nor applicable) of
+TYPE or a subtype: its fields can be read and written directly."
+  (and (rstruct-p s) (not (cstruct-p s))
+       (let ((ty (rstruct-type s))) (or (eq ty type) (subtype-p ty type)))))
+
 (defnative "make-struct-field-accessor" (accessor-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-accessor")
   (declare (ignore field-name contract realm))
-  (let ((f (note-struct-procedure (lambda (s) (funcall accessor-proc s field-pos))
-				  :field-accessor (cdr (gethash accessor-proc *struct-procedures*)))))
+  (let* ((type (cdr (gethash accessor-proc *struct-procedures*)))
+	 (index (and type (integerp field-pos) (< -1 field-pos (struct-type-field-count type))
+		     (+ field-pos (- (struct-type-total type) (struct-type-field-count type)))))
+	 (f (note-struct-procedure
+	     (if index
+		 ;; a plain instance's field directly; anything else (a
+		 ;; chaperone, the wrong type) through the general accessor
+		 (lambda (s)
+		   (if (plain-instance-of-p s type)
+		       (svref (rstruct-fields s) index)
+		       (funcall accessor-proc s field-pos)))
+		 (lambda (s) (funcall accessor-proc s field-pos)))
+	     :field-accessor type)))
     (setf (gethash f *field-operations*) (list :accessor (cdr (gethash accessor-proc *struct-procedures*)) field-pos))
     f))
 
 (defnative "make-struct-field-mutator" (mutator-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-mutator")
   (declare (ignore field-name contract realm))
-  (let ((f (note-struct-procedure (lambda (s v) (funcall mutator-proc s field-pos v))
-				  :field-mutator (cdr (gethash mutator-proc *struct-procedures*)))))
+  (let* ((type (cdr (gethash mutator-proc *struct-procedures*)))
+	 (index (and type (integerp field-pos) (< -1 field-pos (struct-type-field-count type))
+		     (not (member field-pos (struct-type-immutables type)))
+		     (+ field-pos (- (struct-type-total type) (struct-type-field-count type)))))
+	 (f (note-struct-procedure
+	     (if index
+		 (lambda (s v)
+		   (if (plain-instance-of-p s type)
+		       (progn (setf (svref (rstruct-fields s) index) v) *void*)
+		       (funcall mutator-proc s field-pos v)))
+		 (lambda (s v) (funcall mutator-proc s field-pos v)))
+	     :field-mutator type)))
     (setf (gethash f *field-operations*) (list :mutator (cdr (gethash mutator-proc *struct-procedures*)) field-pos))
     f))
 

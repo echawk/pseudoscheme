@@ -45,18 +45,27 @@
 (define (string->utf8 str [s 0] [e (string-length str)]) (string->bytes/utf-8 str #f s e))
 (define (read-u8 [p (current-input-port)]) (read-byte p))
 (define (write-u8 b [p (current-output-port)]) (write-byte b p))
-;; fields are found by position in the field list
-(define (field-index f fields)
-  (let loop ([fs fields] [i 0]) (if (eq? (car fs) f) i (loop (cdr fs) (+ i 1)))))
-(define-syntax define-record-type
-  (syntax-rules ()
+;; the struct definition Racket's own `struct` makes, with the fields'
+;; indexes literal, so that a compiler (Racket CS's schemify, Quasischeme's
+;; linklet compiler) knows the accessors
+(require (for-syntax racket/base))
+(define-syntax (define-record-type stx)
+  (syntax-case stx ()
     [(_ type (ctor cf ...) pred (field acc . mod) ...)
-     (begin
-       (define fields '(field ...))
-       (define-values (st make pred ref set)
-         (make-struct-type 'type #f (length fields) 0 #f '() #f))
-       (define (ctor cf ...) (make (record-arg field (cf ...)) ...))
-       (define-record-field ref set (field-index 'field fields) acc . mod) ...)]))
+     (let* ([fields (syntax->list #'(field ...))]
+            [pairs
+             (append
+              (for/list ([a (syntax->list #'(acc ...))] [f fields] [i (in-naturals)])
+                (list a #`(make-struct-field-accessor ref #,i '#,f)))
+              (for/list ([m (syntax->list #'(mod ...))] [f fields] [i (in-naturals)]
+                         #:when (pair? (syntax-e m)))
+                (list (car (syntax-e m)) #`(make-struct-field-mutator set #,i '#,f))))])
+       (with-syntax ([((id val) ...) pairs] [n (length fields)])
+         #'(begin
+             (define-values (st make pred id ...)
+               (let-values ([(st make p ref set) (make-struct-type 'type #f n 0 #f '() #f)])
+                 (values st make p val ...)))
+             (define (ctor cf ...) (make (record-arg field (cf ...)) ...)))))]))
 ;; a field's constructor argument, or #f when the constructor has none
 (define-syntax record-arg
   (syntax-rules ()
@@ -64,9 +73,3 @@
     [(_ f (c . cs))
      (let-syntax ([same? (syntax-rules (f) [(_ f) c] [(_ x) (record-arg f cs)])])
        (same? c))]))
-(define-syntax define-record-field
-  (syntax-rules ()
-    [(_ ref set i acc) (define acc (make-struct-field-accessor ref i))]
-    [(_ ref set i acc mod)
-     (begin (define acc (make-struct-field-accessor ref i))
-            (define mod (make-struct-field-mutator set i)))]))

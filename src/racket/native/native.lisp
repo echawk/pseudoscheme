@@ -102,6 +102,12 @@ linklets (after every instance is filled: #%linklet's too)."
   (qsx:defhost "racket:variable-set!" (v value) (variable-set v value))
   ;; a reference to a procedure that can't capture (SAFE-CELLS)
   (qsx:defhost "racket:safe-variable-ref" (v) (variable-ref v))
+  ;; a whole linklet's struct procedure, which can't capture (SAFE-STRUCT-PROCEDURES)
+  (qsx:defhost "racket:safe-ref" (v) v)
+  (setf (compiler-macro-function (qsx::location (qsx::sym "racket:safe-ref")))
+	(lambda (form env)
+	  (declare (ignore env))
+	  (if (and (consp form) (not (eq (car form) 'funcall)) (= (length form) 2)) (second form) form)))
   (qsx:defhost "racket:variable-reference" (instance name)
     (make-variable-reference instance name))
   (qsx:defhost "racket:unknown-primitive" (name)
@@ -119,7 +125,7 @@ linklets (after every instance is filled: #%linklet's too)."
   (qsx:defhost "racket:call-with-mark" (key value thunk)
     (qs-r6rs::call-with-mark key value thunk))
   (qsx::register-primitive-names
-   '("racket:variable-ref" "racket:safe-variable-ref" "racket:variable-set!" "racket:variable-reference"
+   '("racket:variable-ref" "racket:safe-variable-ref" "racket:safe-ref" "racket:variable-set!" "racket:variable-reference"
      "racket:unknown-primitive" "racket:assign-error" "racket:arity-error" "racket:with-arity")))
 
 ;;; ------------------------------------------------------------------
