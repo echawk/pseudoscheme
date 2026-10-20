@@ -126,12 +126,18 @@ into INFO."
 
 (defun analyse (parsed info imports-known)
   "Pass 3: what each of the linklet's top-level names is.  IMPORTS-KNOWN
-is what get-import told us about the imported linklets' variables
-(cross-linklet knowledge): not used yet."
-  (declare (ignore imports-known))
+is what get-import told us about the imported linklets (cross-linklet
+knowledge): per import set, the external names of its procedures that
+can't capture a continuation (SAFE-EXPORTS), or NIL."
   (loop for set in (parsed-linklet-imports parsed)
-	do (loop for (nil . internal) in set
-		 do (setf (variable-info-kind (info-of info internal)) :imported)))
+	for safe = (pop imports-known)
+	do (loop for (external . internal) in set
+		 do (let ((v (info-of info internal)))
+		      (setf (variable-info-kind v) :imported)
+		      (let ((entry (find external safe :key (lambda (e) (if (consp e) (car e) e)))))
+			(cond ((null entry))
+			      ((consp entry) (setf (variable-info-known v) (cons :arg-safe-import (cdr entry))))
+			      (t (setf (variable-info-known v) :safe-import)))))))
   (dolist (form (parsed-linklet-body parsed))
     (when (form-p form "define-values")
       (dolist (id (cadr form))
@@ -174,7 +180,12 @@ is what get-import told us about the imported linklets' variables
 					   "racket:variable-ref"))
 				 (variable-info-cell v))))
 		      ((:imported :exported)
-		       (list (core "racket:variable-ref") (variable-info-cell v)))))))
+		       (let ((known (variable-info-known v)))
+			 (cond ((eq known :safe-import)
+				(list (core "racket:safe-variable-ref") (variable-info-cell v)))
+			       ((and (consp known) (eq (car known) :arg-safe-import))
+				(list (core "racket:arg-safe-ref") (quoted (cdr known)) (variable-info-cell v)))
+			       (t (list (core "racket:variable-ref") (variable-info-cell v))))))))))
 	  (t (primitive-reference name)))))
 
 (defun primitive-reference (name)
@@ -517,10 +528,26 @@ STRUCT-SAFE-IDS finds."
 (defun safe-variable-ref-p (form)
   (and (consp form) (eq (car form) (core "racket:safe-variable-ref"))))
 
+(defun arg-safe-ref-p (form)
+  (and (consp form) (eq (car form) (core "racket:arg-safe-ref"))))
+
+(defun arg-safe-call-p (call)
+  "Whether CALL calls an import that is safe when the procedures passed
+it at its positions are, and they are."
+  (let ((op (car call)))
+    (and (arg-safe-ref-p op)
+	 (every (lambda (i) (let ((arg (nthcdr (1+ i) call)))
+			      (or (null arg) (qsx::safe-procedure-p (car arg)))))
+		(cadr (cadr op))))))
+
 (defun call-with-safe-cells (thunk)
   "Call THUNK with (racket:safe-variable-ref cell) taken as safe by the
-continuation transformation."
-  (let ((qsx::*safe-operator-hook*
+continuation transformation, and calls of (racket:arg-safe-ref ...)
+whose procedure arguments are safe."
+  (let ((qsx::*safe-call-hook*
+	  (let ((outer qsx::*safe-call-hook*))
+	    (lambda (call) (or (arg-safe-call-p call) (and outer (funcall outer call))))))
+	(qsx::*safe-operator-hook*
 	  (let ((outer qsx::*safe-operator-hook*))
 	    (lambda (form) (or (safe-variable-ref-p form) (safe-ref-p form) (and outer (funcall outer form)))))))
     (funcall thunk)))
@@ -549,12 +576,16 @@ candidates that turn out to capture made plain."
     (let ((safe (make-hash-table :test 'equal)))
       (maphash (lambda (name v)
 		 (declare (ignore name))
-		 (when (eq (variable-info-known v) :safe-candidate)
-		   (if (assoc (variable-info-cell v) lambdas :test #'equal)
-		       (setf (gethash (variable-info-cell v) safe) t)
-		       (setf (variable-info-known v) nil))))
+		 (case (variable-info-known v)
+		   ;; an import another linklet's compilation found safe
+		   (:safe-import (setf (gethash (variable-info-cell v) safe) t))
+		   (:safe-candidate
+		    (if (assoc (variable-info-cell v) lambdas :test #'equal)
+			(setf (gethash (variable-info-cell v) safe) t)
+			(setf (variable-info-known v) nil)))))
 	       (linklet-info-variables info))
       (let ((qsx::*safe-procedures* nil) (qsx::*known-procedures* nil) (qsx::*downward-parameters* nil)
+	    (qsx::*safe-call-hook* #'arg-safe-call-p)
 	    (qsx::*safe-operator-hook* (lambda (form) (and (safe-variable-ref-p form) (gethash (cadr form) safe)))))
 	(loop while (loop with changed = nil
 			  for (cell . l) in lambdas
@@ -638,6 +669,236 @@ one, LOWER-SPLIT's form."
 		      (mapcar (constantly (quoted qs:unassigned)) defined))
 		(cons (core "begin") body))))))
 
+;;; Exports that can't capture, for the linklets that import them
+;;; (cross-linklet knowledge, through compile-linklet's get-import): a
+;;; defined, exported variable never assigned, whose one definition is a
+;;; lambda (or case-lambda) whose body, lowered, makes no call that can
+;;; capture.  Calls among them are assumed safe and the assumption struck
+;;; out where it fails, until none changes.  An importer's references to
+;;; them are (racket:safe-variable-ref cell), which the continuation
+;;; transformation doesn't count as capture sites.  Sound because the
+;;; variable holds that procedure once defined (an earlier call is an
+;;; error, not a capture), and the cache key of an importer's code
+;;; includes the safe imports it was compiled with (COMPILE-LINKLET).
+
+(defun lowered-procedure (x)
+  "The lambda of X, a lowered definition's value: a lambda, a self-call
+letrec, a case-lambda's racket:with-arity, or NAMED's binding; or NIL."
+  (cond ((qsx::lambda-form-p x) x)
+	((atom x) nil)
+	((eq (car x) (core "racket:with-arity")) (lowered-procedure (caddr x)))
+	((and (eq (car x) (core "letrec")) (consp (cadr x)) (null (cdr (cadr x)))
+	      (eq (caddr x) (car (car (cadr x)))))
+	 (lowered-procedure (cadr (car (cadr x)))))
+	;; (let ((f procedure)) f), as (define g (let ([f (case-lambda ...)]) f))
+	((and (qsx::lambda-form-p (car x)) (consp (cadr (car x))) (null (cdr (cadr (car x))))
+	      (eq (caddr (car x)) (car (cadr (car x)))) (consp (cdr x)) (null (cddr x)))
+	 (lowered-procedure (cadr x)))
+	((and (qsx::lambda-form-p (car x)) (consp (cdr x)))
+	 (let ((b (caddr (car x))))
+	   (and (consp b) (consp (cdr b)) (consp (cadr b)) (eq (car (cadr b)) (core "set!"))
+		(lowered-procedure (caddr (cadr b))))))))
+
+(defun lowered-definitions (core targets)
+  "TARGETS (lexicals and cells) -> the value each is assigned in CORE."
+  (let ((found (make-hash-table :test 'equal)))
+    (labels ((walk (x)
+	       (when (consp x)
+		 (cond ((eq (car x) (core "quote")))
+		       ((and (or (eq (car x) (core "set!")) (eq (car x) (core "racket:variable-set!")))
+			     (consp (cdr x)) (consp (cddr x)) (gethash (cadr x) targets))
+			(setf (gethash (cadr x) found) (caddr x))
+			(walk (caddr x)))
+		       (t (loop for y on x while (consp y) do (walk (car y))))))))
+      (walk core))
+    found))
+
+(defun case-lambda-clauses (l)
+  "The clause lambdas of L, if it is LOWER-CASE-LAMBDA's dispatch,
+(lambda args ((lambda (n) (if ... (apply clause args) ...)) (length args))):
+each applied to the whole argument list."
+  (let ((args (cadr l)))
+    (when (and args (symbolp args))
+      (let ((found '()) (ok t))
+	(labels ((walk (x)
+		   (cond ((eq x args) (setq ok nil))
+			 ((atom x))
+			 ((eq (car x) (core "quote")))
+			 ((and (eq (car x) (core "apply")) (qsx::lambda-form-p (cadr x))
+			       (eq (caddr x) args) (null (cdddr x)))
+			  (push (cadr x) found))
+			 ((and (eq (car x) (core "length")) (eq (cadr x) args)))
+			 ((and (eq (car x) (core "racket:arity-error")) (eq (cadr x) args)))
+			 (t (loop for y on x while (consp y) do (walk (car y)))))))
+	  (walk (caddr l)))
+	(and ok found (nreverse found))))))
+
+(defun direct-letrec-calls (x)
+  "X with each call ((letrec ((f lambda)) f) arg ...), a named let's, as
+(letrec ((f lambda)) (f arg ...)), as cp0 makes it before the
+continuation transformation: a call of a known procedure."
+  (cond ((atom x) x)
+	((eq (car x) (core "quote")) x)
+	((and (consp (car x)) (eq (car (car x)) (core "letrec"))
+	      (consp (cadr (car x))) (null (cdr (cadr (car x))))
+	      (eq (caddr (car x)) (car (car (cadr (car x))))) (null (cdddr (car x))))
+	 (let ((f (caddr (car x))))
+	   (list (core "letrec") (direct-letrec-calls (cadr (car x)))
+		 (cons f (mapcar #'direct-letrec-calls (cdr x))))))
+	(t (labels ((each (l) (if (consp l) (cons (direct-letrec-calls (car l)) (each (cdr l))) l)))
+	     (each x)))))
+
+(defparameter *raising-natives*
+  '("racket:raise" "racket:error" "racket:raise-argument-error" "racket:raise-arguments-error"
+    "racket:raise-type-error" "racket:raise-range-error" "racket:raise-result-error"
+    "racket:raise-mismatch-error" "racket:raise-arity-error" "racket:raise-syntax-error"
+    "racket:raise-user-error")
+  "Primitives that raise a non-continuable exception: a continuation
+captured in its handler can't return through their caller (the handler
+returning is itself an error), so to SAFE-EXPORTS a call of one isn't a
+capture site.")
+
+(defun raising-call-p (call)
+  (let ((op (car call)))
+    (and (symbolp op) (qsx::scheme-symbol-p op)
+	 (member (qs:scheme-symbol-name op) *raising-natives* :test #'string=))))
+
+(defun parameter-read-p (call)
+  "Whether CALL reads a primitive parameter, (error-print-width): no
+procedure of the program's is called."
+  (let ((op (car call)))
+    (and (null (cdr call)) (symbolp op) (qsx::scheme-symbol-p op)
+	 (let ((name (qs:scheme-symbol-name op)))
+	   (and (> (length name) 7) (string= name "racket:" :end1 7)
+		(multiple-value-bind (v found) (primitive (subseq name 7))
+		  (and found (parameter-data-of v))))))))
+
+(defun core-keyword-head-p (op)
+  (and (symbolp op)
+       (member (symbol-name op) '("QUOTE" "IF" "BEGIN" "SET!" "DEFINE" "LAMBDA" "LETREC" "LETREC*" "PRIMITIVE" "CASE-LAMBDA")
+	       :test #'string-equal)
+       (qsx::scheme-symbol-p op)))
+
+(defun safe-exports (parsed info core)
+  "The linklet's exports that can't capture (above): an external name, or
+(name . positions) for one that can't if the procedures at those argument
+positions can't, as with map's procedure.  Every procedure the linklet
+defines once is judged, so that its exports' helpers are known too."
+  (let ((candidates '())		; (external-or-nil target)
+	(externals (make-hash-table :test 'eq)))
+    (loop for (internal . external) in (parsed-linklet-exports parsed)
+	  do (setf (gethash internal externals) external))
+    (maphash (lambda (name v)
+	       (when (and (member (variable-info-kind v) '(:defined :defined-exported))
+			  (not (variable-info-mutated v)))
+		 (push (list (gethash name externals) (or (variable-info-core v) (variable-info-cell v)))
+		       candidates)))
+	     (linklet-info-variables info))
+    (when (some #'first candidates)
+      (let* ((targets (let ((h (make-hash-table :test 'equal)))
+			(dolist (c candidates) (setf (gethash (second c) h) t))
+			h))
+	     (definitions (lowered-definitions core targets))
+	     ;; (external target lambda clauses): a case-lambda's clauses are
+	     ;; each judged on its own
+	     (lambdas (loop for (external target) in candidates
+			    for l = (lowered-procedure (gethash target definitions))
+			    when l collect (list external target l (or (case-lambda-clauses l) (list l)))))
+	     ;; target -> T (safe) or a list of positions (safe given those)
+	     (status (make-hash-table :test 'equal)))
+	(dolist (c lambdas) (setf (gethash (second c) status) t))
+	(labels ((target-of (op)
+		   (cond ((symbolp op) op)
+			 ((and (consp op) (consp (cdr op))
+			       (or (eq (car op) (core "racket:safe-variable-ref"))
+				   (eq (car op) (core "racket:variable-ref"))))
+			  (cadr op))))
+		 (only-calls-position-p (op i)
+		   ;; whether a call with operator OP doesn't call its I'th
+		   ;; argument other than as a safe procedure would be
+		   (let ((st (and (not (core-keyword-head-p op)) (gethash (target-of op) status))))
+		     (or (eq st t) (and (consp st) (member i st))
+			 (and (arg-safe-ref-p op) (member i (cadr (cadr op))))
+			 (safe-ref-p op)
+			 (and (safe-variable-ref-p op) (not (gethash (cadr op) targets)))
+			 (let ((name (qsx::primitive-name op)))
+			   (and name
+				(or (not (member name qsx::*calling-primitives* :test #'string=))
+				    ;; a primitive that only calls it (map's procedure)
+				    (member i (cdr (assoc name qsx::*procedure-arguments* :test #'string=)))))))))
+		 (only-called-p (p body)
+		   ;; P is only called in BODY, or passed where it's only called
+		   (labels ((ok (x)
+			      (cond ((eq x p) nil)
+				    ((atom x) t)
+				    ((eq (car x) (core "quote")) t)
+				    ((and (eq (car x) (core "set!")) (eq (cadr x) p)) nil)
+				    ((core-keyword-head-p (car x))
+				     (loop for y on (cdr x) always (if (consp y) (ok (car y)) (not (eq y p)))))
+				    (t (and (or (eq (car x) p) (ok (car x)))
+					    (loop for y on (cdr x) for i from 0
+						  always (cond ((not (consp y)) (not (eq y p)))
+							       ((eq (car y) p) (only-calls-position-p (car x) i))
+							       (t (ok (car y))))))))))
+		     (ok body)))
+		 (own-call-safe-p (call)
+		   ;; a call of one of these procedures, safe given its arguments
+		   (let ((st (and (consp call) (not (core-keyword-head-p (car call)))
+				  (gethash (target-of (car call)) status))))
+		     (and (consp st)
+			  (every (lambda (i) (let ((arg (nthcdr (1+ i) call)))
+					       (or (null arg) (qsx::safe-procedure-p (car arg)))))
+				 st))))
+		 (judge-clause (l)
+		   ;; T, a list of positions, or NIL
+		   (let* ((formals (cadr l))
+			  (proper (and (listp formals) (null (cdr (last formals)))))
+			  (params (and proper
+				       (loop for p in formals for i from 0
+					     when (only-called-p p (caddr l)) collect i))))
+		     (flet ((captures-p (assumed)
+			      (let ((qsx::*safe-procedures* (make-hash-table :test 'eq)))
+				(loop for target being the hash-keys of status using (hash-value st)
+				      do (when (and (eq st t) (symbolp target))
+					   (setf (gethash target qsx::*safe-procedures*) t)))
+				(dolist (i assumed) (setf (gethash (nth i formals) qsx::*safe-procedures*) t))
+				;; and the body's own letrecs and named lets
+				(let* ((body (direct-letrec-calls (caddr l)))
+				       (qsx::*safe-procedures* (qsx::find-safe-procedures body)))
+				  (qsx::may-capture-p body)))))
+		       (cond ((not (captures-p '())) t)
+			     ((and params (not (captures-p params))) params)))))
+		 (judge (clauses)
+		   (let ((js (mapcar #'judge-clause clauses)))
+		     (cond ((every (lambda (j) (eq j t)) js) t)
+			   ((every #'identity js)
+			    (sort (remove-duplicates (loop for j in js when (consp j) append j)) #'<))))))
+	  (let ((qsx::*known-procedures* nil) (qsx::*downward-parameters* nil)
+		(qsx::*safe-call-hook* (lambda (call) (or (arg-safe-call-p call) (own-call-safe-p call) (raising-call-p call) (parameter-read-p call))))
+		(qsx::*safe-operator-hook*
+		  (lambda (form)
+		    (or (safe-ref-p form)
+			(and (safe-variable-ref-p form)
+			     ;; an import found safe, or one of these cells
+			     (or (not (gethash (cadr form) targets)) (eq (gethash (cadr form) status) t)))
+			;; a split linklet's cell of one of these found safe
+			(and (consp form) (eq (car form) (core "racket:variable-ref"))
+			     (eq (gethash (cadr form) status) t))))))
+	    ;; from the most optimistic, judged again until nothing changes
+	    (loop repeat 30
+		  for changed = nil
+		  do (loop for (nil target nil clauses) in lambdas
+			   do (let ((new (judge clauses)))
+				(unless (equal new (gethash target status))
+				  (setq changed t)
+				  (if new (setf (gethash target status) new) (remhash target status)))))
+		  until (not changed)
+		  finally (when changed (clrhash status)))))
+	(loop for (external target) in lambdas
+	      for st = (and external (gethash target status))
+	      when (eq st t) collect external
+	      when (consp st) collect (cons external st))))))
+
 (defun compile-linklet-form (form &key name imports-known options)
   "A linklet S-expression to a COMPILED-LINKLET (cache.lisp).  OPTIONS
 are compile-linklet's: serializable unsafe static use-prompt
@@ -647,6 +908,7 @@ uninterned-literal quick."
 	 (parsed (analyse (parse-linklet (decorrelate form info)) info imports-known))
 	 (core (lower parsed info))
 	 (compiled (make-compiled-linklet core :name name :strategy "linklet")))
+    (setf (compiled-linklet-safe-exports compiled) (safe-exports parsed info core))
     (setf (compiled-linklet-imports compiled)
 	  (mapcar (lambda (set) (mapcar #'car set)) (parsed-linklet-imports parsed))
 	  (compiled-linklet-exports compiled)

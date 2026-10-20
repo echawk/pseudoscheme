@@ -27,6 +27,7 @@
   (imports '())				; per import set, the external names
   (exports '())				; the external names of the exports
   (export-internals '())		; ... and their names inside the linklet
+  (safe-exports '())			; the exports that are procedures that can't capture
   (source-key nil)			; a string or a digest identifying its source, for the cache
   (source-form nil)			; the linklet as given, for .zo files
   (function nil))			; once loaded: the instantiation function

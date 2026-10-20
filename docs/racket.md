@@ -127,12 +127,27 @@ What changed:
   symbol allocates nothing (every mode); the reader's tokens are collected
   in a per-thread buffer.
 
+Cross-linklet knowledge (2026-10-19): each compiled linklet records its
+safe exports (SAFE-EXPORTS, src/racket/linklet/compiler.lisp): procedures
+defined once whose bodies can't capture, or can't if the procedures at
+some argument positions can't (map's procedure). A module instance keeps
+its body's safe exports, and a linklet compiled against it, through
+`compile-linklet`'s `get-import`, refers to them as
+`(racket:safe-variable-ref cell)` or `(racket:arg-safe-ref 'positions
+cell)`, which the continuation transformation doesn't count as capture
+sites (the latter when the arguments there are safe procedures). The
+importer's cache key includes what it was told. Racket's collections
+yield about 1,170 safe exports and 45 conditional ones;
+`QUASISCHEME_RACKET_SAFE_IMPORTS=0` turns it off. No benchmark moved
+yet (instruction counts within 4% either way): racket/private/map's
+`map2` and friends don't qualify, as their helpers call procedures
+imported through cells the analysis doesn't resolve (a split linklet's
+`racket:variable-ref`s, `apply` of a computed procedure).
+
 Left: what remains is mostly Racket's own code compiled from linklets
 (the expander's reader for `read`, racket/base's `map` and friends),
-whose calls of imported procedures are capture sites: cross-linklet
-knowledge (which exports can't capture, read through `compile-linklet`'s
-`get-import`, which is ignored now) would let the continuation
-transformation see through them. Structs are still two objects, an
+whose calls of imported procedures are capture sites until the analysis
+above finds them safe. Structs are still two objects, an
 instance and its fields vector, which chaperones share.
 
 ## The REPL

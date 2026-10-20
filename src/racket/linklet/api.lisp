@@ -147,18 +147,59 @@ time units), and how many: QUASISCHEME_RACKET_STATS prints them.")
 	    (/ (getf *stats* :lower) internal-time-units-per-second)
 	    (/ (getf *stats* :compile) internal-time-units-per-second))))
 
-(defun compile-linklet (form &optional name key)
+(defun compile-linklet (form &optional name key imports-known)
   "compile-linklet: FORM (an S-expression or correlated) to a linklet.
-KEY, from a .zo, is the cache key it was compiled under."
+KEY, from a .zo, is the cache key it was compiled under.  IMPORTS-KNOWN:
+per import set, the safe exports of the linklet it imports
+(IMPORTS-SAFE-EXPORTS)."
   (incf (getf *stats* :linklets))
   (install-letrec-check)
   (timing (:lower)
-    (let ((compiled (compile-linklet-form form :name name)))
-      ;; its compiled code is cached, keyed by the linklet as given
+    (let ((compiled (compile-linklet-form form :name name :imports-known imports-known)))
+      ;; its compiled code is cached, keyed by the linklet as given and
+      ;; the imports it was told are safe (its code depends on them)
       (unless (compiled-linklet-source-key compiled)
-	(setf (compiled-linklet-source-key compiled) (or key (linklet-hash form))))
+	(setf (compiled-linklet-source-key compiled)
+	      (or key (if (some #'identity imports-known)
+			  (linklet-hash (list form imports-known))
+			  (linklet-hash form)))))
       (setf (compiled-linklet-source-form compiled) form)
       compiled)))
+
+(defvar *instance-safe-exports* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "A module's linklet instance -> its linklet's safe exports.")
+
+(defun module-body-linklet-p (compiled)
+  "Whether COMPILED is a module's body (its name a hasheq whose module is
+not #f), not a top-level form's, whose namespace may define its names
+again."
+  (let ((name (compiled-linklet-name compiled)))
+    (and (or (rhash-p name) (ihash-p name))
+	 (multiple-value-bind (m found) (lookup* name (rsym "module"))
+	   (and found (truthy m))))))
+
+(defun note-instance-safe-exports (compiled instance)
+  "Record, for the linklets compiled against INSTANCE, which of the
+variables COMPILED, a module body, defines in it are safe: each
+definition replaces what was known of the name."
+  (when (module-body-linklet-p compiled)
+    (let ((safe (compiled-linklet-safe-exports compiled))
+	  (known (gethash instance *instance-safe-exports*)))
+      (setq known (set-difference known (compiled-linklet-exports compiled)))
+      (setf (gethash instance *instance-safe-exports*) (union safe known)))))
+
+(defun imports-safe-exports (import-keys get-import)
+  "Per import set, the safe exports (COMPILED-LINKLET-SAFE-EXPORTS) of the
+linklet or module instance GET-IMPORT gives for its key in IMPORT-KEYS, a
+vector; NIL where there is none.  Turned off by
+QUASISCHEME_RACKET_SAFE_IMPORTS=0."
+  (when (and (functionp get-import) (vectorp import-keys)
+	     (not (equal (uiop:getenv "QUASISCHEME_RACKET_SAFE_IMPORTS") "0")))
+    (loop for key across import-keys
+	  collect (and (truthy key)
+		       (let ((l (ignore-errors (funcall get-import key))))
+			 (cond ((compiled-linklet-p l) (compiled-linklet-safe-exports l))
+			       ((linklet-instance-p l) (values (gethash l *instance-safe-exports*)))))))))
 
 (defun linklet-text (form)
   "FORM, a linklet, printed without its correlated objects' locations:
@@ -273,8 +314,9 @@ with one, the body's result, the exports defined in TARGET."
 						 (racket-error "instantiate-linklet"
 							       "variable not found in imported instance: ~A"
 							       (rname n))))))
-	 (exports (loop for n in (compiled-linklet-exports compiled)
-			collect (instance-variable instance n t)))
+	 (exports (prog1 (loop for n in (compiled-linklet-exports compiled)
+			       collect (instance-variable instance n t))
+		    (note-instance-safe-exports compiled instance)))
 	 (result (multiple-value-list
 		  ;; the frames a continuation captured in the body can reach:
 		  ;; the body's (inside an enclosing base, all of that one's)
@@ -313,11 +355,12 @@ it with (primitive-table '#%linklet) of the pinned release.")
 (defparameter *linklet-functions*
   `(("linklet?" ,(lambda (x) (bool (compiled-linklet-p x))))
     ("compile-linklet" ,(lambda (form &optional (name qs:false) (import-keys qs:false) get-import options)
-			  (declare (ignore get-import options))
-			  ;; with import keys, they come back too (we use no
-			  ;; cross-linklet knowledge yet, so unchanged)
+			  (declare (ignore options))
+			  ;; with import keys, they come back too, unchanged; the
+			  ;; linklets they name tell which of their exports are safe
 			  (if (truthy import-keys)
-			      (values (compile-linklet form name) import-keys)
+			      (values (compile-linklet form name nil (imports-safe-exports import-keys get-import))
+				      import-keys)
 			      (compile-linklet form name))))
     ("eval-linklet" ,#'identity)
     ("instantiate-linklet" ,(lambda (linklet imports &optional (target qs:false) use-prompt)

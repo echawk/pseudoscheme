@@ -1061,7 +1061,12 @@ are Lisp symbols are the transformation's own, or the translator's."
 		      (or (zerop n) (and (= n 1) (gethash v placeholders)))
 		      (car ls)))))
       (scan form)
-      (let ((safe (make-hash-table :test 'eq))
+      ;; seeded with what's known outside FORM, when anything is (--racket's
+      ;; SAFE-EXPORTS judges a procedure's body so)
+      (let ((safe (let ((h (make-hash-table :test 'eq)))
+		    (when *safe-procedures*
+		      (maphash (lambda (k v) (setf (gethash k h) v)) *safe-procedures*))
+		    h))
 	    (known (make-hash-table :test 'eq))
 	    (bodies '()))
 	(maphash (lambda (v ls)
@@ -1238,9 +1243,15 @@ position)."
       (and (equal (primitive-name (car call)) "call-with-values")
 	   (cdr call) (safe-procedure-p (cadr call)))))
 
+(defvar *safe-call-hook* nil
+  "NIL, or a function of a combination: true if the call can't capture
+though its operator isn't known safe (--racket's imports that are safe
+when the procedures passed them are, src/racket/linklet/compiler.lisp).")
+
 (defun capturing-call-p (call)
   "Whether CALL, a combination, may capture."
-  (and (calling-call-p (car call)) (not (safe-primitive-call-p call))))
+  (and (calling-call-p (car call)) (not (safe-primitive-call-p call))
+       (not (and *safe-call-hook* (funcall *safe-call-hook* call)))))
 
 (defun may-capture-p (e)
   "Whether evaluating E (not the bodies of the lambdas in it, unless
