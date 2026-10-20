@@ -30,6 +30,7 @@
   (safe-exports '())			; the exports that are procedures that can't capture
   (source-key nil)			; a string or a digest identifying its source, for the cache
   (source-form nil)			; the linklet as given, for .zo files
+  (imports-known nil)			; what it was compiled knowing of its imports
   (function nil))			; once loaded: the instantiation function
 
 (defvar *racket-signature* nil)
@@ -128,15 +129,16 @@ runs it in SBCL's interpreter instead (sb-fasteval, if SBCL has it)."
 
 (defun whole-function (compiled)
   "The instantiation function of COMPILED, not split: from its fasl if
-there is one, else compiled now, into the cache if COMPILED has a key."
+there is one, else compiled now, into the cache if COMPILED has a key.
+NIL if it has a key and SBCL can't compile it (WHOLE-OR-SPLIT-FUNCTION)."
   (let* ((form (compiled-linklet-form compiled))
 	 (key (linklet-key compiled))
 	 (fasl (and key (linklet-fasl key))))
-    (or (and fasl (car (ignore-errors (load-split-fasl fasl 1))))
-	(and fasl (compile-into-cache-p)
-	     (write-fasl-or-mark fasl (list form))
-	     (car (ignore-errors (load-split-fasl fasl 1))))
-	(qsx:host-eval form))))
+    (cond ((not fasl) (qsx:host-eval form))
+	  ((car (ignore-errors (load-split-fasl fasl 1))))
+	  ((not (compile-into-cache-p)) (qsx:host-eval form))
+	  ((write-fasl-or-mark fasl (list form))
+	   (car (ignore-errors (load-split-fasl fasl 1)))))))
 
 (defun split-functions (compiled)
   "The functions of split linklet COMPILED's forms: from its fasl if

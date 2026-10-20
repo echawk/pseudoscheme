@@ -163,7 +163,8 @@ per import set, the safe exports of the linklet it imports
 	      (or key (if (some #'identity imports-known)
 			  (linklet-hash (list form imports-known))
 			  (linklet-hash form)))))
-      (setf (compiled-linklet-source-form compiled) form)
+      (setf (compiled-linklet-source-form compiled) form
+	    (compiled-linklet-imports-known compiled) imports-known)
       compiled)))
 
 (defvar *instance-safe-exports* (make-hash-table :test 'eq :weakness :key :synchronized t)
@@ -271,9 +272,30 @@ objects: compiled now if need be."
 	(form (compiled-linklet-form compiled)))
     (call-with-safe-cells
      (lambda ()
-       (if (and (consp form) (eq (car form) (qsx::sym "racket:split")))
+       (if (split-form-p form)
 	   (split-function (cadr form) (split-functions compiled))
-	   (whole-function compiled))))))
+	   (or (whole-function compiled)
+	       (if (compiled-linklet-source-form compiled)
+		   (let ((split (split-again compiled)))
+		     (split-function (cadr (compiled-linklet-form split)) (split-functions split)))
+		   (qsx:host-eval form))))))))
+
+(defun split-form-p (form)
+  (and (consp form) (eq (car form) (qsx::sym "racket:split"))))
+
+(defun split-again (compiled)
+  "COMPILED, a whole linklet SBCL can't compile (code past arm64's
+branch reach, or an SBCL failure: \"full call to DATA-VECTOR-REF\"),
+lowered again split, so that its forms are compiled one by one: one
+form that fails is interpreted, not the whole linklet.  Its fasl has a
+key of its own (another strategy)."
+  (let ((split (compile-linklet-form (compiled-linklet-source-form compiled)
+				     :name (compiled-linklet-name compiled)
+				     :imports-known (compiled-linklet-imports-known compiled)
+				     :split t)))
+    (setf (compiled-linklet-strategy split) "linklet-split"
+	  (compiled-linklet-source-key split) (compiled-linklet-source-key compiled))
+    split))
 
 (defun split-function (n functions)
   "A split linklet's instantiation: the cells (the variables given, then

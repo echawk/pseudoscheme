@@ -45,6 +45,10 @@
 ;;; ------------------------------------------------------------------
 ;;; Names
 
+(defvar *safe-locals* (make-hash-table :test 'eq)
+  "Lexicals bound to struct procedures by a let-values or letrec-values
+(SAFE-LOCAL-STRUCT-IDS), whose references are (racket:safe-ref lexical).")
+
 (defvar *lambda-depth* 0
   "How many lambdas the expression being lowered is in: 0 at a linklet's
 outer level, whose code runs once.")
@@ -172,7 +176,9 @@ can't capture a continuation (SAFE-EXPORTS), or NIL."
 (defun lookup (name env)
   "NAME's core reference: a lexical, a top-level name's, or a primitive's."
   (let ((local (assoc name env)))
-    (cond (local (cdr local))
+    (cond (local (if (gethash (cdr local) *safe-locals*)
+		     (list (core "racket:safe-ref") (cdr local))
+		     (cdr local)))
 	  ((let ((v (gethash name (linklet-info-variables *info*))))
 	     (and v (case (variable-info-kind v)
 		      ((:defined :defined-exported)
@@ -299,6 +305,18 @@ returns (TRANSLATE-CORE makes it the function's name)."
 	 (list* (car core) (cadr core) (name-lambda (caddr core) id) (cdddr core)))
 	(t core)))
 
+(defun note-safe-local-structs (bindings body env)
+  "Mark in *SAFE-LOCALS* the lexicals (in ENV) that BINDINGS bind to struct
+procedures (STRUCT-SAFE-IDS), when nothing assigns them."
+  (dolist (b bindings)
+    (destructuring-bind (ids rhs) b
+      (when (and (consp ids) (cdr ids))
+	(let ((safe (struct-safe-ids (list (rsym "define-values") ids rhs) '())))
+	  (dolist (id safe)
+	    (unless (or (assigned-p id body) (some (lambda (b2) (assigned-p id (cadr b2))) bindings))
+	      (let ((l (assoc id env)))
+		(when l (setf (gethash (cdr l) *safe-locals*) t))))))))))
+
 (defun lower-let-values (bindings body env &optional recursive)
   "let-values: each right-hand side in the outer ENV, then all bound.
 letrec-values: as Racket's, a letrec* (left to right, each variable
@@ -307,6 +325,7 @@ assigned as its right-hand side returns)."
       (let* ((ids (loop for (ids) in bindings append ids))
 	     (env (bind ids env))
 	     (vars (mapcar (lambda (id) (cdr (assoc id env))) ids)))
+       (note-safe-local-structs bindings body env)
        (if (procedures-only-p bindings body)
 	;; every right-hand side a lambda, none assigned: a letrec the
 	;; translator makes into labels, whose calls SBCL compiles as local
@@ -326,6 +345,7 @@ assigned as its right-hand side returns)."
 		     (lower-body body inner-env)
 		     (destructuring-bind ((ids rhs) &rest more) bindings
 		       (multiple-value-bind (inner-env formals) (bind ids inner-env)
+			 (note-safe-local-structs (list (list ids rhs)) body inner-env)
 			 (if (and (consp ids) (null (cdr ids)))
 			     (list (list (core "lambda") formals (nest more inner-env))
 				   (name-lambda (lower-expr rhs env) (car ids)))
@@ -645,11 +665,17 @@ candidates that turn out to capture made plain."
       (let ((qsx::*safe-procedures* nil) (qsx::*known-procedures* nil) (qsx::*downward-parameters* nil)
 	    (qsx::*safe-call-hook* #'arg-safe-call-p)
 	    (qsx::*safe-operator-hook* (lambda (form) (and (safe-variable-ref-p form) (gethash (cadr form) safe)))))
-	(loop while (loop with changed = nil
-			  for (cell . l) in lambdas
-			  when (and (gethash cell safe) (qsx::may-capture-p (caddr l)))
-			    do (remhash cell safe) (setq changed t)
-			  finally (return changed))))
+	;; each body with its own named lets and letrecs known (as
+	;; SAFE-EXPORTS judges them)
+	(let ((bodies (loop for (cell . l) in lambdas
+			    collect (cons cell (direct-letrec-calls (caddr l))))))
+	  (loop while (loop with changed = nil
+			    for (cell . body) in bodies
+			    when (and (gethash cell safe)
+				      (let ((qsx::*safe-procedures* (qsx::find-safe-procedures body)))
+					(qsx::may-capture-p body)))
+			      do (remhash cell safe) (setq changed t)
+			    finally (return changed)))))
       (labels ((plain (x)
 		 (cond ((atom x) x)
 		       ((and (safe-variable-ref-p x) (not (gethash (cadr x) safe)))
@@ -1002,12 +1028,14 @@ assigned their host primitives after BODY, whose value it still returns."
 					(list r))))
 		    (caddr core))))))
 
-(defun compile-linklet-form (form &key name imports-known options)
+(defun compile-linklet-form (form &key name imports-known options split)
   "A linklet S-expression to a COMPILED-LINKLET (cache.lisp).  OPTIONS
 are compile-linklet's: serializable unsafe static use-prompt
-uninterned-literal quick."
+uninterned-literal quick.  SPLIT: split, whatever its size."
   (declare (ignore options))
-  (let* ((info (make-linklet-info))
+  (let* ((*split-size* (if split -1 *split-size*))
+	 (*safe-locals* (make-hash-table :test 'eq))
+	 (info (make-linklet-info))
 	 (parsed (analyse (parse-linklet (decorrelate form info)) info imports-known))
 	 (core (lower parsed info))
 	 (compiled nil))

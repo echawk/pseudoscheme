@@ -131,6 +131,18 @@ linklets (after every instance is filled: #%linklet's too)."
     (setf (svref *loading-split-functions* i) f))
   (qsx:defhost "racket:call-with-mark" (key value thunk)
     (qs-r6rs::call-with-mark key value thunk))
+  ;; port operations that take no procedure: they call the program's
+  ;; code only through a custom port's procedures, from Lisp, where a
+  ;; continuation captured can't be re-entered anyway, so a call of one
+  ;; needn't be a capture site
+  (qsx::register-primitive-names
+   (loop for n in '("read-char" "read-byte" "read-bytes" "peek-bytes" "read-string" "peek-string"
+		    "peek-char" "peek-byte" "read-line" "read-bytes-line" "read-bytes!" "read-string!"
+		    "char-ready?" "byte-ready?" "write-char" "newline" "write-byte" "write-string"
+		    "write-bytes" "flush-output" "port-count-lines!" "port-next-location" "file-position*"
+		    "close-input-port" "close-output-port" "get-output-string" "get-output-bytes"
+		    "open-input-file" "open-output-file" "open-input-output-file")
+	 when (nth-value 1 (primitive n)) collect (concatenate 'string "racket:" n)))
   ;; natives that raise a non-continuable exception: a handler can't
   ;; return to their caller, so a call of one isn't a capture site
   ;; (compiler.lisp, *RAISING-NATIVES*)
