@@ -216,7 +216,8 @@ fresh lexicals; and the core formals."
 
 (defun lower-lambda (formals body env)
   (multiple-value-bind (env formals) (bind formals env)
-    (list (core "lambda") formals (lower-body body env))))
+    (let ((*lambda-depth* (1+ *lambda-depth*)))
+      (list (core "lambda") formals (lower-body body env)))))
 
 (defun rest-formal (formals)
   "The rest argument of FORMALS (a b . c), if it has one."
@@ -273,6 +274,27 @@ and none of them assigned in them or BODY?"
 			       (some (lambda (b2) (assigned-p (car (car b)) (cadr b2))) bindings)))
 	       bindings)))
 
+(defvar *lambda-depth* 0
+  "How many lambdas the expression being lowered is in: 0 at a linklet's
+outer level, whose code runs once.")
+
+(defun name-lambda (core id)
+  "CORE, a lowered expression; if it is a lambda (or a case-lambda's
+racket:with-arity), with '(:racket-name . ID) first in its body: the
+name Racket infers for a procedure a let binds, which object-name
+returns (TRANSLATE-CORE makes it the function's name)."
+  (cond ((and (zerop *lambda-depth*)
+	      (or (qsx::lambda-form-p core) (and (consp core) (eq (car core) (core "racket:with-arity")))))
+	 ;; at the outer level, which runs once: named as it's made, which
+	 ;; nothing the continuation transformation does can lose
+	 (list (core "racket:named") (quoted id) core))
+	((and (qsx::lambda-form-p core) (null (cdddr core)))
+	 (list (car core) (cadr core)
+	       (list (core "begin") (quoted (cons :racket-name id)) (caddr core))))
+	((and (consp core) (eq (car core) (core "racket:with-arity")))
+	 (list* (car core) (cadr core) (name-lambda (caddr core) id) (cdddr core)))
+	(t core)))
+
 (defun lower-let-values (bindings body env &optional recursive)
   "let-values: each right-hand side in the outer ENV, then all bound.
 letrec-values: as Racket's, a letrec* (left to right, each variable
@@ -302,7 +324,7 @@ assigned as its right-hand side returns)."
 		       (multiple-value-bind (inner-env formals) (bind ids inner-env)
 			 (if (and (consp ids) (null (cdr ids)))
 			     (list (list (core "lambda") formals (nest more inner-env))
-				   (lower-expr rhs env))
+				   (name-lambda (lower-expr rhs env) (car ids)))
 			     (list (core "call-with-values")
 				   (list (core "lambda") '() (lower-expr rhs env))
 				   (list (core "lambda") formals (nest more inner-env)))))))))
@@ -346,14 +368,26 @@ ID being calls of SELF."
 	 (*self-call* (cons id self)))
     (list (core "letrec") (list (list self (lower-expr rhs env))) self)))
 
+(defun object-named (id rhs set env)
+  "SET, the lowered assignment of ID, a top-level definition, to RHS; and
+when RHS is a lambda, (racket:named 'ID ID) after it: the procedure's
+object-name, which compiled code doesn't keep when the continuation
+transformation makes it a state machine behind an anonymous wrapper.
+After the assignment, so that analyses still see the lambda assigned."
+  (if (and (not (assoc id env)) (or (form-p rhs "lambda") (form-p rhs "case-lambda")))
+      (list (core "begin") set (list (core "racket:named") (quoted id) (lookup id env)))
+      set))
+
 (defun lower-assignment (ids rhs env)
   "IDS (already bound in ENV) assigned RHS's values."
   (if (and (consp ids) (null (cdr ids)))
-      (lower-set (car ids)
-		 (if (self-call-p (car ids) rhs env)
-		     (lower-self-procedure (car ids) rhs env)
-		     (named (car ids) rhs (lower-expr rhs env) env))
-		 env)
+      (object-named (car ids) rhs
+		    (lower-set (car ids)
+			       (if (self-call-p (car ids) rhs env)
+				   (lower-self-procedure (car ids) rhs env)
+				   (named (car ids) rhs (lower-expr rhs env) env))
+			       env)
+		    env)
       (let ((temps (loop repeat (length ids) collect (fresh-lexical "v"))))
 	(list (core "call-with-values")
 	      (list (core "lambda") '() (lower-expr rhs env))
@@ -559,6 +593,9 @@ candidates that turn out to capture made plain."
     (dolist (form forms)
       ;; (lambda (instance cells) (begin (racket:variable-set! cell value) '#<void>))
       (let ((set (and (consp (caddr form)) (consp (cdr (caddr form))) (cadr (caddr form)))))
+	;; OBJECT-NAMED's (begin (racket:variable-set! cell value) (racket:named ...))
+	(when (and (consp set) (eq (car set) (core "begin")) (consp (cdr set)))
+	  (setq set (cadr set)))
 	(when (and (consp set) (eq (car set) (core "racket:variable-set!")))
 	  (let* ((value (caddr set))
 		 (l (labels ((procedure (x)

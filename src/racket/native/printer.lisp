@@ -324,6 +324,16 @@ the trailing ones equal to the one before."
 	    ((extflonum-p x) (write-string (extflonum-str x) stream))
 	    ((numberp x) (write-string (racket-number-string x) stream))
 	    ((eq mode :display) (host-display x stream))
+	    ;; a symbol with a | in it: Racket's \-escapes, not R7RS's
+	    ;; |...\|...|, which Racket reads differently (a backslash between
+	    ;; bars is itself); the first character escaped too, so that it
+	    ;; can't read as a number
+	    ((and (symbolp x) x (not (eq x qs:true)) (not (eq x qs:false)) (find #\| (rname x)))
+	     (let ((name (rname x)))
+	       (loop for c across name for i from 0
+		     do (when (or (zerop i) (find c "|\\()[]{}\"';`,#") (sb-unicode:whitespace-p c))
+			  (write-char #\\ stream))
+			(write-char c stream))))
 	    (t (host-write x stream))))))
 
 (defun print-quoted (x stream)

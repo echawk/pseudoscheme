@@ -134,6 +134,14 @@
 		   (lambda (p) (make-rpath (let ((s (path-string "current-directory" p)))
 					     (if (directory-string-p s) s (concatenate 'string s "/")))))))
 (define-primitive "#%kernel" "current-directory" *current-directory*)
+
+(defun reset-current-directory ()
+  "The current-directory parameter's root value: the process's working
+directory when it starts, not when the image was saved."
+  (setf (car (parameter-cell (gethash *current-directory* *parameters*)))
+	(make-rpath (namestring (uiop:getcwd)))))
+
+#+sbcl (pushnew 'reset-current-directory sb-ext:*init-hooks*)
 (define-primitive "#%kernel" "current-directory-for-user" *current-directory*)
 (define-primitive "#%kernel" "current-load-relative-directory" (make-parameter* qs:false))
 (define-primitive "#%kernel" "current-write-relative-directory" (make-parameter* qs:false))
@@ -149,7 +157,14 @@
 ;;; ------------------------------------------------------------------
 ;;; The filesystem
 
-(defun native-path (who p) (path-string who p))
+(defun native-path (who p)
+  "P, a path or string, as the operating system is to be given it: a
+relative one against Racket's current-directory parameter (which
+parameterize changes without the process's working directory)."
+  (let ((s (path-string who p)))
+    (if (or (absolute-string-p s) (zerop (length s)))
+	s
+	(join (path-string who (funcall *current-directory*)) s))))
 
 (defnative "file-exists?" (p) (:leaf t)
   (let ((s (native-path "file-exists?" p)))

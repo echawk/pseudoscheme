@@ -133,7 +133,8 @@ keyword (a macro or special form of the translator's)."
 	finally (return (if (and l (symbolp l)) (append vars (list l)) vars))))
 
 (defun name-marker-p (e)
-  (and (quote-p e) (consp (cadr e)) (eq (car (cadr e)) :procedure-name)))
+  ;; psyntax's, or --racket's (src/racket/linklet/compiler.lisp)
+  (and (quote-p e) (consp (cadr e)) (member (car (cadr e)) '(:procedure-name :racket-name))))
 
 ;;; ------------------------------------------------------------------
 ;;; Analysis: every variable the form binds, how, and whether it's assigned

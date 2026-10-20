@@ -274,16 +274,16 @@
 ;;; Files, time, the process
 
 (defnatives "#%kernel"
-  ("delete-file" (p) (delete-file (path-string "delete-file" p)) *void*)
-  ("delete-directory" (p) (sb-posix:rmdir (path-string "delete-directory" p)) *void*)
+  ("delete-file" (p) (delete-file (native-path "delete-file" p)) *void*)
+  ("delete-directory" (p) (sb-posix:rmdir (native-path "delete-directory" p)) *void*)
   ("make-directory" (p &optional perms) (declare (ignore perms))
-   (sb-posix:mkdir (path-string "make-directory" p) #o777) *void*)
+   (sb-posix:mkdir (native-path "make-directory" p) #o777) *void*)
   ("copy-file" (from to &optional exists-ok?) (declare (ignore exists-ok?))
-   (uiop:copy-file (path-string "copy-file" from) (path-string "copy-file" to)) *void*)
+   (uiop:copy-file (native-path "copy-file" from) (native-path "copy-file" to)) *void*)
   ("rename-file-or-directory" (from to &optional exists-ok?) (declare (ignore exists-ok?))
-   (sb-posix:rename (path-string "rename-file-or-directory" from) (path-string "rename-file-or-directory" to)) *void*)
+   (sb-posix:rename (native-path "rename-file-or-directory" from) (native-path "rename-file-or-directory" to)) *void*)
   ("file-or-directory-type" (p &optional must-exist?)
-   (let ((st (ignore-errors (sb-posix:lstat (path-string "file-or-directory-type" p)))))
+   (let ((st (ignore-errors (sb-posix:lstat (native-path "file-or-directory-type" p)))))
      (cond ((null st) (if (truthy (or must-exist? qs:false))
 			  (racket-error "file-or-directory-type" "access failed~%  path: ~A" (path-string "" p))
 			  qs:false))

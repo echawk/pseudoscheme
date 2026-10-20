@@ -179,6 +179,10 @@ to VALUE, after PROPERTY's guard."
 		    -1))
 	  s))))
 
+(defvar *renamed-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "Procedures -> their object-name (basics.lisp; defined here too, as the
+struct types exn.lisp makes are named before basics.lisp loads).")
+
 (defun simple-type-p (type)
   "Whether TYPE and its ancestors have no guards and no auto fields: a
 constructor's arguments are then the fields, in order."
@@ -352,6 +356,15 @@ numbers of arguments."
 	    (predicate (lambda (x) (bool (and (struct-instance-p x) (subtype-p (struct-of-type x) type))))))
 	(setf (struct-type-accessor type) accessor
 	      (struct-type-mutator type) mutator)
+	;; their names, as Racket's: make-NAME (or the constructor name),
+	;; NAME?, NAME-ref, NAME-set!
+	(flet ((named (f s) (setf (gethash f *renamed-procedures*) (rsym s))))
+	  (named constructor (if (struct-type-constructor-name type)
+				 (rname (struct-type-constructor-name type))
+				 (format nil "make-~A" who)))
+	  (named predicate (format nil "~A?" who))
+	  (named accessor who-ref)
+	  (named mutator who-set))
 	(note-struct-procedure constructor :constructor type)
 	(note-struct-procedure predicate :predicate type)
 	(note-struct-procedure accessor :accessor type)
@@ -404,7 +417,7 @@ TYPE or a subtype: its fields can be read and written directly."
 
 (defnative "make-struct-field-accessor" (accessor-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-accessor")
-  (declare (ignore field-name contract realm))
+  (declare (ignore contract realm))
   (let* ((type (cdr (gethash accessor-proc *struct-procedures*)))
 	 (index (and type (integerp field-pos) (< -1 field-pos (struct-type-field-count type))
 		     (+ field-pos (- (struct-type-total type) (struct-type-field-count type)))))
@@ -418,12 +431,15 @@ TYPE or a subtype: its fields can be read and written directly."
 		       (funcall accessor-proc s field-pos)))
 		 (lambda (s) (funcall accessor-proc s field-pos)))
 	     :field-accessor type)))
+    (when (and type (symbolp field-name) field-name (not (eq field-name qs:false)))
+      (setf (gethash f *renamed-procedures*)
+	    (rsym (format nil "~A-~A" (rname (struct-type-name type)) (rname field-name)))))
     (setf (gethash f *field-operations*) (list :accessor (cdr (gethash accessor-proc *struct-procedures*)) field-pos))
     f))
 
 (defnative "make-struct-field-mutator" (mutator-proc field-pos &optional field-name contract realm)
     (:rumble "make-struct-field-mutator")
-  (declare (ignore field-name contract realm))
+  (declare (ignore contract realm))
   (let* ((type (cdr (gethash mutator-proc *struct-procedures*)))
 	 (index (and type (integerp field-pos) (< -1 field-pos (struct-type-field-count type))
 		     (not (member field-pos (struct-type-immutables type)))
@@ -436,6 +452,9 @@ TYPE or a subtype: its fields can be read and written directly."
 		       (funcall mutator-proc s field-pos v)))
 		 (lambda (s v) (funcall mutator-proc s field-pos v)))
 	     :field-mutator type)))
+    (when (and type (symbolp field-name) field-name (not (eq field-name qs:false)))
+      (setf (gethash f *renamed-procedures*)
+	    (rsym (format nil "set-~A-~A!" (rname (struct-type-name type)) (rname field-name)))))
     (setf (gethash f *field-operations*) (list :mutator (cdr (gethash mutator-proc *struct-procedures*)) field-pos))
     f))
 

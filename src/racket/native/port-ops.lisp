@@ -540,7 +540,7 @@ count, eof or a special); 0 for none yet."
 	    (progn (ip-append p buf 0 n) :data))))))
 
 (defun open-output (who path m1 m2 perms plus-input)
-  (let* ((name (path-string who path))
+  (let* ((name (native-path who path))
 	 (exists (exists-mode m1 m2))
 	 (perms (if (integerp perms) perms #o666))
 	 (fd (open-output-fd who name exists perms))
@@ -683,12 +683,12 @@ count, eof or a special); 0 for none yet."
 	   (pair "creation-time-nanoseconds" 0)))))
 
 (defnative "file-or-directory-identity" (path &optional as-link?) ()
-  (let ((name (path-string "file-or-directory-identity" path)))
+  (let ((name (native-path "file-or-directory-identity" path)))
     (stat-identity (stat-of "file-or-directory-identity" "error obtaining identity for path" name
 			    (and as-link? (truthy as-link?))))))
 
 (defnative "file-or-directory-stat" (path &optional as-link?) ()
-  (let ((name (path-string "file-or-directory-stat" path)))
+  (let ((name (native-path "file-or-directory-stat" path)))
     (stat-hash (stat-of "file-or-directory-stat" "cannot get stat result" name
 			(and as-link? (truthy as-link?))))))
 
@@ -697,7 +697,7 @@ count, eof or a special); 0 for none yet."
     (sb-posix:syscall-error () nil)))
 
 (defnative "file-or-directory-permissions" (path &optional (mode qs:false)) ()
-  (let* ((name (path-string "file-or-directory-permissions" path))
+  (let* ((name (native-path "file-or-directory-permissions" path))
 	 (st (stat-of "file-or-directory-permissions" "access failed" name nil))
 	 (m (mode-name mode)))
     (cond ((null m)
@@ -749,7 +749,7 @@ count, eof or a special); 0 for none yet."
 ;;; Filesystem change events: with no other process to change anything
 ;;; while we wait, such an event never becomes ready.
 (defnative "filesystem-change-evt" (path &optional (fail qs:false)) ()
-  (let ((name (path-string "filesystem-change-evt" path)))
+  (let ((name (native-path "filesystem-change-evt" path)))
     (handler-case (progn (sb-posix:stat name) (make-revt :never (list :fs name)))
       (sb-posix:syscall-error (e)
 	(if (truthy fail)

@@ -976,7 +976,32 @@ TOP-LEVEL begin's forms are compiled one by one: its biggest counts."
 		  (tree-size form))))
     (if (> size *inline-arithmetic-limit*)
 	`(locally (declare (notinline qs:scheme+ qs:scheme- qs:scheme*)) ,lisp)
-	(inline-small-labels (declare-loop-types (stack-allocate-marked lisp))))))
+	(inline-small-labels (declare-loop-types (stack-allocate-marked (name-marked-lambdas lisp)))))))
+
+(defun name-marked-lambdas (lisp)
+  "LISP with each #'(lambda args '(:racket-name . id) ...) made
+#'(sb-int:named-lambda (:racket id) args ...): --racket's let-bound
+procedures keep their names (object-name) when the continuation
+transformation makes them state machines."
+  (labels ((marker-p (x) (and (consp x) (eq (car x) 'quote) (consp (cadr x)) (eq (car (cadr x)) :racket-name)))
+	   (walk (x)
+	     (cond ((atom x) x)
+		   ((eq (car x) 'quote) x)
+		   ((and (eq (car x) 'function) (consp (cadr x)) (eq (car (cadr x)) 'lambda)
+			 (consp (cdr (cadr x))))
+		    (let* ((l (cadr x)) (body (cddr l))
+			   (m (or (and (marker-p (car body)) (car body))
+				  (and (consp (car body)) (eq (car (car body)) 'progn) (marker-p (cadr (car body)))
+				       (cadr (car body))))))
+		      (if m
+			  (let ((body (if (marker-p (car body))
+					  (cdr body)
+					  (cons (cons 'progn (cddr (car body))) (cdr body)))))
+			    `(function (sb-int:named-lambda (:racket ,(cdr (cadr m))) ,(cadr l) ,@(mapcar #'walk body))))
+			  (cons (car x) (walk (cdr x))))))
+		   (t (let ((a (walk (car x))) (d (walk (cdr x))))
+			(if (and (eq a (car x)) (eq d (cdr x))) x (cons a d)))))))
+    (walk lisp)))
 
 ;;; Small known procedures inline (docs/optimizations.md, idea 6).  SBCL
 ;;; inlines a LABELS function only if it's called once; declared INLINE,

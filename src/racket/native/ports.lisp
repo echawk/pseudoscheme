@@ -542,7 +542,7 @@ NIL, FD open, for anything else."
 
 (defnative "open-input-file" (path &rest mode) ()
   (declare (ignore mode))
-  (let* ((name (path-string "open-input-file" path))
+  (let* ((name (native-path "open-input-file" path))
 	 (bytes (open-file-for-input "open-input-file" name)))
     (finish-inport (make-rinport bytes (make-rpath name)))))
 (defnative "open-input-string" (s &optional (name (rsym "string"))) ()

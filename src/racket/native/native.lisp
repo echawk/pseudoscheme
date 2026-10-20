@@ -121,6 +121,10 @@ linklets (after every instance is filled: #%linklet's too)."
     (setf (gethash f *arity-masks*) mask)
     (when name (setf (gethash f *renamed-procedures*) name))
     f)
+  ;; a top-level definition's procedure, with its name (OBJECT-NAMED)
+  (qsx:defhost "racket:named" (name f)
+    (unless (gethash f *renamed-procedures*) (setf (gethash f *renamed-procedures*) name))
+    f)
   (qsx:defhost "racket:arity-error" (args)
     (racket-arity-error "#<procedure>" (length args)))
   (qsx:defhost "racket:note-split-function" (i f)
@@ -128,7 +132,7 @@ linklets (after every instance is filled: #%linklet's too)."
   (qsx:defhost "racket:call-with-mark" (key value thunk)
     (qs-r6rs::call-with-mark key value thunk))
   (qsx::register-primitive-names
-   '("racket:variable-ref" "racket:safe-variable-ref" "racket:safe-ref" "racket:arg-safe-ref" "racket:variable-set!" "racket:variable-reference"
+   '("racket:variable-ref" "racket:safe-variable-ref" "racket:safe-ref" "racket:arg-safe-ref" "racket:named" "racket:variable-set!" "racket:variable-reference"
      "racket:unknown-primitive" "racket:assign-error" "racket:arity-error" "racket:with-arity")))
 
 ;;; ------------------------------------------------------------------

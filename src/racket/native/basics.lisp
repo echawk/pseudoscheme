@@ -344,6 +344,29 @@ index of a field of the type that has the property; or NIL."
 	    (svref fields (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
 	  (funcall value x)))))
 
+(defun local-function-name (f)
+  "The Racket name of F if SBCL knows it as a local function of compiled
+Racket code, (LABELS name :IN ...) or (FLET \"name\" :IN ...): a
+lexical's name less the suffixes the linklet compiler gives it
+(name_8~1234.R); not a state machine's."
+  (let ((n (ignore-errors (sb-kernel:%fun-name f))))
+    ;; NAME-MARKED-LAMBDAS's (:racket id)
+    (when (and (consp n) (eq (car n) :racket) (consp (cdr n)) (symbolp (cadr n)))
+      (return-from local-function-name (cadr n)))
+    (when (and (consp n) (member (car n) '(labels flet)) (consp (cdr n)))
+      (let* ((raw (cadr n))
+	     (s (cond ((stringp raw) raw)
+		      ((and (symbolp raw) raw) (symbol-name raw)))))
+	(when (and s (plusp (length s)) (not (search "%machine" s)) (not (search "%MACHINE" s)))
+	  ;; FRESH-LEXICAL case-inverted the whole name, suffix and all
+	  (let* ((s (qs::invert-case s))
+		 (s (subseq s 0 (or (position #\~ s) (length s))))
+		 (u (position #\_ s :from-end t)))
+	    ;; decorrelation's _N
+	    (when (and u (< (1+ u) (length s)) (every #'digit-char-p (subseq s (1+ u))) (plusp u))
+	      (setq s (subseq s 0 u)))
+	    (and (plusp (length s)) (rsym s))))))))
+
 (defnative "object-name" (x) (:leaf t)
   (cond ((rregexp-p x) (rregexp-source x))
 	((regexp-literal-p x) (regexp-literal-source x))
@@ -352,6 +375,7 @@ index of a field of the type that has the property; or NIL."
 	((struct-instance-p x) (or (object-name-property x) (struct-type-name (struct-of-type x))))
 	((struct-type-p x) (struct-type-name x))
 	((and (functionp x) (gethash x *renamed-procedures*)))
+	((and (functionp x) (local-function-name x)))
 	((functionp x)
 	 (let ((name (ignore-errors (sb-kernel:%fun-name x))))
 	   ;; the host's procedures defined by DEFUNE are named .NAME

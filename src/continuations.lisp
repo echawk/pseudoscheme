@@ -1499,9 +1499,30 @@ procedure with such a body needs no machine."
 		   ((or (keyword-p head "SET!") (keyword-p head "DEFINE")) nil)
 		   (t (every #'simple-p e)))))))
 
+(defun racket-name-marker (body)
+  "BODY's leading '(:racket-name . id), --racket's name for its lambda
+(src/racket/linklet/compiler.lisp, NAME-LAMBDA), and BODY without it."
+  (if (and (consp body) (keyword-p (car body) "BEGIN") (consp (cdr body))
+	   (quote-form-p (cadr body)) (consp (cadr (cadr body))) (eq (car (cadr (cadr body))) :racket-name))
+      (values (cadr body) (if (cdddr body) (cons (car body) (cddr body)) (caddr body)))
+      (values nil body)))
+
 (defun transform-lambda (e &optional self)
-  "Lambda E transformed.  SELF: the variable a letrec or definition binds
-to E, if E is a known procedure."
+  "Lambda E transformed, a --racket name marker kept first in the result's
+body.  SELF: the variable a letrec or definition binds to E, if E is a
+known procedure."
+  (multiple-value-bind (marker body) (racket-name-marker (caddr e))
+    (let ((l (transform-lambda-1 (if marker (list (car e) (cadr e) body) e) self)))
+      (labels ((named (l)
+		 (cond ((and (lambda-form-p l) (null (cdddr l)))
+			(list (car l) (cadr l) (list (sym "begin") marker (caddr l))))
+		       ;; a machine: (letrec ((m machine-lambda)) (lambda formals ...))
+		       ((and (consp l) (keyword-p (car l) "LETREC") (null (cdddr l)))
+			(list (car l) (cadr l) (named (caddr l))))
+		       (t l))))
+	(if marker (named l) l)))))
+
+(defun transform-lambda-1 (e &optional self)
   (multiple-value-bind (body name) (strip-procedure-name (caddr e))
     (let ((formals (cadr e)))
       (if (tail-simple-p body)

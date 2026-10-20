@@ -118,8 +118,9 @@
 	  ;; a handler that returns, for raise
 	  (let ((qs-r6rs::*marks* (cdr (member entry marks :test #'eq))))
 	    (do-raise (make-exn "exn:fail:contract"
-				(format nil "exception handler returned~%  exception: ~A"
-					(with-output-to-string (s) (funcall (qsx:host-ref "write") v s)))))))
+				(format nil "exception handler returned~%  exception: ~A~@[~%  message: ~A~]"
+					(with-output-to-string (s) (funcall (qsx:host-ref "write") v s))
+					(ignore-errors (let ((m (exn-message v))) (and (stringp m) m))))))))
 	(funcall *uncaught-exception-handler* v))))
 
 (defnative "raise" (v &optional (barrier? qs:true)) (:rumble "raise")
