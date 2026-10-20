@@ -911,6 +911,22 @@ it has no LAMBDA, FUNCTION, FLET, LABELS or the like."
 			    always (and (walk (car y)) (or (listp (cdr y)) (walk (cdr y)))))))))
     (walk form)))
 
+(defparameter *constraint-propagation-limit* 50000
+  "The largest Lisp form, in conses, SBCL compiles with constraint
+propagation: its sets of constraints, a bit vector per block, grow with
+the square of a function's size, and one of Typed Racket's linklets took
+more than 3 GB of them (CALL-WITH-SIZE-POLICY).")
+
+(defun call-with-size-policy (size thunk)
+  "Call THUNK, which compiles code whose biggest form is SIZE conses:
+without SBCL's constraint propagation if that's past
+*CONSTRAINT-PROPAGATION-LIMIT*.  The code is as correct, its types less
+well known."
+  #+sbcl (if (> size *constraint-propagation-limit*)
+	     (let ((sb-c::*constraint-propagate* nil)) (funcall thunk))
+	     (funcall thunk))
+  #-sbcl (progn size (funcall thunk)))
+
 (defun eval-compiled-or-interpreted (form)
   "EVAL FORM, or, if SBCL's compiler fails on it (a procedure too big for
 one code object, past arm64's branch and constant reach), evaluate it
@@ -933,7 +949,7 @@ form bigger than *INTERPRET-LIMIT* is interpreted, and so is one
 				  (when (and (boundp 'sb-c::*compilation*) sb-c::*compilation*
 					     (not (typep c 'sb-int:simple-program-error)))
 				    (throw 'compile-failed (values nil t))))))
-	    (values (multiple-value-list (eval form)) nil)))
+	    (values (multiple-value-list (call-with-size-policy (tree-size form) (lambda () (eval form)))) nil)))
       (if failure
 	  (let ((sb-ext:*evaluator-mode* :interpret))
 	    (eval form))

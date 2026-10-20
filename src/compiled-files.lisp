@@ -108,10 +108,13 @@ is never reached.")
 		   (multiple-value-bind (output warnings-p failure-p)
 		       (with-compilation-unit (:override t)
 			 (handler-case
-			     (if *full-continuations*
-				 (call-with-full-policy
-				  (lambda () (compile-file lisp :output-file fasl :verbose nil :print nil)))
-				 (compile-file lisp :output-file fasl :verbose nil :print nil))
+			     (call-with-size-policy
+			      (reduce #'max forms :key #'tree-size :initial-value 0)
+			      (lambda ()
+				(if *full-continuations*
+				    (call-with-full-policy
+				     (lambda () (compile-file lisp :output-file fasl :verbose nil :print nil)))
+				    (compile-file lisp :output-file fasl :verbose nil :print nil))))
 			   (error () (values nil t t))))
 		     (declare (ignore warnings-p))
 		     ;; a big chunk leaves much garbage in older generations;
