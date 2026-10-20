@@ -143,6 +143,15 @@ linklets (after every instance is filled: #%linklet's too)."
 		    "close-input-port" "close-output-port" "get-output-string" "get-output-bytes"
 		    "open-input-file" "open-output-file" "open-input-output-file")
 	 when (nth-value 1 (primitive n)) collect (concatenate 'string "racket:" n)))
+  ;; natives that call the program's procedures only from Lisp, not in
+  ;; tail position (a prop:equal+hash's equal procedure, a
+  ;; prop:custom-write's write procedure): a continuation captured in one
+  ;; can't be re-entered, a site or not (the native's frame is Lisp's),
+  ;; so a call of one needn't be a capture site
+  (qsx::register-primitive-names
+   (loop for n in '("equal?" "equal-always?" "write" "display" "print" "writeln" "displayln" "println"
+		    "printf" "fprintf" "eprintf" "format")
+	 when (nth-value 1 (primitive n)) collect (concatenate 'string "racket:" n)))
   ;; natives that raise a non-continuable exception: a handler can't
   ;; return to their caller, so a call of one isn't a capture site
   ;; (compiler.lisp, *RAISING-NATIVES*)

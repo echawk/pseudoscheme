@@ -123,7 +123,48 @@ into INFO."
       (make-parsed-linklet
        (mapcar (lambda (set) (mapcar (lambda (x) (pair x nil)) set)) imports)
        (mapcar (lambda (x) (pair x nil)) exports)
-       body))))
+       (mapcan #'split-procedure-definitions body)))))
+
+(defun split-procedure-definitions (form)
+  "FORM, or, for (define-values (a ...) (let-values ([(x) lambda] ...)
+(values x ...))), as racket/private/list defines assq, assv and assoc,
+one definition per procedure, (define-values (a) (let-values ([(x)
+lambda]) x)): each a known procedure (SAFE-EXPORTS), as it is to Racket
+CS's schemify.  The lambdas are evaluated in any order, and none refers
+to another's x (a letrec-values's may not), so it's the same."
+  (or (and (form-p form "define-values") (consp (cdr form)) (consp (cddr form)) (null (cdddr form))
+	   (let ((ids (cadr form))
+		 (rhs (strip-empty-let-values (caddr form))))
+	     (and (consp ids) (cdr ids)
+		  (or (form-p rhs "let-values") (form-p rhs "letrec-values"))
+		  (consp (cdr rhs)) (consp (cddr rhs)) (null (cdddr rhs))
+		  (let* ((clauses (cadr rhs))
+			 (body (caddr rhs))
+			 (xs (mapcar (lambda (c) (and (consp c) (consp (car c)) (null (cdr (car c))) (car (car c))))
+				     clauses)))
+		    (and (listp clauses)
+			 (every (lambda (c x)
+				  (and x (consp (cdr c)) (null (cddr c))
+				       (or (form-p (cadr c) "lambda") (form-p (cadr c) "case-lambda"))
+				       (notany (lambda (y) (tree-mentions-p y (cadr c))) xs)
+				       (symbolp x)))
+				clauses xs)
+			 (form-p body "values")
+			 (= (length (cdr body)) (length ids))
+			 (every (lambda (v) (member v xs)) (cdr body))
+			 (= (length (remove-duplicates (cdr body))) (length (cdr body)))
+			 (loop for id in ids
+			       for v in (cdr body)
+			       collect (list (car form) (list id)
+					     (list (rsym "let-values")
+						   (list (find v clauses :key #'caar))
+						   v))))))))
+      (list form)))
+
+(defun tree-mentions-p (symbol x)
+  (cond ((eq x symbol) t)
+	((atom x) nil)
+	(t (or (tree-mentions-p symbol (car x)) (tree-mentions-p symbol (cdr x))))))
 
 ;;; ------------------------------------------------------------------
 ;;; Pass 3: analysis
@@ -620,7 +661,7 @@ continuation transformation, and calls of (racket:arg-safe-ref ...)
 whose procedure arguments are safe."
   (let ((qsx::*safe-call-hook*
 	  (let ((outer qsx::*safe-call-hook*))
-	    (lambda (call) (or (arg-safe-call-p call) (and outer (funcall outer call))))))
+	    (lambda (call) (or (arg-safe-call-p call) (parameter-read-p call) (and outer (funcall outer call))))))
 	(qsx::*safe-operator-hook*
 	  (let ((outer qsx::*safe-operator-hook*))
 	    (lambda (form) (or (safe-variable-ref-p form) (safe-ref-p form) (and outer (funcall outer form)))))))
@@ -771,6 +812,9 @@ letrec, a case-lambda's racket:with-arity, or NAMED's binding; or NIL."
   (cond ((qsx::lambda-form-p x) x)
 	((atom x) nil)
 	((eq (car x) (core "racket:with-arity")) (lowered-procedure (caddr x)))
+	;; NAME-LAMBDA's, at the outer level
+	((and (eq (car x) (core "racket:named")) (consp (cdr x)) (consp (cddr x)))
+	 (lowered-procedure (caddr x)))
 	((and (eq (car x) (core "letrec")) (consp (cadr x)) (null (cdr (cadr x)))
 	      (eq (caddr x) (car (car (cadr x)))))
 	 (lowered-procedure (cadr (car (cadr x)))))
