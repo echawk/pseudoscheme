@@ -746,10 +746,16 @@ pass doesn't know."
   (let ((level (optimize-level)))
     (if (or (= level 0) (atom form))
 	form
-	(let ((*vi* (make-hash-table :test 'eq)))
+	(let ((*vi* (make-hash-table :test 'eq))
+	      (original form))
 	  (let ((result
 		  (catch 'cp-bail
+		    ;; cpletrec, like cp0, takes each name to be bound once:
+		    ;; given up on, a form is left as it was
 		    (unless (equal (uiop:getenv "QUASISCHEME_CPLETREC") "0")
+		      (analyze form)
+		      (unless (unique-binders-p) (cp-bail "names not unique"))
+		      (clrhash *vi*)
 		      (setq form (cpletrec form)))
 		    (analyze form)
 		    (if (not (unique-binders-p))
@@ -773,4 +779,4 @@ pass doesn't know."
 		(cadr result)
 		(progn (incf (second *cp0-stats*))
 		       (pushnew (princ-to-string result) (fifth *cp0-stats*) :test #'string=)
-		       form)))))))
+		       original)))))))
