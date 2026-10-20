@@ -27,6 +27,10 @@
 
 (defun equal* (a b)
   (cond ((eq a b) t)
+	;; symbols, fixnums and characters are equal? only when eq?/eqv?:
+	;; the common keys, answered before the other types are tried
+	((or (symbolp a) (symbolp b)) nil)
+	((typep a 'fixnum) (eql a b))
 	((consp a) (and (consp b) (equal* (car a) (car b)) (equal* (cdr a) (cdr b))))
 	((numberp a) (racket-eqv a b))
 	((characterp a) (eql a b))

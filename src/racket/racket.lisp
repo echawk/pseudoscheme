@@ -88,6 +88,7 @@ of which INTERN-SCHEME-SYMBOL would case-convert (allocating) and hash.")
   (or (gethash name *rsym-cache*)
       (setf (gethash (copy-seq name) *rsym-cache*) (qs:intern-scheme-symbol name))))
 (defun rname (symbol) "SYMBOL's Racket name." (qs:scheme-symbol-name symbol))
+(declaim (inline bool truthy))
 (defun bool (x) (if x qs:true qs:false))
 (defun truthy (x) (not (eq x qs:false)))
 

@@ -1031,8 +1031,13 @@ are Lisp symbols are the transformation's own, or the translator's."
 		     ((lambda-form-p e) (scan (caddr e)))
 		     ((keyword-p (car e) "SET!")
 		      (incf (gethash (cadr e) assignments 0))
-		      (when (lambda-form-p (caddr e))
-			(push (caddr e) (gethash (cadr e) lambdas)))
+		      (let ((v (caddr e)))
+			(cond ((lambda-form-p v) (push v (gethash (cadr e) lambdas)))
+			      ;; --racket's top-level procedure that calls itself:
+			      ;; (set! f (letrec ((self lambda)) self))
+			      ((and (consp v) (keyword-p (car v) "LETREC") (consp (cadr v)) (null (cdr (cadr v)))
+				    (eq (caddr v) (car (car (cadr v)))) (lambda-form-p (cadr (car (cadr v)))))
+			       (push (cadr (car (cadr v))) (gethash (cadr e) lambdas)))))
 		      (scan (caddr e)))
 		     ;; a definition HOIST-DEFINITIONS made of a body's
 		     ((keyword-p (car e) "DEFINE")

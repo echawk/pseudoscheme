@@ -131,6 +131,11 @@ linklets (after every instance is filled: #%linklet's too)."
     (setf (svref *loading-split-functions* i) f))
   (qsx:defhost "racket:call-with-mark" (key value thunk)
     (qs-r6rs::call-with-mark key value thunk))
+  ;; natives that raise a non-continuable exception: a handler can't
+  ;; return to their caller, so a call of one isn't a capture site
+  ;; (compiler.lisp, *RAISING-NATIVES*)
+  (qsx::register-primitive-names
+   (remove-if-not (lambda (n) (nth-value 1 (primitive (subseq n 7)))) *raising-natives*))
   (qsx::register-primitive-names
    '("racket:variable-ref" "racket:safe-variable-ref" "racket:safe-ref" "racket:arg-safe-ref" "racket:named" "racket:variable-set!" "racket:variable-reference"
      "racket:unknown-primitive" "racket:assign-error" "racket:arity-error" "racket:with-arity")))

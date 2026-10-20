@@ -49,7 +49,10 @@ themselves: compiled code calls every primitive by its name, a host
 global (native.lisp), whichever native is behind it."
   (let ((root (asdf:system-source-directory :quasischeme)))
     (format nil "~A ~A~{ ~A~} ~36R" (qsx::build-signature) qsx::*full-continuations*
-	    (loop for file in '("src/racket/linklet/compiler.lisp" "src/racket/cache.lisp")
+	    ;; native.lisp too: which natives are primitives that call no
+	    ;; procedure changes what the continuation transformation makes
+	    (loop for file in '("src/racket/linklet/compiler.lisp" "src/racket/cache.lisp"
+				"src/racket/native/native.lisp")
 		  collect (file-write-date (merge-pathnames file root)))
 	    (qsx::fnv-1a (prin1-to-string (list *host-shared* *host-aliases*))))))
 

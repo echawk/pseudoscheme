@@ -45,6 +45,10 @@
 ;;; ------------------------------------------------------------------
 ;;; Names
 
+(defvar *lambda-depth* 0
+  "How many lambdas the expression being lowered is in: 0 at a linklet's
+outer level, whose code runs once.")
+
 (defun core (name) (qsx::sym name))
 (defun quoted (x) (list (core "quote") x))
 (defun form-p (x name) (and (consp x) (symbolp (car x)) (string= (rname (car x)) name)))
@@ -136,6 +140,8 @@ can't capture a continuation (SAFE-EXPORTS), or NIL."
 		      (setf (variable-info-kind v) :imported)
 		      (let ((entry (find external safe :key (lambda (e) (if (consp e) (car e) e)))))
 			(cond ((null entry))
+			      ((and (consp entry) (eq (cadr entry) :host))
+			       (setf (variable-info-known v) (cons :host (caddr entry))))
 			      ((consp entry) (setf (variable-info-known v) (cons :arg-safe-import (cdr entry))))
 			      (t (setf (variable-info-known v) :safe-import)))))))
   (dolist (form (parsed-linklet-body parsed))
@@ -175,7 +181,7 @@ can't capture a continuation (SAFE-EXPORTS), or NIL."
 			     (and c (if (eq (variable-info-known v) :safe-struct)
 					(list (core "racket:safe-ref") c)
 					c)))
-			   (list (core (if (eq (variable-info-known v) :safe-candidate)
+			   (list (core (if (member (variable-info-known v) '(:safe-candidate :safe-struct))
 					   "racket:safe-variable-ref"
 					   "racket:variable-ref"))
 				 (variable-info-cell v))))
@@ -183,6 +189,8 @@ can't capture a continuation (SAFE-EXPORTS), or NIL."
 		       (let ((known (variable-info-known v)))
 			 (cond ((eq known :safe-import)
 				(list (core "racket:safe-variable-ref") (variable-info-cell v)))
+			       ;; *NATIVE-EXPORTS*': the host primitive the cell holds
+			       ((and (consp known) (eq (car known) :host)) (core (cdr known)))
 			       ((and (consp known) (eq (car known) :arg-safe-import))
 				(list (core "racket:arg-safe-ref") (quoted (cdr known)) (variable-info-cell v)))
 			       (t (list (core "racket:variable-ref") (variable-info-cell v))))))))))
@@ -273,10 +281,6 @@ and none of them assigned in them or BODY?"
        (notany (lambda (b) (or (assigned-p (car (car b)) body)
 			       (some (lambda (b2) (assigned-p (car (car b)) (cadr b2))) bindings)))
 	       bindings)))
-
-(defvar *lambda-depth* 0
-  "How many lambdas the expression being lowered is in: 0 at a linklet's
-outer level, whose code runs once.")
 
 (defun name-lambda (core id)
   "CORE, a lowered expression; if it is a lambda (or a case-lambda's
@@ -452,7 +456,23 @@ After the assignment, so that analyses still see the lambda assigned."
 	      (error "compile-linklet: define-values not at a linklet's top level: ~S" x)))))
 	((and *self-call* (eq (car x) (car *self-call*)) (not (assoc (car x) env)))
 	 (cons (cdr *self-call*) (mapcar (lambda (y) (lower-expr y env)) (cdr x))))
+	;; (equal? x 'datum) of a datum equal? to only itself, as case makes
+	;; for its symbols: eq?, open-coded, not the equal? primitive's call
+	((and (symbolp (car x)) (not (assoc (car x) env)) (= (length x) 3)
+	      (member (rname (car x)) '("equal?" "eqv?") :test #'string=)
+	      (eq (gethash (car x) (linklet-info-variables *info*) :none) :none)
+	      (or (eq-datum-p (second x)) (eq-datum-p (third x))))
+	 (list (core "eq?") (lower-expr (second x) env) (lower-expr (third x) env)))
 	(t (mapcar (lambda (y) (lower-expr y env)) x))))
+
+(defun eq-datum-p (x)
+  "Whether X is (quote d), or a literal, of a datum equal? and eqv? to
+only what is eq? to it: a symbol, a fixnum, a character, a boolean, '()."
+  (let ((d (cond ((form-p x "quote") (cadr x))
+		 ((consp x) (return-from eq-datum-p nil))
+		 ((symbolp x) (return-from eq-datum-p (or (null x) (eq x qs:false) (eq x qs:true))))
+		 (t x))))
+    (or (and (symbolp d) d) (null d) (typep d 'fixnum) (characterp d))))
 
 (defparameter *special-forms*
   '(("quote" . :quote) ("if" . :if) ("begin" . :begin) ("begin0" . :begin0)
@@ -614,8 +634,9 @@ candidates that turn out to capture made plain."
       (maphash (lambda (name v)
 		 (declare (ignore name))
 		 (case (variable-info-known v)
-		   ;; an import another linklet's compilation found safe
-		   (:safe-import (setf (gethash (variable-info-cell v) safe) t))
+		   ;; an import another linklet's compilation found safe, or a
+		   ;; struct procedure (SAFE-STRUCT-PROCEDURES)
+		   ((:safe-import :safe-struct) (setf (gethash (variable-info-cell v) safe) t))
 		   (:safe-candidate
 		    (if (assoc (variable-info-cell v) lambdas :test #'equal)
 			(setf (gethash (variable-info-cell v) safe) t)
@@ -670,9 +691,9 @@ then exports then the rest (N cells in all)."
   "Pass 4: the linklet as a core lambda of its variable objects (imports,
 then exports), whose body is a letrec* of the definitions; or, for a big
 one, LOWER-SPLIT's form."
+  (safe-struct-procedures parsed info)
   (when (> (qsx::tree-size (parsed-linklet-body parsed)) *split-size*)
     (return-from lower (lower-split parsed info)))
-  (safe-struct-procedures parsed info)
   (let ((*info* info))
     ;; core names: a lexical per definition, a variable object per
     ;; import and export
@@ -936,6 +957,51 @@ defines once is judged, so that its exports' helpers are known too."
 	      when (eq st t) collect external
 	      when (consp st) collect (cons external st))))))
 
+(defparameter *native-exports*
+  '(("map" ("map2" "%full-map" "map") ("for-each2" "%full-for-each" "for-each")))
+  "Module (the last element of its name) -> exports replaced, once its
+body has run, by host primitives that do the same: racket/private/map's
+map and for-each, written in Racket, as the host's frame-aware %full-map
+and %full-for-each, which re-entered continuations go through as well.
+Importers know them safe when the procedure passed them is.")
+
+(defun linklet-module-name (name)
+  "The module a linklet named NAME (a hasheq with module) is the body of."
+  (and (ihash-p name)
+       (multiple-value-bind (m found) (lookup* name (rsym "module"))
+	 (and found (symbolp m) m (not (eq m qs:false)) (rname m)))))
+
+(defun native-overrides (name parsed info)
+  "((cell . host-name) ...) for the exports of the linklet named NAME that
+*NATIVE-EXPORTS* replaces, and the safe-export entries they make."
+  (let ((entry (cdr (assoc (linklet-module-name name) *native-exports* :test #'equal))))
+    (when (and entry
+	       (every (lambda (e) (find (car e) (parsed-linklet-exports parsed) :key (lambda (x) (rname (cdr x))) :test #'string=))
+		      entry))
+      (loop for (export full plain) in entry
+	    for (internal . external) = (find export (parsed-linklet-exports parsed) :key (lambda (x) (rname (cdr x))) :test #'string=)
+	    for v = (gethash internal (linklet-info-variables info))
+	    collect (cons (variable-info-cell v) full) into sets
+	    ;; importers call the host primitive itself: the continuation
+	    ;; transformation then uses its plain or frame-aware version, as
+	    ;; for R7RS's map
+	    collect (list external :host plain) into safe
+	    finally (return (values sets safe))))))
+
+(defun add-native-overrides (core sets)
+  "CORE, a lowered whole linklet (lambda params body), with SETS' cells
+assigned their host primitives after BODY, whose value it still returns."
+  (if (or (null sets) (not (qsx::lambda-form-p core)))
+      core
+      (let ((r (fresh-lexical "result")))
+	(list (car core) (cadr core)
+	      (list (list (core "lambda") (list r)
+			  (cons (core "begin")
+				(append (loop for (cell . host) in sets
+					      collect (list (core "racket:variable-set!") cell (core host)))
+					(list r))))
+		    (caddr core))))))
+
 (defun compile-linklet-form (form &key name imports-known options)
   "A linklet S-expression to a COMPILED-LINKLET (cache.lisp).  OPTIONS
 are compile-linklet's: serializable unsafe static use-prompt
@@ -944,8 +1010,13 @@ uninterned-literal quick."
   (let* ((info (make-linklet-info))
 	 (parsed (analyse (parse-linklet (decorrelate form info)) info imports-known))
 	 (core (lower parsed info))
-	 (compiled (make-compiled-linklet core :name name :strategy "linklet")))
-    (setf (compiled-linklet-safe-exports compiled) (safe-exports parsed info core))
+	 (compiled nil))
+    (multiple-value-bind (sets safe) (and (qsx::lambda-form-p core) (native-overrides name parsed info))
+      (setq core (add-native-overrides core sets))
+      (setq compiled (make-compiled-linklet core :name name :strategy "linklet"))
+      (setf (compiled-linklet-safe-exports compiled)
+	    (append safe (remove-if (lambda (e) (find (if (consp e) (car e) e) safe :key #'car))
+				    (safe-exports parsed info core)))))
     (setf (compiled-linklet-imports compiled)
 	  (mapcar (lambda (set) (mapcar #'car set)) (parsed-linklet-imports parsed))
 	  (compiled-linklet-exports compiled)
