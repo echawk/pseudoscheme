@@ -1412,14 +1412,24 @@ Scheme symbol), the procedure's, after a |."
 		      (scan (caddr e) machine-p))
 		     (t (dolist (x e) (scan x machine-p)))))
 	     (note-letrec* (e)
-	       ;; ((lambda (v ...) (begin (set! v e) ... body)) '#f ...)
+	       ;; ((lambda (v ...) (begin (set! v e) ... body)) '#f ...), or
+	       ;; '#<unassigned> (--racket's linklet bodies): each v set
+	       ;; before any site can run, the sets perhaps among other
+	       ;; simple forms and in nested begins
 	       (let ((vars (cadr (car e))) (body (caddr (car e))))
-		 (when (and (every (lambda (a) (equal a `(,(sym "quote") ,qs:false))) (cdr e))
+		 (when (and (every (lambda (a) (or (equal a `(,(sym "quote") ,qs:false))
+						   (equal a `(,(sym "quote") ,qs:unassigned))))
+				   (cdr e))
 			    (consp body) (keyword-p (car body) "BEGIN"))
-		   (loop for s in (cdr body)
-			 while (and (consp s) (keyword-p (car s) "SET!") (member (cadr s) vars))
-			 while (simple-p (caddr s))
-			 do (setf (gethash (cadr s) exempt) t)))))
+		   (labels ((each (forms)
+			      ;; NIL once a form may capture
+			      (dolist (s forms t)
+				(cond ((not (simple-p s)) (return nil))
+				      ((and (consp s) (keyword-p (car s) "BEGIN"))
+				       (unless (each (cdr s)) (return nil)))
+				      ((and (consp s) (keyword-p (car s) "SET!") (member (cadr s) vars))
+				       (setf (gethash (cadr s) exempt) t))))))
+		     (each (cdr body))))))
 	     (rewrite (e)
 	       (cond ((and (symbolp e) (gethash e boxed)) `(car ,e))
 		     ((atom e) e)

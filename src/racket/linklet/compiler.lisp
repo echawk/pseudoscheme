@@ -1081,7 +1081,9 @@ uninterned-literal quick.  SPLIT: split, whatever its size."
 	 (*safe-locals* (make-hash-table :test 'eq))
 	 (info (make-linklet-info))
 	 (parsed (analyse (parse-linklet (decorrelate form info)) info imports-known))
-	 (core (lower parsed info))
+	 ;; a named let's call as a call of a known procedure (DIRECT-LETREC-CALLS),
+	 ;; not a capture site
+	 (core (direct-letrec-calls (lower parsed info)))
 	 (compiled nil))
     (multiple-value-bind (sets safe) (and (qsx::lambda-form-p core) (native-overrides name parsed info))
       (setq core (add-native-overrides core sets))
