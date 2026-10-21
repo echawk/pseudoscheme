@@ -97,12 +97,39 @@ image, run it instead, making it first if need be."
 	   (sb-posix:setenv "QUASISCHEME_RACKET_CORE_ACTIVE" "1" 1)
 	   (exec-program (sb-ext:native-namestring core) sb-ext:*posix-argv*)))))))
 
+(defun preload-modules ()
+  "The modules QUASISCHEME_RACKET_PRELOAD names (by default racket/base
+and racket), declared and instantiated in the namespace programs run in,
+with what expanding a module in their language and reading its #lang
+line instantiate (their phase-1 instances, their readers): what a
+program's start-up would load and run of them.  Racket's own start-up
+namespace has racket/base so (instantiated, attached); racket, so,
+starts a #lang racket program in a tenth of the time."
+  (let ((names (uiop:split-string (or (uiop:getenv "QUASISCHEME_RACKET_PRELOAD") "racket/base racket")
+				  :separator " ")))
+    (dolist (name (remove "" names :test #'string=))
+      (ignore-errors
+       (racket-eval-at-base
+	(format nil "(begin
+                       (dynamic-require '~A #f)
+                       (dynamic-require 'racket/runtime-config #f)
+                       (let-values ([(accept) (read-accept-reader)])
+                         (read-accept-reader #t)
+                         (read-syntax 'preload (open-input-string \"#lang ~A\"))
+                         (read-accept-reader accept))
+                       (eval (namespace-syntax-introduce
+                              (datum->syntax #f '(module |#%quasischeme-preload ~A| ~A)))))"
+		name name name name)
+	:exit nil)))
+    (setq *uncaught* nil)))
+
 (defun save-racket-core (path)
-  "Instantiate the expander and save this program, so, as PATH, which
-doesn't return."
+  "Instantiate the expander, preload modules (PRELOAD-MODULES), and save
+this program, so, as PATH, which doesn't return."
   (unless *expander-instance*
     (unless (instantiate-expander :stream nil)
       (uiop:quit 1)))
+  (preload-modules)
   (sb-posix:unsetenv "QUASISCHEME_RACKET_SAVE_CORE")
   (uiop:dump-image path :executable t))
 
@@ -202,9 +229,10 @@ its main submodule if it has one)."
 ;;; ------------------------------------------------------------------
 ;;; Executables (contrib/cli: --racket --compile)
 
-(defun racket-eval-at-base (text)
+(defun racket-eval-at-base (text &key (exit t))
   "TEXT's forms evaluated by the expander as LINKLET-LOAD does its own, and
-the last one's values."
+the last one's values.  An exception that goes uncaught ends the program
+(with status 1), if EXIT."
   (let ((forms (read-racket-forms-from-string text))
 	(values (list *void*)))
     (setq *uncaught* nil)
@@ -220,7 +248,7 @@ the last one's values."
 	      (dolist (form forms)
 		(setq values (multiple-value-list (expander-eval form))))))
 	  *default-prompt-tag* nil))))
-    (when *uncaught* (finish-output) (uiop:quit 1))
+    (when (and *uncaught* exit) (finish-output) (uiop:quit 1))
     (values-list values)))
 
 (defun read-racket-forms-from-string (text)

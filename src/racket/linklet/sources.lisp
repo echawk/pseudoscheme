@@ -194,6 +194,30 @@ its pathname."
 
 (defvar *expander-booted* nil)
 
+(defvar *collection-paths-set* nil
+  "Whether this process set the collection paths (SET-COLLECTION-PATHS):
+an image saved with the expander booted (save-racket-core) has the paths
+of the run that made it.")
+
+(pushnew (lambda () (setq *collection-paths-set* nil)) sb-ext:*init-hooks*)
+
+(defun set-collection-paths ()
+  "The collections, as main.sps sets them up, less the user's own (the
+addon directory's collects and links: not the source tree's), plus a
+links file for the packages of the source tree (pkgs/)."
+  (funcall (expander-export "eval")
+	   (read-racket (make-string-input-stream
+			 (format nil "(let-values ([(user) (use-user-specific-search-paths)])
+                                        (begin
+                                          (use-user-specific-search-paths #f)
+                                          (current-library-collection-links
+                                            (append (find-library-collection-links)
+                                                    (list (string->path ~S))))
+                                          (current-library-collection-paths (find-library-collection-paths))
+                                          (use-user-specific-search-paths user)))"
+				 (namestring (write-collection-links))))))
+  (setq *collection-paths-set* t))
+
 (defun expander-eval (datum)
   "DATUM evaluated by the expander, in a namespace with #%kernel, as
 Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
@@ -202,20 +226,7 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
     (funcall (expander-export "boot"))
     (funcall (expander-export "namespace-require")
 	     (list (rsym "quote") (rsym "#%kernel")))
-    ;; the collections, as main.sps sets them up, less the user's own
-    ;; (the addon directory's collects and links: not the source tree's),
-    ;; plus a links file for the packages of the source tree (pkgs/)
-    (funcall (expander-export "eval")
-	     (read-racket (make-string-input-stream
-			   (format nil "(let-values ([(user) (use-user-specific-search-paths)])
-                                          (begin
-                                            (use-user-specific-search-paths #f)
-                                            (current-library-collection-links
-                                              (append (find-library-collection-links)
-                                                      (list (string->path ~S))))
-                                            (current-library-collection-paths (find-library-collection-paths))
-                                            (use-user-specific-search-paths user)))"
-				   (namestring (write-collection-links))))))
+    (set-collection-paths)
     (install-zo-writer)
     ;; Racket's string->number is the reader's, which #%kernel re-exports
     ;; from #%read (data.lisp)
@@ -231,6 +242,7 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 	     (funcall (expander-export "dynamic-require")
 		      (list (rsym "quote") (rsym "#%read")) (rsym name))))))
     (setq *expander-booted* t))
+  (unless *collection-paths-set* (set-collection-paths))
   (funcall (expander-export "eval") datum))
 
 ;;; The port read handler: the io layer's default reads with the reader
