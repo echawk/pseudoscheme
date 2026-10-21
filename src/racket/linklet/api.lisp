@@ -154,6 +154,14 @@ per import set, the safe exports of the linklet it imports
 (IMPORTS-SAFE-EXPORTS)."
   (incf (getf *stats* :linklets))
   (install-letrec-check)
+  ;; its machine code and what lowering it says cached already
+  (when key
+    (let ((compiled (make-compiled-linklet :deferred :name name :strategy "linklet")))
+      (setf (compiled-linklet-source-key compiled) key
+	    (compiled-linklet-source-form compiled) form
+	    (compiled-linklet-imports-known compiled) imports-known)
+      (when (linklet-from-meta compiled)
+	(return-from compile-linklet compiled))))
   (timing (:lower)
     (let ((compiled (compile-linklet-form form :name name :imports-known imports-known)))
       ;; its compiled code is cached, keyed by the linklet as given and
@@ -165,6 +173,7 @@ per import set, the safe exports of the linklet it imports
 			  (linklet-hash form)))))
       (setf (compiled-linklet-source-form compiled) form
 	    (compiled-linklet-imports-known compiled) imports-known)
+      (write-linklet-meta compiled)
       compiled)))
 
 (defvar *instance-safe-exports* (make-hash-table :test 'eq :weakness :key :synchronized t)
@@ -269,16 +278,16 @@ objects: compiled now if need be."
 
 (defun linklet-function-1 (compiled)
   (let ((qsx::*full-continuations* t)
-	(form (compiled-linklet-form compiled)))
+	(shape (linklet-shape compiled)))
     (call-with-safe-cells
      (lambda ()
-       (if (split-form-p form)
-	   (split-function (cadr form) (split-functions compiled))
+       (if (eq (car shape) :split)
+	   (split-function (second shape) (split-functions compiled))
 	   (or (whole-function compiled)
 	       (if (compiled-linklet-source-form compiled)
 		   (let ((split (split-again compiled)))
 		     (split-function (cadr (compiled-linklet-form split)) (split-functions split)))
-		   (qsx:host-eval form))))))))
+		   (qsx:host-eval (linklet-form compiled)))))))))
 
 (defun split-form-p (form)
   (and (consp form) (eq (car form) (qsx::sym "racket:split"))))

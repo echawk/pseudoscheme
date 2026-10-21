@@ -123,11 +123,19 @@ top-level form failed and why."
 		   ;; (regexp-layer.lisp)
 		   (install-regexp-layer :stream stream)
 		   (expander-linklet-text)))
-	   (form (wrap-expander-read (with-input-from-string (in text) (read-racket in))))
-	   (compiled (compile-linklet-form form :name (rsym "expander"))))
-      ;; its compiled form is cached, keyed by its text (cache.lisp), and
-      ;; what WRAP-EXPANDER-READ does
-      (setf (compiled-linklet-source-key compiled) (concatenate 'string text ";fast-read"))
+	   ;; its compiled form is cached, keyed by its text (cache.lisp), and
+	   ;; what WRAP-EXPANDER-READ does; lowered only if the cache hasn't
+	   ;; its machine code and meta file
+	   (key (concatenate 'string text ";fast-read"))
+	   (form (lambda () (wrap-expander-read (with-input-from-string (in text) (read-racket in)))))
+	   (compiled (let ((c (make-compiled-linklet :deferred :name (rsym "expander") :strategy "linklet")))
+		       (setf (compiled-linklet-source-key c) key
+			     (compiled-linklet-source-form c) form)
+		       (or (linklet-from-meta c)
+			   (let ((c (compile-linklet-form (funcall form) :name (rsym "expander"))))
+			     (setf (compiled-linklet-source-key c) key)
+			     (write-linklet-meta c)
+			     c)))))
       (format stream "~&expander: read and lowered in ~,1Fs~%" (seconds start))
       (setq start (get-internal-real-time))
       (linklet-function compiled)

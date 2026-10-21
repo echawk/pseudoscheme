@@ -31,6 +31,7 @@
   (source-key nil)			; a string or a digest identifying its source, for the cache
   (source-form nil)			; the linklet as given, for .zo files
   (imports-known nil)			; what it was compiled knowing of its imports
+  (shape nil)				; (:whole) or (:split cells forms), from its meta file (FORM :deferred)
   (function nil))			; once loaded: the instantiation function
 
 (defvar *racket-signature* nil)
@@ -127,31 +128,100 @@ QUASISCHEME_EVALUATOR=interpret (src/psyntax.lisp, *EVALUATOR*), which
 runs it in SBCL's interpreter instead (sb-fasteval, if SBCL has it)."
   (not (eq (qsx::evaluator) :interpret)))
 
+;;; A linklet's meta file, beside its fasl: what compile-linklet would
+;;; lower the linklet again to learn (its imports, exports and safe
+;;; exports, and whether it's split), so that a linklet whose machine
+;;; code is cached isn't lowered at all (LINKLET-FROM-META): at start,
+;;; lowering racket/base's few hundred linklets was half the time.
+
+(defun linklet-meta-file (key)
+  (merge-pathnames (make-pathname :name key :type "meta") (racket-cache-directory)))
+
+(defun linklet-shape (compiled)
+  (or (compiled-linklet-shape compiled)
+      (let ((form (compiled-linklet-form compiled)))
+	(if (and (consp form) (eq (car form) (qsx::sym "racket:split")))
+	    (list :split (cadr form) (length (cddr form)))
+	    (list :whole)))))
+
+(defun meta-symbols-p (x)
+  "Whether X's symbols all read back as themselves (interned)."
+  (cond ((symbolp x) (or (null x) (symbol-package x)))
+	((consp x) (and (meta-symbols-p (car x)) (meta-symbols-p (cdr x))))
+	(t (or (stringp x) (integerp x)))))
+
+(defun write-linklet-meta (compiled)
+  (let ((key (linklet-key compiled)))
+    (when key
+      (let ((file (linklet-meta-file key))
+	    (meta (list (compiled-linklet-imports compiled) (compiled-linklet-exports compiled)
+			(compiled-linklet-export-internals compiled) (compiled-linklet-safe-exports compiled)
+			(linklet-shape compiled))))
+	(when (and (meta-symbols-p meta) (not (probe-file file)))
+	  (ignore-errors
+	   (ensure-directories-exist file)
+	   (let ((tmp (make-pathname :type "metatmp" :defaults file)))
+	     (with-open-file (out tmp :direction :output :if-exists :supersede)
+	       (with-standard-io-syntax
+		 (let ((*package* (find-package "SCHEME")) (*print-readably* t))
+		   (prin1 meta out))))
+	     (rename-file tmp file))))))))
+
+(defun linklet-from-meta (compiled)
+  "COMPILED (its FORM :deferred, source key set) filled from its meta
+file, if both that and its fasl are in the cache; else NIL."
+  (let ((key (linklet-key compiled)))
+    (when (and key (probe-file (linklet-fasl key)))
+      (let ((meta (ignore-errors
+		   (with-open-file (in (linklet-meta-file key) :if-does-not-exist nil)
+		     (and in (with-standard-io-syntax
+			       (let ((*package* (find-package "SCHEME")) (*read-eval* nil))
+				 (read in))))))))
+	(when (and (consp meta) (= (length meta) 5))
+	  (destructuring-bind (imports exports internals safe shape) meta
+	    (setf (compiled-linklet-imports compiled) imports
+		  (compiled-linklet-exports compiled) exports
+		  (compiled-linklet-export-internals compiled) internals
+		  (compiled-linklet-safe-exports compiled) safe
+		  (compiled-linklet-shape compiled) shape)
+	    compiled))))))
+
+(defun linklet-form (compiled)
+  "COMPILED's lowered form: lowered now if its meta file stood for it."
+  (when (eq (compiled-linklet-form compiled) :deferred)
+    ;; a function that makes it (the expander's: INSTANTIATE-EXPANDER)
+    (when (functionp (compiled-linklet-source-form compiled))
+      (setf (compiled-linklet-source-form compiled) (funcall (compiled-linklet-source-form compiled))))
+    (setf (compiled-linklet-form compiled)
+	  (compiled-linklet-form
+	   (compile-linklet-form (compiled-linklet-source-form compiled)
+				 :name (compiled-linklet-name compiled)
+				 :imports-known (compiled-linklet-imports-known compiled)))))
+  (compiled-linklet-form compiled))
+
 (defun whole-function (compiled)
   "The instantiation function of COMPILED, not split: from its fasl if
 there is one, else compiled now, into the cache if COMPILED has a key.
 NIL if it has a key and SBCL can't compile it (WHOLE-OR-SPLIT-FUNCTION)."
-  (let* ((form (compiled-linklet-form compiled))
-	 (key (linklet-key compiled))
+  (let* ((key (linklet-key compiled))
 	 (fasl (and key (linklet-fasl key))))
-    (cond ((not fasl) (qsx:host-eval form))
+    (cond ((not fasl) (qsx:host-eval (linklet-form compiled)))
 	  ((car (ignore-errors (load-split-fasl fasl 1))))
-	  ((not (compile-into-cache-p)) (qsx:host-eval form))
-	  ((write-fasl-or-mark fasl (list form))
+	  ((not (compile-into-cache-p)) (qsx:host-eval (linklet-form compiled)))
+	  ((write-fasl-or-mark fasl (list (linklet-form compiled)))
 	   (car (ignore-errors (load-split-fasl fasl 1)))))))
 
 (defun split-functions (compiled)
   "The functions of split linklet COMPILED's forms: from its fasl if
 there is one, else compiled now, into the cache if COMPILED has a key."
-  (let* ((form (compiled-linklet-form compiled))
-	 (n (length (cddr form)))
+  (let* ((n (third (linklet-shape compiled)))
 	 (key (linklet-key compiled))
 	 (fasl (and key (linklet-fasl key))))
     (or (and fasl (ignore-errors (load-split-fasl fasl n)))
 	(and fasl (compile-into-cache-p)
-	     (write-fasl-or-mark fasl (cddr form))
+	     (write-fasl-or-mark fasl (cddr (linklet-form compiled)))
 	     (ignore-errors (load-split-fasl fasl n)))
-	(mapcar #'qsx:host-eval (cddr form)))))
+	(mapcar #'qsx:host-eval (cddr (linklet-form compiled))))))
 
 ;;; ------------------------------------------------------------------
 ;;; .zo files: write-linklet-bundle-hash and read-linklet-bundle-hash

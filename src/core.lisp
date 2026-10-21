@@ -80,6 +80,8 @@
   "The Scheme symbol named STRING (STRING->SYMBOL).  The inverted name is
 made on the stack and looked up, and copied only for a new symbol:
 readers intern every symbol they read, nearly all of them existing ones."
+  (when (typep string '(simple-array character (*)))
+    (return-from intern-scheme-symbol (intern-scheme-symbol-simple string)))
   (let ((upper nil) (lower nil))
     (loop for c across string
 	  do (cond ((upper-case-p c) (setq upper t))
@@ -91,6 +93,35 @@ readers intern every symbol they read, nearly all of them existing ones."
 	  (declare (dynamic-extent name))
 	  (dotimes (i n)
 	    (setf (schar name i) (if upper (char-downcase (char string i)) (char-upcase (char string i)))))
+	  (multiple-value-bind (symbol status) (find-symbol name scheme-package)
+	    (if status symbol (values (intern (copy-seq name) scheme-package))))))))
+
+(defun intern-scheme-symbol-simple (string)
+  "INTERN-SCHEME-SYMBOL of a simple character string: ASCII letters told
+by their codes, without Unicode's tables."
+  (declare (type (simple-array character (*)) string) (optimize speed))
+  (let ((upper nil) (lower nil))
+    (loop for c across string
+	  for code of-type fixnum = (char-code c)
+	  do (cond ((< code 128)
+		    (cond ((<= 65 code 90) (setq upper t))
+			  ((<= 97 code 122) (setq lower t))))
+		   ((upper-case-p c) (setq upper t))
+		   ((lower-case-p c) (setq lower t))))
+    (if (eq upper lower)
+	(values (intern string scheme-package))
+	(let* ((n (length string))
+	       (name (make-string n)))
+	  (declare (dynamic-extent name))
+	  (dotimes (i n)
+	    (let ((c (schar string i)))
+	      (setf (schar name i)
+		    (let ((code (char-code c)))
+		      (cond ((and upper (<= 65 code 90)) (code-char (+ code 32)))
+			    ((and lower (<= 97 code 122)) (code-char (- code 32)))
+			    ((< code 128) c)
+			    (upper (char-downcase c))
+			    (t (char-upcase c)))))))
 	  (multiple-value-bind (symbol status) (find-symbol name scheme-package)
 	    (if status symbol (values (intern (copy-seq name) scheme-package))))))))
 
