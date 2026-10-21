@@ -7,12 +7,29 @@ description: >
 runs:
   using: composite
   steps:
+    # SBCL 2.6.9, the release Quasischeme is developed on (and the one
+    # utils/container/ builds): the distribution's (2.2.9 on Ubuntu 24.04)
+    # lacks internals it uses, (setf sb-kernel:%instance-layout) among them.
+    - name: Cache SBCL
+      id: sbcl-cache
+      uses: actions/cache@v4
+      with:
+        path: ~/sbcl
+        key: sbcl-2.6.9-${{ runner.os }}-x86-64
+
     - name: Install SBCL
       shell: bash
       run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq sbcl
-        sbcl --version
+        if [ ! -x ~/sbcl/bin/sbcl ]; then
+          curl -fsSL -o /tmp/sbcl.tar.bz2 \
+            https://downloads.sourceforge.net/project/sbcl/sbcl/2.6.9/sbcl-2.6.9-x86-64-linux-binary.tar.bz2
+          echo "39fac28407405841003e4c2abfbe0d96abd93b7701e8b61cdd35e713943b46d6  /tmp/sbcl.tar.bz2" | sha256sum -c -
+          tar xjf /tmp/sbcl.tar.bz2 -C /tmp
+          (cd /tmp/sbcl-2.6.9-x86-64-linux && INSTALL_ROOT=$HOME/sbcl sh install.sh > /dev/null)
+        fi
+        echo "$HOME/sbcl/bin" >> "$GITHUB_PATH"
+        echo "SBCL_HOME=$HOME/sbcl/lib/sbcl" >> "$GITHUB_ENV"
+        ~/sbcl/bin/sbcl --version
 
     - name: Cache Quicklisp and compiled Lisp
       uses: actions/cache@v4

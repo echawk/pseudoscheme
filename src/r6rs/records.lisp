@@ -52,13 +52,22 @@ slots."
 
 #+sbcl (defvar *record-layout* (sb-kernel:find-layout 'record))
 
+#+sbcl
+(defmacro set-instance-layout (instance layout)
+  "Set INSTANCE's layout: (setf sb-kernel:%instance-layout) in newer SBCLs,
+sb-kernel::%set-instance-layout in older ones (2.2.9, Debian's)."
+  (let ((old (find-symbol "%SET-INSTANCE-LAYOUT" "SB-KERNEL")))
+    (if (and old (fboundp old))
+	`(,old ,instance ,layout)
+	`(setf (sb-kernel:%instance-layout ,instance) ,layout))))
+
 (declaim (inline allocate-record record-field (setf record-field) record-field-count))
 
 (defun allocate-record (rtd n)
   "A record of type RTD with N fields, each 0 until set."
   #+sbcl (let ((r (sb-kernel:%make-instance (+ (record-field-start) n))))
-	   (setf (sb-kernel:%instance-layout r) *record-layout*
-		 (record-rtd r) rtd)
+	   (set-instance-layout r *record-layout*)
+	   (setf (record-rtd r) rtd)
 	   r)
   #-sbcl (%%make-record rtd (make-array n :initial-element 0)))
 
