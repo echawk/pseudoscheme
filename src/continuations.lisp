@@ -2084,8 +2084,7 @@ place of the reference the lambda makes."
 	 (l (defined-lambda value))
 	 (formals (and l (cadr l)))
 	 (calls 0)
-	 (checks '())			; the other variables' guards
-	 (closures (and l (escaping-lambdas-p (caddr l)))))
+	 (checks '()))			; the other variables' guards
     (when (and l (listp formals) (null (cdr (last formals))) (every #'symbolp formals)
 	       (<= (tree-size l) *self-call-size-limit*))
       (let* ((f (fresh)) (w (fresh)) (m (fresh))
@@ -2108,7 +2107,7 @@ place of the reference the lambda makes."
 					 ,(car e) ,@(mapcar #'guard (cdr e)))))
 				    ;; a call of another top-level variable that holds
 				    ;; a safe procedure while CHECK is true
-				    ((and *guard-reference-hook* (not closures) (consp (car e)) (listp (cdr e))
+				    ((and *guard-reference-hook* (consp (car e)) (listp (cdr e))
 					  (funcall *guard-reference-hook* (car e)))
 				     (let ((check (funcall *guard-reference-hook* (car e)))
 					   (g (fresh)) (temps (mapcar (lambda (a) (declare (ignore a)) (fresh)) (cdr e))))
@@ -2154,41 +2153,6 @@ place of the reference the lambda makes."
 		      (if checks
 			  (funcall *guarded-note-hook* value checks)
 			  (list (sym "%note-safe") value)))))))))))
-
-(defun escaping-lambdas-p (e)
-  "Whether E makes a procedure that can be called from outside its
-extent: a lambda neither applied on the spot nor bound by a letrec whose
-variables are only called (a named let's).  GUARD-DEFINITION guards
-other variables' calls only in bodies that make none."
-  (let ((letrec-vars '()))
-    (labels ((walk (x)
-	       (cond ((symbolp x) (when (member x letrec-vars) (throw 'escapes t)))
-		     ((atom x))
-		     ((quote-form-p x))
-		     ((lambda-form-p x) (throw 'escapes t))
-		     ((lambda-form-p (car x))
-		      (walk (caddr (car x))) (mapc #'walk (cdr x)))
-		     ;; ((letrec ((loop lambda)) loop) arg ...), a named let
-		     ((and (consp (car x)) (keyword-p (car (car x)) "LETREC")
-			   (symbolp (caddr (car x))) (null (cdddr (car x)))
-			   (assoc (caddr (car x)) (cadr (car x)))
-			   (every (lambda (b) (lambda-form-p (cadr b))) (cadr (car x))))
-		      (dolist (b (cadr (car x))) (push (car b) letrec-vars))
-		      (dolist (b (cadr (car x))) (walk (caddr (cadr b))))
-		      (mapc #'walk (cdr x)))
-		     ((keyword-p (car x) "LETREC")
-		      (if (every (lambda (b) (lambda-form-p (cadr b))) (cadr x))
-			  (progn (dolist (b (cadr x)) (push (car b) letrec-vars))
-				 (dolist (b (cadr x)) (walk (caddr (cadr b))))
-				 (mapc #'walk (cddr x)))
-			  (throw 'escapes t)))
-		     (t (if (and (symbolp (car x)) (member (car x) letrec-vars))
-			    nil
-			    (walk (car x)))
-			(loop for y on (cdr x)
-			      do (walk (car y))
-			      unless (listp (cdr y)) do (walk (cdr y)))))))
-      (catch 'escapes (walk e) nil))))
 
 (defun rename-binders (e &optional env)
   "E with each variable it binds (lambda formals, letrec variables) made

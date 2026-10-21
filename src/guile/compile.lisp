@@ -797,8 +797,9 @@ non-continuable exception (error, throw, scm-error): a handler can't
 return to their caller, so a call of one needn't be a capture site, as
 --racket's raising natives aren't (src/racket/linklet/compiler.lisp)."
   (and (functionp value)
-       (loop for name in '("error" "throw" "scm-error")
-	     thereis (eq value (root-value name)))))
+       (or (eq value *r7rs-error*)
+	   (loop for name in '("error" "throw" "scm-error")
+		 thereis (eq value (root-value name))))))
 
 (defun safe-site-p (site)
   "Whether SITE's variable holds a procedure that can't capture, and
@@ -847,7 +848,7 @@ taken as safe (procedures that call each other, each guarded).")
 			       (and sites
 				    (let ((*safety-in-progress* (cons v *safety-in-progress*)))
 				      (every (lambda (site)
-					       (let ((w (site-variable site)))
+					       (let ((w (resolve-site-for-guard site)))
 						 (and w (gvariable-safe-p w))))
 					     sites)))))
 			 t)))
@@ -873,6 +874,15 @@ procedure-valued variable has changed since, else found again."
 sites of CHECKS, its guards (GUARD-REFERENCE-FORM's)."
   (list (core "%guile-note-guarded") value
 	(list (core "quote") (mapcar (lambda (c) (cadr (cadr c))) checks))))
+
+(defun resolve-site-for-guard (site)
+  "SITE's variable, found now if it's a top-level one not yet referenced
+(a guard asks before the call that would find it), else NIL."
+  (or (site-variable site)
+      (and (eq (site-kind site) :toplevel)
+	   (let ((v (ignore-errors (site-lookup site))))
+	     (when v (setf (site-variable site) v))
+	     v))))
 
 (defun guard-reference-form (operator)
   "For QSX::*GUARD-REFERENCE-HOOK*: (%guile-safe-ref-p 'site) if OPERATOR
@@ -921,8 +931,8 @@ is (%guile-set! 'site value) or defines the same variable
     (setf (gethash f *guarded-procedures*) sites)
     f)
   (qsx:defhost "%guile-safe-ref-p" (site)
-    (let ((v (site-variable site)))
-      (and v (gvariable-safe-p v))))
+    (let ((v (resolve-site-for-guard site)))
+      (bool (and v (gvariable-safe-p v)))))
   (qsx:defhost "%guile-ref" (site) (site-ref site))
   ;; past the fixnums inlined (*GUILE-INLINE-PRIMITIVES*), flonums: the
   ;; host's arithmetic is the root procedure's for them, without its
@@ -1024,8 +1034,8 @@ is (%guile-set! 'site value) or defines the same variable
 	     (if (eq value +unbound+) :call value))
 	   :call)))
     ("%guile-safe-ref-p" (s)
-     (let ((v (site-variable (sb-ext:truly-the site s))))
-       (and v (gvariable-safe-p (sb-ext:truly-the gvariable v)))))
+     (let ((v (or (site-variable (sb-ext:truly-the site s)) (resolve-site-for-guard s))))
+       (bool (and v (gvariable-safe-p (sb-ext:truly-the gvariable v))))))
     ("%guile-sub2" (x y)
      (cond ((and (typep x 'fixnum) (typep y 'fixnum)) (- x y))
 	   ((and (typep x 'double-float) (typep y 'double-float)) (- x y))

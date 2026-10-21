@@ -152,6 +152,8 @@ an imported one, else its binder's.  MODULE :root is (guile)."
 push-fluid, ...), which are Quasischeme's own procedures instead: the
 name, and a function returning the replacement.")
 
+(defvar *r7rs-error* nil "(scheme base)'s error, once it's defined.")
+
 (defparameter *boot-wrappers*
   '(("map" . fast-map-wrapper)
     ("for-each" . fast-for-each-wrapper))
@@ -244,12 +246,18 @@ version (src/continuations.lisp)."
     ;; (scheme base)'s and (srfi srfi-1)'s own map and for-each, which
     ;; R7RS programs call: the same fast path
     (unless root
-      (let ((wrapper (cdr (assoc (qs:scheme-symbol-name name) *boot-wrappers* :test #'string=))))
-	(when (and wrapper (functionp value)
-		   (member (ignore-errors
-			    (mapcar #'qs:scheme-symbol-name (funcall (root-value "module-name") module)))
-			   '(("scheme" "base") ("srfi" "srfi-1")) :test #'equal))
-	  (setq value (funcall wrapper value)))))
+      (let ((wrapper (cdr (assoc (qs:scheme-symbol-name name) *boot-wrappers* :test #'string=)))
+	    ;; base.scm's r7:error, exported as error
+	    (error-p (string= (qs:scheme-symbol-name name) "r7:error")))
+	(when (and (or wrapper error-p) (functionp value))
+	  (let ((module-name (ignore-errors
+			      (mapcar #'qs:scheme-symbol-name (funcall (root-value "module-name") module)))))
+	    (when (and wrapper (member module-name '(("scheme" "base") ("srfi" "srfi-1")) :test #'equal))
+	      (setq value (funcall wrapper value)))
+	    ;; R7RS's error, which raises a non-continuable exception as the
+	    ;; root's does (RAISING-PROCEDURE-P)
+	    (when (and error-p (equal module-name '("scheme" "base")))
+	      (setq *r7rs-error* value))))))
     ;; named after its definition, unless it's a primitive, which has its
     ;; own name ((define module-gensym gensym) doesn't rename gensym)
     (when (and (functionp value) (not (gethash value *procedure-properties*))
