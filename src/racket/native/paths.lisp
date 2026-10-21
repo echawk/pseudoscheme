@@ -166,11 +166,19 @@ parameterize changes without the process's working directory)."
 	s
 	(join (path-string who (funcall *current-directory*)) s))))
 
+(defun file-kind (s)
+  "What native path S names, following links: :DIRECTORY, :FILE (any
+other kind) or NIL.  One stat(2), not PROBE-FILE's realpath and lstats
+(and S isn't parsed as a Lisp pathname, wildcards and all): the module
+name resolver asks a few times for each module required."
+  (multiple-value-bind (ok dev ino mode) (sb-unix:unix-stat s)
+    (declare (ignore dev ino))
+    (and ok (if (= (logand mode #o170000) #o040000) :directory :file))))
+
 (defnative "file-exists?" (p) (:leaf t)
-  (let ((s (native-path "file-exists?" p)))
-    (bool (and (probe-file s) (not (uiop:directory-exists-p s))))))
+  (bool (eq (file-kind (native-path "file-exists?" p)) :file)))
 (defnative "directory-exists?" (p) (:leaf t)
-  (bool (uiop:directory-exists-p (native-path "directory-exists?" p))))
+  (bool (eq (file-kind (native-path "directory-exists?" p)) :directory)))
 (defnative "link-exists?" (p) (:leaf t)
   (bool (ignore-errors (sb-posix:s-islnk (sb-posix:stat-mode (sb-posix:lstat (native-path "link-exists?" p)))))))
 (defnative "file-size" (p) (:leaf t)

@@ -163,7 +163,8 @@ per import set, the safe exports of the linklet it imports
       (when (linklet-from-meta compiled)
 	(return-from compile-linklet compiled))))
   (timing (:lower)
-    (let ((compiled (compile-linklet-form form :name name :imports-known imports-known)))
+    (let* ((form (if (functionp form) (funcall form) form)) ; a .zo's (READ-LINKLET-BUNDLE)
+	   (compiled (compile-linklet-form form :name name :imports-known imports-known)))
       ;; its compiled code is cached, keyed by the linklet as given and
       ;; the imports it was told are safe (its code depends on them)
       (unless (compiled-linklet-source-key compiled)
@@ -298,7 +299,7 @@ branch reach, or an SBCL failure: \"full call to DATA-VECTOR-REF\"),
 lowered again split, so that its forms are compiled one by one: one
 form that fails is interpreted, not the whole linklet.  Its fasl has a
 key of its own (another strategy)."
-  (let ((split (compile-linklet-form (compiled-linklet-source-form compiled)
+  (let ((split (compile-linklet-form (linklet-source-form compiled)
 				     :name (compiled-linklet-name compiled)
 				     :imports-known (compiled-linklet-imports-known compiled)
 				     :split t)))

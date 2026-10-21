@@ -29,7 +29,7 @@
   (export-internals '())		; ... and their names inside the linklet
   (safe-exports '())			; the exports that are procedures that can't capture
   (source-key nil)			; a string or a digest identifying its source, for the cache
-  (source-form nil)			; the linklet as given, for .zo files
+  (source-form nil)			; the linklet as given, for .zo files (or a function that reads it: LINKLET-SOURCE-FORM)
   (imports-known nil)			; what it was compiled knowing of its imports
   (shape nil)				; (:whole) or (:split cells forms), from its meta file (FORM :deferred)
   (function nil))			; once loaded: the instantiation function
@@ -66,10 +66,19 @@ global (native.lisp), whichever native is behind it."
 		 (if (integerp source) source (qsx::fnv-1a source))
 		 (qsx::fnv-1a (format nil "~A ~A" (racket-signature) (compiled-linklet-strategy compiled)))))))
 
+(defvar *racket-cache-directory* nil
+  "RACKET-CACHE-DIRECTORY's answer, once per process: finding the cache's
+directory (truenames, a stat per component) for each linklet was a sixth
+of starting racket.")
+
+(pushnew (lambda () (setq *racket-cache-directory* nil)) sb-ext:*init-hooks*)
+
 (defun racket-cache-directory ()
   "This signature's generation of the Racket cache (qsx::CACHE-GENERATION)."
-  (qsx::cache-generation (uiop:merge-pathnames* "../racket/" (qsx::library-cache-directory))
-			 (racket-signature)))
+  (or *racket-cache-directory*
+      (setq *racket-cache-directory*
+	    (qsx::cache-generation (uiop:merge-pathnames* "../racket/" (qsx::library-cache-directory))
+				   (racket-signature)))))
 
 (defun linklet-fasl (key)
   (merge-pathnames (make-pathname :name key :type "fasl") (racket-cache-directory)))
@@ -95,12 +104,27 @@ compact frames), aren't the program's output."
 		 (list (core "racket:note-split-function") (quoted i) form)))
    :source "a Racket linklet"))
 
+(defun open-cache-file (path element-type)
+  "An input stream of PATH, a cache file, or NIL if it can't be opened:
+one open(2), not OPEN's access, lstat and realpath first, for each of
+a few thousand cache files at start."
+  (let ((fd (sb-unix:unix-open (sb-ext:native-namestring path) sb-unix:o_rdonly 0)))
+    (and fd (sb-sys:make-fd-stream fd :input t :element-type element-type :buffering :full
+				      :external-format :utf-8 :file path :auto-close t))))
+
+(defmacro with-cache-file ((var path &optional (element-type ''(unsigned-byte 8))) &body body)
+  "BODY with VAR an input stream of cache file PATH, or NIL if there's none."
+  `(let ((,var (open-cache-file ,path ,element-type)))
+     (unwind-protect (progn ,@body)
+       (when ,var (close ,var)))))
+
 (defun load-split-fasl (path n)
   "The N functions of the split linklet whose fasl is at PATH."
   (let ((*loading-split-functions* (make-array n :initial-element nil)))
     ;; from a stream: loading by name looks the file up (stat, a dozen
     ;; times a path) for each of a few thousand fasls
-    (with-open-file (in path :element-type '(unsigned-byte 8))
+    (with-cache-file (in path)
+      (unless in (error "~A isn't there" path))
       (handler-bind ((warning #'muffle-warning))
 	(load in)))
     (when (find nil *loading-split-functions*)
@@ -169,11 +193,13 @@ runs it in SBCL's interpreter instead (sb-fasteval, if SBCL has it)."
 
 (defun linklet-from-meta (compiled)
   "COMPILED (its FORM :deferred, source key set) filled from its meta
-file, if both that and its fasl are in the cache; else NIL."
+file, if that's in the cache; else NIL."
   (let ((key (linklet-key compiled)))
-    (when (and key (probe-file (linklet-fasl key)))
+    ;; (its fasl not looked for: if it's missing, it's compiled again
+    ;; from the form lowered then, which the meta file describes)
+    (when key
       (let ((meta (ignore-errors
-		   (with-open-file (in (linklet-meta-file key) :if-does-not-exist nil)
+		   (with-cache-file (in (linklet-meta-file key) 'character)
 		     (and in (with-standard-io-syntax
 			       (let ((*package* (find-package "SCHEME")) (*read-eval* nil))
 				 (read in))))))))
@@ -186,15 +212,21 @@ file, if both that and its fasl are in the cache; else NIL."
 		  (compiled-linklet-shape compiled) shape)
 	    compiled))))))
 
+(defun linklet-source-form (compiled)
+  "COMPILED's linklet as given: made now if what was kept is a function
+that makes it (the expander's, INSTANTIATE-EXPANDER; a .zo's, which
+READ-LINKLET-BUNDLE reads only if it's lowered or written again)."
+  (let ((form (compiled-linklet-source-form compiled)))
+    (if (functionp form)
+	(setf (compiled-linklet-source-form compiled) (funcall form))
+	form)))
+
 (defun linklet-form (compiled)
   "COMPILED's lowered form: lowered now if its meta file stood for it."
   (when (eq (compiled-linklet-form compiled) :deferred)
-    ;; a function that makes it (the expander's: INSTANTIATE-EXPANDER)
-    (when (functionp (compiled-linklet-source-form compiled))
-      (setf (compiled-linklet-source-form compiled) (funcall (compiled-linklet-source-form compiled))))
     (setf (compiled-linklet-form compiled)
 	  (compiled-linklet-form
-	   (compile-linklet-form (compiled-linklet-source-form compiled)
+	   (compile-linklet-form (linklet-source-form compiled)
 				 :name (compiled-linklet-name compiled)
 				 :imports-known (compiled-linklet-imports-known compiled)))))
   (compiled-linklet-form compiled))
@@ -226,12 +258,16 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 ;;; ------------------------------------------------------------------
 ;;; .zo files: write-linklet-bundle-hash and read-linklet-bundle-hash
 ;;;
-;;; After the expander's header: a 4-byte length (little-endian), then the
-;;; bundle as Racket data in UTF-8, (#%quasischeme-bundle (key . value)
-;;; ...).  A linklet is (#%quasischeme-linklet name form), its form as
-;;; the expander gave it, decorrelated, and its cache key (a number):
-;;; reading it compiles it again, which lowers it (fast) and finds its
-;;; machine code in the fasl cache under that key.  (Hashing what is read
+;;; After the expander's header: a 4-byte length (little-endian) of the
+;;; rest, a 4-byte length of the bundle, then the bundle as Racket data in
+;;; UTF-8, (#%quasischeme-bundle (key . value) ...), then its linklets'
+;;; forms.  A linklet is (#%quasischeme-linklet name start end key): its
+;;; form as the expander gave it, decorrelated, is the text from START to
+;;; END of what follows the bundle, read only if it's needed (its machine
+;;; code or meta file is missing): at start, reading every linklet's form
+;;; again was half of loading racket's .zo files.  KEY is its cache key
+;;; (a number): reading it compiles it again, which finds its machine
+;;; code in the fasl cache under that key.  (Hashing what is read
 ;;; back wouldn't do: it isn't the form that was hashed, so the code
 ;;; compiled as the .zo was written would be compiled again.)  Our
 ;;; values without a Racket syntax are tagged lists: (#%quasischeme-void), (#%quasischeme-path "..."),
@@ -239,13 +275,23 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 ;;; (#%quasischeme-prefab key field ...) for a prefab struct (the
 ;;; expander's serialized syntax holds shifted-to-label-phase ones).
 
+(defvar *zo-forms* nil
+  "While WRITE-LINKLET-BUNDLE encodes a bundle: an adjustable byte vector,
+its linklets' forms as text, one after another.")
+
+(defun zo-text-bytes (x)
+  (bytes-of (with-output-to-string (s) (print-value x s :write))))
+
 (defun zo-encode (x)
   (cond ((compiled-linklet-p x)
 	 ;; with its cache key, a digest of the linklet before this round
 	 ;; trip: what it was compiled under, so reading it finds that code
-	 (let ((key (compiled-linklet-source-key x)))
+	 (let* ((key (compiled-linklet-source-key x))
+		(text (zo-text-bytes (zo-encode (correlated->datum (linklet-source-form x)))))
+		(start (fill-pointer *zo-forms*)))
+	   (loop for b across text do (vector-push-extend b *zo-forms*))
 	   (list* (rsym "#%quasischeme-linklet") (or (compiled-linklet-name x) qs:false)
-		  (zo-encode (correlated->datum (compiled-linklet-source-form x)))
+		  start (fill-pointer *zo-forms*)
 		  (and (integerp key) (list key)))))
 	((eq x *void*) (list (rsym "#%quasischeme-void")))
 	((eq x qs:eof-object) (list (rsym "#%quasischeme-eof")))
@@ -275,11 +321,26 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 	 x)
 	(t (error "can't put ~S in a .zo" x))))
 
+(defvar *zo-bytes* nil
+  "While READ-LINKLET-BUNDLE decodes a bundle: (bytes . start), where its
+linklets' forms are.")
+
+(defun zo-form-reader (start end)
+  "A function that reads the linklet form from START to END of the
+bundle being decoded (*ZO-BYTES*)."
+  (let ((bytes (car *zo-bytes*))
+	(base (cdr *zo-bytes*)))
+    (lambda ()
+      (zo-decode (with-input-from-string (in (sb-ext:octets-to-string bytes :external-format :utf-8
+									      :start (+ base start) :end (+ base end)))
+		   (read-racket in))))))
+
 (defun zo-decode (x)
   (cond ((and (consp x) (symbolp (car x)))
 	 (let ((head (rname (car x))))
 	   (cond ((string= head "#%quasischeme-linklet")
-		  (compile-linklet (zo-decode (third x)) (zo-decode (second x)) (fourth x)))
+		  (destructuring-bind (name start end &optional key) (cdr x)
+		    (compile-linklet (zo-form-reader start end) (zo-decode name) key)))
 		 ((string= head "#%quasischeme-void") *void*)
 		 ((string= head "#%quasischeme-eof") qs:eof-object)
 		 ((string= head "#%quasischeme-path") (make-rpath (second x)))
@@ -298,28 +359,32 @@ there is one, else compiled now, into the cache if COMPILED has a key."
 (defun write-linklet-bundle (bundle port)
   "write-linklet-bundle-hash: BUNDLE (a hash: phase or key -> linklet or
 data) to PORT, an output port of ours."
-  (let* ((text (with-output-to-string (s)
-		 (print-value (cons (rsym "#%quasischeme-bundle")
-				    (map 'list (lambda (e) (cons (car e) (zo-encode (cdr e))))
-					 (entries bundle)))
-			      s :write)))
-	 (bytes (bytes-of text)))
-    (out-bytes port (let ((n (length bytes)))
-		      (make-array 4 :element-type '(unsigned-byte 8)
-				    :initial-contents (loop for i below 4 collect (ldb (byte 8 (* 8 i)) n)))))
-    (out-bytes port bytes)
-    *void*))
+  (flet ((size (n)
+	   (make-array 4 :element-type '(unsigned-byte 8)
+			 :initial-contents (loop for i below 4 collect (ldb (byte 8 (* 8 i)) n)))))
+    (let* ((*zo-forms* (make-array 4096 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
+	   (bytes (zo-text-bytes (cons (rsym "#%quasischeme-bundle")
+				       (map 'list (lambda (e) (cons (car e) (zo-encode (cdr e))))
+					    (entries bundle))))))
+      (out-bytes port (size (+ 4 (length bytes) (length *zo-forms*))))
+      (out-bytes port (size (length bytes)))
+      (out-bytes port bytes)
+      (out-bytes port (coerce *zo-forms* '(simple-array (unsigned-byte 8) (*))))
+      *void*)))
 
 (defun read-linklet-bundle (port)
   "read-linklet-bundle-hash: the bundle WRITE-LINKLET-BUNDLE wrote, from
 PORT, an input port of ours."
-  (let* ((n (loop for i below 4 sum (ash (inport-read-byte port) (* 8 i))))
-	 (start (rinport-pos port))
-	 (text (sb-ext:octets-to-string (rinport-bytes port) :external-format :utf-8
-					:start start :end (+ start n))))
-    (setf (rinport-pos port) (+ start n))
-    (let ((datum (with-input-from-string (in text) (read-racket in))))
-      (ihash-from-assocs :eq (mapcar (lambda (e) (cons (car e) (zo-decode (cdr e)))) (cdr datum))))))
+  (flet ((size () (loop for i below 4 sum (ash (inport-read-byte port) (* 8 i)))))
+    (let* ((total (size))
+	   (n (size))
+	   (start (rinport-pos port))
+	   (bytes (rinport-bytes port))
+	   (text (sb-ext:octets-to-string bytes :external-format :utf-8 :start start :end (+ start n))))
+      (setf (rinport-pos port) (+ start (- total 4)))
+      (let ((datum (with-input-from-string (in text) (read-racket in)))
+	    (*zo-bytes* (cons bytes (+ start n))))
+	(ihash-from-assocs :eq (mapcar (lambda (e) (cons (car e) (zo-decode (cdr e)))) (cdr datum)))))))
 
 ;;; (system-type 'vm) answers this, so that Racket code that checks for
 ;;; chez-scheme doesn't take paths meant for Racket CS's machine code.
