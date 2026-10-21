@@ -182,7 +182,13 @@ NaN is itself."
 (defun numerical-overflow (who)
   (guile-error (ssym "numerical-overflow") who "Numerical overflow" '()))
 
-(defun host-call (name &rest args) (apply (qsx:host-ref name) args))
+(defvar *host-call-functions* (make-hash-table :test 'equal :synchronized t)
+  "Name -> the host's procedure, for HOST-CALL's out-of-line calls.")
+
+(defun host-call (name &rest args)
+  (apply (the function (or (gethash name *host-call-functions*)
+			   (setf (gethash name *host-call-functions*) (qsx:host-ref name))))
+	 args))
 
 (defun host-function-cached (name cell)
   "The host's NAME, kept in CELL (a call site's) once looked up: looking
@@ -323,7 +329,9 @@ square, else the nearest double, however big or small X is."
 (defguile "/" (x &rest ys)
   (when (if ys (some #'exact-zero-p ys) (exact-zero-p x))
     (numerical-overflow "divide"))
-  (cond ((not (or (complexp x) (some #'complexp ys))) (apply #'host-call "/" x ys))
+  (cond ((not (or (complexp x) (some #'complexp ys)))
+	 (cond ((and ys (null (cdr ys))) (host-call "/" x (car ys)))
+	       (t (apply (the function (host-function-cached "/" (load-time-value (list nil)))) x ys))))
 	((null ys) (guile-divide 1 x))
 	(t (let ((q x)) (dolist (y ys q) (setq q (guile-divide q y)))))))
 

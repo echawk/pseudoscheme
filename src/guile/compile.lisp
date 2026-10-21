@@ -880,6 +880,8 @@ is (%guile-ref 'site), a top-level variable's reference."
   (and (consp operator) (eq (car operator) (core "%guile-ref"))
        (consp (cdr operator)) (qsx::quote-form-p (cadr operator))
        (site-p (cadr (cadr operator)))
+       ;; one known safe for good (a primitive) needs no guard
+       (not (safe-operator-form-p operator))
        (list (core "%guile-safe-ref-p") (cadr operator))))
 
 (defun safe-operator-form-p (form)

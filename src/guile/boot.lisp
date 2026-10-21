@@ -50,6 +50,22 @@
   (let ((v (obarray-variable (ssym name))))
     (and v (not (eq (gvariable-value v) +unbound+)) (gvariable-value v))))
 
+(defun root-value-cached (name cell)
+  "ROOT-VALUE of NAME, its variable kept in CELL (a call site's) for this
+obarray: finding it interns the name."
+  (let ((c (car cell)))
+    (if (and c (eq (car c) *obarray*))
+	(let ((x (gvariable-value (cdr c))))
+	  (and (not (eq x +unbound+)) x))
+	(let ((v (obarray-variable (ssym name))))
+	  (when v (setf (car cell) (cons *obarray* v)))
+	  (and v (not (eq (gvariable-value v) +unbound+)) (gvariable-value v))))))
+
+(define-compiler-macro root-value (&whole whole name)
+  (if (stringp name)
+      `(root-value-cached ,name (load-time-value (list nil)))
+      whole))
+
 (defun module-slot (m i) (svref (struct-slots-of m) i))
 
 (defun ghash-lookup (h key)
