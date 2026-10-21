@@ -38,8 +38,10 @@
   `(lambda ,lambda-list ,@body))
 
 (declaim (inline bool truthy))
-(defun bool (x) (if x qs:true qs:false))
-(defun truthy (x) (not (eq x qs:false)))
+;; the booleans' values as constants of the code (they're inline): not
+;; reads of the special variables, each with its check that it's bound
+(defun bool (x) (if x (load-time-value qs:true t) (load-time-value qs:false t)))
+(defun truthy (x) (not (eq x (load-time-value qs:false t))))
 
 (defvar *unspecified* qs:unspecific)
 

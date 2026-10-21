@@ -97,6 +97,19 @@ whether it lowers, and which primitives it uses that we lack."
 	      (loop for (name . n) in unknown append (list name n))))
     unknown))
 
+(defun wrap-expander-read (form)
+  "The expander linklet FORM with the read its read-primitives table
+holds (#%read's, and so #%kernel's) as (quasischeme-fast-read read):
+read's fast path (fast-read.lisp) in front of it."
+  (dolist (f (cdddr form) form)
+    (when (and (form-p f "define-values") (consp (cadr f)) (symbolp (car (cadr f)))
+	       (string= (rname (car (cadr f))) "read-primitives")
+	       (form-p (caddr f) "hasheq"))
+      (loop for tail on (cdr (caddr f)) by #'cddr
+	    when (equal (car tail) (list (rsym "quote") (rsym "read")))
+	      do (setf (cadr tail) (list (rsym "quasischeme-fast-read") (cadr tail))))
+      (return form))))
+
 (defvar *expander-instance* nil "The expander linklet's instance, once instantiated.")
 
 (defun instantiate-expander (&key (stream *standard-output*))
@@ -110,10 +123,11 @@ top-level form failed and why."
 		   ;; (regexp-layer.lisp)
 		   (install-regexp-layer :stream stream)
 		   (expander-linklet-text)))
-	   (form (with-input-from-string (in text) (read-racket in)))
+	   (form (wrap-expander-read (with-input-from-string (in text) (read-racket in))))
 	   (compiled (compile-linklet-form form :name (rsym "expander"))))
-      ;; its compiled form is cached, keyed by its text (cache.lisp)
-      (setf (compiled-linklet-source-key compiled) text)
+      ;; its compiled form is cached, keyed by its text (cache.lisp), and
+      ;; what WRAP-EXPANDER-READ does
+      (setf (compiled-linklet-source-key compiled) (concatenate 'string text ";fast-read"))
       (format stream "~&expander: read and lowered in ~,1Fs~%" (seconds start))
       (setq start (get-internal-real-time))
       (linklet-function compiled)
@@ -200,6 +214,14 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
     (setq *expander-string->number*
 	  (funcall (expander-export "dynamic-require")
 		   (list (rsym "quote") (rsym "#%read")) (rsym "string->number")))
+    ;; read's fast path (fast-read.lisp), given the reader's parameters
+    (install-fast-read
+     (lambda (name)
+       (multiple-value-bind (v found) (primitive name)
+	 (if found
+	     v
+	     (funcall (expander-export "dynamic-require")
+		      (list (rsym "quote") (rsym "#%read")) (rsym name))))))
     (setq *expander-booted* t))
   (funcall (expander-export "eval") datum))
 

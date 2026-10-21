@@ -101,8 +101,20 @@
 (defun bytes-of (s) (sb-ext:string-to-octets s :external-format :utf-8))
 
 (defun decode-utf-8 (bytes &optional (start 0) end)
-  (sb-ext:octets-to-string bytes :start start :end end
-				 :external-format (list :utf-8 :replacement (code-char #xFFFD))))
+  (let ((end (or end (length bytes))))
+    (if (and (typep bytes '(simple-array (unsigned-byte 8) (*)))
+	     (locally (declare (type (simple-array (unsigned-byte 8) (*)) bytes) (type fixnum start end))
+	       (loop for i of-type fixnum from start below end always (< (aref bytes i) #x80))))
+	;; ASCII, as most lines are: a character per byte
+	(locally (declare (type (simple-array (unsigned-byte 8) (*)) bytes) (type fixnum start end)
+			  (optimize speed))
+	  (let ((s (make-string (- end start))))
+	    (loop for i of-type fixnum from start below end
+		  for j of-type fixnum from 0
+		  do (setf (schar s j) (code-char (aref bytes i))))
+	    s))
+	(sb-ext:octets-to-string bytes :start start :end end
+				       :external-format (list :utf-8 :replacement (code-char #xFFFD))))))
 
 (defun finish-inport (p)
   "P, counting lines if the parameter says so."
@@ -457,8 +469,31 @@ at eof (or a special, and 1)."
 	       (incf count)))
     (if (and (zerop count) (plusp n)) qs:eof-object (get-output-stream-string out))))
 
+(defun buffered-line (p mode)
+  "For P's bytes all in its buffer (a file's, a string's), not counting
+lines: the start and end in RINPORT-BYTES of its next line, consumed
+with the line separator of MODE; :EOF at the end; NIL if the slow way
+must do (a return byte before the linefeed, in a mode other than
+linefeed's)."
+  (when (and (null (rinport-fill p)) (null (rinport-custom p)) (not (rinport-count-lines p))
+	     (member mode '("linefeed" "any" "any-one") :test #'string=))
+    (let* ((bytes (rinport-bytes p))
+	   (pos (rinport-pos p))
+	   (end (ip-end p))
+	   (nl (position 10 bytes :start pos :end end))
+	   (stop (or nl end)))
+      (cond ((and (not (string= mode "linefeed")) (position 13 bytes :start pos :end stop)) nil)
+	    ((and (null nl) (= pos end)) :eof)
+	    (t (ip-advance p (- (if nl (1+ nl) end) pos))
+	       (values pos stop))))))
+
 (defun read-line-bytes (p mode who)
   "The bytes of P up to the next line separator of MODE (a string), which is consumed; or eof."
+  (multiple-value-bind (start stop) (buffered-line p mode)
+    (case start
+      ((nil))
+      (:eof (return-from read-line-bytes qs:eof-object))
+      (t (return-from read-line-bytes (subseq (rinport-bytes p) start stop)))))
   (let ((out (make-array 80 :element-type '(unsigned-byte 8) :adjustable t :fill-pointer 0))
 	(seen nil))
     (flet ((result () (coerce out 'octets)))
@@ -592,6 +627,8 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 
 (defun unwrap-port (x property)
   "X, or the port it stands for if it is a struct with PROPERTY."
+  (when (or (rinport-p x) (routport-p x))
+    (return-from unwrap-port x))
   (loop repeat 100
 	while (and x (struct-instance-p x))
 	do (let ((target (port-struct-target x property)))
@@ -615,9 +652,27 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 ;;; ------------------------------------------------------------------
 ;;; Reading
 
+(defmacro buffered-ascii-read (p)
+  "The next character of rinport P, consumed, if it is an ASCII byte in
+its buffer, P open, not counting lines, not custom, and no progress
+event waiting; else NIL."
+  `(let ((p ,p))
+     (when (and (rinport-p p) (not (rinport-closed p)) (null (rinport-custom p))
+		(not (rinport-count-lines p)) (null (rinport-progress p)))
+       (let* ((bytes (rinport-bytes p))
+	      (pos (rinport-pos p))
+	      (end (or (rinport-end p) (length bytes))))
+	 (declare (type (simple-array (unsigned-byte 8) (*)) bytes) (fixnum pos end))
+	 (when (< pos end)
+	   (let ((b (aref bytes pos)))
+	     (when (< b #x80)
+	       (setf (rinport-pos p) (1+ pos))
+	       (code-char b))))))))
+
 (defnative "read-char" (&optional port) ()
-  (let ((p (input-port "read-char" port)))
-    (if (rinport-p p) (inport-read-char p "read-char") (funcall (qsx:host-ref "read-char") p))))
+  (or (buffered-ascii-read port)
+      (let ((p (input-port "read-char" port)))
+	(if (rinport-p p) (inport-read-char p "read-char") (funcall (qsx:host-ref "read-char") p)))))
 (defnative "peek-char" (&optional port (skip 0)) ()
   (let ((p (input-port "peek-char" port)))
     (if (rinport-p p)
@@ -692,8 +747,13 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
   (let ((p (input-port "read-line" port)))
     (if (not (rinport-p p))
 	(funcall (qsx:host-ref "read-line") p)
-	(let ((line (read-line-bytes p (line-mode-name "read-line" mode) "read-line")))
-	  (if (eq line qs:eof-object) line (decode-utf-8 line))))))
+	(let ((mode (line-mode-name "read-line" mode)))
+	  (multiple-value-bind (start stop) (buffered-line p mode)
+	    (case start
+	      ((nil) (let ((line (read-line-bytes p mode "read-line")))
+		       (if (eq line qs:eof-object) line (decode-utf-8 line))))
+	      (:eof qs:eof-object)
+	      (t (decode-utf-8 (rinport-bytes p) start stop))))))))
 (defnative "read-bytes-line" (&optional port (mode (rsym "linefeed"))) ()
   (read-line-bytes (in-port "read-bytes-line" port) (line-mode-name "read-bytes-line" mode) "read-bytes-line"))
 
@@ -1008,7 +1068,21 @@ string and then its bytes, as WRITE-STRING would."
 	       (out-emit p buf 0 (encode-utf-8-char c buf)))))))
 
 (defnative "write-char" (c &optional port) ()
-  (port-write-char c port "write-char")
+  ;; an ASCII character to an open file port's buffer, not counting
+  ;; lines, block or line buffered: as PORT-WRITE-CHAR's own fast path,
+  ;; without the port's unwrapping
+  (let ((p port))
+    (if (and (routport-p p) (characterp c) (< (char-code c) #x80)
+	     (eq (routport-kind p) :file) (not (routport-closed p))
+	     (not (routport-count-lines p)) (routport-obuf p)
+	     (< (routport-opos p) +file-outport-buffer-size+)
+	     (not (eq (routport-buffer-mode p) (load-time-value (rsym "none")))))
+	(let ((buf (routport-obuf p)))
+	  (declare (type (simple-array (unsigned-byte 8) (*)) buf))
+	  (setf (aref buf (routport-opos p)) (char-code c))
+	  (incf (routport-opos p))
+	  (incf (routport-written p)))
+	(port-write-char c port "write-char")))
   *void*)
 (defnative "newline" (&optional port) ()
   (port-write-char #\Newline port "newline")

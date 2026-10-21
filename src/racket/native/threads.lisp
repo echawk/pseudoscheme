@@ -1431,16 +1431,28 @@ identity; or NIL."
 
 (defvar *wrapped-natives* (make-hash-table :test 'eq))
 
+(defmacro atomically (call)
+  `(if (null (cdr *threads*))
+       ,call
+       (let ((self *self*))
+	 (incf (rthread-atomic self))
+	 (unwind-protect ,call
+	   (decf (rthread-atomic self))))))
+
 (defun atomic-wrapper (f)
-  "F, without preemption (cheaply skipped while there's one thread)."
-  (lambda (&rest args)
-    (declare (dynamic-extent args))
-    (if (null (cdr *threads*))
-	(apply f args)
-	(let ((self *self*))
-	  (incf (rthread-atomic self))
-	  (unwind-protect (apply f args)
-	    (decf (rthread-atomic self)))))))
+  "F, without preemption (cheaply skipped while there's one thread).  For
+the arities most natives have, without a list of the arguments and
+APPLY (read-char and write-char are called per character)."
+  (declare (function f))
+  (case (ignore-errors (arity-mask f))
+    (1 (lambda () (atomically (funcall f))))
+    (2 (lambda (a) (atomically (funcall f a))))
+    (3 (lambda (&optional (a nil a-p)) (if a-p (atomically (funcall f a)) (atomically (funcall f)))))
+    (4 (lambda (a b) (atomically (funcall f a b))))
+    (6 (lambda (a &optional (b nil b-p)) (if b-p (atomically (funcall f a b)) (atomically (funcall f a)))))
+    (t (lambda (&rest args)
+	 (declare (dynamic-extent args))
+	 (atomically (apply f args))))))
 
 (defun protect-natives ()
   "Wrap the natives that change shared structures in atomic sections,
