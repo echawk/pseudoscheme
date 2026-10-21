@@ -140,7 +140,7 @@ a later definition first (boot.lisp's EVAL-LOAD-FORM).")
   (let ((v (site-variable site)))
     (if v
 	(let ((x (gvariable-value (the gvariable v))))
-	  (if (eq x +unbound+) (site-ref-slowly site) x))
+	  (if (eq x **unbound**) (site-ref-slowly site) x))
 	(site-ref-slowly site))))
 
 (defun site-set (site value)
@@ -1031,7 +1031,7 @@ is (%guile-set! 'site value) or defines the same variable
      (let ((v (site-variable (sb-ext:truly-the site s))))
        (if v
 	   (let ((value (gvariable-value (sb-ext:truly-the gvariable v))))
-	     (if (eq value +unbound+) :call value))
+	     (if (eq value **unbound**) :call value))
 	   :call)))
     ("%guile-safe-ref-p" (s)
      (let ((v (or (site-variable (sb-ext:truly-the site s)) (resolve-site-for-guard s))))

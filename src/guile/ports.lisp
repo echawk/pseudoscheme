@@ -375,6 +375,29 @@ there is one, at the start; big-endian otherwise."
 per-character paths' slot reads, without PCL's."
   `(sb-mop:standard-instance-access ,port (load-time-value (gport-slot-location ',name) t)))
 
+(defun buffered-ascii-line (port)
+  "The rest of PORT's line, without its newline, which is consumed, if all
+of it is ASCII in PORT's read buffer and PORT a UTF-8 port past its start;
+else NIL (%read-line's common case: no character at a time)."
+  (when (and (eq (class-of port) (load-time-value (find-class 'gport) t))
+	     (eq (gslot port codec) :utf-8) (gslot port bom-state))
+    (let* ((rb (gslot port rbuffer))
+	   (buf (svref rb 0))
+	   (rpos (svref rb 1))
+	   (rend (svref rb 2)))
+      (declare (simple-vector rb) (type (simple-array (unsigned-byte 8) (*)) buf) (fixnum rpos rend))
+      (let ((nl (position 10 buf :start rpos :end rend)))
+	(when (and nl (loop for i of-type fixnum from rpos below nl always (< (aref buf i) 128)))
+	  (let ((s (make-string (- nl rpos)))
+		(position (svref rb 4)))
+	    (loop for i of-type fixnum from rpos below nl
+		  for j of-type fixnum from 0
+		  do (setf (schar s j) (code-char (aref buf i))))
+	    (setf (svref rb 1) (1+ nl))
+	    (incf (car position))
+	    (setf (cdr position) 0)
+	    s))))))
+
 (defun buffered-ascii-char (port)
   "PORT's next character, consumed, if it is an ASCII byte in its read
 buffer and PORT a UTF-8 port past its start (its byte-order mark looked
@@ -536,7 +559,44 @@ mark, as Guile writes."
   (when (and (eq (port-buffering port) :line) (char= char #\Newline))
     (flush-output port)))
 
+(defun buffer-ascii-string (port string start end)
+  "Put STRING[START,END) in PORT's write buffer, if all of it is printable
+ASCII or newlines and PORT an open, buffered UTF-8 output port with room
+there and no buffered input, its line and column kept: true if so."
+  (when (and (simple-string-p string)
+	     (eq (class-of port) (load-time-value (find-class 'gport) t))
+	     (eq (gslot port codec) :utf-8) (gslot port open)
+	     (gslot port output) (gslot port registered)
+	     (not (eq (gslot port buffering) :none)))
+    (let* ((rb (gslot port rbuffer))
+	   (wb (gslot port wbuffer))
+	   (wbuf (svref wb 0))
+	   (wend (svref wb 2))
+	   (n (- end start)))
+      (declare (simple-vector rb wb) (type (simple-array (unsigned-byte 8) (*)) wbuf) (fixnum wend n))
+      (when (and (>= (the fixnum (svref rb 1)) (the fixnum (svref rb 2)))
+		 (<= (+ wend n) (length wbuf))
+		 (loop for i of-type fixnum from start below end
+		       always (let ((c (char-code (schar string i)))) (or (<= 32 c 126) (= c 10)))))
+	(let ((last-newline nil) (newlines 0) (position (svref rb 4)))
+	  (declare (fixnum newlines))
+	  (loop for i of-type fixnum from start below end
+		for j of-type fixnum from wend
+		do (let ((c (char-code (schar string i))))
+		     (setf (aref wbuf j) c)
+		     (when (= c 10) (incf newlines) (setq last-newline i))))
+	  (setf (svref wb 2) (+ wend n))
+	  (if last-newline
+	      (setf (car position) (+ (car position) newlines)
+		    (cdr position) (- end last-newline 1))
+	      (incf (cdr position) n))
+	  (when (and (eq (gslot port buffering) :line) last-newline)
+	    (flush-output port))
+	  t)))))
+
 (defun port-write-string (port string start end)
+  (when (buffer-ascii-string port string start end)
+    (return-from port-write-string))
   (if (and (eq (codec port) :utf-8) (not (eq (port-buffering port) :none)))
       (progn
 	(write-octets port (sb-ext:string-to-octets string :external-format :utf-8 :start start :end end))
@@ -1535,8 +1595,11 @@ end of file, or END: (delimiter-or-eof . count)."
 	  (read-delimited-into delims buf gobble (in-port port "%read-delimited!") start end)))
     (def "%read-line"
 	(lambda (&optional port)
+	 (block %read-line-block
 	  (let ((p (in-port port "%read-line"))
 		(out (make-string-output-stream)))
+	    (let ((line (buffered-ascii-line p)))
+	      (when line (return-from %read-line-block (cons line #\Newline))))
 	    (loop (let ((c (port-read-char p)))
 		    (cond ((eq c :eof)
 			   (let ((s (get-output-stream-string out)))
@@ -1544,7 +1607,7 @@ end of file, or END: (delimiter-or-eof . count)."
 			  (t (track-char p c)
 			     (if (char= c #\Newline)
 				 (return (cons (get-output-stream-string out) c))
-				 (write-char c out)))))))))
+				 (write-char c out))))))))))
     (def "write-line"
 	(lambda (obj &optional port)
 	  (let ((p (out-port port "write-line")))

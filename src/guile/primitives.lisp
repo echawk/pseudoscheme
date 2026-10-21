@@ -1880,8 +1880,8 @@ true (the predicate's value) if it matches."
   (check-stack-limit "call-with-stack-overflow-handler" limit)
   ;; deep recursion (past the binding stack, src/continuations.lisp) stops
   ;; at 64 MB more of control stack, short of the stack's own end
-  (handler-case (let ((qsx::*stack-limit* (cons (sb-sys:sap-int (sb-vm::current-sp)) (* 64 1024 1024)))
-		      ;; frameless recursion (a procedure that calls only itself
+  (handler-case (qsx::with-stack-limit ((cons (sb-sys:sap-int (sb-vm::current-sp)) (* 64 1024 1024)))
+		 (let (;; frameless recursion (a procedure that calls only itself
 		      ;; and safe ones) checks no limit: it exhausts the control
 		      ;; stack itself, which SBCL recovers from only if not
 		      ;; told to lose on corruption (--script tells it)
@@ -1889,7 +1889,7 @@ true (the predicate's value) if it matches."
 		  (unwind-protect
 		       (progn (setf (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int) 0)
 			      (funcall thunk))
-		    (setf (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int) lose)))
+		    (setf (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int) lose))))
     (storage-condition ()
       (check-stack-limit "call-with-stack-overflow-handler" (funcall handler))
       (guile-error (ssym "stack-overflow") "call-with-stack-overflow-handler" "Stack overflow" '()))))

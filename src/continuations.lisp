@@ -119,9 +119,21 @@ binds *FSTACK* once (WITH-THREAD-STATE)."
 use from START-ADDRESS before CALL-WITH-ASSIGNED-FSTACK signals
 STACK-LIMIT-REACHED (Guile's call-with-stack-overflow-handler).")
 
+(sb-ext:define-load-time-global **stack-limits** 0
+  "How many *STACK-LIMIT*s are in force, in any thread: what the checks
+of frameless code read (a global's one load, not a special's lookup).")
+(declaim (type fixnum **stack-limits**))
+
+(defmacro with-stack-limit ((limit) &body body)
+  "BODY with *STACK-LIMIT* LIMIT, counted in **STACK-LIMITS**."
+  `(let ((*stack-limit* ,limit))
+     (sb-ext:atomic-incf **stack-limits**)
+     (unwind-protect (progn ,@body)
+       (sb-ext:atomic-decf **stack-limits**))))
+
 (defmacro %no-stack-limit ()
-  "True (a Scheme boolean) unless a *STACK-LIMIT* is in force."
-  `(if *stack-limit* ',qs:false ',qs:true))
+  "True (a Scheme boolean) unless a *STACK-LIMIT* may be in force."
+  `(if (zerop **stack-limits**) ',qs:true ',qs:false))
 
 (define-condition stack-limit-reached (storage-condition) ()
   (:report "Stack overflow"))
@@ -1549,7 +1561,7 @@ end, which the condition handlers have no stack left for).")
 W running M instead while one is in force.")
 
 (defmacro %check-stack-limit ()
-  `(when *stack-limit* (check-stack-limit)))
+  `(unless (zerop **stack-limits**) (when *stack-limit* (check-stack-limit))))
 
 (defun check-stack-limit ()
   (let ((sp #+sbcl (sb-sys:sap-int (sb-vm::current-sp)) #-sbcl 0))

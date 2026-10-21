@@ -354,6 +354,9 @@ classes among them, are printed with it.")
 ;;; Variables
 
 (defvar +unbound+ (qs::make-photon "#<unbound>"))
+(sb-ext:define-load-time-global **unbound** +unbound+
+  "+UNBOUND+, read by the variable references compiled code inlines as a
+global's one load, not a special variable's lookup.")
 
 (defvar *procedure-epoch* 0
   "Counts the assignments of top-level variables that held or now hold a
