@@ -225,6 +225,15 @@ version (src/continuations.lisp)."
 	(when override (setq value (funcall override)))
 	(let ((wrapper (cdr (assoc (qs:scheme-symbol-name name) *boot-wrappers* :test #'string=))))
 	  (when (and wrapper (functionp value)) (setq value (funcall wrapper value))))))
+    ;; (scheme base)'s and (srfi srfi-1)'s own map and for-each, which
+    ;; R7RS programs call: the same fast path
+    (unless root
+      (let ((wrapper (cdr (assoc (qs:scheme-symbol-name name) *boot-wrappers* :test #'string=))))
+	(when (and wrapper (functionp value)
+		   (member (ignore-errors
+			    (mapcar #'qs:scheme-symbol-name (funcall (root-value "module-name") module)))
+			   '(("scheme" "base") ("srfi" "srfi-1")) :test #'equal))
+	  (setq value (funcall wrapper value)))))
     ;; named after its definition, unless it's a primitive, which has its
     ;; own name ((define module-gensym gensym) doesn't rename gensym)
     (when (and (functionp value) (not (gethash value *procedure-properties*))
@@ -517,9 +526,9 @@ gives an infinity and 0.0/0.0 a NaN, as in Guile."
 
 (defvar *cache-ready* nil "Set once Guile has booted (cache.lisp).")
 (defvar *cacheable-load* nil
-  "True in PRIMITIVE-LOAD of a module from the load path, which is cached;
-a file loaded otherwise (load, a script) is evaluated as read, as Guile's
-evaluator does.")
+  "True in PRIMITIVE-LOAD of a module from the load path, or of the script
+LOAD-FILE runs, which are cached (as guile auto-compiles them); a file
+loaded otherwise (load) is evaluated as read, as Guile's evaluator does.")
 
 (defun top-level-form-start (text i)
   "The index in TEXT, from I, past whitespace and line comments."
@@ -1091,7 +1100,9 @@ boot); the last form's values."
 (defun load-file (path)
   "Load the Guile source file PATH at the current top level."
   (boot)
-  (call-with-guile-catch (lambda () (primitive-load (namestring (merge-pathnames path))))))
+  ;; compiled into the cache, as guile auto-compiles the script it's given
+  (let ((*cacheable-load* t))
+    (call-with-guile-catch (lambda () (primitive-load (namestring (merge-pathnames path)))))))
 
 (defvar *quit-code* nil)
 

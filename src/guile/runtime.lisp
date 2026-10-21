@@ -95,7 +95,8 @@ generic's methods are tried instead (src/guile/goops.lisp).")
 (defstruct (vtable (:include gstruct) (:constructor %make-vtable (vtable slots)) (:copier nil))
   (nfields 0 :type fixnum)
   (flags 0 :type fixnum)
-  (hidden '() :type list))		; the hidden fields' indices
+  (hidden '() :type list)		; the hidden fields' indices
+  (layout-cache nil))			; (layout symbol name . no u field), for INIT-SLOTS
 
 (defclass applicable-struct (sb-mop:funcallable-standard-object)
   ((vtable :initarg :vtable :accessor astruct-vtable)
@@ -136,10 +137,32 @@ generic's methods are tried instead (src/guile/goops.lisp).")
 (defun field-default (layout-string i)
   (if (char= (char layout-string (* 2 i)) #\u) 0 qs:false))
 
+(defun vtable-layout-string (vtable)
+  "VTABLE's layout as a string: kept per layout symbol, not made at each
+make-struct."
+  (let ((symbol (svref (gstruct-slots vtable) 0))
+	(cache (vtable-layout-cache vtable)))
+    (if (and cache (eq (car cache) symbol))
+	(cadr cache)
+	(let ((string (qs:scheme-symbol-name symbol)))
+	  ;; (symbol string . plain-p)
+	  (setf (vtable-layout-cache vtable) (list* symbol string (plain-layout-p string)))
+	  string))))
+
+(defun plain-layout-p (layout)
+  "Whether LAYOUT (a string) has no unboxed (u) field."
+  (loop for i from 0 below (length layout) by 2 never (char= (char layout i) #\u)))
+
 (defun init-slots (vtable inits &optional (who "make-struct"))
+  ;; a record's: every field given, none unboxed or hidden
+  (when (and (not (logtest (vtable-flags vtable) +vtable-flag-vtable+))
+	     (= (length inits) (vtable-nfields vtable)))
+    (vtable-layout-string vtable)
+    (when (cddr (vtable-layout-cache vtable))
+      (return-from init-slots (coerce inits 'simple-vector))))
   (let* ((n (vtable-nfields vtable))
 	 (hidden (vtable-hidden vtable))
-	 (layout (qs:scheme-symbol-name (svref (gstruct-slots vtable) 0)))
+	 (layout (vtable-layout-string vtable))
 	 (slots (make-array n)))
     ;; a vtable's hidden fields (flags, size, ...) take no initializer;
     ;; other structs' fields all do, as in Guile 3

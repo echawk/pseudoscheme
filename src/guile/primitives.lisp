@@ -184,6 +184,16 @@ NaN is itself."
 
 (defun host-call (name &rest args) (apply (qsx:host-ref name) args))
 
+(defun host-function-cached (name cell)
+  "The host's NAME, kept in CELL (a call site's) once looked up: looking
+it up interns the name."
+  (or (car cell) (setf (car cell) (qsx:host-ref name))))
+
+(define-compiler-macro host-call (&whole whole name &rest args)
+  (if (stringp name)
+      `(funcall (the function (host-function-cached ,name (load-time-value (list nil)))) ,@args)
+      whole))
+
 (defun exact-zero-p (x) (eql x 0))
 
 (defun complex-integer-expt (z k)
