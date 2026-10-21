@@ -126,10 +126,19 @@ starts a #lang racket program in a tenth of the time."
 (defun save-racket-core (path)
   "Instantiate the expander, preload modules (PRELOAD-MODULES), and save
 this program, so, as PATH, which doesn't return."
-  (unless *expander-instance*
-    (unless (instantiate-expander :stream nil)
+  (let ((compiled (getf *stats* :compile)))
+    (unless *expander-instance*
+      (unless (instantiate-expander :stream nil)
+	(uiop:quit 1)))
+    (preload-modules)
+    ;; what compiling (into the cache) left behind isn't the image's: made
+    ;; again by a run that finds it all compiled (half the size, and a
+    ;; third faster to start)
+    (when (and (> (getf *stats* :compile) compiled) (not (uiop:getenv "QUASISCHEME_RACKET_SAVE_AGAIN")))
+      (sb-posix:setenv "QUASISCHEME_RACKET_SAVE_AGAIN" "1" 1)
+      (exec-program (sb-ext:native-namestring sb-ext:*runtime-pathname*) sb-ext:*posix-argv*)
       (uiop:quit 1)))
-  (preload-modules)
+  (sb-posix:unsetenv "QUASISCHEME_RACKET_SAVE_AGAIN")
   (sb-posix:unsetenv "QUASISCHEME_RACKET_SAVE_CORE")
   (uiop:dump-image path :executable t))
 

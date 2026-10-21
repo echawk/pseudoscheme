@@ -479,6 +479,62 @@ After the assignment, so that analyses still see the lambda assigned."
 		((eq kind :exported) (list (core "racket:variable-set!") (variable-info-cell v) value))
 		(t (list (core "racket:assign-error") (quoted name))))))))
 
+(defvar *inline-procedures* (make-hash-table :test 'eq)
+  "Top-level name -> (formals . body): a procedure small enough to inline,
+for the calls of it lowered after its definition (NOTE-INLINE-PROCEDURE).")
+
+(defvar *inlining* '()
+  "The names whose bodies are being inlined, which aren't again: a body
+may call another, which may call it back.")
+
+(defparameter *inline-size* 16
+  "The biggest body (in conses) of a procedure inlined at its calls.")
+
+(defun inline-body-p (x formals)
+  "Whether X, a procedure's body form, is one to inline: variable
+references, literals, if, begin and calls; no binding form, lambda or
+assignment, whose copies would differ from the procedure's own."
+  (cond ((atom x) t)
+	((and (symbolp (car x)) (not (member (car x) formals)) (special-form (car x)))
+	 (case (special-form (car x))
+	   (:quote t)
+	   ((:if :begin) (every (lambda (y) (inline-body-p y formals)) (cdr x)))
+	   (t nil)))
+	(t (and (listp (cdr (last x))) (every (lambda (y) (inline-body-p y formals)) x)))))
+
+(defun note-inline-procedure (form)
+  "After lowering FORM, a top-level definition: remember its procedure for
+inlining, if it is a small lambda of a proper list of formals defining a
+name never assigned.  (Calls after the definition only: one before it is
+an error when it runs, which inlining would hide.  A top-level lambda's
+free names are top-level, which the copy, lowered at top level, refers
+to as the procedure would; the call's arguments are evaluated first, as
+the procedure's would be.)"
+  (let ((ids (cadr form)) (rhs (caddr form)))
+    (when (and (consp ids) (null (cdr ids)))
+      (let* ((id (car ids))
+	     (v (gethash id (linklet-info-variables *info*))))
+	(cond ((nth-value 1 (gethash id *inline-procedures*))
+	       ;; defined again: not known after all
+	       (setf (gethash id *inline-procedures*) nil))
+	      ((and v (member (variable-info-kind v) '(:defined :defined-exported))
+		    (not (variable-info-mutated v))
+		    (form-p rhs "lambda") (consp (cdr rhs))
+		    (listp (cadr rhs)) (null (cdr (last (cadr rhs))))
+		    (every #'symbolp (cadr rhs))
+		    (<= (qsx::tree-size (cddr rhs)) *inline-size*)
+		    (every (lambda (y) (inline-body-p y (cadr rhs))) (cddr rhs))
+		    (not (tree-mentions-p id (cddr rhs))))
+	       (setf (gethash id *inline-procedures*) (cons (cadr rhs) (cddr rhs))))
+	      (t (setf (gethash id *inline-procedures*) nil)))))))
+
+(defun inline-procedure (x env)
+  "The (formals . body) to inline for X, a call, if it calls a procedure
+NOTE-INLINE-PROCEDURE remembered, with as many arguments as it takes."
+  (and (symbolp (car x)) (not (assoc (car x) env)) (not (member (car x) *inlining*))
+       (let ((p (gethash (car x) *inline-procedures*)))
+	 (and p (= (length (car p)) (length (cdr x))) p))))
+
 (defun lower-expr (x env)
   (cond ((symbolp x)
 	 (if (or (null x) (eq x qs:false) (eq x qs:true)) (quoted x) (lookup x env)))
@@ -524,6 +580,13 @@ After the assignment, so that analyses still see the lambda assigned."
 	      (eq (gethash (car x) (linklet-info-variables *info*) :none) :none)
 	      (or (eq-datum-p (second x)) (eq-datum-p (third x))))
 	 (list (core "eq?") (lower-expr (second x) env) (lower-expr (third x) env)))
+	;; a small procedure defined before: its body, lowered at top level
+	;; (its free names are top-level ones), applied to the arguments
+	((inline-procedure x env)
+	 (let ((p (inline-procedure x env)))
+	   (cons (let ((*inlining* (cons (car x) *inlining*)) (*self-call* nil))
+		   (lower-lambda (car p) (cdr p) '()))
+		 (mapcar (lambda (y) (lower-expr y env)) (cdr x)))))
 	(t (mapcar (lambda (y) (lower-expr y env)) x))))
 
 (defun eq-datum-p (x)
@@ -748,9 +811,10 @@ then exports then the rest (N cells in all)."
 	    (loop for form in (parsed-linklet-body parsed)
 		 collect (list (core "lambda") (list (core "racket:instance") cells)
 			       (if (form-p form "define-values")
-				   (list (core "begin")
-					 (lower-assignment (cadr form) (caddr form) '())
-					 (quoted *void*))
+				   (prog1 (list (core "begin")
+						(lower-assignment (cadr form) (caddr form) '())
+						(quoted *void*))
+				     (note-inline-procedure form))
 				   (lower-expr form '()))))
 	    info))))
 
@@ -783,7 +847,8 @@ one, LOWER-SPLIT's form."
 		      l))
 	   (body (loop for form in (parsed-linklet-body parsed)
 		       collect (if (form-p form "define-values")
-				   (lower-assignment (cadr form) (caddr form) '())
+				   (prog1 (lower-assignment (cadr form) (caddr form) '())
+				     (note-inline-procedure form))
 				   (lower-expr form '()))))
 	   (body (if (and body (form-p (car (last (parsed-linklet-body parsed))) "define-values"))
 		     (append body (list (quoted *void*)))
@@ -1079,6 +1144,7 @@ uninterned-literal quick.  SPLIT: split, whatever its size."
   (declare (ignore options))
   (let* ((*split-size* (if split -1 *split-size*))
 	 (*safe-locals* (make-hash-table :test 'eq))
+	 (*inline-procedures* (make-hash-table :test 'eq))
 	 (info (make-linklet-info))
 	 (parsed (analyse (parse-linklet (decorrelate form info)) info imports-known))
 	 ;; a named let's call as a call of a known procedure (DIRECT-LETREC-CALLS),

@@ -33,6 +33,7 @@
 (defmethod print-object ((x struct-type) stream)
   (format stream "#<struct-type:~A>" (rname (struct-type-name x))))
 
+(declaim (inline make-rstruct))		; constructors make one per call
 (defstruct (rstruct (:constructor make-rstruct (type fields)))
   type (fields #() :type simple-vector))
 
