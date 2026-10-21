@@ -119,6 +119,10 @@ binds *FSTACK* once (WITH-THREAD-STATE)."
 use from START-ADDRESS before CALL-WITH-ASSIGNED-FSTACK signals
 STACK-LIMIT-REACHED (Guile's call-with-stack-overflow-handler).")
 
+(defmacro %no-stack-limit ()
+  "True (a Scheme boolean) unless a *STACK-LIMIT* is in force."
+  `(if *stack-limit* ',qs:false ',qs:true))
+
 (define-condition stack-limit-reached (storage-condition) ()
   (:report "Stack overflow"))
 
@@ -133,10 +137,7 @@ STACK-LIMIT-REACHED (Guile's call-with-stack-overflow-handler).")
   "Call THUNK with *FSTACK* assigned CELL, restored however THUNK is left."
   (declare (function thunk))
   (when *stack-limit*
-    (let ((sp #+sbcl (sb-sys:sap-int (sb-vm::current-sp)) #-sbcl 0))
-      (when (> (abs (- sp (car *stack-limit*))) (cdr *stack-limit*))
-	(let ((*stack-limit* nil))	; handling it takes stack
-	  (error 'stack-limit-reached)))))
+    (check-stack-limit))
   (let ((old *fstack*))
     (unwind-protect
 	 (progn (setq *fstack* cell)
@@ -1537,11 +1538,34 @@ known procedure."
 		       (t l))))
 	(if marker (named l) l)))))
 
+(defvar *frameless-stack-checks* nil
+  "True if a procedure without sites checks *STACK-LIMIT* as it's entered,
+as a machine's frames do (Guile mode: call-with-stack-overflow-handler;
+recursion that makes no frames otherwise runs to the control stack's
+end, which the condition handlers have no stack left for).")
+
+(defvar *guarded-frameless* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "The F variables of GUARD-DEFINITION: they check no stack limit, their
+W running M instead while one is in force.")
+
+(defmacro %check-stack-limit ()
+  `(when *stack-limit* (check-stack-limit)))
+
+(defun check-stack-limit ()
+  (let ((sp #+sbcl (sb-sys:sap-int (sb-vm::current-sp)) #-sbcl 0))
+    (when (> (abs (- sp (car *stack-limit*))) (cdr *stack-limit*))
+      (let ((*stack-limit* nil))
+	(error 'stack-limit-reached)))))
+
 (defun transform-lambda-1 (e &optional self)
   (multiple-value-bind (body name) (strip-procedure-name (caddr e))
     (let ((formals (cadr e)))
       (if (tail-simple-p body)
-	  `(,(car e) ,formals ,(keep-tail-frames (simple body)))
+	  `(,(car e) ,formals ,(let ((body (keep-tail-frames (simple body))))
+				 ;; a named procedure's: recursion goes through one
+				 (if (and *frameless-stack-checks* self (not (gethash self *guarded-frameless*)))
+				     `(,(sym "begin") (%check-stack-limit) ,body)
+				     body)))
 	  (build-machine formals body
 			 (and self (listp formals) (null (cdr (last formals)))
 			      (not (makes-closures-p body))
@@ -1995,6 +2019,23 @@ procedure in *SAFE-FUNCTIONS*."
 (by one of *DEFINITION-OPERATORS*): :READS if the form reads the variable
 the definition defines, :ASSIGNS if it assigns or defines it, else NIL.")
 
+(defvar *guard-reference-hook* nil
+  "NIL, or a function of an operator form: a form true while the
+top-level variable the operator reads holds a procedure that can't
+capture (Guile mode's (%guile-safe-ref-p 'site)), if it reads one; else
+NIL.  GUARD-DEFINITION guards the calls of such variables as it guards a
+procedure's calls of itself.")
+
+(defvar *guarded-note-hook* nil
+  "With *GUARD-REFERENCE-HOOK*: a function of a guarded definition's W (a
+form) and its guards, a form that records W as safe while they hold.
+Such a W isn't recorded safe outright (%note-safe): it runs M, which can
+capture, when one doesn't.")
+
+(defmacro %safe-call (f &rest args)
+  "A call of F, just found to be a procedure that can't capture: not a site."
+  `(funcall ,f ,@args))
+
 (defparameter *self-call-size-limit* 4000
   "The biggest procedure, in conses, whose calls of itself are guarded:
 it is compiled twice.")
@@ -2042,7 +2083,9 @@ place of the reference the lambda makes."
   (let* ((value (fourth definition))
 	 (l (defined-lambda value))
 	 (formals (and l (cadr l)))
-	 (calls 0))
+	 (calls 0)
+	 (checks '())			; the other variables' guards
+	 (closures (and l (escaping-lambdas-p (caddr l)))))
     (when (and l (listp formals) (null (cdr (last formals))) (every #'symbolp formals)
 	       (<= (tree-size l) *self-call-size-limit*))
       (let* ((f (fresh)) (w (fresh)) (m (fresh))
@@ -2063,16 +2106,39 @@ place of the reference the lambda makes."
 					   (,f ,@temps)
 					   (%self-call-barrier ,g ,@temps)))
 					 ,(car e) ,@(mapcar #'guard (cdr e)))))
+				    ;; a call of another top-level variable that holds
+				    ;; a safe procedure while CHECK is true
+				    ((and *guard-reference-hook* (not closures) (consp (car e)) (listp (cdr e))
+					  (funcall *guard-reference-hook* (car e)))
+				     (let ((check (funcall *guard-reference-hook* (car e)))
+					   (g (fresh)) (temps (mapcar (lambda (a) (declare (ignore a)) (fresh)) (cdr e))))
+				       (pushnew check checks :test #'equal)
+				       `((,(sym "lambda") (,g ,@temps)
+					  (,(sym "if") ,check
+					   (%safe-call ,g ,@temps)
+					   (%self-call-barrier ,g ,@temps)))
+					 ,(car e) ,@(mapcar #'guard (cdr e)))))
 				    (t (loop for x on e
 					     collect (guard (car x)) into new
 					     unless (listp (cdr x)) do (return (nconc new (cdr x)))
 					     finally (return new))))))
-		     (guard (caddr l)))))
-	(when (plusp calls)
+		     ;; F's own variables: not M's (a named let in both
+		     ;; would bind one variable to two lambdas)
+		     (guard (rename-binders (caddr l))))))
+	(when (or (plusp calls) checks)
 	  (multiple-value-bind (stripped name) (strip-procedure-name (caddr l))
 	    (declare (ignore stripped))
-	    (let* ((reference (or dispatch-reference (find-self-reference (caddr l) definition)))
-		   (dispatch `(,(sym "if") (,(sym "eq?") ,reference ,w) (,f ,@formals) (,m ,@formals)))
+	    (let* ((reference (and (plusp calls)
+				   (or dispatch-reference (find-self-reference (caddr l) definition))))
+		   ;; F while the variable holds W and each other guarded
+		   ;; variable a safe procedure, else M
+		   ;; ... and no stack limit is in force (Guile's
+		   ;; call-with-stack-overflow-handler): F's frameless calls
+		   ;; check none, M's frames do
+		   (dispatch (reduce (lambda (test inner) `(,(sym "if") ,test ,inner (,m ,@formals)))
+				     (append '((%no-stack-limit))
+					     (and reference `((,(sym "eq?") ,reference ,w))) checks)
+				     :from-end t :initial-value `(,f ,@formals)))
 		   (letrec `(,(sym "letrec")
 			     ((,f (,(car l) ,formals ,body))
 			      (,m ,l)
@@ -2082,9 +2148,79 @@ place of the reference the lambda makes."
 					dispatch))))
 			     ,w)))
 	      (funcall note f)
-	      (list (first definition) (second definition) (third definition)
-		    (list (sym "%note-safe")
-			  (if (eq value l) letrec (list* (car value) letrec (cddr value))))))))))))
+	      (setf (gethash f *guarded-frameless*) t)
+	      (let ((value (if (eq value l) letrec (list* (car value) letrec (cddr value)))))
+		(list (first definition) (second definition) (third definition)
+		      (if checks
+			  (funcall *guarded-note-hook* value checks)
+			  (list (sym "%note-safe") value)))))))))))
+
+(defun escaping-lambdas-p (e)
+  "Whether E makes a procedure that can be called from outside its
+extent: a lambda neither applied on the spot nor bound by a letrec whose
+variables are only called (a named let's).  GUARD-DEFINITION guards
+other variables' calls only in bodies that make none."
+  (let ((letrec-vars '()))
+    (labels ((walk (x)
+	       (cond ((symbolp x) (when (member x letrec-vars) (throw 'escapes t)))
+		     ((atom x))
+		     ((quote-form-p x))
+		     ((lambda-form-p x) (throw 'escapes t))
+		     ((lambda-form-p (car x))
+		      (walk (caddr (car x))) (mapc #'walk (cdr x)))
+		     ;; ((letrec ((loop lambda)) loop) arg ...), a named let
+		     ((and (consp (car x)) (keyword-p (car (car x)) "LETREC")
+			   (symbolp (caddr (car x))) (null (cdddr (car x)))
+			   (assoc (caddr (car x)) (cadr (car x)))
+			   (every (lambda (b) (lambda-form-p (cadr b))) (cadr (car x))))
+		      (dolist (b (cadr (car x))) (push (car b) letrec-vars))
+		      (dolist (b (cadr (car x))) (walk (caddr (cadr b))))
+		      (mapc #'walk (cdr x)))
+		     ((keyword-p (car x) "LETREC")
+		      (if (every (lambda (b) (lambda-form-p (cadr b))) (cadr x))
+			  (progn (dolist (b (cadr x)) (push (car b) letrec-vars))
+				 (dolist (b (cadr x)) (walk (caddr (cadr b))))
+				 (mapc #'walk (cddr x)))
+			  (throw 'escapes t)))
+		     (t (if (and (symbolp (car x)) (member (car x) letrec-vars))
+			    nil
+			    (walk (car x)))
+			(loop for y on (cdr x)
+			      do (walk (car y))
+			      unless (listp (cdr y)) do (walk (cdr y)))))))
+      (catch 'escapes (walk e) nil))))
+
+(defun rename-binders (e &optional env)
+  "E with each variable it binds (lambda formals, letrec variables) made
+fresh: a copy that binds nothing the original does, so that each binding
+stays one (FIND-SAFE-PROCEDURES knows a variable bound to one lambda)."
+  (labels ((rename (x env) (let ((p (assoc x env :test #'eq))) (if p (cdr p) x)))
+	   (formal-renames (formals)
+	     (let ((renames '()))
+	       (labels ((walk (f)
+			  (cond ((null f) nil)
+				((symbolp f) (let ((n (fresh))) (push (cons f n) renames) n))
+				(t (cons (walk (car f)) (walk (cdr f)))))))
+		 (values (walk formals) renames))))
+	   (walk (x env)
+	     (cond ((symbolp x) (rename x env))
+		   ((atom x) x)
+		   ((quote-form-p x) x)
+		   ((lambda-form-p x)
+		    (multiple-value-bind (formals renames) (formal-renames (cadr x))
+		      (list* (car x) formals
+			     (mapcar (lambda (b) (walk b (append renames env))) (cddr x)))))
+		   ((keyword-p (car x) "LETREC")
+		    (let* ((renames (mapcar (lambda (b) (cons (car b) (fresh))) (cadr x)))
+			   (env (append renames env)))
+		      (list* (car x)
+			     (mapcar (lambda (b) (list (rename (car b) env) (walk (cadr b) env))) (cadr x))
+			     (mapcar (lambda (b) (walk b env)) (cddr x)))))
+		   (t (loop for y on x
+			    collect (walk (car y) env) into new
+			    unless (listp (cdr y)) do (return (nconc new (walk (cdr y) env)))
+			    finally (return new))))))
+    (walk e env)))
 
 (defun find-self-reference (e definition)
   "The first operator form in E that reads DEFINITION's variable."

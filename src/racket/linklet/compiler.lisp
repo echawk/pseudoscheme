@@ -768,7 +768,7 @@ one, LOWER-SPLIT's form."
 	       (when (member (variable-info-kind v) '(:defined :defined-exported))
 		 (setf (variable-info-core v) (fresh-lexical (rname name))))
 	       (when (member (variable-info-kind v) '(:imported :exported :defined-exported))
-		 (setf (variable-info-cell v) (fresh-lexical "var"))))
+		 (setf (variable-info-cell v) (fresh-lexical (concatenate (quote string) "var-" (rname name))))))
 	     (linklet-info-variables info))
     (let* ((imports (loop for set in (parsed-linklet-imports parsed)
 			  append (loop for (nil . internal) in set

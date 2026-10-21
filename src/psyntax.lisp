@@ -1212,6 +1212,19 @@ the command line and exits; DROP-LAST skips it.)"
      (if (typep bv '(simple-array (unsigned-byte 8) (*)))
 	 (length bv)
 	 :call))
+    ;; R6RS's fixnum operations (and --racket's fx and unsafe-fx ones, their
+    ;; aliases) on two fixnums; anything else, or a result past the
+    ;; fixnums, the procedure's own way (its condition)
+    ("fx+" (a b) (if (and (typep a 'fixnum) (typep b 'fixnum))
+		     (let ((r (+ a b))) (if (typep r 'fixnum) r :call))
+		     :call))
+    ("fx-" (a b) (if (and (typep a 'fixnum) (typep b 'fixnum))
+		     (let ((r (- a b))) (if (typep r 'fixnum) r :call))
+		     :call))
+    ,@(loop for (name op) in '(("fx=?" =) ("fx<?" <) ("fx>?" >) ("fx<=?" <=) ("fx>=?" >=))
+	    collect `(,name (a b) (if (and (typep a 'fixnum) (typep b 'fixnum))
+				      (if (,op a b) t qs:false)
+				      :call)))
     ;; two strings: CL's comparisons, which compare code points as R7RS does
     ("string=?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string= a b) t qs:false) :call))
     ("string<?" (a b) (if (and (simple-string-p a) (simple-string-p b)) (if (string< a b) t qs:false) :call))

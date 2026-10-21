@@ -791,6 +791,15 @@ own with no parameter named as a procedure.  Made on first use.")
 		 *guile-primitives*)
 	(setq *safe-primitive-functions* table))))
 
+(defun raising-procedure-p (value)
+  "Whether VALUE is one of the root's procedures that raise a
+non-continuable exception (error, throw, scm-error): a handler can't
+return to their caller, so a call of one needn't be a capture site, as
+--racket's raising natives aren't (src/racket/linklet/compiler.lisp)."
+  (and (functionp value)
+       (loop for name in '("error" "throw" "scm-error")
+	     thereis (eq value (root-value name)))))
+
 (defun safe-site-p (site)
   "Whether SITE's variable holds a procedure that can't capture, and
 will: a primitive (Guile's compiler, too, takes the root module's
@@ -809,12 +818,69 @@ proved safe, defined in a declarative module."
 	 (let ((value (gvariable-value v)))
 	   (and (functionp value)
 		(or (gethash value (safe-primitive-functions))
+		    (raising-procedure-p value)
 		    (and (gethash value qsx::*safe-functions*)
 			 (let ((m (cond ((eq (site-module site) :root) qs:false)
 					((eq (site-kind site) :module) (or (existing-module (site-module site) nil) qs:false))
 					(t (site-module-object site))))
 			       (declarative (root-value "module-declarative?")))
 			   (and (module-p* m) declarative (truthy (funcall declarative m)))))))))))
+
+(defvar *guarded-procedures* (make-hash-table :test 'eq :weakness :key :synchronized t)
+  "A W of GUARD-DEFINITION (src/continuations.lisp) -> the sites of the
+variables whose procedures it calls: it can't capture while each holds
+a procedure that can't (%guile-note-guarded).")
+
+(defvar *safety-in-progress* '()
+  "The variables GVARIABLE-SAFE-P-SLOWLY is judging: one met again is
+taken as safe (procedures that call each other, each guarded).")
+
+(defun gvariable-safe-p-slowly (v x)
+  (let ((epoch *procedure-epoch*))
+    (if (member v *safety-in-progress* :test #'eq)
+	t
+	(let ((safe (and (functionp x)
+			 (or (gethash x (safe-primitive-functions))
+			     (gethash x qsx::*safe-functions*)
+			     (raising-procedure-p x)
+			     (let ((sites (gethash x *guarded-procedures*)))
+			       (and sites
+				    (let ((*safety-in-progress* (cons v *safety-in-progress*)))
+				      (every (lambda (site)
+					       (let ((w (site-variable site)))
+						 (and w (gvariable-safe-p w))))
+					     sites)))))
+			 t)))
+	  ;; kept only if nothing changed meanwhile, and not while judging a
+	  ;; cycle (what it found assumed something)
+	  (when (and (null *safety-in-progress*) (= epoch *procedure-epoch*))
+	    (setf (gvariable-safe v) safe (gvariable-safe-for v) x (gvariable-safe-epoch v) epoch))
+	  safe))))
+
+(declaim (inline gvariable-safe-p))
+(defun gvariable-safe-p (v)
+  "Whether variable V holds a procedure that can't capture (a primitive,
+one the continuation transformation proved safe, or a guarded one whose
+callees' variables do): known for its value as last asked unless a
+procedure-valued variable has changed since, else found again."
+  (let ((x (gvariable-value v)))
+    (if (and (eq x (gvariable-safe-for v)) (= (gvariable-safe-epoch v) *procedure-epoch*))
+	(gvariable-safe v)
+	(gvariable-safe-p-slowly v x))))
+
+(defun guarded-note-form (value checks)
+  "For QSX::*GUARDED-NOTE-HOOK*: VALUE, a guarded W, recorded with the
+sites of CHECKS, its guards (GUARD-REFERENCE-FORM's)."
+  (list (core "%guile-note-guarded") value
+	(list (core "quote") (mapcar (lambda (c) (cadr (cadr c))) checks))))
+
+(defun guard-reference-form (operator)
+  "For QSX::*GUARD-REFERENCE-HOOK*: (%guile-safe-ref-p 'site) if OPERATOR
+is (%guile-ref 'site), a top-level variable's reference."
+  (and (consp operator) (eq (car operator) (core "%guile-ref"))
+       (consp (cdr operator)) (qsx::quote-form-p (cadr operator))
+       (site-p (cadr (cadr operator)))
+       (list (core "%guile-safe-ref-p") (cadr operator))))
 
 (defun safe-operator-form-p (form)
   "(%guile-ref 'site), SITE being a SAFE-SITE-P."
@@ -845,7 +911,16 @@ is (%guile-set! 'site value) or defines the same variable
 (defun install-compiler-primitives ()
   (setq qsx::*definition-operators* '("%guile-define!")
 	qsx::*safe-operator-hook* 'safe-operator-form-p
-	qsx::*self-reference-hook* 'self-reference-form-p)
+	qsx::*self-reference-hook* 'self-reference-form-p
+	qsx::*frameless-stack-checks* t
+	qsx::*guard-reference-hook* 'guard-reference-form
+	qsx::*guarded-note-hook* 'guarded-note-form)
+  (qsx:defhost "%guile-note-guarded" (f sites)
+    (setf (gethash f *guarded-procedures*) sites)
+    f)
+  (qsx:defhost "%guile-safe-ref-p" (site)
+    (let ((v (site-variable site)))
+      (and v (gvariable-safe-p v))))
   (qsx:defhost "%guile-ref" (site) (site-ref site))
   ;; past the fixnums inlined (*GUILE-INLINE-PRIMITIVES*), flonums: the
   ;; host's arithmetic is the root procedure's for them, without its
@@ -927,7 +1002,7 @@ is (%guile-set! 'site value) or defines the same variable
    '("%guile-append2" "%guile-nil:memq" "%guile-nil:memv" "%guile-nil:assq" "%guile-nil:assv"
      "%guile-nil:length" "%guile-nil:list?" "%guile-nil:reverse" "%guile-nil:last-pair"
      "%guile-nil:append"
-     "%guile-ref" "%guile-sub2" "%guile-<" "%guile->" "%guile-<=" "%guile->=" "%guile-=" "%guile-null?" "%guile-not" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
+     "%guile-ref" "%guile-safe-ref-p" "%guile-note-guarded" "%guile-sub2" "%guile-<" "%guile->" "%guile-<=" "%guile->=" "%guile-=" "%guile-null?" "%guile-not" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
      "%guile-with-meta" "%guile-inline"
      "%guile-nargs>=" "%guile-nargs-between" "%guile-keywords-fit?" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
@@ -946,6 +1021,9 @@ is (%guile-set! 'site value) or defines the same variable
 	   (let ((value (gvariable-value (sb-ext:truly-the gvariable v))))
 	     (if (eq value +unbound+) :call value))
 	   :call)))
+    ("%guile-safe-ref-p" (s)
+     (let ((v (site-variable (sb-ext:truly-the site s))))
+       (and v (gvariable-safe-p (sb-ext:truly-the gvariable v)))))
     ("%guile-sub2" (x y)
      (if (and (typep x 'fixnum) (typep y 'fixnum)) (- x y) :call))
     ,@(loop for (name test) in '(("<" <) (">" >) ("<=" <=) (">=" >=) ("=" =))

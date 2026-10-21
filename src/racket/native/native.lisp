@@ -157,6 +157,14 @@ linklets (after every instance is filled: #%linklet's too)."
   ;; (compiler.lisp, *RAISING-NATIVES*)
   (qsx::register-primitive-names
    (remove-if-not (lambda (n) (nth-value 1 (primitive (subseq n 7)))) *raising-natives*))
+  ;; #%linklet's that call nothing of the program's (racket/private/reverse
+  ;; asks variable-reference-from-unsafe? at each call)
+  (qsx::register-primitive-names
+   '("racket:variable-reference?" "racket:variable-reference-from-unsafe?"
+     "racket:variable-reference-constant?" "racket:variable-reference->instance"
+     "racket:correlated?" "racket:correlated-e" "racket:correlated-source" "racket:correlated-line"
+     "racket:correlated-column" "racket:correlated-position" "racket:correlated-span"
+     "racket:correlated->datum" "racket:instance-name" "racket:instance?"))
   (qsx::register-primitive-names
    '("racket:variable-ref" "racket:safe-variable-ref" "racket:safe-ref" "racket:arg-safe-ref" "racket:named" "racket:variable-set!" "racket:variable-reference"
      "racket:unknown-primitive" "racket:assign-error" "racket:arity-error" "racket:with-arity")))

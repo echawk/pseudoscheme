@@ -208,9 +208,9 @@ SBCL's) and making the fields vector from them with no list."
   `(case n
      ,@(loop for k from 0 to max
 	     collect (let ((vars (loop for i below k collect (intern (format nil "A~D" i)))))
-		       `(,k (lambda (&optional ,@(mapcar (lambda (v) `(,v +missing+)) vars) &rest more)
+		       `(,k (lambda (&optional ,@(mapcar (lambda (v) `(,v (load-time-value +missing+ t))) vars) &rest more)
 			      (declare (dynamic-extent more))
-			      (when (or more ,@(and vars `((eq ,(car (last vars)) +missing+))))
+			      (when (or more ,@(and vars `((eq ,(car (last vars)) (load-time-value +missing+ t)))))
 				(arity-error (list* ,@(remove-if (lambda (v) (declare (ignore v)) nil) vars) more)))
 			      (make-rstruct type (vector ,@vars))))))
      (t nil)))

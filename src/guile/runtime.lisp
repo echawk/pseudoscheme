@@ -254,8 +254,10 @@ one): it has no fields until then."
   "An unboxed field (u) holds a 64-bit word."
   (let ((layout (svref (gstruct-slots (struct-vtable-of s)) +vtable-index-layout+)))
     (when (and (symbolp layout) (not (typep v '(unsigned-byte 64))))
-      (let ((string (qs:scheme-symbol-name layout)))
-	(when (and (< (* 2 i) (length string)) (char= (char string (* 2 i)) #\u))
+      ;; the symbol's own name, case inverted or not (qs:scheme-symbol-name
+      ;; would make a string per call): u or U either way
+      (let ((string (symbol-name layout)))
+	(when (and (< (* 2 i) (length string)) (char-equal (char string (* 2 i)) #\u))
 	  (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list v) (list v)))))))
 
 (defguile "struct-set!" (s i v)
@@ -330,8 +332,26 @@ classes among them, are printed with it.")
 
 (defvar +unbound+ (qs::make-photon "#<unbound>"))
 
-(defstruct (gvariable (:constructor make-gvariable (&optional (value +unbound+))) (:copier nil))
-  value)
+(defvar *procedure-epoch* 0
+  "Counts the assignments of top-level variables that held or now hold a
+procedure: what GVARIABLE-SAFE-P (src/guile/compile.lisp) found of a
+variable stands while this hasn't changed.")
+(declaim (type fixnum *procedure-epoch*))
+
+(defstruct (gvariable (:constructor make-gvariable (&optional (%value +unbound+))) (:copier nil))
+  %value
+  ;; whether the value is a procedure that can't capture a continuation,
+  ;; as found for SAFE-FOR in SAFE-EPOCH (GVARIABLE-SAFE-P)
+  (safe-for +unbound+)
+  (safe-epoch -1 :type fixnum)
+  (safe nil))
+
+(declaim (inline gvariable-value))
+(defun gvariable-value (v) (gvariable-%value v))
+(defun (setf gvariable-value) (x v)
+  (when (or (functionp x) (functionp (gvariable-%value v)))
+    (setq *procedure-epoch* (logand (1+ *procedure-epoch*) most-positive-fixnum)))
+  (setf (gvariable-%value v) x))
 
 (defmethod print-object ((v gvariable) stream)
   (if (eq (gvariable-value v) +unbound+)

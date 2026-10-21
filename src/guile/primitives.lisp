@@ -567,7 +567,14 @@ square, else the nearest double, however big or small X is."
 
 (defvar *read-only-strings* (trivial-garbage:make-weak-hash-table :weakness :key :test 'eq :synchronized t))
 
+(defvar *last-mutated-string* nil
+  "The string a mutator last changed, if it is mutable, marked mutated,
+and shares characters with no other string: its next change needs none
+of the weak tables' lookups (each takes a lock).  Forgotten whenever a
+string is made read-only or shared (READ-ONLY-STRING, SUBSTRING/SHARED).")
+
 (defun read-only-string (s)
+  (setq *last-mutated-string* nil)
   (setf (gethash s *read-only-strings*) t)
   s)
 
@@ -633,11 +640,24 @@ bytevector mutators read-only bytevectors."
 		  (position position))
 	     (when (functionp f)
 	       (setf (gvariable-value v)
-		     (lambda (&rest args)
-		       (let ((s (nth position args)))
-			 (check-mutable-string s)
-			 (multiple-value-prog1 (apply f args)
-			   (when (stringp s) (string-changed s)))))))))
+		     (flet ((after (s)
+			      (when (stringp s)
+				(string-changed s)
+				(unless (or (gethash s *shared-substrings*) (gethash s *string-sharers*))
+				  (setq *last-mutated-string* s)))))
+		       (if (string= name "string-set!")
+			   ;; per character: no argument list
+			   (lambda (s k c)
+			     (if (eq s *last-mutated-string*)
+				 (funcall f s k c)
+				 (progn (check-mutable-string s)
+					(multiple-value-prog1 (funcall f s k c) (after s)))))
+			   (lambda (&rest args)
+			     (let ((s (nth position args)))
+			       (if (eq s *last-mutated-string*)
+				   (apply f args)
+				   (progn (check-mutable-string s)
+					  (multiple-value-prog1 (apply f args) (after s))))))))))))
   (let ((v (obarray-variable (ssym "substring/shared"))))
     (when v (setf (gvariable-value v) #'substring/shared))))
 
@@ -664,6 +684,7 @@ bytevector mutators read-only bytevectors."
     (if (and (= start 0) (= end (length s)))
 	s
 	(let ((sub (subseq s start end)))
+	  (setq *last-mutated-string* nil)
 	  (setf (gethash sub *shared-substrings*) (cons s start))
 	  (push (trivial-garbage:make-weak-pointer sub) (gethash s *string-sharers*))
 	  sub))))
@@ -1829,7 +1850,7 @@ true (the predicate's value) if it matches."
 ;;; result checked as Guile checks it), and a non-local exit from it
 ;;; leaves THUNK.  A handler that returns, asking for more stack, can't be
 ;;; given it.  (SBCL recovers from an exhausted stack unless it runs with
-;;; --lose-on-corruption, which --script implies.)
+;;; --lose-on-corruption, which --script implies: turned off meanwhile.)
 
 (defun check-stack-limit (who x)
   (unless (integerp x) (wrong-type who 1 x))
@@ -1841,8 +1862,16 @@ true (the predicate's value) if it matches."
   (check-stack-limit "call-with-stack-overflow-handler" limit)
   ;; deep recursion (past the binding stack, src/continuations.lisp) stops
   ;; at 64 MB more of control stack, short of the stack's own end
-  (handler-case (let ((qsx::*stack-limit* (cons (sb-sys:sap-int (sb-vm::current-sp)) (* 64 1024 1024))))
-		  (funcall thunk))
+  (handler-case (let ((qsx::*stack-limit* (cons (sb-sys:sap-int (sb-vm::current-sp)) (* 64 1024 1024)))
+		      ;; frameless recursion (a procedure that calls only itself
+		      ;; and safe ones) checks no limit: it exhausts the control
+		      ;; stack itself, which SBCL recovers from only if not
+		      ;; told to lose on corruption (--script tells it)
+		      (lose (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int)))
+		  (unwind-protect
+		       (progn (setf (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int) 0)
+			      (funcall thunk))
+		    (setf (sb-alien:extern-alien "lose_on_corruption_p" sb-alien:int) lose)))
     (storage-condition ()
       (check-stack-limit "call-with-stack-overflow-handler" (funcall handler))
       (guile-error (ssym "stack-overflow") "call-with-stack-overflow-handler" "Stack overflow" '()))))

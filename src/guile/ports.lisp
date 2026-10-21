@@ -22,6 +22,7 @@
 (defun make-octets (n) (make-array n :element-type '(unsigned-byte 8)))
 
 (defconstant +buffer-size+ 1024 "As Guile's ports' (custom ports' read and write sizes show it).")
+(defconstant +file-buffer-size+ 65536 "A regular file's port's buffers (FD-PORT).")
 
 (defclass gport (trivial-gray-streams:fundamental-binary-input-stream
 		 trivial-gray-streams:fundamental-binary-output-stream
@@ -53,7 +54,9 @@
    (filename :initarg :filename :initform qs:false :accessor port-filename*)
    (open :initform t :accessor port-open-p)
    (revealed :initform 0 :accessor port-revealed*)
-   (properties :initform '() :accessor port-properties)))
+   (properties :initform '() :accessor port-properties)
+   ;; in *OPEN-OUTPUT-PORTS* (a weak table, locked: not asked per character)
+   (registered :initform nil :accessor port-registered)))
 
 (defun gport-p (x) (typep x 'gport))
 
@@ -250,7 +253,8 @@
   ;; file's), on a port with random access; a pipe's input stays
   (when (and (< (port-rpos port) (port-rend port)) (port-random-access-p port))
     (discard-input port))
-  (setf (gethash port *open-output-ports*) t)
+  (unless (port-registered port)
+    (setf (gethash port *open-output-ports*) t (port-registered port) t))
   (loop while (< start end)
 	do (let* ((wbuf (port-wbuf port))
 		  (n (min (- end start) (- (length wbuf) (port-wend port)))))
@@ -360,8 +364,61 @@ there is one, at the start; big-endian otherwise."
 	  ((or (<= #xd800 u #xdfff) (> u #x10ffff)) (bad-input port))
 	  (t (code-char u)))))
 
+(defun gport-slot-location (name)
+  (let ((class (find-class 'gport)))
+    (sb-mop:finalize-inheritance class)
+    (sb-mop:slot-definition-location
+     (find name (sb-mop:class-slots class) :key #'sb-mop:slot-definition-name))))
+
+(defmacro gslot (port name)
+  "PORT's slot NAME, read at its place (gport has no subclasses): the
+per-character paths' slot reads, without PCL's."
+  `(sb-mop:standard-instance-access ,port (load-time-value (gport-slot-location ',name) t)))
+
+(defun buffered-ascii-char (port)
+  "PORT's next character, consumed, if it is an ASCII byte in its read
+buffer and PORT a UTF-8 port past its start (its byte-order mark looked
+for); else NIL (read-char asks this per character)."
+  (when (and (eq (class-of port) (load-time-value (find-class 'gport) t))
+	     (eq (gslot port codec) :utf-8) (gslot port bom-state))
+    (let* ((rb (gslot port rbuffer))
+	   (rpos (svref rb 1)))
+      (declare (simple-vector rb) (fixnum rpos))
+      (when (< rpos (the fixnum (svref rb 2)))
+	(let ((b (aref (the (simple-array (unsigned-byte 8) (*)) (svref rb 0)) rpos)))
+	  (when (< b 128)
+	    (setf (svref rb 1) (1+ rpos))
+	    (code-char b)))))))
+
+(defun buffer-ascii-char (port char)
+  "Put ASCII CHAR in PORT's write buffer, if PORT is an open, buffered
+UTF-8 output port with room there and no buffered input, its line and
+column kept: true if so (write-char, per character)."
+  (let ((code (char-code char)))
+    (when (and (< code 128) (eq (class-of port) (load-time-value (find-class 'gport) t))
+	       (eq (gslot port codec) :utf-8) (gslot port open)
+	       (gslot port output) (gslot port registered))
+      (let ((buffering (gslot port buffering))
+	    (rb (gslot port rbuffer))
+	    (wb (gslot port wbuffer)))
+	(declare (simple-vector rb wb))
+	(when (and (not (eq buffering :none)) (>= (the fixnum (svref rb 1)) (the fixnum (svref rb 2))))
+	  (let ((wbuf (svref wb 0)) (wend (svref wb 2)))
+	    (declare (type (simple-array (unsigned-byte 8) (*)) wbuf) (fixnum wend))
+	    (when (< wend (length wbuf))
+	      (setf (aref wbuf wend) code
+		    (svref wb 2) (1+ wend))
+	      (track-position (svref rb 4) char)
+	      (when (and (eq buffering :line) (= code 10))
+		(flush-output port))
+	      t)))))))
+
 (defun port-read-char (port)
   "The next character from PORT, or :EOF."
+  ;; an ASCII byte already buffered, of a UTF-8 port past its start (its
+  ;; byte-order mark looked for): the character at once
+  (let ((c (buffered-ascii-char port)))
+    (when c (return-from port-read-char c)))
   (fill-input port)
   (let ((codec (codec port))
 	(*bad-input-start* (port-rpos port)))
@@ -441,14 +498,23 @@ conversion strategy says."
 		(t (call-throw (ssym "encoding-error")
 			       (list "scm_putc" "conversion to port encoding failed" +eilseq+ port char))))))))
 
-(defun track-char (port char)
+(defun track-position (position char)
+  "POSITION, a port's (line . column), past CHAR."
   (case char
-    (#\Newline (incf (port-line* port)) (setf (port-column* port) 0))
-    (#\Tab (setf (port-column* port) (* 8 (1+ (floor (port-column* port) 8)))))
-    (#\Backspace (when (plusp (port-column* port)) (decf (port-column* port))))
-    (#\Return (setf (port-column* port) 0))
+    (#\Newline (incf (car position)) (setf (cdr position) 0))
+    (#\Tab (setf (cdr position) (* 8 (1+ (floor (cdr position) 8)))))
+    (#\Backspace (when (plusp (cdr position)) (decf (cdr position))))
+    (#\Return (setf (cdr position) 0))
     (#\Bel)				; the bell takes no column, as in Guile
-    (t (incf (port-column* port)))))
+    (t (incf (cdr position)))))
+
+(defun track-char (port char)
+  "PORT's line and column past CHAR."
+  (track-position (svref (if (eq (class-of port) (load-time-value (find-class 'gport) t))
+			     (gslot port rbuffer)
+			     (port-rbuffer port))
+			 4)
+		  char))
 
 (defun write-bom (port)
   "At the start of a UTF-16 or UTF-32 stream, a big-endian byte-order
@@ -460,6 +526,10 @@ mark, as Guile writes."
 			   (make-array 4 :element-type '(unsigned-byte 8) :initial-contents '(0 0 #xfe #xff))))))
 
 (defun port-write-char (port char)
+  ;; an ASCII character to an open, buffered UTF-8 output port with room
+  ;; in its buffer and no buffered input: its byte there, at once
+  (when (buffer-ascii-char port char)
+    (return-from port-write-char))
   (write-bom port)
   (write-octets port (encode-char port char))
   (track-char port char)
@@ -571,7 +641,7 @@ mark, as Guile writes."
   (when (port-open-p p)
     (when (port-output-p p) (ignore-errors (flush-output p)))
     (remhash p *open-output-ports*)
-    (setf (port-open-p p) nil)
+    (setf (port-registered p) nil (port-open-p p) nil)
     (let ((fd (port-fd p)))
       (when (port-close-fn p) (funcall (port-close-fn p)))
       (when fd (run-fdes-finalizers fd))))
@@ -727,6 +797,12 @@ mark, as Guile writes."
 				  (fd-backend fd))))
     (when (and (find #\0 mode) (find #\b mode))
       (setf (port-buffering port) :none))
+    ;; a regular file's: buffers of +FILE-BUFFER-SIZE+, a system call per
+    ;; that many bytes rather than per 1024 (cat's time was its writes)
+    (when (and (eq (port-buffering port) :full)
+	       (ignore-errors (sb-posix:s-isreg (sb-posix:stat-mode (sb-posix:fstat fd)))))
+      (setf (port-rbuf port) (make-octets +file-buffer-size+)
+	    (port-wbuf port) (make-octets +file-buffer-size+)))
     (setf (gethash port *fd-ports*) t)
     port))
 
