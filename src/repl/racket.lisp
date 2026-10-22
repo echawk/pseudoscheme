@@ -58,6 +58,15 @@ runs it, without the other languages' banner and tip.  The exit status."
     (let ((*interactive* (racket-interactive-p)))
       (qsr::linklet-repl :next-text (and *interactive* #'racket-input)))))
 
+(defun racket-command-line-repl (&key init-file)
+  "-i's REPL, for racket's command line (QSR::RUN-RACKET-COMMAND-LINE),
+which has written the banner and required the init library: with the
+line editor at a terminal.  The exit status."
+  (let ((*interactive* t))
+    (let ((*interactive* (racket-interactive-p)))
+      (qsr::linklet-repl :next-text (and *interactive* #'racket-input)
+			 :banner nil :init-library nil :init-file init-file))))
+
 (define-language :racket
   :title "Racket" :prompt "> "
   :run #'run-racket-repl

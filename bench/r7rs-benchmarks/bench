@@ -378,7 +378,7 @@ quasischeme_r6rs_exec ()
 
 quasischeme_chez_exec ()
 {
-    time "${QUASISCHEME}" --chez "$1" < "$2"
+    time "${QUASISCHEME}" --chez --script "$1" < "$2"
 }
 
 quasischeme_guile_exec ()

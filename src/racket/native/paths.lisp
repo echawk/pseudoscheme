@@ -203,11 +203,17 @@ name resolver asks a few times for each module required."
 ;;; find-system-path: Racket's collections and configuration are the
 ;;; pinned source tree's (racket/collects, racket/etc), when it's there
 
+(defvar *system-paths* '()
+  "Kind (a string) -> path string, for the kinds the command line sets:
+run-file and exec-file (-N, -E, and the program run), collects-dir (-X)
+and addon-dir (-A) (command-line.lisp).")
+
 (defnative "find-system-path" (kind) (:leaf t)
   (let ((k (rname kind))
 	(source (ignore-errors (namestring (racket-source-directory)))))
     (make-rpath
-     (cond ((string= k "home-dir") (namestring (user-homedir-pathname)))
+     (cond ((cdr (assoc k *system-paths* :test #'string=)))
+	   ((string= k "home-dir") (namestring (user-homedir-pathname)))
 	   ((member k '("pref-dir" "addon-dir") :test #'string=)
 	    (namestring (uiop:xdg-data-home "racket/")))
 	   ((string= k "pref-file") (namestring (uiop:xdg-data-home "racket/racket-prefs.rktd")))

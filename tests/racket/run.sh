@@ -33,7 +33,7 @@ for strategy in "$@"; do
     name=$(basename "$f" .rktl)
     out=$OUT/$strategy-$name.out
     total=$((total + 1))
-    bin/quasischeme --racket="$strategy" "$f" > "$out" 2>&1
+    bin/quasischeme --linklets "$f" --racket="$strategy" > "$out" 2>&1
     if cmp -s "$out" "tests/racket/linklets/$name.expected"; then
       pass=$((pass + 1))
     else

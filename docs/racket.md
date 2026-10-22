@@ -204,8 +204,30 @@ What changed:
   (lattice is 108G there).
 - **Fewer cache files**: a linklet's meta could live in its `.zo` entry,
   halving the files opened at start.
-- **`-e`** evaluates in `#%kernel` (LINKLET-EVAL), where `racket -e` has
-  `racket`.
+
+## The command line
+
+After `--racket` the command line is racket's own (`racket -h`):
+src/racket/linklet/command-line.lisp parses it as Racket CS's main.sps
+does, and runs it as main.sps runs it.
+- `FILE ARG ...` is `-u FILE ARG ...`; `-e`, `-f`, `-t`, `-l`, `-r`,
+  `-u`, `-m`, `-i`, `-n` and `-I` work as there, with the implied `-i`,
+  `-u` and `-n`, and with combined switches (`-ifve file expr`).
+- The init library (racket/init, or `-I typed/racket`'s) is required
+  unless `-n` is given, or a `-t`, `-l`, `-p` or `-u` comes first.
+- The first load that escapes makes the exit status 1 and stops the
+  rest.
+- `-X`, `-S`, `-U`, `-A`, `-G`, `-N`, `-E`, `-q` and `-c` are honoured.
+  `-y`, `-d`, `-b`, `-j`, `-M`, `-R` and the logging levels are accepted
+  and do nothing.
+- `-k`, `-Y`, `-C` and the cross-compiling switches are errors.
+
+Quasischeme's own options go before `--racket`. Run as `racket` (a link
+to bin/quasischeme), the program is `--racket`. The linklet compiler's
+test harness files run with `quasischeme --linklets FILE --racket`.
+
+Differences from upstream: with `-n`, the namespace still has
+`#%kernel`, as the expander's boot requires it.
 
 ## The REPL
 
@@ -550,8 +572,7 @@ In the command line (contrib/cli/cli.lisp):
 
 The first run of a collection is slow. `racket/base` is a few hundred
 modules, and SBCL compiles much more slowly than Chez. So:
-- `quasischeme --racket --precompile racket/base` compiles them ahead
-  of time;
+- `quasischeme --racket -l racket/base` compiles them ahead of time;
 - stage B (decision 4) is the main lever on this cost.
 
 ## Compiled code

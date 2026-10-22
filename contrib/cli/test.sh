@@ -132,7 +132,8 @@ printf '#lang racket/base\n(write (current-command-line-arguments)) (newline)\n(
 exe_check() {  # exe_check NAME EXPECTED-OUTPUT EXPECTED-STATUS SOURCE MODE-FLAG...
   name=$1; want=$2; wantcode=$3; src=$4; shift 4; n=$((n+1))
   out=$tmp/exe/${src%.*}.out
-  if ! $PS "$@" -L $tmp/lib --compile $tmp/exe/$src -o $out >$tmp/exe/build.log 2>&1; then
+  # (the mode flag last: after --chez, --guile or --racket come that language's own options)
+  if ! $PS -L $tmp/lib --compile $tmp/exe/$src -o $out "$@" >$tmp/exe/build.log 2>&1; then
     fail=$((fail+1)); printf 'FAIL %s: did not build\n  %s\n' "$name" "$(tail -3 $tmp/exe/build.log)"; return
   fi
   mv $tmp/exe/$src $tmp/exe/$src.moved
@@ -149,10 +150,10 @@ Error: not a pair 5" 70 p5.scm --r5rs
 exe_check "--compile r3rs" "(2432902008176640000 abc)
 Error: not a pair 5" 70 p5.scm --r3rs
 exe_check "--compile chez" '(a b c --help) 3' 5 pc.ss --chez
-if $PS --guile -p '(+ 1 2)' >/dev/null 2>&1; then
+if $PS --guile -c '(+ 1 2)' >/dev/null 2>&1; then
   exe_check "--compile guile" '(a b c --help)' 6 pg.scm --guile
 fi
-if $PS --racket -p '(+ 1 2)' >/dev/null 2>&1; then
+if $PS --racket -e '(+ 1 2)' >/dev/null 2>&1; then
   exe_check "--compile racket" '#("a" "b c" "--help")' 7 pr.rkt --racket
 fi
 

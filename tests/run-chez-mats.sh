@@ -48,7 +48,7 @@ if [ "$1" = "--one" ]; then
   while [ $attempt -lt 8 ]; do
     attempt=$((attempt + 1))
     # exec, so that the kill below reaches quasischeme, not just a subshell
-    ( cd "$work" && CHEZ_MAT_SKIP="$skip" exec "$PS" --chez "$ROOT/tests/chez-mat.ss" $files \
+    ( cd "$work" && CHEZ_MAT_SKIP="$skip" exec "$PS" --chez --script "$ROOT/tests/chez-mat.ss" $files \
         > "$OUT/$name.out.$attempt" 2>> "$OUT/$name.err" < /dev/null ) & pid=$!
     ( sleep "$LIMIT"; kill -9 $pid 2>/dev/null ) > /dev/null 2>&1 & w=$!
     wait $pid 2>/dev/null

@@ -11,6 +11,13 @@ and the rest. On Guile's own test suite (vendored,
 stands" below. Emacs Lisp runs too: `,language elisp` at the REPL, and
 Guile's three elisp test files pass in full (below).
 
+After `--guile` the command line is Guile's own (`guile --help`): FILE,
+`-s`, `-c`, `-l`, `-e`, `-L`, `-C`, `-x`, `-q`, `--use-srfi`, `--` and
+the rest. Guile's own `compile-shell-switches`, from the installation's
+`(ice-9 command-line)`, turns it into the expression to run, as `guile`
+does. Quasischeme's own options go before `--guile`; run as `guile` (a
+link to bin/quasischeme), the program is `--guile`.
+
 The sections after "Where it stands" are the plan as written before the
 work started, with each stage marked as it now is.
 

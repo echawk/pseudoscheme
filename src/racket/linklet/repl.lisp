@@ -54,11 +54,21 @@ of no arguments returning a string (the front end shows the prompt) or
 	      (return qs:eof-object)
 	      (setq pending (make-input-string-port text))))))))
 
-(defun linklet-repl (&key next-text (banner t))
+(defun write-banner ()
+  "racket's welcome line (-v, -i)."
+  (expander-eval
+   (read-racket (make-string-input-stream
+		 "(begin (display \"Welcome to Racket v\") (display (version)) (display \" [\") (display (system-type 'gc)) (display \"].\") (newline))"))))
+
+(defun linklet-repl (&key next-text (banner t) (init-library (list (rsym "lib") "racket/init"))
+			  (init-file t))
   "Racket's REPL, as `racket' runs it, until end of file (or exit).
 NEXT-TEXT: a line editor, as EDITOR-PROMPT-READ takes.  BANNER: write
-the welcome line.  Returns when the loop ends; the exit status is 1 if
-init-file loading or the loop's start failed, else 0 (as racket's)."
+the welcome line.  INIT-LIBRARY: the module path required first (NIL:
+none, the command line did).  INIT-FILE: run racket/interactive, which
+loads the user's init file (not for -q).  Returns when the loop ends;
+the exit status is 1 if init-file loading or the loop's start failed,
+else 0 (as racket's)."
   (setq *uncaught* nil)
   (unless *expander-instance*
     (unless (instantiate-expander :stream nil)
@@ -74,27 +84,20 @@ init-file loading or the loop's start failed, else 0 (as racket's)."
 	    (with-racket-errors
 	      ;; stdin, stdout and stderr as Racket's io layer makes them: rktio's
 	      (when (rktio-available-p) (install-console-ports))
-	      (when banner
-		(expander-eval
-		 (read-racket (make-string-input-stream
-			       "(begin (display \"Welcome to Racket v\") (display (version)) (display \" [\") (display (system-type 'gc)) (display \"].\") (newline))"))))
-	      (let ((default-print (expander-eval (read-racket (make-string-input-stream "(current-print)")))))
-		(expander-eval (read-racket (make-string-input-stream "(namespace-require '(lib \"racket/init\"))")))
-		;; racket/init prints with pretty-print; where our ports can't
-		;; run it yet (its printing port is a prop:output-port struct),
-		;; the default, which agrees for what fits a line
-		(unless (truthy (expander-eval (read-racket (make-string-input-stream
-							     "(with-handlers ([void (lambda (e) #f)]) (pretty-print 1 (open-output-string)) #t)"))))
-		  (funcall (primitive "current-print") default-print)))
+	      (when banner (write-banner))
+	      (when init-library (namespace-require+ init-library))
 	      ;; racket/interactive: xrepl, if installed, and the init file
-	      (call-with-continuation-prompt
-	       (lambda ()
-		 (expander-eval (read-racket (make-string-input-stream "(dynamic-require 'racket/interactive 0)"))))
-	       *default-prompt-tag*
-	       (lambda (&rest args) (declare (ignore args)) (setq status 1)))
+	      (when init-file
+		(call-with-continuation-prompt
+		 (lambda ()
+		   (funcall (expander-export "dynamic-require") (rsym "racket/interactive") 0))
+		 *default-prompt-tag*
+		 (lambda (&rest args) (declare (ignore args)) (setq status 1))))
 	      (funcall *current-prompt-read*
 		       (if next-text (editor-prompt-read next-text) #'flushing-prompt-read))
-	      (expander-eval (read-racket (make-string-input-stream "(read-eval-print-loop)")))))
+	      ;; racket/base's, not whatever the namespace's language binds
+	      (funcall (funcall (expander-export "dynamic-require") (rsym "racket/base")
+				(rsym "read-eval-print-loop")))))
 	  *default-prompt-tag* nil))))
     (port-write-string (string #\Newline) (current-port :output))
     (finish-output)

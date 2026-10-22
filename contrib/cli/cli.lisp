@@ -32,17 +32,28 @@
                    the older reports, each with exactly its names: R4RS,
                    IEEE 1178-1990, R3RS, R2RS, the 1978 Revised Report
                    (docs/reports.md)
-  --chez           Chez Scheme: FILE runs as a Chez script, at a top level
-                   with (chezscheme)'s bindings (docs/chez.md); run as
-                   scheme-script, this program is --chez
-  --guile          GNU Guile: Guile's own boot-9 and modules, loaded from
-                   a Guile installation (docs/guile.md); FILE is loaded
-                   in (guile-user), -e/-p evaluate there
-  --racket[=STRATEGY]
-                   Racket (docs/racket.md): FILE runs as racket runs a
-                   module.  STRATEGY is linklet (our linklet compiler,
-                   the default), cs (Racket CS's own layers; not working
-                   yet) or hybrid; or set QUASISCHEME_RACKET_STRATEGY
+  --chez [CHEZ-OPTION ...]
+                   Chez Scheme (docs/chez.md): the rest of the command
+                   line is Chez's (scheme --help): files loaded at a top
+                   level with (chezscheme)'s bindings, then its REPL;
+                   --script FILE ARG ... and --program FILE ARG ...
+                   Run as scheme, chez or petite (or scheme-script), this
+                   program is --chez
+  --guile [GUILE-OPTION ...]
+                   GNU Guile (docs/guile.md): the rest is Guile's command
+                   line (guile --help), parsed by Guile's own (ice-9
+                   command-line): FILE, -c, -l, -e, -L, -s, ...; its
+                   modules are loaded from a Guile installation.  Run as
+                   guile, this program is --guile
+  --racket[=STRATEGY] [RACKET-OPTION ...]
+                   Racket (docs/racket.md): the rest is racket's command
+                   line (racket -h): FILE ARG ..., -e, -t, -l, -i, -I
+                   typed/racket, ...  STRATEGY is linklet (our linklet
+                   compiler, the default), cs (Racket CS's own layers; not
+                   working yet) or hybrid; or set
+                   QUASISCHEME_RACKET_STRATEGY.  Run as racket, this
+                   program is --racket
+                   Quasischeme's own options go before these three.
   -e, --eval EXPR  evaluate EXPR (Scheme text); may be repeated
   -p, --print EXPR evaluate EXPR and write its value
   -L, --library-path DIR
@@ -50,6 +61,8 @@
                    for (foo bar)); may be repeated
   --akku           look for libraries in the Akku project's .akku/lib
                    (in the current directory or the nearest one above)
+  --linklets FILE  with --racket, run FILE's linklet forms, the linklet
+                   compiler's test harness (docs/racket.md), not Racket
   -l, --lisp-system SYSTEM
                    load the Common Lisp system SYSTEM (with ASDF, or
                    Quicklisp if loaded) first; may be repeated
@@ -226,7 +239,9 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
       (when (null args) (return))
       (let ((a (pop args)))
 	(flet ((value () (or (pop args) (die "~A needs an argument" a))))
-	  (cond ((string= a "--") (return))
+	  (cond ((string= a "--")
+		 ;; the rest are (command-line-arguments)
+		 (return-from parse-chez-arguments (values (nreverse actions) nil args t)))
 		((member a '("-q" "--quiet") :test #'string=) (setq *chez-quiet* t))
 		((string= a "--no-userinit") (setq *userinit* nil)) ; ours, not Chez's
 		((member a '("--script" "--program") :test #'string=)
@@ -252,10 +267,40 @@ FILE ARG ...  Returns as PARSE-ARGUMENTS does; the files before any
                             (Quasischeme's Chez mode: docs/chez.md)~%"
 			 (file-namestring (car (uiop:raw-command-line-arguments))))
 		 (uiop:quit 0))
-		((and (> (length a) 1) (char= (char a 0) #\-))
-		 (die "unknown Chez option ~A" a))
+		;; anything else, an unknown option too, is a file to load, as Chez's
 		(t (push (list :load a) actions))))))
     (values (nreverse actions) nil '() t)))
+
+(defun parse-chez-arguments* (args)
+  "PARSE-CHEZ-ARGUMENTS' values, as a list: Chez's REPL runs after the
+files are loaded, unless a script ran."
+  (multiple-value-bind (actions file file-args interactive) (parse-chez-arguments args)
+    (list actions file file-args (and interactive (null file)))))
+
+;;; Guile's command line is Guile's own: (ice-9 command-line)'s
+;;; compile-shell-switches, which guile's main calls too, makes it an
+;;; expression (loading, -c, -e's function, the REPL, (quit)), evaluated in
+;;; (guile-user).  It's loaded from the Guile installation, as the rest of
+;;; --guile's modules are.
+
+(defun parse-guile-arguments (args)
+  "As PARSE-CHEZ-ARGUMENTS*, for Guile's command line ARGS: one action,
+running them."
+  (list (list (list :guile-command-line args)) nil '() nil))
+
+(defun run-guile-command-line (args)
+  (qsg:eval-string
+   (format nil "(primitive-eval ((@ (ice-9 command-line) compile-shell-switches) '(~{~S~^ ~}) \"guile\"))"
+	   (cons "guile" args))))
+
+;;; Guile's and Racket's own commands, as Chez's: run as guile or racket
+;;; (a link to this program), the arguments are theirs.
+(defparameter *guile-commands* '("guile"))
+(defparameter *racket-commands* '("racket"))
+
+(defun command-name-p (names)
+  (let ((argv0 (car (uiop:raw-command-line-arguments))))
+    (and argv0 (member (file-namestring argv0) names :test #'string=))))
 
 (defun script-interpreter-standard ()
   (let ((argv0 (car (uiop:raw-command-line-arguments))))
@@ -598,6 +643,17 @@ asks when not all of it was written."
 	when (equal dir (uiop:pathname-parent-directory-pathname dir))
 	  do (die "--akku: no .akku/lib here or above (run akku install first)")))
 
+(defvar *racket-arguments* nil
+  "racket's command line, after --racket (or all of it, run as racket):
+run by QSR::RUN-RACKET-COMMAND-LINE.")
+(defvar *racket-command-line* nil "Whether there is one.")
+
+(defun native-arguments (actions interactive parsed)
+  "PARSE-ARGUMENTS' values: ACTIONS (ours, reversed) and INTERACTIVE, with
+those of PARSED, a list of the mode's own parser's values."
+  (destructuring-bind (more file file-args more-interactive) parsed
+    (values (append (reverse actions) more) file file-args (or interactive more-interactive))))
+
 (defun parse-arguments (args)
   "Returns (values actions file file-args interactive), ACTIONS being a
 list of (:eval text) / (:print text)."
@@ -616,12 +672,19 @@ list of (:eval text) / (:print text)."
 		((string= a "--r3rs") (setq *standard* :r3rs))
 		((string= a "--r2rs") (setq *standard* :r2rs))
 		((string= a "--rrs") (setq *standard* :rrs))
-		((string= a "--chez") (setq *standard* :chez))
-		((string= a "--guile") (setq *standard* :guile))
+		;; the rest is the language's own command line
+		((string= a "--chez")
+		 (setq *standard* :chez)
+		 (return-from parse-arguments (native-arguments actions interactive (parse-chez-arguments* args))))
+		((string= a "--guile")
+		 (setq *standard* :guile)
+		 (return-from parse-arguments (native-arguments actions interactive (parse-guile-arguments args))))
 		((or (string= a "--racket") (uiop:string-prefix-p "--racket=" a))
 		 (setq *standard* :racket)
 		 (handler-case (qsr:select-strategy (and (find #\= a) (subseq a (1+ (position #\= a)))))
-		   (error (e) (die "~A" e))))
+		   (error (e) (die "~A" e)))
+		 (setq *racket-arguments* args *racket-command-line* t)
+		 (return-from parse-arguments (values (nreverse actions) nil '() interactive)))
 		((member a '("-e" "--eval") :test #'string=) (push (list :eval (value)) actions))
 		((member a '("-p" "--print") :test #'string=) (push (list :print (value)) actions))
 		((member a '("-L" "--library-path") :test #'string=) (add-library-path (value)))
@@ -629,6 +692,7 @@ list of (:eval text) / (:print text)."
 		((member a '("-l" "--lisp-system") :test #'string=)
 		 (push (list :lisp-system (value)) actions))
 		((string= a "--quicklisp") (push (list :quicklisp nil) actions))
+		((string= a "--linklets") (push (list :linklets (value)) actions))
 		((string= a "--precompile-srfi") (push (list :precompile nil) actions))
 		((string= a "--precompile") (push (list :precompile (value)) actions))
 		((string= a "--no-userinit") (setq *userinit* nil))
@@ -731,9 +795,15 @@ is reported, and the program runs anyway."
 	    (args (uiop:command-line-arguments)))
 	(cond ((chez-command-p)
 	       (setq *standard* :chez)
-	       (multiple-value-bind (actions file file-args interactive) (parse-chez-arguments args)
-		 ;; Chez's REPL runs after files loaded, unless a script ran
-		 (values actions file file-args (and interactive (null file)))))
+	       (values-list (parse-chez-arguments* args)))
+	      ((command-name-p *guile-commands*)
+	       (setq *standard* :guile)
+	       (values-list (parse-guile-arguments args)))
+	      ((command-name-p *racket-commands*)
+	       (setq *standard* :racket)
+	       (qsr:select-strategy)
+	       (setq *racket-arguments* args *racket-command-line* t)
+	       (values '() nil '() nil))
 	      ((null standard) (parse-arguments args))
 	      ((null args) (die "usage: ~A FILE [ARGUMENT ...]"
 				(file-namestring (car (uiop:raw-command-line-arguments)))))
@@ -764,6 +834,9 @@ is reported, and the program runs anyway."
 	(destructuring-bind (kind text) action
 	  (case kind
 	    (:lisp-system (quasischeme-interop:load-lisp-system text))
+	    (:guile-command-line (run-guile-command-line text))
+	    ;; a file of linklet forms (tests/racket/linklets/), with --racket
+	    (:linklets (qsr:load-file text) (finish-output) (uiop:quit 0))
 	    (:quicklisp (load-quicklisp))
 	    (:load (unless (probe-file text) (die "no such file: ~A" text))
 		   (run-file text))
@@ -784,6 +857,11 @@ is reported, and the program runs anyway."
       (when *compile-file*
 	(when file (die "--compile takes the program's name, not also ~A" file))
 	(build-executable *compile-file* *compile-output*))
+      (when (and *racket-command-line* (not *lisp-repl*))
+	(uiop:quit (qsr::run-racket-command-line
+		    *racket-arguments*
+		    :repl (lambda (&key init-file)
+			    (quasischeme-repl::racket-command-line-repl :init-file init-file)))))
       (when file
 	(unless (probe-file file) (die "no such file: ~A" file))
 	(if *script* (run-script file) (run-file file))))

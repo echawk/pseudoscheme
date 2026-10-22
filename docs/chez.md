@@ -1,7 +1,13 @@
 # Chez Scheme on Quasischeme: `--chez`
 
-`quasischeme --chez prog.ss` runs programs written for Chez Scheme 10.
-Scripts run at Chez's top level, R6RS programs and libraries can import
+`quasischeme --chez --script prog.ss` runs programs written for Chez
+Scheme 10. After `--chez` the command line is Chez's own, as `scheme
+--help` gives it: files are loaded and then the REPL starts, and
+`--script FILE ARG ...` and `--program FILE ARG ...` run a script or an
+R6RS program; `-q`, `--libdirs`, `--` (the rest are
+`(command-line-arguments)`) and the other options are accepted
+(contrib/cli/cli.lisp, PARSE-CHEZ-ARGUMENTS). Quasischeme's own options
+go before `--chez`. Scripts run at Chez's top level, R6RS programs and libraries can import
 `(chezscheme)`, and so can the libraries written for Chez. Run as
 `scheme-script` (a link to bin/quasischeme, as Chez's is), the program
 is `--chez`.

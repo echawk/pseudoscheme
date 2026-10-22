@@ -201,10 +201,16 @@ of the run that made it.")
 
 (pushnew (lambda () (setq *collection-paths-set* nil)) sb-ext:*init-hooks*)
 
+(defvar *collection-options* '()
+  "The command line's say in the collection paths (command-line.lisp):
+:SEARCH, directories after the main collects (-S); :NO-USER-PATHS, no
+user-specific ones (-U); :NO-COLLECTS, none at all (-X \"\").")
+
 (defun set-collection-paths ()
   "The collections, as main.sps sets them up, less the user's own (the
 addon directory's collects and links: not the source tree's), plus a
-links file for the packages of the source tree (pkgs/)."
+links file for the packages of the source tree (pkgs/), and what
+*COLLECTION-OPTIONS* says."
   (funcall (expander-export "eval")
 	   (read-racket (make-string-input-stream
 			 (format nil "(let-values ([(user) (use-user-specific-search-paths)])
@@ -213,15 +219,28 @@ links file for the packages of the source tree (pkgs/)."
                                           (current-library-collection-links
                                             (append (find-library-collection-links)
                                                     (list (string->path ~S))))
-                                          (current-library-collection-paths (find-library-collection-paths))
-                                          (use-user-specific-search-paths user)))"
-				 (namestring (write-collection-links))))))
+                                          (current-library-collection-paths ~A)
+                                          (use-user-specific-search-paths ~A)))"
+				 (namestring (write-collection-links))
+				 (if (getf *collection-options* :no-collects)
+				     "'()"
+				     (format nil "(find-library-collection-paths '() (map string->path '(~{~S~^ ~})))"
+					     (getf *collection-options* :search)))
+				 (if (getf *collection-options* :no-user-paths) "#f" "user")))))
   (setq *collection-paths-set* t))
 
 (defun expander-eval (datum)
   "DATUM evaluated by the expander, in a namespace with #%kernel, as
 Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
-  (unless *expander-instance* (instantiate-expander))
+  (boot-expander)
+  (funcall (expander-export "eval") datum))
+
+(defun boot-expander ()
+  "The expander instantiated and booted (EXPANDER-EVAL), and this run's
+collection paths set."
+  (unless *expander-instance*
+    (unless (instantiate-expander :stream nil)
+      (racket-error "racket" "the expander didn't instantiate")))
   (unless *expander-booted*
     (funcall (expander-export "boot"))
     (funcall (expander-export "namespace-require")
@@ -242,8 +261,7 @@ Racket CS's main.sps starts: boot, then (namespace-require ''#%kernel)."
 	     (funcall (expander-export "dynamic-require")
 		      (list (rsym "quote") (rsym "#%read")) (rsym name))))))
     (setq *expander-booted* t))
-  (unless *collection-paths-set* (set-collection-paths))
-  (funcall (expander-export "eval") datum))
+  (unless *collection-paths-set* (set-collection-paths)))
 
 ;;; The port read handler: the io layer's default reads with the reader
 ;;; the expander installs (in Racket CS, install-reader!); here, the

@@ -117,9 +117,8 @@
 		      (guile-string (merge-pathnames "tests/" *suite*))
 		      (guile-string *quasischeme-command*)
 		      (format nil "#!/bin/sh
-if [ \"$1\" = -c ]; then shift; exec ~A --guile -e \"$@\"; fi
 exec ~A --guile \"$@\"
-" (guile-string *quasischeme-command*) (guile-string *quasischeme-command*))
+" (guile-string *quasischeme-command*))
 		      top (concatenate 'string top "/libguile")
 		      (if *verbose* "(register-reporter user-reporter)" "")
 		      (concatenate 'string name ".test") (guile-string path)

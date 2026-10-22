@@ -287,6 +287,8 @@ the trailing ones equal to the one before."
 		      (p (mpair-car tail))
 		   finally (when tail (write-string " . " stream) (p tail)))
 	     (write-char (if (po-mpair-curly o) #\} #\)) stream))
+	    ;; display writes a path's characters, as Racket's
+	    ((and (rpath-p x) (eq mode :display)) (write-string (rpath-string x) stream))
 	    ((rpath-p x) (unreadable (format nil "#<path:~A>" (rpath-string x))))
 	    ((or (rinport-p x) (routport-p x)) (unreadable (port-desc x)))
 	    ((or (ihash-p x) (rhash-p x))

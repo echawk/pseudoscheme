@@ -332,8 +332,9 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
     referenced.
 
 - **The expander evaluates.** `bin/quasischeme --racket=linklet -e
-  '...'` reads each form with Racket's datum syntax and evaluates it
-  through Racket's expander, in a namespace with `#%kernel`. That is the
+  '...'` reads each form with Racket's reader and evaluates it through
+  Racket's expander, in a namespace with racket/init, as `racket -e`
+  does (docs/racket.md, "The command line"). That is the
   `boot`, `namespace-require` and `eval` that Racket CS's main.sps
   does. tests/racket/expander.rktd holds the expressions and values
   tests/racket/run.sh checks: 10 of 10 pass.
@@ -341,7 +342,7 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   fasl under `~/.cache/quasischeme/racket/`. It is keyed by
   the linklet's text, the build signature and src/racket/'s file dates.
   The first process compiles it (about 30 s); after that,
-  `--racket=linklet -p '(+ 1 2)'` takes 0.4 s.
+  `--racket=linklet -e '(+ 1 2)'` takes 0.4 s.
 
 - **`racket/base` loads and runs**, from the pinned source's
   `racket/collects`. Each module is expanded from source by Racket's
