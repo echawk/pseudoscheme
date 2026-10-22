@@ -176,6 +176,8 @@ top-level form failed and why."
 	  (when (and (probe-file info)
 		     (search "(define collection 'multi)" (uiop:read-file-string info)))
 	    (format out "~%  (root ~S)" (namestring dir)))))
+      ;; the collection cl: Lisp packages as modules (interop.lisp)
+      (format out "~%  (\"cl\" ~S)" (funcall 'lisp-collection-directory))
       (format out ")~%"))))
 
 (defun write-collection-links ()

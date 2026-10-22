@@ -468,6 +468,57 @@ symbols. They are made the first time they're resolved, by the module
 
 This works in `bin/quasischeme --guile` too.
 
+## 6b. Racket and Common Lisp
+
+`(asdf:load-system :quasi-racket)` loads Quasischeme's Racket. That is
+`--racket`: Racket's own expander and collections on our linklet
+compiler, not a binding to Racket CS. The system also loads its Lisp
+API, the package `QUASI-RACKET` (`QR`), from
+src/racket/linklet/interop.lisp.
+
+From Lisp:
+
+```lisp
+(qr:eval "(string-append \"a\" \"b\")")                     ; => "ab"
+(qr:require (only-in racket/string string-join) (prefix-in r- racket/match)
+            (prefix-in r- racket/list))
+(string-join '("x" "y") ",")                         ; => "x,y"
+(r-last '(1 2 3))                                    ; => 3
+(let ((y 5)) (r-match (list y 1) ((list p q) (twice (+ p q)))))  ; a Racket macro
+(funcall (qr:procedure "string-upcase") "abc")       ; => "ABC"
+```
+
+- `qr:require` takes `require` specs written in Lisp: `only-in`,
+  `prefix-in` (a prefix that reads as a Lisp symbol, so `r-` and not
+  `r:`) and `rename-in`.
+- A procedure that takes keywords is exported as syntax, and is still a
+  function here.
+- A Racket macro's arguments are Racket code, with Lisp's lexical
+  variables and functions passed in, as for Guile's.
+- `qr:eval` takes Racket text or a datum written in Lisp, evaluated in a
+  namespace with `:language` (racket/base by default).
+  `qr:module-exports` is there too.
+
+From Racket, the collection `cl` has a module for each Lisp package.
+`cl/PACKAGE` is written into the Racket cache the first time it is
+looked for:
+
+```racket
+(require (prefix-in cl: cl/common-lisp))
+(cl:mapcar add1 '(1 2 3))                                    ; '(2 3 4)
+(let ([n 10]) (cl:loop for x in '(1 2 3) collect (* x n)))   ; '(10 20 30)
+(set! cl:*print-base* 16)
+```
+
+- Functions, variables (and `set!` of them) and other symbols are as
+  for Guile.
+- A Lisp macro's call expands to `(quasischeme-lisp-call 'package 'macro
+  'form 'names lexical ...)`. That keeps the call as data, compiled as
+  Lisp when first run, because a module's expansion is serialized into
+  its `.zo`.
+- This works in `bin/quasischeme --racket`;
+  tests/racket/programs/lisp-interop.rkt runs it.
+
 ## 7. Not done yet
 
 - **Libraries whose expansions hold Lisp objects** (those that import a

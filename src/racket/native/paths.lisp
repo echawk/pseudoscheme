@@ -166,11 +166,18 @@ parameterize changes without the process's working directory)."
 	s
 	(join (path-string who (funcall *current-directory*)) s))))
 
+(defun ensure-lisp-module-file (s)
+  "A module of the collection cl is written as it's looked for or opened
+(linklet/interop.lisp, ENSURE-LISP-MODULE)."
+  (when (and (fboundp 'ensure-lisp-module) (search "/lisp-collection/cl/" s))
+    (funcall 'ensure-lisp-module s)))
+
 (defun file-kind (s)
   "What native path S names, following links: :DIRECTORY, :FILE (any
 other kind) or NIL.  One stat(2), not PROBE-FILE's realpath and lstats
 (and S isn't parsed as a Lisp pathname, wildcards and all): the module
 name resolver asks a few times for each module required."
+  (ensure-lisp-module-file s)
   (multiple-value-bind (ok dev ino mode) (sb-unix:unix-stat s)
     (declare (ignore dev ino))
     (and ok (if (= (logand mode #o170000) #o040000) :directory :file))))

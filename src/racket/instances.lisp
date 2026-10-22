@@ -212,7 +212,10 @@ Compiled code still reaches them, by their host globals."
 	      (extra '()))
 	  (dolist (e entries) (setf (gethash (table-entry-name e) names) t))
 	  (maphash (lambda (name value)
-		     (unless (gethash name names) (push (cons name value) extra)))
+		     ;; but the cl collection's (linklet/interop.lisp), which
+		     ;; its modules require #%kernel for, at phase 0 and 1
+		     (unless (or (gethash name names) (uiop:string-prefix-p "quasischeme-lisp-" name))
+		       (push (cons name value) extra)))
 		   (primitive-instance instance))
 	  (loop for (name . value) in extra
 		do (remhash name (primitive-instance instance))

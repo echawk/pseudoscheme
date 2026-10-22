@@ -389,7 +389,9 @@
 	       ;; B: our linklet compiler
 	       (:module "linklet"
 		:serial t
-		:components ((:file "api") (:file "compiler") (:file "sources") (:file "regexp-layer") (:file "boot") (:file "repl") (:file "command-line")))
+		:components ((:file "api") (:file "compiler") (:file "sources") (:file "regexp-layer") (:file "boot") (:file "repl") (:file "command-line")
+			     ;; Racket and Common Lisp, both ways: cl/PACKAGE, QUASI-RACKET
+			     (:file "interop")))
 	       ;; C: A plus native overrides
 	       (:module "hybrid" :components ((:file "overrides")))
 	       (:file "strategies")))

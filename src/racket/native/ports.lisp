@@ -547,6 +547,7 @@ linefeed's)."
 
 (defun open-file-for-input (who name)
   "The bytes of the file NAME, or Racket's exception."
+  (ensure-lisp-module-file name)
   (let ((fd (handler-case (sb-posix:open name sb-posix:o-rdonly)
 	      (sb-posix:syscall-error (e)
 		(raise-errno who "cannot open input file" name (sb-posix:syscall-errno e))))))
