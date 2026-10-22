@@ -447,11 +447,7 @@
 			     (racket-error "fsemaphore-wait" "would block forever (one thread)")))
   ("processor-count" () (processor-count))
   ("mark-future-trace-end!" () *void*)
-  ("reset-future-logs-for-tracing!" () *void*)
-  ("make-parallel-thread-pool" (&optional n) (declare (ignore n)) (unsupported "make-parallel-thread-pool" "parallel threads"))
-  ("parallel-thread-pool?" (x) (declare (ignore x)) qs:false)
-  ("parallel-thread-pool-close" (p) (declare (ignore p)) (unsupported "parallel-thread-pool-close" "parallel threads"))
-  ("thread/parallel" (&rest args) (declare (ignore args)) (unsupported "thread/parallel" "parallel threads")))
+  ("reset-future-logs-for-tracing!" () *void*))
 
 (defun processor-count ()
   "The processors online, as sysconf says."

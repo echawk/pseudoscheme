@@ -367,7 +367,7 @@
   :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :pathname #p"src/racket/"
-  :depends-on (:quasischeme/api :cl-ppcre #+sbcl :sb-introspect #+sbcl :sb-posix)
+  :depends-on (:quasischeme/api :cl-ppcre :lparallel #+sbcl :sb-introspect #+sbcl :sb-posix)
   :serial t
   :components ((:file "racket")
 	       (:file "instances")

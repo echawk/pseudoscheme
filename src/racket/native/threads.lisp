@@ -94,6 +94,9 @@
 
 (setf (rthread-state *main-thread*) :running)
 
+(defstruct (pool (:constructor make-pool (kernel channel))) kernel channel (closed nil))
+(defmethod print-object ((x pool) stream) (write-string "#<parallel-thread-pool>" stream))
+
 (defstruct (rchannel (:constructor make-rchannel ()))
   (getters '())				; ((wait branch) ...), oldest first
   (putters '()))			; ((wait branch . value) ...)
@@ -146,11 +149,16 @@
 ;;; ------------------------------------------------------------------
 ;;; Atomic sections
 
+(defvar *parallel-active* nil "True once a parallel-thread pool has been made.")
+(defvar *atomic-lock* (sb-thread:make-mutex :name "racket atomic"))
+
 (defmacro with-atomic (&body body)
-  "BODY without preemption."
+  "BODY without preemption, and, once there are parallel threads, alone."
   `(let ((self *self*))
      (incf (rthread-atomic self))
-     (unwind-protect (progn ,@body)
+     (unwind-protect (if *parallel-active*
+			 (sb-thread:with-recursive-lock (*atomic-lock*) ,@body)
+			 (progn ,@body))
        (decf (rthread-atomic self)))))
 
 (defnative "unsafe-start-atomic" () (:instance "#%unsafe" :leaf t)
@@ -452,6 +460,7 @@ ready one.  True if it's complete."
   (let ((now (get-internal-real-time)) (best 0.25d0))
     (dolist (th *threads*)
       (let ((w (rthread-wait th)))
+	(when (eq (rthread-state th) :parallel) (setq best (min best 0.002d0)))
 	(when (and w (eq (rthread-state th) :blocked) (not (rthread-suspended th)))
 	  (when (wait-external w) (setq best (min best 0.002d0)))
 	  (when (wait-deadline w)
@@ -475,8 +484,16 @@ ready one.  True if it's complete."
   (setf qsx::*shared-winders* qsx::*winders*)
   (throw 'rthread-exit nil))
 
+(defvar *parallel-p* nil "True in a parallel thread that has not yet taken the baton.")
+
 (defun reschedule (self)
   "SELF has made itself :runnable or :blocked: run others until it's chosen."
+  (when *parallel-p*
+    ;; a parallel thread that needs the scheduler becomes an ordinary thread:
+    ;; it waits for the baton as a new thread does, the holder picking it
+    (setq *parallel-p* nil)
+    (let ((*in-sched* t)) (acquire-baton self))
+    (return-from reschedule (when (rthread-zombie self) (exit-thread-unwinding))))
   (let ((*in-sched* t))
     (sb-thread:with-mutex (*sched-lock*)
       (loop
@@ -566,14 +583,20 @@ ready one.  True if it's complete."
 
 (defun thread-finished (me)
   "ME is done: it leaves the threads, and the baton goes on."
-  (setf (rthread-dead me) t (rthread-state me) :done (rthread-mailbox me) '())
-  (dolist (m (rthread-custodians me))
-    (setf (managed-live m) nil)
-    (setf (custodian-managed (managed-custodian m)) (delete m (custodian-managed (managed-custodian m)))))
-  (setf (rthread-custodians me) '())
-  (let ((g (rthread-group me)))
-    (when g (setf (thread-group-members g) (delete me (thread-group-members g)))))
-  (setq *threads* (delete me *threads*))
+  (flet ((bookkeeping ()
+	   (setf (rthread-dead me) t (rthread-state me) :done (rthread-mailbox me) '())
+	   (dolist (m (rthread-custodians me))
+	     (setf (managed-live m) nil)
+	     (setf (custodian-managed (managed-custodian m)) (delete m (custodian-managed (managed-custodian m)))))
+	   (setf (rthread-custodians me) '())
+	   (let ((g (rthread-group me)))
+	     (when g (setf (thread-group-members g) (delete me (thread-group-members g)))))
+	   (setq *threads* (delete me *threads*))))
+    (when *parallel-p*
+      ;; it never held the baton, so there's none to pass on
+      (sb-thread:with-mutex (*sched-lock*) (bookkeeping))
+      (return-from thread-finished))
+    (bookkeeping))
   (let ((*in-sched* t))
     (sb-thread:with-mutex (*sched-lock*)
       (loop
@@ -581,12 +604,13 @@ ready one.  True if it's complete."
 	  (cond (next (hand-baton next) (return))
 		(t (idle-wait))))))))
 
-(defun run-thread (me thunk values marks)
-  "The body of a Racket thread's SBCL thread."
+(defun run-thread (me thunk values marks &optional parallel)
+  "The body of a Racket thread's SBCL thread; a PARALLEL one starts without the baton."
   (qs:disable-float-traps)
   (progv *thread-specials* values
-    (let ((*self* me) (*in-sched* nil) (*uncaught* nil) (qs-r6rs::*marks* marks))
-      (let ((*in-sched* t)) (acquire-baton me))
+    (let ((*self* me) (*in-sched* nil) (*uncaught* nil) (qs-r6rs::*marks* marks)
+	  (*parallel-p* parallel))
+      (unless parallel (let ((*in-sched* t)) (acquire-baton me)))
       (unwind-protect
 	   (catch 'rthread-exit
 	     (unless (rthread-zombie me)
@@ -617,7 +641,7 @@ the custodian's shutdown.  Raises if C is shut down."
     (raise-exn "exn:fail:contract"
 	       (format nil "~A: the custodian has been shut down~%  custodian: #<custodian>" who))))
 
-(defun create-thread (who thunk &optional suspend-to-kill)
+(defun create-thread (who thunk &optional suspend-to-kill pool)
   (let ((c (funcall *current-custodian*)))
     (check-custodian-live who c)
     (ensure-scheduler)
@@ -635,18 +659,59 @@ the custodian's shutdown.  Raises if C is shut down."
       (push (custodian-register c me nil) (rthread-custodians me))
       (let ((values (mapcar #'symbol-value *thread-specials*))
 	    (marks (list (list* -1 *parameterization-key* param))))
-	(setf (rthread-lisp me)
-	      (sb-thread:make-thread (lambda () (run-thread me thunk values marks))
-				     :name "racket thread")))
-      (setq *threads* (append *threads* (list me)))
+	(cond (pool
+	       (when (pool-closed pool) (racket-error who "the parallel thread pool is closed"))
+	       (setf (rthread-state me) :parallel)
+	       (setq *threads* (append *threads* (list me)))
+	       (let ((lparallel:*kernel* (pool-kernel pool)))
+		 (lparallel:submit-task
+		  (pool-channel pool)
+		  (lambda ()
+		    (setf (rthread-lisp me) sb-thread:*current-thread*)
+		    (run-thread me thunk values marks t)))))
+	      (t
+	       (setf (rthread-lisp me)
+		     (sb-thread:make-thread (lambda () (run-thread me thunk values marks))
+					    :name "racket thread"))
+	       (setq *threads* (append *threads* (list me))))))
       me)))
 
-;; the second argument: a parallel-thread pool (racket/base's #:pool), or #f;
-;; threads here are never parallel
 (defnative "thread" (thunk &optional pool) ()
-  (declare (ignore pool))
   (unless (accepts-arity-p thunk 0) (arg-error "thread" "(procedure-arity-includes/c 0)" thunk))
-  (create-thread "thread" thunk))
+  (create-thread "thread" thunk nil (and (pool-p pool) pool)))
+
+;;; Parallel threads (racket/base's #:pool): a pool is an lparallel kernel
+;;; of worker threads, and a thread of the pool runs on one of them
+;;; without the baton, truly in parallel with the thread that has it,
+;;; until it needs the scheduler (sync, sleep, semaphore-wait, thread
+;;; creation, ...): then it waits for the baton and goes on as an
+;;; ordinary thread, as Racket CS's parallel threads do (they wait to
+;;; run in the main place).  WITH-ATOMIC regions exclude each other once
+;;; a pool exists.  Not parallel-safe: the natives not wrapped in it, and
+;;; unsafe-start-atomic; a pool thread waiting for the baton inside
+;;; WITH-ATOMIC while the holder waits for that region deadlocks.
+
+(defnative "make-parallel-thread-pool" (&optional n) ()
+  (let ((n (cond ((or (null n) (eq n qs:false)) (processor-count))
+		 ((and (integerp n) (plusp n)) n)
+		 (t (arg-error "make-parallel-thread-pool" "exact-positive-integer?" n)))))
+    (ensure-scheduler)
+    (setq *parallel-active* t)
+    (let ((k (lparallel:make-kernel n :name "racket parallel pool")))
+      (make-pool k (let ((lparallel:*kernel* k)) (lparallel:make-channel))))))
+(defnative "parallel-thread-pool?" (x) (:leaf t) (bool (pool-p x)))
+(defnative "parallel-thread-pool-close" (p) ()
+  (unless (pool-p p) (arg-error "parallel-thread-pool-close" "parallel-thread-pool?" p))
+  (unless (pool-closed p)
+    (setf (pool-closed p) t)
+    (let ((lparallel:*kernel* (pool-kernel p)))
+      (lparallel:end-kernel :wait nil)))
+  *void*)
+(defnative "thread/parallel" (thunk pool &optional keep) ()
+  (declare (ignore keep))
+  (unless (accepts-arity-p thunk 0) (arg-error "thread" "(procedure-arity-includes/c 0)" thunk))
+  (unless (pool-p pool) (arg-error "thread" "(or/c parallel-thread-pool? #f)" pool))
+  (create-thread "thread" thunk nil pool))
 
 (defnative "thread/suspend-to-kill" (thunk) ()
   (unless (accepts-arity-p thunk 0)
