@@ -47,6 +47,7 @@
 	       :trivial-garbage)		; the reader's weak table of ports
   :components
     (
+     (:file "sbcl-compiler")		; SBCL's own compiler, sped up for big code
      (:file "pack")
      (:file "spack" :depends-on ("pack"))
      (:file "core" :depends-on ("pack"))

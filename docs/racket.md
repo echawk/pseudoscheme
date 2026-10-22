@@ -197,6 +197,11 @@ What changed:
 - **Second run.** The run after the first still compiles about 90G
   instructions' worth: syntax-literal and declaration linklets that only
   loading from a `.zo` instantiates.
+- **Very big forms.** intercal's `pit/beer.i` expands to one 150,500-cons
+  form, which SBCL can't compile in an 8 GB heap. Racket CS interprets
+  the outer part of a form past its compile limit and compiles the
+  procedures inside it one by one; a mode like that is needed here.
+  (Smaller intercal programs run: hello.i in 0.24 s warm, racket's 2.0 s.)
 - **Structs are two objects**, an instance and its fields vector, which
   chaperones share (gcbench is 2.5x upstream).
 - **lattice and parsing** are mostly frame setup for calls of unknown
