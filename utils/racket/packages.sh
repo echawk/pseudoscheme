@@ -31,6 +31,7 @@ repo_of() {
   case "$1" in
     source-syntax|typed-racket*) echo typed-racket ;;
     srfi*) echo srfi ;;
+    data-*) echo data ;;
     scheme-lib) echo scheme-lib ;;
     mzscheme-lib) echo mzscheme ;;
     *) echo "$1" | sed -e 's/-lib$//' -e 's/-doc$//' -e 's/-test$//' ;;
@@ -74,6 +75,20 @@ fetch_catalog() {
   sum=$(printf '%s' "$entry" | sed -n 's/.*(checksum \. "\([0-9a-f]*\)").*/\1/p' | head -1)
   url=$(printf '%s' "$src" | sed -e 's/^git+//' -e 's|^git://|https://|' -e 's/[#?].*//')
   sub=$(printf '%s' "$src" | sed -n 's/.*[?&]path=\([^#&]*\).*/\1/p')
+  # a package of the main distribution (the catalog's source a
+  # placeholder, or the release's zip): the release's source zip
+  case "$src" in
+    *empty.zip*|*download.racket-lang.org/releases/*)
+      if [ ! -f "$dir/info.rkt" ]; then
+        rel=${TAG#v}
+        echo "fetching $p from the $rel release's packages" >&2
+        mkdir -p "$dir"
+        curl -fsSL -o "$dir.zip" "https://download.racket-lang.org/releases/$rel/pkgs/$p.zip" \
+          && unzip -q -o "$dir.zip" -d "$dir" && rm -f "$dir.zip" \
+          || { rm -rf "$dir" "$dir.zip"; echo "$p: no $rel release zip" >&2; exit 1; }
+      fi
+      echo "$dir"; return 0 ;;
+  esac
   if [ ! -d "$dir/.git" ]; then
     echo "fetching $p from $url at $sum" >&2
     git init -q "$dir" && git -C "$dir" fetch -q --depth 1 "$url" "$sum" \

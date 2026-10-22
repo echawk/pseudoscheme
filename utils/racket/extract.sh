@@ -7,7 +7,7 @@
 # of the copy in BC's startup.inc.
 #
 # Usage: sh utils/racket/extract.sh [LAYER ...]
-#   LAYER: expander (the default), thread, io or regexp
+#   LAYER: expander (the default), thread, io, regexp or schemify
 # Needs sh utils/racket/setup.sh first, and a `racket` of the pinned
 # version (RACKET names another) to run the source: the README requires
 # "essentially the same version" as the target.  Writes
@@ -68,7 +68,11 @@ layer_args() {
            ++global-ok host-addon-dir ++global-ok 'saved-error-value->string' ;;
     regexp)
       echo --no-global ;;
-    *) echo "unknown layer: $1 (expander, thread, io or regexp)" >&2; return 1 ;;
+    schemify)
+      # schemify/main.zuo's: #%read's functions don't appear in the
+      # simplified expansion; racket/private/collect.rkt declared pure
+      echo ++knot read - ++direct kernel ++pure "$TREE/racket/collects/racket/private/collect.rkt" ;;
+    *) echo "unknown layer: $1 (expander, thread, io, regexp or schemify)" >&2; return 1 ;;
   esac
 }
 
