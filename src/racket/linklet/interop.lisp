@@ -27,13 +27,21 @@
   (or (quasischeme-interop::lisp-package-for (list (qs:intern-scheme-symbol name)))
       (racket-error "cl" "no Lisp package for ~A" name)))
 
+(defun lisp-argument (x)
+  "A Racket keyword passed to Lisp as Lisp's (#:sha256 is :SHA256)."
+  (if (rkeyword-p x)
+      (intern (qs:invert-case (rkeyword-name x)) "KEYWORD")
+      x))
+
 (defnative "quasischeme-lisp-functions" (package-name names) ()
   (let ((package (find-package package-name)))
     (values-list
      (mapcar (lambda (name)
-	       (let ((s (find-symbol name package)))
-		 (quasischeme-interop:scheme-facing
-		  (fdefinition s) (quasischeme-interop:lisp-predicate-name-p name))))
+	       (let ((f (quasischeme-interop:scheme-facing
+			 (fdefinition (find-symbol name package))
+			 (quasischeme-interop:lisp-predicate-name-p name))))
+		 (lambda (&rest args)
+		   (apply f (mapcar #'lisp-argument args)))))
 	     names))))
 
 (defnative "quasischeme-lisp-symbols" (package-name names) (:leaf t)

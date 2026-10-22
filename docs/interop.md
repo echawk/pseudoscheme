@@ -518,6 +518,19 @@ looked for:
   its `.zo`.
 - This works in `bin/quasischeme --racket`;
   tests/racket/programs/lisp-interop.rkt runs it.
+- A Racket keyword passed to a Lisp function is a Lisp keyword:
+  `#:sha256` is `:SHA256`.
+
+A Lisp system that isn't loaded loads when its package is first asked
+for, as for `(cl ...)` libraries (3.2), from Guile and Racket alike:
+
+```sh
+bin/quasischeme --quicklisp --guile -c '(use-modules ((cl ironclad) #:prefix ic:))
+  (display (ic:byte-array-to-hex-string
+            (ic:digest-sequence #:sha256 (ic:ascii-string-to-byte-array "abc"))))'
+bin/quasischeme --quicklisp --racket -e '(require (prefix-in ic: cl/ironclad))' \
+  -e "(ic:byte-array-to-hex-string (ic:digest-sequence '#:sha256 (ic:ascii-string-to-byte-array \"abc\")))"
+```
 
 ## 7. Not done yet
 
