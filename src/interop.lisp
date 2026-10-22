@@ -41,7 +41,7 @@
 	   "USE-LIBRARY" "LIBRARY-EXPORTS" "VERBATIM" "BOOT"
 	   "TO-LISP" "TO-SCHEME" "LISP-FACING" "SCHEME-FACING"
 	   "LISP-PREDICATE-NAME-P" "*LISP-PREDICATES*" "*NOT-LISP-PREDICATES*"
-	   "LIBRARY-PACKAGE-NAME" "PARSE-LIBRARY-NAME"))
+	   "LIBRARY-PACKAGE-NAME" "PARSE-LIBRARY-NAME" "LISP-MACRO-FUNCTION" "CACHED-LISP-MACRO-FUNCTION"))
 
 (in-package "QUASISCHEME-INTEROP")
 
@@ -481,6 +481,52 @@ its value.  FORM's compile-time effects happen first, as in a file
     (handler-bind ((warning #'muffle-warning))
       (let ((*error-output* (make-broadcast-stream)))	; compiler notes
 	(compile nil code)))))
+
+;;; Lisp macros used from Guile and Racket (src/guile/interop.lisp,
+;;; src/racket/linklet/interop.lisp): the call, as data, compiled as a
+;;; Lisp function of the language's lexical variables it mentions.
+
+(defvar *lisp-macro-functions* (make-hash-table :test 'equal :synchronized t)
+  "(form names package macro) -> LISP-MACRO-FUNCTION's function, for the
+Racket calls that compile when first run.")
+
+(defun lisp-macro-function (form names package macro)
+  "A Lisp function computing FORM, a call of the Lisp macro MACRO (its
+symbol) written in Guile or Racket (a datum, its head whatever name the
+language gave the macro), whose identifiers NAMES (symbols) are its
+lexical variables, passed as its arguments.  Other symbols are Lisp's: in
+PACKAGE, else COMMON-LISP, else the symbol itself."
+  (let* ((params (mapcar (lambda (n) (make-symbol (symbol-name n))) names))
+	 (map (mapcar #'cons names params)))
+    (labels ((lisp (x)
+	       (cond ((eq x qs:false) nil)
+		     ((symbolp x)
+		      (or (cdr (assoc x map))
+			  (let ((name (symbol-name x)))
+			    (cond ((and (> (length name) 1) (char= (char name 0) #\:))
+				   (intern (subseq name 1) "KEYWORD"))
+				  ((multiple-value-bind (s status) (find-symbol name package)
+				     (and status s)))
+				  ((multiple-value-bind (s status) (find-symbol name "COMMON-LISP")
+				     (and status s)))
+				  (t x)))))
+		     ((consp x) (cons (lisp (car x)) (lisp (cdr x))))
+		     (t x))))
+      (let ((lisp-form (cons macro (lisp (cdr form)))))
+	(compile nil
+		 `(lambda ,params
+		    (let ,(mapcar (lambda (p) `(,p (to-lisp ,p))) params)
+		      (declare (ignorable ,@params))
+		      ;; a procedure called by name, as a Lisp function
+		      (flet ,(mapcar (lambda (p) `(,p (&rest args) (apply ,p args))) params)
+			(declare (ignorable ,@(mapcar (lambda (p) `(function ,p)) params)))
+			(values-list (mapcar #'to-scheme
+					     (multiple-value-list ,lisp-form)))))))))))
+
+(defun cached-lisp-macro-function (form names package macro)
+  (let ((key (list form names (package-name package) macro)))
+    (or (gethash key *lisp-macro-functions*)
+	(setf (gethash key *lisp-macro-functions*) (lisp-macro-function form names package macro)))))
 
 ;;; ------------------------------------------------------------------
 ;;; Scheme macros used from Lisp

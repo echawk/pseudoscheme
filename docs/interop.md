@@ -419,6 +419,55 @@ command line) is all it takes. docs/libraries.md walks through
 installing and using packages with each. `tests/run-library-corpus.lisp`
 measures how many load.
 
+## 6a. Guile and Common Lisp
+
+`(asdf:load-system :quasi-guile)` loads Quasischeme's Guile. That is
+`--guile`: Guile's own boot-9 and modules on our runtime, not a binding
+to GNU Guile. The system also loads its Lisp API, the package
+`QUASI-GUILE` (`QG`), from src/guile/interop.lisp.
+
+From Lisp:
+
+```lisp
+(qg:eval "(use-modules (ice-9 match)) (match '(1 2) ((a b) (+ a b)))")  ; => 3
+(qg:use-modules ((srfi srfi-1) :select (fold iota (delete-duplicates . dedup)))
+                ((ice-9 match) :select (match)))
+(fold #'+ 0 (iota 4))                                 ; => 6
+(let ((y 5)) (match (list y 1) ((p q) (twice (+ p q)))))   ; a Guile macro
+(funcall (qg:procedure "string-join") '("a" "b") "-")      ; => "a-b"
+```
+
+- `qg:use-modules` takes `use-modules` specs written in Lisp: `:select`
+  (with `(name . lisp-name)` to rename), `:hide` and `:prefix`.
+  Procedures become functions, variables symbol macros, and macros Lisp
+  macros. A name that would redefine an inherited symbol (CL's
+  `delete-duplicates`) is an error.
+- A Guile macro's arguments are Guile code with Lisp's meanings where
+  they exist, as for Scheme's macros (4.2): Lisp lexical variables and
+  Lisp functions are passed in. The call becomes `(lambda (p ...)
+  call)`, which Guile evaluates once, when the Lisp code loads.
+- `qg:eval` takes Guile text or a datum written in Lisp, and a
+  `:module`. `qg:load` and `qg:module-exports` are there too.
+
+From Guile, the modules `(cl PACKAGE)` are Lisp packages' external
+symbols. They are made the first time they're resolved, by the module
+`(cl)`'s submodule binder:
+
+```scheme
+(use-modules ((cl common-lisp) #:prefix cl:))
+(cl:mapcar 1+ '(1 2 3))                              ; => (2 3 4)
+(let ((n 10)) (cl:loop for x in '(1 2 3) collect (* x n)))  ; => (10 20 30)
+(cl:evenp 3)                                         ; => #f
+```
+
+- Functions are procedures, with booleans crossing as in section 2.
+- Variables are syntax for their values (and `set!` of them).
+- Macros and special operators are syntax that compiles the call as
+  Lisp, with the Guile lexical variables it mentions passed in.
+- Any other symbol (a type, a class) is a variable holding the symbol.
+
+This works in `bin/quasischeme --guile` too.
+
 ## 7. Not done yet
 
 - **Libraries whose expansions hold Lisp objects** (those that import a

@@ -328,6 +328,8 @@
 	       (:file "i18n" :depends-on ("primitives"))
 	       (:file "write" :depends-on ("goops" "ports" "regex" "arrays"))
 	       (:file "elisp" :depends-on ("primitives" "compile" "boot"))
+	       ;; Guile and Common Lisp, both ways: (cl PACKAGE), QUASI-GUILE
+	       (:file "interop" :depends-on ("primitives" "compile" "boot"))
 	       ;; Guile's VM (docs/guile-vm.md)
 	       (:file "vm-elf" :depends-on ("runtime"))
 	       (:file "vm-ops" :depends-on ("primitives"))

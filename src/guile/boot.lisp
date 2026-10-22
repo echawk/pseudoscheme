@@ -1092,6 +1092,8 @@ struct dirent layout by it)."
 	(primitive-load-path "ice-9/boot-9"))
       ;; what loads from here on is cached (cache.lisp)
       (setq *cache-ready* t)
+      ;; the modules (cl PACKAGE) (interop.lisp)
+      (funcall 'install-cl-modules)
       (when verbose
 	(format *error-output* "~&;; boot-9 loaded in ~,1F s~%"
 		(/ (- (get-internal-real-time) start) internal-time-units-per-second))))
