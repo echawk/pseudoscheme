@@ -412,16 +412,26 @@ with one, the body's result, the exports defined in TARGET."
 and the Core Compiler\") and its correlated objects; milestone 1 replaces
 it with (primitive-table '#%linklet) of the pinned release.")
 
+(defvar *interpret-quick-linklets* (not (equal (uiop:getenv "QUASISCHEME_RACKET_INTERPRET") "0"))
+  "Whether a linklet compiled 'quick is interpreted (schemify-layer.lisp),
+not compiled; QUASISCHEME_RACKET_INTERPRET=0 compiles it.")
+
 (defparameter *linklet-functions*
   `(("linklet?" ,(lambda (x) (bool (compiled-linklet-p x))))
     ("compile-linklet" ,(lambda (form &optional (name qs:false) (import-keys qs:false) get-import options)
-			  (declare (ignore options))
-			  ;; with import keys, they come back too, unchanged; the
-			  ;; linklets they name tell which of their exports are safe
-			  (if (truthy import-keys)
-			      (values (compile-linklet form name nil (imports-safe-exports import-keys get-import))
-				      import-keys)
-			      (compile-linklet form name))))
+			  ;; one compiled 'quick (run once at expand time) is
+			  ;; interpreted, as Racket CS does (schemify-layer.lisp)
+			  (let ((interpreted (and (consp options) (member (rsym "quick") options)
+						  *interpret-quick-linklets*
+						  (interpreted-linklet form name))))
+			    (cond ((and interpreted (truthy import-keys)) (values interpreted import-keys))
+				  (interpreted interpreted)
+				  ;; with import keys, they come back too, unchanged; the
+				  ;; linklets they name tell which of their exports are safe
+				  ((truthy import-keys)
+				   (values (compile-linklet form name nil (imports-safe-exports import-keys get-import))
+					   import-keys))
+				  (t (compile-linklet form name))))))
     ("eval-linklet" ,#'identity)
     ("instantiate-linklet" ,(lambda (linklet imports &optional (target qs:false) use-prompt)
 			      (declare (ignore use-prompt))

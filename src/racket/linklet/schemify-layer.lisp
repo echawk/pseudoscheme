@@ -39,3 +39,113 @@ hasn't been extracted or doesn't instantiate."
   "The schemify layer's export NAME (instantiating it), or NIL."
   (let ((instance (instantiate-schemify-layer)))
     (and instance (instance-value instance (rsym name)))))
+
+;;; ------------------------------------------------------------------
+;;; Interpreting a linklet
+;;;
+;;; As Racket CS's compile-linklet does in 'quick mode (racket/src/cs/
+;;; linklet.sls): the linklet schemified for the target 'interp, made
+;;; interpretable by interpretable-jitified-linklet and run by
+;;; interpret-linklet, which gives a procedure of the instance's variable
+;;; reference, the imported variables and the exported ones -- the shape
+;;; of our compiled linklets' functions (INSTANTIATE-LINKLET).  The
+;;; interpreter refers to primitives by name, in a table of all the
+;;; instances' (INTERPRETER-PRIMITIVES), and to variables through the
+;;; operations INTERPRETER-LINK! is given, here on our LINKLET-VARIABLEs.
+
+(defvar *interpreter-primitives* nil
+  "Symbol -> value: every primitive instance's, and the internal ones
+schemify's output calls (cs/primitive/internal.ss).")
+
+(defun call-with-module-prompt (proc &optional (syms nil syms-p) modes &rest vars)
+  "Racket CS's: PROC under the default prompt, its values assigned to
+VARS (if given), which must then be defined."
+  (declare (ignore modes))
+  (flet ((handler (&rest args)
+	   (apply #'abort-current-continuation* *default-prompt-tag* args)))
+    (if (not syms-p)
+	(call-with-continuation-prompt proc *default-prompt-tag* #'handler)
+	(progn
+	  (call-with-continuation-prompt
+	   (lambda ()
+	     (let ((vals (multiple-value-list (funcall proc))))
+	       (unless (= (length vals) (length vars))
+		 (racket-arity-error "define-values" (length vals) (length vars)))
+	       (loop for v in vars for x in vals do (setf (linklet-variable-value v) x))))
+	   *default-prompt-tag* #'handler)
+	  (loop for v in vars for s in syms
+		when (eq (linklet-variable-value v) +undefined+)
+		  do (raise-variable-error s "cannot use before initialization"))
+	  *void*))))
+
+(defun abort-current-continuation* (tag &rest values)
+  (apply (primitive "abort-current-continuation") tag values))
+
+(defun interpreter-primitives ()
+  (or *interpreter-primitives*
+      (let ((h (make-rhash :eq)))
+	(flet ((add (name value) (setf (gethash (rsym name) (rhash-table h)) value)))
+	  (maphash (lambda (instance table)
+		     (declare (ignore instance))
+		     (maphash #'add table))
+		   *primitive-instances*)
+	  (add "call-with-module-prompt" #'call-with-module-prompt)
+	  (add "#%call-with-values" (primitive "call-with-values"))
+	  (add "unbox/check-undefined"
+	       (lambda (b name)
+		 (let ((x (box-ref* b)))
+		   (if (eq x +undefined+) (raise-variable-error name "cannot use before initialization") x))))
+	  (add "set-box!/check-undefined"
+	       (lambda (b v name)
+		 (when (eq (box-ref* b) +undefined+)
+		   (raise-variable-error name "assignment disallowed; cannot set variable before its definition"))
+		 (setf (rbox-value b) v)
+		 *void*))
+	  (add "raise-binding-result-arity-error"
+	       (lambda (expected args) (racket-arity-error "local-binding form" (length args) expected)))
+	  (add "raise-definition-result-arity-error"
+	       (lambda (expected args) (racket-arity-error "define-values" (length args) (length expected))))
+	  (add "#%struct-constructor" (lambda (p mask) (declare (ignore mask)) p))
+	  (add "#%struct-predicate" (lambda (p) p))
+	  (add "#%struct-field-accessor" (lambda (p rtd pos) (declare (ignore rtd pos)) p))
+	  (add "#%struct-field-mutator" (lambda (p rtd pos) (declare (ignore rtd pos)) p)))
+	(setq *interpreter-primitives* h))))
+
+(defvar *interpreter-linked* nil)
+
+(defun link-interpreter ()
+  (unless *interpreter-linked*
+    (funcall (schemify-export "interpreter-link!")
+	     (interpreter-primitives)
+	     #'correlated->datum
+	     (lambda (name) (make-linklet-variable name))
+	     #'variable-ref
+	     #'linklet-variable-value
+	     (lambda (v x) (setf (linklet-variable-value v) x) *void*)
+	     (lambda (v x constance) (declare (ignore constance)) (setf (linklet-variable-value v) x) *void*)
+	     (lambda (proc mask name) (declare (ignore mask name)) proc)
+	     (lambda (name) name)
+	     (lambda (e) (declare (ignore e)) (racket-error "interpret" "ffi isn't interpreted")))
+    (setq *interpreter-linked* t)))
+
+(defun interpreted-linklet (form name)
+  "FORM, a linklet S-expression, as a COMPILED-LINKLET that is interpreted
+\(Racket CS's 'quick mode), or NIL if the schemify layer isn't there."
+  (when (instantiate-schemify-layer)
+    (link-interpreter)
+    (multiple-value-bind (impl-lam importss exports)
+	(funcall (schemify-export "schemify-linklet")
+		 form (make-rbox :value qs:false) qs:true (rsym "interp") qs:false qs:false qs:false qs:true qs:false
+		 (make-rhash :eq) (interpreter-primitives) (lambda (v) (declare (ignore v)) qs:false)
+		 (lambda (key) (declare (ignore key)) (values qs:false qs:false qs:false)) qs:false)
+      (let* ((b (funcall (schemify-export "interpretable-jitified-linklet") impl-lam qs:false (rsym "racket")))
+	     (proc (funcall (schemify-export "interpret-linklet") b))
+	     (compiled (make-compiled-linklet :interpreted :name name :strategy "interp")))
+	(setf (compiled-linklet-imports compiled) importss
+	      (compiled-linklet-exports compiled) exports
+	      (compiled-linklet-export-internals compiled) exports
+	      (compiled-linklet-source-form compiled) form
+	      (compiled-linklet-function compiled)
+	      (lambda (instance &rest variables)
+		(apply proc (make-variable-reference instance qs:false) variables)))
+	compiled))))

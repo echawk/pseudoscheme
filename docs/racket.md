@@ -186,14 +186,18 @@ What changed:
 - **Cold start.** A first `#lang racket` takes about 280 s: 230 s of
   that is SBCL compiling 7,400 linklets, of which a warm run loads 1,655.
   The expander compiles each expand-time linklet it runs once with
-  `'(quick)` (src/expander/compile/form.rkt), which Racket CS
-  interprets. Our `compile-linklet` ignores its options and compiles
-  them fully, then caches them. Options:
-  - compile `quick` linklets in memory (no fasl write and load), and
-    don't cache them;
-  - use a cheaper policy for them;
-  - compile in a separate process, since SBCL's compiler holds the
-    world lock.
+  `'(quick)` (src/expander/compile/form.rkt). Such a linklet is now
+  interpreted, as Racket CS does: it is schemified for the target
+  `'interp` and run by Racket CS's own interpreter
+  (schemify/interpret.rkt). That needs the schemify layer, extracted by
+  `utils/racket/extract.sh schemify` and instantiated on our compiler
+  (src/racket/linklet/schemify-layer.lisp).
+  `QUASISCHEME_RACKET_INTERPRET=0` compiles them instead. Left to do:
+  - measure the cold start again;
+  - give schemify the primitives' knowns (cs/primitive/*.ss), which it
+    only uses to optimize;
+  - schemify the other linklets too, to see whether its output compiles
+    better than our lowering's.
 - **Second run.** The run after the first still compiles about 90G
   instructions' worth: syntax-literal and declaration linklets that only
   loading from a `.zo` instantiates.
