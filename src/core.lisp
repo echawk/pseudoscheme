@@ -176,7 +176,9 @@ since the last sweep.  For when a file or library is done."
 	   (setq *symbols-after-sweep* (sb-int:package-internal-symbol-count scheme-package))))))
 
 (defun list->bytevector (list)
-  "For the reader's #u8(...) / #vu8(...)."
+  "For the reader's #u8(...) / #vu8(...): of its elements' data, when the
+reader annotates (Chez annotates the literal, not its bytes)."
+  (setq list (mapcar #'stripped list))
   (dolist (b list)
     (unless (typep b '(unsigned-byte 8))
       (scheme-error "bytevector literal: not a byte: ~S" b)))
@@ -262,7 +264,9 @@ made of annotated parts) replaced by their stripped data."
   (typep x '(simple-array fixnum (*))))
 
 (defun list->fxvector (list)
-  "For the reader's #vfx(...) and Chez's list->fxvector."
+  "For the reader's #vfx(...) (its elements' data, as LIST->BYTEVECTOR)
+and Chez's list->fxvector."
+  (setq list (mapcar #'stripped list))
   (dolist (x list)
     (unless (typep x 'fixnum)
       (scheme-error "fxvector: not a fixnum: ~S" x)))

@@ -950,11 +950,31 @@ form bigger than *INTERPRET-LIMIT* is interpreted, and so is one
 					     (not (typep c 'sb-int:simple-program-error)))
 				    (throw 'compile-failed (values nil t))))))
 	    (values (multiple-value-list (call-with-size-policy (tree-size form) (lambda () (eval form)))) nil)))
-      (if failure
-	  (let ((sb-ext:*evaluator-mode* :interpret))
-	    (eval form))
-	  (values-list values))))
+      (cond ((not failure) (values-list values))
+	    ;; compiled again with constraint propagation, whatever its size:
+	    ;; without it, SBCL 2.6.9 can fail ("full call to DATA-VECTOR-REF",
+	    ;; a bug) on code it compiles with it (e's libraries had their
+	    ;; bodies interpreted so)
+	    ((let ((f (compiled-or-nil form)))
+	       (and f (return-from eval-compiled-or-interpreted (funcall f)))))
+	    (t (let ((sb-ext:*evaluator-mode* :interpret))
+		 (eval form))))))
   #-sbcl (eval form))
+
+#+sbcl
+(defun compiled-or-nil (form)
+  "FORM compiled as (lambda () FORM), with constraint propagation, or NIL
+if SBCL's compiler fails on it."
+  (catch 'compile-failed
+    (handler-bind ((error (lambda (c)
+			    (when (and (boundp 'sb-c::*compilation*) sb-c::*compilation*
+				       (not (typep c 'sb-int:simple-program-error)))
+			      (throw 'compile-failed nil)))))
+      (multiple-value-bind (f warnings failure)
+	  (let ((*error-output* (make-broadcast-stream)))
+	    (compile nil `(lambda () ,form)))
+	(declare (ignore warnings failure))
+	f))))
 
 (defun host-eval-1 (form)
   "Translate and evaluate core FORM in *HOST*.  The CL compiler's

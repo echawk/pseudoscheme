@@ -49,11 +49,99 @@ values cross: :int, :pointer for u8* (a bytevector's data), :string, :address
   (qsffi:load-library path)
   qs:unspecific)
 
-(defprim "chez:foreign-procedure" (entry params result)
+(defun varargs-after (conventions)
+  "Where CONVENTIONS, a foreign-procedure's, say the variable arguments
+start: N for (__varargs_after N), 1 for __varargs; else NIL."
+  (loop for c in conventions
+	thereis (cond ((and (symbolp c) (string= (qs:scheme-symbol-name c) "__varargs")) 1)
+		      ((and (consp c) (symbolp (car c))
+			    (string= (qs:scheme-symbol-name (car c)) "__varargs_after"))
+		       (cadr c)))))
+
+;;; Signal masks and sigwait.  SBCL owns the signals it defers (it
+;;; blocks them all or none, and dies on a mask that blocks some), and a
+;;; thread inside sigwait never answers its signal to stop for a
+;;; collection on macOS.  So pthread_sigmask, sigprocmask and sigwait, as
+;;; foreign procedures, are emulated for the signals a program blocks to
+;;; wait for (*EMULATED-SIGNALS*), as e's base does: a blocked one is
+;;; caught by a Lisp handler and kept pending until sigwait takes it, or,
+;;; unblocked, it is raised again for the handler it had.  The mask is
+;;; the process's, not each thread's.  Other signals' masking is left
+;;; alone (a request to block them does nothing).
+
+(defparameter *emulated-signals*
+  (loop for name in '("SIGHUP" "SIGINT" "SIGQUIT" "SIGTERM" "SIGALRM" "SIGTSTP" "SIGCHLD" "SIGWINCH" "SIGIO")
+	for symbol = (find-symbol name "SB-UNIX")
+	when (and symbol (boundp symbol)) collect (symbol-value symbol)))
+
+(defvar *pending-signals* (make-array 64 :initial-element nil)
+  "Signal -> whether it arrived while blocked (set by a handler).")
+(defvar *blocked-signals* '() "(signal . the handler it had) of each blocked signal.")
+(defvar *signal-mask-lock* (sb-thread:make-mutex :name "signal mask"))
+
+(defun signal-set-members (address)
+  (loop for signal from 1 below 32
+	when (= 1 (cffi:foreign-funcall "sigismember" :pointer (cffi:make-pointer address)
+					:int signal :int))
+	  collect signal))
+
+(defun block-emulated-signal (signal)
+  (unless (assoc signal *blocked-signals*)
+    (push (cons signal (sb-sys:enable-interrupt
+			signal (lambda (sig info context)
+				 (declare (ignore info context))
+				 (setf (svref *pending-signals* sig) t))))
+	  *blocked-signals*)))
+
+(defun unblock-emulated-signal (signal)
+  (let ((entry (assoc signal *blocked-signals*)))
+    (when entry
+      (setq *blocked-signals* (remove entry *blocked-signals*))
+      (sb-sys:enable-interrupt signal (cdr entry))
+      (when (svref *pending-signals* signal)
+	(setf (svref *pending-signals* signal) nil)
+	(sb-posix:kill (sb-posix:getpid) signal)))))
+
+(defun emulated-sigmask (how set old)
+  "pthread_sigmask(HOW, SET, OLD), and sigprocmask's, for *EMULATED-SIGNALS*."
+  (sb-thread:with-recursive-lock (*signal-mask-lock*)
+    (unless (zerop old)
+      (cffi:foreign-funcall "sigemptyset" :pointer (cffi:make-pointer old) :int)
+      (dolist (entry *blocked-signals*)
+	(cffi:foreign-funcall "sigaddset" :pointer (cffi:make-pointer old) :int (car entry) :int)))
+    (unless (zerop set)
+      (let ((members (intersection (signal-set-members set) *emulated-signals*)))
+	(case how
+	  (#+darwin 1 #-darwin 0 (mapc #'block-emulated-signal members))
+	  (#+darwin 2 #-darwin 1 (mapc #'unblock-emulated-signal members))
+	  (t (dolist (signal *emulated-signals*)
+	       (if (member signal members)
+		   (block-emulated-signal signal)
+		   (unblock-emulated-signal signal))))))))
+  0)
+
+(defun emulated-sigwait (set sig)
+  "sigwait(SET, SIG): the next pending signal of SET, waited for in Lisp
+(a sleep between looks), so that collections go on meanwhile."
+  (let ((members (signal-set-members set)))
+    (loop
+      (dolist (signal members)
+	(when (svref *pending-signals* signal)
+	  (setf (svref *pending-signals* signal) nil)
+	  (unless (zerop sig) (setf (cffi:mem-ref (cffi:make-pointer sig) :int) signal))
+	  (return-from emulated-sigwait 0)))
+      (sleep 0.01))))
+
+(defprim "chez:foreign-procedure" (entry params result &optional conventions)
   (let ((address (if (integerp entry) entry (qsffi:symbol-address entry))))
     (unless address
       (qs:scheme-error "foreign-procedure: no entry for ~S" entry))
-    (qsffi:foreign-function address (mapcar #'chez-type params) (chez-type result))))
+    (let ((f (qsffi:foreign-function address (mapcar #'chez-type params) (chez-type result)
+				     :varargs-after (varargs-after conventions))))
+      (cond ((and (equal entry "sigwait") (= (length params) 2)) #'emulated-sigwait)
+	    ((and (member entry '("pthread_sigmask" "sigprocmask") :test #'equal) (= (length params) 3))
+	     #'emulated-sigmask)
+	    (t f)))))
 
 (defprim "chez:foreign-callable" (procedure params result)
   (qsffi:foreign-callback procedure (mapcar #'chez-type params) (chez-type result)))

@@ -338,13 +338,26 @@
   (or (not (file-exists? object))
       (time<? (file-modification-time object) (file-modification-time source))))
 (define compiling-imported (make-parameter '()))
+;; the libraries already brought up to date in this process: Chez checks
+;; a library when it first loads it, not at each import (re-reading every
+;; importer's sources, for theirs, at each, was most of e's start)
+(define imports-checked (make-hashtable equal-hash equal?))
 (define (compile-imported-library name)
   (when (and (library-name? name) (not (member name (compiling-imported)))
+             (not (hashtable-ref imports-checked (cons name (library-directories)) #f))
              (not (%chez:system-library-name? name)))
+    (hashtable-set! imports-checked (cons name (library-directories)) #t)
     (let-values (((source object object-exists?) (library-search 'import name)))
       (when (and source object (file-exists? source))
         (parameterize ((compiling-imported (cons name (compiling-imported))))
           (when (object-out-of-date? 'import source object)
+            ;; the object file's directories made first, as Chez's
+            ;; import does ("creating subdirectory")
+            (let make-parent ((p object))
+              (let ((p (path-parent p)))
+                (unless (or (string=? p "") (file-exists? p))
+                  (make-parent p)
+                  (mkdir p))))
             ((compile-library-handler) source object)))))))
 
 ;; Chez's library search: (library-search-handler) is called with who

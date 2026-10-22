@@ -114,10 +114,12 @@ to pin and point into."
 ;;; ------------------------------------------------------------------
 ;;; Calling C
 
-(defun foreign-function (address arguments result &key errno)
+(defun foreign-function (address arguments result &key errno varargs-after)
   "A function calling the C function at ADDRESS (an integer) with
 ARGUMENTS and RESULT, types as above.  With ERRNO, it returns errno
-after the call as a second value."
+after the call as a second value.  VARARGS-AFTER: the function is
+variadic, its first VARARGS-AFTER arguments the fixed ones (Apple's
+arm64 passes the others on the stack)."
   (let* ((args (loop for nil in arguments collect (gensym "ARG")))
 	 (vectors (loop for nil in arguments collect (gensym "V")))
 	 (places (loop for nil in arguments collect (gensym "P")))
@@ -126,8 +128,13 @@ after the call as a second value."
 		 append (if (pointer-kind-p type)
 			    `(:pointer (sb-sys:int-sap (if ,v (+ (vector-address ,v) ,p) ,p)))
 			    `(,(type-ctype type) (argument-value ',type ,a)))))
-	 (call `(cffi:foreign-funcall-pointer (sb-sys:int-sap ,address) () ,@call-args
-					      ,(call-ctype result)))
+	 (call (if varargs-after
+		   (let ((fixed (* 2 (min varargs-after (length arguments)))))
+		     `(cffi:foreign-funcall-pointer-varargs
+		       (sb-sys:int-sap ,address) () ,(subseq call-args 0 fixed)
+		       ,@(subseq call-args fixed) ,(call-ctype result)))
+		   `(cffi:foreign-funcall-pointer (sb-sys:int-sap ,address) () ,@call-args
+						  ,(call-ctype result))))
 	 (body `(let ((raw ,call))
 		  ,(if errno
 		       `(let ((e (sb-alien:get-errno))) (values (result-value ',result raw) e))

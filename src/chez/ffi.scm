@@ -5,13 +5,14 @@
 
 (define load-shared-object %chez:load-shared-object)
 
-;; (foreign-procedure conv ... entry (param-type ...) result-type): the
-;; conventions (__collect_safe, (__varargs_after n), ...) are accepted
-;; and ignored
+;; (foreign-procedure conv ... entry (param-type ...) result-type): of
+;; the conventions, __varargs and (__varargs_after n) say where a variadic
+;; function's variable arguments start (Apple's arm64 passes them on the
+;; stack); the others (__collect_safe, ...) are accepted and ignored
 (define-syntax foreign-procedure
   (syntax-rules ()
     ((_ conv ... entry (param ...) result)
-     (%chez:foreign-procedure entry '(param ...) 'result))))
+     (%chez:foreign-procedure entry '(param ...) 'result '(conv ...)))))
 
 ; (foreign-callable conv ... procedure (param-type ...) result-type): the
 ; code object is its entry point, an address, and is never freed

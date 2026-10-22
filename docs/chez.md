@@ -525,6 +525,38 @@ read. Boxes, fxvectors and stencil vectors are written back the same
 way. The mats section above lists the rest, along with what `#!r6rs`
 turns off.
 
+## The editor itself (2026-10-22)
+
+e starts and edits under `--chez`. Its base starts in about 16 s on a
+warm cache, and a client attaches to it, draws the screen, visits a file,
+takes typing, and detaches on `C-x C-c`. To run it, put
+`bin/scheme-script` first on the PATH (e's loader is a `scheme-script`
+script, and it runs itself again for the base). On macOS, give it a
+short `--base-working-dir`: a socket path has at most 104 bytes. What
+it took:
+- **Object directories**: an imported library compiled into e's `eo/`
+  has its directories made first, as Chez's import does.
+- **Annotated literals**: `#vu8(...)` and `#vfx(...)` read with
+  annotations take their elements' data.
+- **`mkdir`** is Chez's: one directory, with the mode given (e wants
+  700), and an error if it can't be made.
+- **Variadic foreign procedures**: `__varargs` and `(__varargs_after n)`
+  are honoured (CFFI's varargs call). Apple's arm64 passes variable
+  arguments on the stack, so `open`'s mode was garbage before.
+- **Signal masks and `sigwait`** are emulated for the signals SBCL
+  defers (src/chez/ffi.lisp). SBCL dies on a mask that blocks only some
+  of them. A thread inside `sigwait` never answers its signal to stop
+  for a collection on macOS, which hung every collection after e's base
+  started waiting for its signals.
+- **SBCL's "full call to DATA-VECTOR-REF"**: compiling a big top-level
+  form without constraint propagation can hit this bug. The form is now
+  compiled again with constraint propagation before it is ever
+  interpreted (EVAL-COMPILED-OR-INTERPRETED, src/psyntax.lisp). e's
+  libraries had been interpreted, which took minutes.
+- **Imported libraries are checked once per process**, as Chez checks
+  a library when it first loads it. Before, each import re-read every
+  importer's sources to find their imports.
+
 ## What e still needs
 
 From the last run of all 63 scripts (five at a time, each under a

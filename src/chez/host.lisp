@@ -189,9 +189,10 @@ error if ERROR? is true."
 		  (file-namestring p)))
 	    (append (uiop:subdirectories dir) (uiop:directory-files dir)))))
 
-(defprim "chez:mkdir" (name &optional mode)
-  (declare (ignore mode))
-  (ensure-directories-exist (uiop:ensure-directory-pathname name))
+(defprim "chez:mkdir" (name &optional (mode #o777))
+  ;; Chez's: one directory, with MODE (less the umask), an error if it
+  ;; can't be made (it exists, say)
+  (call-for-file "mkdir" name t (lambda (path) (sb-posix:mkdir (string-right-trim "/" path) mode)))
   qs:unspecific)
 
 (defprim "chez:rename-file" (old new)
