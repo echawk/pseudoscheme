@@ -150,6 +150,63 @@ whose calls of imported procedures are capture sites until the analysis
 above finds them safe. Structs are still two objects, an
 instance and its fields vector, which chaperones share.
 
+## Start-up and speed against `racket` (2026-10-21)
+
+In instructions retired, warm cache, against Racket 9.3 CS:
+
+| | before | now | `racket` |
+|---|---|---|---|
+| `#lang racket/base` hello | 7.6G | 1.1G | 0.57G |
+| `#lang racket` hello | 30G | 1.1G | 1.8G |
+| ray | 44G | 34G | 35G |
+| simplex | 49G | 31G | 36G |
+| destruc | 52G | 31G | 20.5G |
+| nucleic | 43G | 31G | 25G |
+| peval | | 49G | 29G |
+| parsing | | 58G | 28G |
+| gcbench | | 25G | 10G |
+| lattice | | 124G | 50G |
+
+What changed:
+- A `.zo`'s linklet forms are read only if their machine code or meta
+  file is missing; the bundle says where each is, past it.
+- The cache's directory is found once per process, generations are
+  pruned at most hourly, cache files are opened with one `open(2)`, and
+  `file-exists?` and `directory-exists?` are one `stat(2)` each.
+- The saved image has racket/base and racket declared and instantiated,
+  with their phase-1 instances and `#lang` readers
+  (QUASISCHEME_RACKET_PRELOAD names others). It is made again by a run
+  that compiles nothing if its own run had to compile.
+- A small top-level procedure that is never assigned is inlined at the
+  calls of it after its definition, its body lowered at top level, as
+  schemify does (INLINE-PROCEDURE, src/racket/linklet/compiler.lisp).
+
+### Future work
+
+- **Cold start.** A first `#lang racket` takes about 280 s: 230 s of
+  that is SBCL compiling 7,400 linklets, of which a warm run loads 1,655.
+  The expander compiles each expand-time linklet it runs once with
+  `'(quick)` (src/expander/compile/form.rkt), which Racket CS
+  interprets. Our `compile-linklet` ignores its options and compiles
+  them fully, then caches them. Options:
+  - compile `quick` linklets in memory (no fasl write and load), and
+    don't cache them;
+  - use a cheaper policy for them;
+  - compile in a separate process, since SBCL's compiler holds the
+    world lock.
+- **Second run.** The run after the first still compiles about 90G
+  instructions' worth: syntax-literal and declaration linklets that only
+  loading from a `.zo` instantiates.
+- **Structs are two objects**, an instance and its fields vector, which
+  chaperones share (gcbench is 2.5x upstream).
+- **lattice and parsing** are mostly frame setup for calls of unknown
+  procedures: the cost of full continuations, which R7RS mode pays too
+  (lattice is 108G there).
+- **Fewer cache files**: a linklet's meta could live in its `.zo` entry,
+  halving the files opened at start.
+- **`-e`** evaluates in `#%kernel` (LINKLET-EVAL), where `racket -e` has
+  `racket`.
+
 ## The REPL
 
 `bin/quasischeme --racket` with no file starts Racket's REPL as `racket`

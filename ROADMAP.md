@@ -176,7 +176,8 @@ chibi's or Gauche's leniency, such as duplicate pattern variables in
   Guix's TLS runs; bigger LilyPond inputs; our own `libguile.h`.
 - **Racket** (docs/racket.md): `--racket` is strategy B, our linklet
   compiler; `--racket=cs` (strategy A) reports "not implemented yet".
-  Next: Racket's own suite file by file, a faster cold start, real
+  Next: Racket's own suite file by file, a faster cold start (the
+  expander's `quick` linklets, docs/racket.md "Future work"), real
   places and futures, and Racket's thread and io layers in place of our
   natives.
 
