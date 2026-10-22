@@ -2,7 +2,9 @@
 # Fetch extra Racket packages (Typed Racket and what it needs) for --racket:
 # shallow clones of the packages' github.com/racket repositories at the
 # tag of the pinned release, into build/external/racket-pkgs/REPO/
-# (gitignored).  Packages that Racket's own repository holds
+# (gitignored).  A package not in a github.com/racket repository is cloned
+# from the source pkgs.racket-lang.org gives for it, at the commit it
+# lists (its checksum), into build/external/racket-pkgs/catalog/PACKAGE/.  Packages that Racket's own repository holds
 # (build/external/racket/pkgs) are skipped.  Dependencies are resolved
 # transitively from each package's info.rkt `deps`.
 #
@@ -58,8 +60,27 @@ fetch_repo() {
   [ -d "$OUT/$r/.git" ] && return 0
   echo "fetching racket/$r at $TAG"
   git clone -q --depth 1 --branch "$TAG" "https://github.com/racket/$r" "$OUT/$r" 2>/dev/null \
-    || { rm -rf "$OUT/$r"; echo "no racket/$r at $TAG (package $2 unmapped: add it to repo_of)" >&2; exit 1; }
+    || { rm -rf "$OUT/$r"; return 1; }
   echo "  $(git -C "$OUT/$r" rev-parse HEAD)"
+}
+
+# A package from the catalog: its git source at the commit listed as its
+# checksum.  Prints the directory holding its info.rkt.
+fetch_catalog() {
+  p=$1 dir=$OUT/catalog/$1
+  entry=$(curl -fsSL "https://pkgs.racket-lang.org/pkg/$p") \
+    || { echo "$p: not in racket/ repositories or the catalog" >&2; exit 1; }
+  src=$(printf '%s' "$entry" | sed -n 's/.*(source \. "\([^"]*\)").*/\1/p' | head -1)
+  sum=$(printf '%s' "$entry" | sed -n 's/.*(checksum \. "\([0-9a-f]*\)").*/\1/p' | head -1)
+  url=$(printf '%s' "$src" | sed -e 's/^git+//' -e 's|^git://|https://|' -e 's/[#?].*//')
+  sub=$(printf '%s' "$src" | sed -n 's/.*[?&]path=\([^#&]*\).*/\1/p')
+  if [ ! -d "$dir/.git" ]; then
+    echo "fetching $p from $url at $sum" >&2
+    git init -q "$dir" && git -C "$dir" fetch -q --depth 1 "$url" "$sum" \
+      && git -C "$dir" checkout -q FETCH_HEAD \
+      || { rm -rf "$dir"; echo "$p: can't fetch $url at $sum" >&2; exit 1; }
+  fi
+  echo "$dir${sub:+/$sub}"
 }
 
 seen=" "
@@ -74,11 +95,14 @@ while [ -n "$queue" ]; do
   # typed/net/cookies uses it): skipped rather than unpinned
   case "$p" in net-cookies*) echo "skipping $p (not a racket/ repository)"; continue ;; esac
   r=$(repo_of "$p")
-  fetch_repo "$r" "$p"
-  # a repository holds packages in subdirectories, or is one itself
-  d=$OUT/$r/$p
-  [ -f "$d/info.rkt" ] || d=$OUT/$r
-  [ -f "$d/info.rkt" ] || { echo "$p isn't in racket/$r" >&2; exit 1; }
+  if fetch_repo "$r" "$p"; then
+    # a repository holds packages in subdirectories, or is one itself
+    d=$OUT/$r/$p
+    [ -f "$d/info.rkt" ] || d=$OUT/$r
+  else
+    d=$(fetch_catalog "$p")
+  fi
+  [ -f "$d/info.rkt" ] || { echo "$p: no info.rkt in $d" >&2; exit 1; }
   if grep -q "(define collection 'multi)" "$d/info.rkt"; then
     roots="$roots:$(pwd)/$d"
   else

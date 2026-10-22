@@ -73,6 +73,17 @@
 				:weakness (and weak :key) :synchronized t)
 	       weak))
 
+;; a literal in compiled code (a macro's: br-parser-tools' tables) is
+;; dumped into a fasl, made first and filled after (it may hold itself)
+(defmethod make-load-form ((x rhash) &optional environment)
+  (declare (ignore environment))
+  (values `(make-rhash ',(rhash-kind x) ',(rhash-weak x))
+	  `(fill-rhash ,x ',(entries x))))
+
+(defun fill-rhash (h entries)
+  (loop for (k . v) in entries do (setf (gethash k (rhash-table h)) v))
+  h)
+
 (defmethod print-object ((x rhash) stream)
   (format stream "#<hash~A>" (ecase (rhash-kind x) (:eq "eq") (:eqv "eqv") (:equal ""))))
 

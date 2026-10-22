@@ -788,10 +788,15 @@ the aborts abort-current-continuation makes do, without the throw)."
 			 until (eq frame prompt)
 			 collect (prog1 (qsx::fresh-frame frame inside) (push frame inside))))
 	   (winders (ldiff qsx::*winders* (svref prompt 4)))
+	   ;; its marks (a parameterization among them: a generator's), which
+	   ;; its frames, rebuilt, have on top of the caller's, as Racket's
+	   (outside (assoc tag *prompt-marks*))
+	   (marks (if outside (ldiff (current-marks) (cdr outside)) '()))
 	   (k (lambda (&rest values)
 		(unless qsx::*full-continuations*
 		  (racket-error "continuation" "a composable continuation can't be called without full continuations"))
-		(qsx::compose-continuation frames winders values))))
+		(let ((qs-r6rs::*marks* (append marks (current-marks))))
+		  (qsx::compose-continuation frames winders values)))))
       (setf (gethash k *composable-continuations*) t)
       k)))
 

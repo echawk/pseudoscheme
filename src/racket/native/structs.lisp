@@ -520,8 +520,17 @@ TYPE or a subtype: its fields can be read and written directly."
       *current-inspector*))
 
 (defun transparent-p (type)
-  "Whether TYPE's instances show their fields: made with inspector #f, or prefab."
-  (or (eq (struct-type-inspector type) qs:false) (struct-type-prefab-key type)))
+  "Whether TYPE's instances show their fields (to equal?, hashing,
+printing): made with inspector #f, prefab, or with an inspector the
+current one is superior to, as (make-inspector) makes (br-parser-tools'
+items: their LR(0) automaton never ended when equal kernels weren't)."
+  (let ((inspector (struct-type-inspector type)))
+    (or (eq inspector qs:false)
+	(struct-type-prefab-key type)
+	(and (inspector-p inspector)
+	     (let ((current (current-inspector*)))
+	       (loop for i = (inspector-superior inspector) then (inspector-superior i)
+		     while i thereis (eq i current)))))))
 
 ;;; (current-inspector is a parameter: hash.lisp)
 (defnative "make-inspector" (&optional (superior (current-inspector*))) (:leaf t)

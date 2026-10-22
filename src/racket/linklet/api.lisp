@@ -147,6 +147,29 @@ time units), and how many: QUASISCHEME_RACKET_STATS prints them.")
 	    (/ (getf *stats* :lower) internal-time-units-per-second)
 	    (/ (getf *stats* :compile) internal-time-units-per-second))))
 
+(defun undumpable-literal-p (core)
+  "Whether lowered CORE quotes a value a fasl can't hold: a procedure, or
+another object without a load form.  A macro can put such a value into
+the code it makes (Racket's \"3-D syntax\"), which Racket compiles in
+memory, as is done for it here, uncached."
+  (let ((seen (make-hash-table :test 'eq)))
+    (labels ((value (x)
+	       (cond ((or (numberp x) (stringp x) (symbolp x) (characterp x)) nil)
+		     ((gethash x seen) nil)
+		     (t (setf (gethash x seen) t)
+			(typecase x
+			  (cons (or (value (car x)) (value (cdr x))))
+			  (simple-vector (some #'value x))
+			  (function t)
+			  ((or structure-object standard-object)
+			   (handler-case (progn (make-load-form x) nil) (error () t)))
+			  (t nil)))))
+	     (walk (x)
+	       (cond ((atom x) nil)
+		     ((eq (car x) (core "quote")) (value (cadr x)))
+		     (t (loop for y on x thereis (and (consp y) (walk (car y))))))))
+      (walk core))))
+
 (defun compile-linklet (form &optional name key imports-known)
   "compile-linklet: FORM (an S-expression or correlated) to a linklet.
 KEY, from a .zo, is the cache key it was compiled under.  IMPORTS-KNOWN:
@@ -165,6 +188,11 @@ per import set, the safe exports of the linklet it imports
   (timing (:lower)
     (let* ((form (if (functionp form) (funcall form) form)) ; a .zo's (READ-LINKLET-BUNDLE)
 	   (compiled (compile-linklet-form form :name name :imports-known imports-known)))
+      ;; compiled in memory if it can't be cached (UNDUMPABLE-LITERAL-P)
+      (when (undumpable-literal-p (compiled-linklet-form compiled))
+	(setf (compiled-linklet-source-form compiled) form
+	      (compiled-linklet-imports-known compiled) imports-known)
+	(return-from compile-linklet compiled))
       ;; its compiled code is cached, keyed by the linklet as given and
       ;; the imports it was told are safe (its code depends on them)
       (unless (compiled-linklet-source-key compiled)

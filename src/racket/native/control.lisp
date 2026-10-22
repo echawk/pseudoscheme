@@ -83,10 +83,17 @@
       (lambda (thunk) (call-with-continuation-prompt thunk tag nil))
       #'values))
 
+(defvar *prompt-marks* '()
+  "(tag . marks) for each prompt the current continuation has, innermost
+first: the continuation marks outside it (CAPTURE-COMPOSABLE-CONTINUATION
+keeps those inside).")
+
 (defun call-with-continuation-prompt (proc tag handler &rest args)
   (let ((handler (or handler (default-prompt-handler tag))))
     (qsx::call-with-prompt tag
-			   (lambda () (apply proc args))
+			   (lambda ()
+			     (let ((*prompt-marks* (acons tag (current-marks) *prompt-marks*)))
+			       (apply proc args)))
 			   (lambda (k &rest values)
 			     (declare (ignore k))
 			     (apply handler values)))))

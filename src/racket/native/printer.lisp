@@ -336,6 +336,14 @@ the trailing ones equal to the one before."
 		     do (when (or (zerop i) (find c "|\\()[]{}\"';`,#") (sb-unicode:whitespace-p c))
 			  (write-char #\\ stream))
 			(write-char c stream))))
+	    ;; brackets and braces delimit in Racket, not in R7RS, whose
+	    ;; writer the host's is: such a symbol between bars (syntax-color's
+	    ;; lexer quotes '{, and its .zo didn't read back)
+	    ((and (symbolp x) x (not (eq x qs:true)) (not (eq x qs:false))
+		  (find-if (lambda (c) (find c "[]{}")) (rname x)))
+	     (write-char #\| stream)
+	     (write-string (rname x) stream)
+	     (write-char #\| stream))
 	    (t (host-write x stream))))))
 
 (defun print-quoted (x stream)
