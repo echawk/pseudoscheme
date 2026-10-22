@@ -124,6 +124,10 @@ is never reached.")
 	    ;; a form too big for SBCL (a branch past its reach, on arm64)
 	    ;; goes again with compact frames
 	    (or (try)
+		;; SBCL can fail on a big form without constraint propagation
+		;; where it compiles with it (CALL-WITH-SIZE-POLICY): Idris 2's
+		;; compiler
+		(let ((*force-constraint-propagation* t)) (try))
 		(let ((*compact-frames* t)) (try))
 		(error "compiling ~A failed" source))))))))
 

@@ -44,6 +44,8 @@
 	 ,@body)))
   (defmacro qs-position-or-lose (&rest args)
     `(or (position ,@args) (error "shouldn't happen?")))
+  (defparameter *qs-tagging-limit* 2000
+    "The most tagged-or-untagged choices SELECT-TAGGING analyses in a component.")
   (defparameter *qs-mv-let-kind*
     (loop for i below 32
 	  when (equal (decode-functional-kind-attributes (ash 1 i)) '(mv-let))
@@ -121,6 +123,19 @@
 	      (recurse node nth-value))))
 
 	(defun select-tagging (component)
+	  ;; a component with more choices than *QS-TAGGING-LIMIT*: each the
+	  ;; tagged VOP, as the min cut makes it for a node on the tagged
+	  ;; side (the analysis walks each choice's variables' references,
+	  ;; quadratic in the component's size)
+	  (let ((choices '()))
+	    (qs-do-blocks (block component)
+	      (qs-do-nodes (node block)
+		(when (and (combination-p node) (consp (combination-info node)))
+		  (push node choices))))
+	    (when (> (length choices) *qs-tagging-limit*)
+	      (dolist (node choices)
+		(setf (combination-info node) (first (combination-info node))))
+	      (return-from select-tagging nil)))
 	  (let ((net (make-net)))
 	    (qs-do-blocks (block component)
 	      (qs-do-nodes (node block)

@@ -447,6 +447,13 @@ the environment so that its code generator uses this Chez too:
   bootstrap installed the libraries), and the program runs here:
   `Hello from Idris 2 on Quasischeme`. The compiler starts in 0.8 s.
 
+(2026-10-22: the bootstrap had regressed to copying `idris2.ss` as its
+"object file", so the compiler expanded and compiled itself at each start,
+95 s. SBCL failed on a chunk compiled without constraint propagation, with
+its "full call to DATA-VECTOR-REF" bug. A failed chunk is now compiled
+again with it (src/compiled-files.lisp), and the compiler starts in 0.8 s
+again.)
+
 What Idris needed:
 - **Hoisting through `(let () ...)`**: psyntax expands it to
   `((lambda () body))`, which hid the body's definitions from the hoisting

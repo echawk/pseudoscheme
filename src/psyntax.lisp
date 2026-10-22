@@ -917,12 +917,17 @@ propagation: its sets of constraints, a bit vector per block, grow with
 the square of a function's size, and one of Typed Racket's linklets took
 more than 3 GB of them (CALL-WITH-SIZE-POLICY).")
 
+(defvar *force-constraint-propagation* nil
+  "True to compile with constraint propagation whatever the size: SBCL
+2.6.9 can fail without it (\"full call to DATA-VECTOR-REF\", a bug) on
+code it compiles with it, so a compile that fails is tried again so.")
+
 (defun call-with-size-policy (size thunk)
   "Call THUNK, which compiles code whose biggest form is SIZE conses:
 without SBCL's constraint propagation if that's past
-*CONSTRAINT-PROPAGATION-LIMIT*.  The code is as correct, its types less
-well known."
-  #+sbcl (if (> size *constraint-propagation-limit*)
+*CONSTRAINT-PROPAGATION-LIMIT* (and not *FORCE-CONSTRAINT-PROPAGATION*).
+The code is as correct, its types less well known."
+  #+sbcl (if (and (> size *constraint-propagation-limit*) (not *force-constraint-propagation*))
 	     (let ((sb-c::*constraint-propagate* nil)) (funcall thunk))
 	     (funcall thunk))
   #-sbcl (progn size (funcall thunk)))
