@@ -81,7 +81,8 @@
 	  `(fill-rhash ,x ',(entries x))))
 
 (defun fill-rhash (h entries)
-  (loop for (k . v) in entries do (setf (gethash k (rhash-table h)) v))
+  "H with ENTRIES, a sequence of (key . value)."
+  (map nil (lambda (e) (setf (gethash (car e) (rhash-table h)) (cdr e))) entries)
   h)
 
 (defmethod print-object ((x rhash) stream)
