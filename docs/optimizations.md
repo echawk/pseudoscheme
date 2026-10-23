@@ -498,3 +498,16 @@ times on a loaded machine varied by 2x.
   in cycles; the collections cost more than the cache misses saved.
 - **A site's body inline** when the binding stack isn't deep, rather than
   in a `dynamic-extent` closure: about 0.5 ns of a site's 3-6 ns.
+- **Lazy resume** (October 2026): a machine compiled without its resume
+  code (the dispatch and each site's restores, which only a re-entered
+  continuation runs), its frames holding a resumer that makes the full
+  machine, from a copy kept as core, the first time one is re-entered.
+  On a cold `#lang racket/base` (3,162 forms), the resume code is a
+  third of the conses SBCL compiles, and dropping it outright cut
+  SBCL's time by about a quarter; but keeping the copies cost as much:
+  in the code's fasl, warm start took 12% more instructions; in a
+  compiled fasl beside it, cold start took 3.6% more (561G against 542G
+  instructions, though 5% less wall-clock); printed beside it, 7% more.
+  Nested procedures had to refer to each other's copies, not contain
+  them (each copy holding its inner ones' grows exponentially with the
+  nesting).
