@@ -22,10 +22,35 @@ and the modules it uses that begin with it, and the meta-commands.")
 (defparameter *guile-setup*
   "(use-modules (system repl repl) (system repl command) (system repl common))
      ((@ (system repl repl) %inhibit-welcome-message) #t)
+     (define %quasischeme-definitions (make-hash-table))
      (module-set! the-root-module 'repl-reader
        (lambda* (prompt #:optional (reader (fluid-ref current-reader)))
          (%quasischeme-set-prompt! (if (string? prompt) prompt (prompt)))
-         ((or reader read) (current-input-port))))
+         (let* ((x ((or reader read) (current-input-port)))
+                (d (or (false-if-exception (syntax->datum x)) x)))
+           ;; a definition, for ,lisp
+           (if (and (pair? d) (eq? (car d) 'define) (pair? (cdr d)))
+               (let loop ((target (cadr d)))
+                 (cond ((pair? target) (loop (car target)))
+                       ((symbol? target) (hashq-set! %quasischeme-definitions target d)))))
+           x)))
+     (define-meta-command ((lisp quasischeme) repl (form))
+       \"lisp EXP
+Show the Lisp an expression, or a procedure defined at this REPL, compiles to.\"
+       (let* ((x (repl-parse repl form))
+              (x (or (false-if-exception (syntax->datum x)) x))
+              (source (if (symbol? x) (hashq-ref %quasischeme-definitions x) x)))
+         (if source
+             (%quasischeme-show-lisp (compile source #:to 'tree-il #:env (current-module)))
+             (format #t \"~a wasn't defined at this REPL (a primitive, or a module's): its Lisp isn't kept; ,asm shows its machine code.~%\" x))))
+     (define-meta-command ((asm quasischeme) repl (form))
+       \"asm EXP
+Show the machine code of a procedure (a name, or an expression giving one), or of an expression, compiled but not run.\"
+       (let* ((x (repl-parse repl form))
+              (x (or (false-if-exception (syntax->datum x)) x)))
+         (if (or (symbol? x) (and (pair? x) (eq? (car x) 'lambda)))
+             (%quasischeme-lisp-disassemble (repl-eval repl (repl-parse repl form)))
+             (%quasischeme-asm (compile x #:to 'tree-il #:env (current-module))))))
      (define-meta-command ((mode quasischeme) repl #:optional name)
        \"mode [NAME]
 Show Quasischeme's languages, or switch to one (r7rs, r6rs, chez, ...).\"
@@ -117,6 +142,21 @@ form imports are there for the rest): the reader hook, ,mode, and the completer.
 			   (if (functionp f)
 			       (disassemble f)
 			       (format t "Not a procedure: ~A~%" f))
+			   qsg::*unspecified*))
+    (qsg::obarray-define (qsg::ssym "%quasischeme-show-lisp")
+			 (lambda (tree)
+			   (dolist (lisp (qsg::translate-top-level (qsg::tree-il->core tree)))
+			     (format t "~A~%" (string-left-trim '(#\Newline) (lisp-text lisp))))
+			   qsg::*unspecified*))
+    (qsg::obarray-define (qsg::ssym "%quasischeme-asm")
+			 (lambda (tree)
+			   (let ((forms (qsg::translate-top-level (qsg::tree-il->core tree))))
+			     (disassemble
+			      (qsx::call-with-full-policy
+			       (lambda ()
+				 (handler-bind ((warning #'muffle-warning))
+				   (let ((*error-output* (make-broadcast-stream)))
+				     (compile nil `(lambda () ,@forms))))))))
 			   qsg::*unspecified*))
     (qsg::obarray-define (qsg::ssym "%quasischeme-mode")
 			 (lambda (name)

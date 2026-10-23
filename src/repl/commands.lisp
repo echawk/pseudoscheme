@@ -44,6 +44,10 @@ Ctrl-C cancels, Ctrl-D on an empty line quits." :gray)))))
     (if (language-load *language*)
 	(funcall (language-load *language*) path)
 	(error "this language can't load files"))
+    ;; its definitions, for ,lisp
+    (ignore-errors
+     (dolist (form (funcall (language-read-forms *language*) (uiop:read-file-string path)))
+       (note-definitions form)))
     (say "~A" (colored (format nil ";; loaded ~A" path) :gray))))
 
 (define-command (describe d) (text)
@@ -210,6 +214,49 @@ psyntax's host-set! does: calls go through the function."
 			   (say "~A" (colored (format nil ";; untraced ~A" name) :gray))
 			   t)))
 		     *traced*))))
+
+(defun lisp-text (form)
+  (let ((*print-case* :downcase) (*print-circle* t) (*print-right-margin* 100)
+	(*package* (find-package "CL-USER")))
+    (with-output-to-string (s) (pprint form s))))
+
+(defun source-of (form)
+  "What ,lisp and ,asm translate for FORM: the definition of the name FORM
+is, if this REPL recorded one, else FORM.  The second value: FORM is a
+name of a procedure defined elsewhere (a primitive, a library's)."
+  (let ((name (and (symbolp form) form (qs:scheme-symbol-name form))))
+    (cond ((null name) form)
+	  ((recorded-definition name))
+	  ((ignore-errors (functionp (funcall (language-eval *language*) form))) (values nil t))
+	  (t form))))
+
+(define-command (lisp) (form)
+  "Show the Lisp an expression, or a procedure defined at this REPL (or by a file loaded there), compiles to: ,lisp EXPR."
+  (let ((translate (language-translate *language*)))
+    (if (null translate)
+	(say "This language can't show its Lisp.")
+	(multiple-value-bind (source elsewhere) (source-of form)
+	  (if elsewhere
+	      (say "~A wasn't defined at this REPL (a primitive, or a library's): its Lisp isn't kept; ,asm shows its machine code."
+		   (qs:scheme-symbol-name form))
+	      (dolist (lisp (funcall translate source))
+		(format (out) "~A~%" (string-left-trim '(#\Newline) (lisp-text lisp)))))))))
+
+(define-command (asm) (form)
+  "Show the machine code of a procedure (a name, or an expression giving one), or of an expression, compiled but not run: ,asm EXPR."
+  (let ((translate (language-translate *language*)))
+    (flet ((show (f) (disassemble f :stream (out))))
+      (cond ((or (symbolp form)
+		 (and (consp form) (symbolp (car form)) (string-equal (symbol-name (car form)) "lambda"))
+		 (null translate))
+	     (let ((f (funcall (language-eval *language*) form)))
+	       (if (functionp f) (show f) (say "Not a procedure: ~A" (value-text f)))))
+	    (t
+	     (show (qsx::call-with-full-policy
+		    (lambda ()
+		      (handler-bind ((warning #'muffle-warning))
+			(let ((*error-output* (make-broadcast-stream)))
+			  (compile nil `(lambda () ,@(funcall translate form)))))))))))))
 
 (define-command (disassemble x) (form)
   "Disassemble a procedure's native code: ,disassemble EXPR."

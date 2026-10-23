@@ -289,8 +289,18 @@ running them."
   (list (list (list :guile-command-line args)) nil '() nil))
 
 (defun run-guile-command-line (args)
+  ;; the REPL Guile's switches end in, ((@ (ice-9 top-repl) top-repl)), is the line editor's
+  ;; (src/repl/guile.lisp), which runs Guile's own REPL reading from it
+  (qsg::obarray-define (qsg::ssym "%quasischeme-top-repl")
+		       (lambda ()
+			 (quasischeme-repl:run-repl :guile)
+			 qsg::*unspecified*))
   (qsg:eval-string
-   (format nil "(primitive-eval ((@ (ice-9 command-line) compile-shell-switches) '(~{~S~^ ~}) \"guile\"))"
+   (format nil "(primitive-eval
+		 (let walk ((x ((@ (ice-9 command-line) compile-shell-switches) '(~{~S~^ ~}) \"guile\")))
+		   (cond ((equal? x '(@ (ice-9 top-repl) top-repl)) '%quasischeme-top-repl)
+			 ((pair? x) (cons (walk (car x)) (walk (cdr x))))
+			 (else x))))"
 	   (cons "guile" args))))
 
 ;;; Guile's and Racket's own commands, as Chez's: run as guile or racket

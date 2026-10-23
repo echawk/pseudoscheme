@@ -98,6 +98,11 @@ variable's (psyntax's location), or NIL if it isn't a variable."
   (lambda (form)
     (with-top-level (interaction source) (psyntax "expand-top-level" form))))
 
+(defun translate-top-level (interaction source)
+  (lambda (form)
+    (with-top-level (interaction source)
+      (qsx::translate-top-level (psyntax "expand-top-level" form)))))
+
 (defun read-forms (&key fold-case chez)
   (lambda (text)
     (let ((qs:*fold-case* fold-case)
@@ -113,6 +118,7 @@ variable's (psyntax's location), or NIL if it isn't a variable."
      :names (lambda () (top-level-names ',interaction ',source))
      :describe (describe-top-level ',interaction ',source)
      :expand (expand-top-level ',interaction ',source)
+     :translate (translate-top-level ',interaction ',source)
      :cell (top-level-cell ',interaction ',source)
      :error-text #'quasischeme-api::error-message
      :unspecified-p #'unspecific-p))

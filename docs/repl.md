@@ -92,6 +92,8 @@ lists them all:
 | `,trace name ...` `,tr` | trace calls of top-level procedures (with no names: list them) |
 | `,untrace [name ...]` | stop tracing |
 | `,disassemble expr` `,x` | the native code of a procedure |
+| `,lisp expr` | the Lisp an expression compiles to, or a procedure defined at the REPL (or by a file `,load`ed there) |
+| `,asm expr` | the machine code of a procedure (a name or a `lambda`), or of any other expression compiled but not run |
 | `,backtrace [all]` `,bt` | the last error's backtrace; `all` keeps the evaluator's and the REPL's own frames |
 | `,error-info` `,e` | the last error again, with its condition type |
 | `,values` `,v` | the values printed so far, numbered |

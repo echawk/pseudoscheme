@@ -24,6 +24,7 @@
   load					; a function of a path
   cell					; a function of a name: the Lisp symbol holding its value, or NIL
   run					; if a function, the language has a REPL of its own
+  translate				; a function of a form: the Lisp forms it compiles to
   (unspecified-p (constantly nil)))	; a function: is a value not worth printing?
 
 (defvar *languages* '() "The languages ,language knows, in order.")
@@ -202,8 +203,34 @@ printing the values; stop at the first error."
 	(let ((values (with-repl-errors ()
 			(list (multiple-value-list (funcall (language-eval *language*) form))))))
 	  (if values
-	      (show-values (car values))
+	      (progn (note-definitions form) (show-values (car values)))
 	      (return)))))))
+
+;;; The definitions made at the REPL's top level, or by a file loaded
+;;; there, by language and name: what ,lisp shows the Lisp of.
+
+(defvar *definitions* (make-hash-table :test 'equal)
+  "(language-name . name) -> the form that defined name.")
+
+(defun definition-name (form)
+  "The name FORM, (define name ...) or (define (name . args) ...), defines,
+a string; or NIL."
+  (and (consp form) (symbolp (car form))
+       (string-equal (symbol-name (car form)) "define")
+       (consp (cdr form))
+       (let ((target (cadr form)))
+	 (loop while (consp target) do (setq target (car target)))
+	 (and (symbolp target) target (qs:scheme-symbol-name target)))))
+
+(defun note-definitions (form &optional (language *language*))
+  (let ((name (definition-name form)))
+    (when name
+      (setf (gethash (cons (language-name language) name) *definitions*) form))
+    (when (and (consp form) (symbolp (car form)) (string-equal (symbol-name (car form)) "begin"))
+      (dolist (f (cdr form)) (when (consp f) (note-definitions f language))))))
+
+(defun recorded-definition (name &optional (language *language*))
+  (values (gethash (cons (language-name language) name) *definitions*)))
 
 ;;; ------------------------------------------------------------------
 ;;; Meta-commands
