@@ -185,6 +185,19 @@ checks of the pattern string and of the number of arguments first."
 		    (if args (funcall shown) "")))
     (apply #'racket-format control args)))
 
+(defun write-fixnum (n out)
+  "N's decimal digits to OUT."
+  (declare (fixnum n))
+  (if (zerop n)
+      (write-char #\0 out)
+      (let ((digits (make-string 21)) (i 21) (m (abs n)))
+	(declare (dynamic-extent digits) (fixnum i) (type (integer 0) m))
+	(loop while (> m 0)
+	      do (multiple-value-bind (q r) (floor m 10)
+		   (setf (schar digits (decf i)) (code-char (+ 48 r)) m q)))
+	(when (< n 0) (write-char #\- out))
+	(write-string digits out :start i))))
+
 (defun racket-format (control &rest args)
   "Racket's format directives: ~a ~s ~v ~e ~% ~n ~~."
   (with-output-to-string (out)
@@ -200,8 +213,15 @@ checks of the pattern string and of the number of arguments first."
 		       (setq d (char-downcase (char control (1+ i)))))
 		     (case d
 		       ;; Racket's printer (printer.lisp): ~v prints as print does
-		       ((#\a) (print-value (pop args) out :display))
-		       ((#\s) (print-value (pop args) out :write))
+		       ;; a string or fixnum as itself, without the printer's
+		       ;; walk for cycles and shared structure
+		       ((#\a) (let ((v (pop args)))
+				(typecase v
+				  (string (write-string v out))
+				  (fixnum (write-fixnum v out))
+				  (t (print-value v out :display)))))
+		       ((#\s) (let ((v (pop args)))
+				(if (typep v 'fixnum) (write-fixnum v out) (print-value v out :write))))
 		       ((#\e) (write-string (error-value->string (pop args)) out))
 		       ((#\v) (print-quoted (pop args) out))
 		       ((#\c) (write-char (pop args) out))
