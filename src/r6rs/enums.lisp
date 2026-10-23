@@ -244,10 +244,38 @@ apostrophe or the like between letters (Unicode word breaks, roughly)."
   (with-ascii-code (code c) (if (<= 65 code 90) (+ code 32) code)
     (char-code (funcall (prim "char-foldcase") c))))
 
+(defun ascii-string-p (s)
+  (if (typep s '(simple-array character (*)))
+      (locally (declare (type (simple-array character (*)) s) (optimize speed))
+	(loop for c across s always (< (char-code c) 128)))
+      (every (lambda (c) (< (char-code c) 128)) s)))
+
+(declaim (inline ascii-fold-code))
+(defun ascii-fold-code (c)
+  (let ((code (char-code c))) (if (<= 65 code 90) (+ code 32) code)))
+
+(defun ascii-ci-compare (a b)
+  "-1, 0 or 1 as ASCII strings A and B, case-folded (to lower case, as
+full-casefold does), compare."
+  (let ((la (length a)) (lb (length b)))
+    (dotimes (i (min la lb) (cond ((< la lb) -1) ((> la lb) 1) (t 0)))
+      (let ((x (ascii-fold-code (char a i))) (y (ascii-fold-code (char b i))))
+	(cond ((< x y) (return -1)) ((> x y) (return 1)))))))
+
+(defmacro string-ci-test (test a b)
+  "TEST, a string comparison, of A and B case-folded: by their codes if
+both are ASCII, else by full-casefold."
+  `(if (and (ascii-string-p ,a) (ascii-string-p ,b))
+       (,(ecase test (string= '=) (string< '<) (string> '>) (string<= '<=) (string>= '>=))
+	(ascii-ci-compare ,a ,b) 0)
+       (and (,test (full-casefold ,a) (full-casefold ,b)) t)))
+
 (macrolet ((def-ci (name test fold)
 	     `(defprim ,name (a b &rest more)
 		(if (null more)
-		    (bool (,test (,fold a) (,fold b)))
+		    ,(if (eq fold 'full-casefold)
+			 `(bool (string-ci-test ,test a b))
+			 `(bool (,test (,fold a) (,fold b))))
 		    (let ((all (mapcar #',fold (list* a b more))))
 		      (bool (loop for (x y) on all while y always (,test x y))))))))
   (def-ci "char-ci=?" = char-fold-code)

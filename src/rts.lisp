@@ -132,7 +132,18 @@
 ; STRING->NUMBER
 
 (defune string->number (string &optional (radix 10))
-  (or (qs:parse-scheme-number string radix) qs:false))
+  (or (and (cl:eql radix 10) (decimal-integer-string-p string) (cl:parse-integer string))
+      (qs:parse-scheme-number string radix)
+      qs:false))
+
+(cl:defun decimal-integer-string-p (string)
+  "Whether STRING is an optional sign then decimal digits: an exact integer
+PARSE-INTEGER reads as Scheme does."
+  (cl:and (cl:stringp string)
+	  (cl:let ((n (cl:length string)) (start 0))
+	    (cl:when (cl:and (cl:> n 0) (cl:member (cl:char string 0) '(#\+ #\-))) (cl:setq start 1))
+	    (cl:and (cl:> n start)
+		    (cl:loop for i from start below n always (cl:char<= #\0 (cl:char string i) #\9))))))
 
 ; STRING-APPEND
 

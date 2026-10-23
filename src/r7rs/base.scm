@@ -303,7 +303,16 @@
       ((>= i (%end r (string-length s))))
     (string-set! s i c)))
 
+;; the R5RS ones, of a whole string or vector: the host's
+(define %whole-string->list string->list)
+(define %whole-vector->list vector->list)
+
 (define (string->list s . r)
+  (if (null? r)
+      (%whole-string->list s)
+      (%string->list s r)))
+
+(define (%string->list s r)
   (let ((start (%start r)))
     (let loop ((i (- (%end r (string-length s)) 1)) (acc '()))
       (if (< i start) acc (loop (- i 1) (cons (string-ref s i) acc))))))
@@ -315,6 +324,11 @@
   (apply for-each proc (string->list s) (map string->list more)))
 
 (define (vector->list v . r)
+  (if (null? r)
+      (%whole-vector->list v)
+      (%vector->list v r)))
+
+(define (%vector->list v r)
   (let ((start (%start r)))
     (let loop ((i (- (%end r (vector-length v)) 1)) (acc '()))
       (if (< i start) acc (loop (- i 1) (cons (vector-ref v i) acc))))))
