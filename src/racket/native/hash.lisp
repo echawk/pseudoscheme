@@ -65,13 +65,40 @@
 
 (defstruct (rhash (:constructor %make-rhash (kind table weak)))
   kind table weak
-  (snapshot nil))			; for iteration: #((key . value) ...)
+  (snapshot nil)			; for iteration: #((key . value) ...)
+  (owner nil))				; the thread holding its lock (WITH-RHASH-LOCK)
 
 (defun make-rhash (kind &optional weak)
+  ;; a weak table is SBCL's synchronized one (its GC culls it); another
+  ;; is locked by WITH-RHASH-LOCK, which costs a tenth of SBCL's lock
   (%make-rhash kind
 	       (make-hash-table :test (ecase kind (:eq 'eq) (:eqv 'racket-eqv) (:equal 'racket-equal))
-				:weakness (and weak :key) :synchronized t)
+				:weakness (and weak :key) :synchronized (and weak t))
 	       weak))
+
+;;; A mutable table is used from threads that run at once (lparallel's
+;;; pools), so each operation on it holds its lock: its owner, set by
+;;; compare-and-swap, recursive (an equal-based table's hash and equality
+;;; procedures may use the table), with interrupts deferred, as SBCL's
+;;; synchronized tables' system lock is, so that no interrupt runs in a
+;;; half-changed table.
+
+(defun rhash-acquire (h self)
+  (loop for spins of-type fixnum from 0
+	until (null (sb-ext:compare-and-swap (rhash-owner h) nil self))
+	do (if (< spins 64) (sb-ext:spin-loop-hint) (sb-thread:thread-yield))))
+
+(defmacro with-rhash-lock ((h) &body body)
+  (let ((hv (gensym "H")) (self (gensym "SELF")))
+    `(let ((,hv ,h))
+       (if (or (rhash-weak ,hv) (eq (rhash-owner ,hv) sb-thread:*current-thread*))
+	   (progn ,@body)
+	   (let ((,self sb-thread:*current-thread*))
+	     (sb-sys:without-interrupts
+	       (rhash-acquire ,hv ,self)
+	       (unwind-protect (progn ,@body)
+		 (sb-thread:barrier (:write))
+		 (setf (rhash-owner ,hv) nil))))))))
 
 ;; a literal in compiled code (a macro's: br-parser-tools' tables) is
 ;; dumped into a fasl, made first and filled after (it may hold itself)
@@ -82,7 +109,8 @@
 
 (defun fill-rhash (h entries)
   "H with ENTRIES, a sequence of (key . value)."
-  (map nil (lambda (e) (setf (gethash (car e) (rhash-table h)) (cdr e))) entries)
+  (with-rhash-lock (h)
+    (map nil (lambda (e) (setf (gethash (car e) (rhash-table h)) (cdr e))) entries))
   h)
 
 (defmethod print-object ((x rhash) stream)
@@ -285,14 +313,15 @@ differ, at SHIFT."
 (defun entries (h)
   (cond ((ihash-p h) (ihash-entries h))
 	((chash-p h) (chash-entries h h))
-	(t (or (rhash-snapshot h)
-	       (setf (rhash-snapshot h)
-		     (let ((l '()))
-		       (maphash (lambda (k v) (push (cons k v) l)) (rhash-table h))
-		       (coerce (nreverse l) 'simple-vector)))))))
+	(t (with-rhash-lock (h)
+	     (or (rhash-snapshot h)
+		 (setf (rhash-snapshot h)
+		       (let ((l '()))
+			 (maphash (lambda (k v) (push (cons k v) l)) (rhash-table h))
+			 (coerce (nreverse l) 'simple-vector))))))))
 
 (defun lookup* (h key)
-  (cond ((rhash-p h) (gethash key (rhash-table h)))
+  (cond ((rhash-p h) (with-rhash-lock (h) (gethash key (rhash-table h))))
 	((ihash-p h) (ihash-ref h key))
 	(t (chash-lookup h key h))))
 
@@ -324,7 +353,7 @@ differ, at SHIFT."
 	 under)))
 
 (defun hash-set!* (h key value orig)
-  (cond ((rhash-p h) (setf (gethash key (rhash-table h)) value (rhash-snapshot h) nil))
+  (cond ((rhash-p h) (with-rhash-lock (h) (setf (gethash key (rhash-table h)) value (rhash-snapshot h) nil)))
 	(t (multiple-value-bind (k2 v2) (funcall (chash-set-proc h) orig key value)
 	     (checked-chaperone "hash-set!" (chash-kind h) "key" key k2)
 	     (checked-chaperone "hash-set!" (chash-kind h) "value" value v2)
@@ -332,14 +361,14 @@ differ, at SHIFT."
   *void*)
 
 (defun hash-remove!* (h key orig)
-  (cond ((rhash-p h) (remhash key (rhash-table h)) (setf (rhash-snapshot h) nil))
+  (cond ((rhash-p h) (with-rhash-lock (h) (remhash key (rhash-table h)) (setf (rhash-snapshot h) nil)))
 	(t (let ((k2 (funcall (chash-remove-proc h) orig key)))
 	     (checked-chaperone "hash-remove!" (chash-kind h) "key" key k2)
 	     (hash-remove!* (chash-of h) k2 orig))))
   *void*)
 
 (defun hash-clear!* (h orig)
-  (cond ((rhash-p h) (clrhash (rhash-table h)) (setf (rhash-snapshot h) nil))
+  (cond ((rhash-p h) (with-rhash-lock (h) (clrhash (rhash-table h)) (setf (rhash-snapshot h) nil)))
 	((truthy (chash-clear-proc h))
 	 (funcall (chash-clear-proc h) orig)
 	 (hash-clear!* (chash-of h) orig))
@@ -377,7 +406,7 @@ differ, at SHIFT."
 	     result))))
 
 (defun hash-count* (h)
-  (cond ((rhash-p h) (hash-table-count (rhash-table h)))
+  (cond ((rhash-p h) (with-rhash-lock (h) (hash-table-count (rhash-table h))))
 	((ihash-p h) (ihash-count h))
 	(t (hash-count* (chash-of h)))))
 
@@ -400,7 +429,9 @@ differ, at SHIFT."
 
 (defun rhash-from-assocs (kind assocs &optional weak)
   (let ((h (make-rhash kind weak)))
-    (dolist (a assocs h) (setf (gethash (car a) (rhash-table h)) (cdr a)))))
+    (with-rhash-lock (h)
+      (dolist (a assocs) (setf (gethash (car a) (rhash-table h)) (cdr a))))
+    h))
 
 ;;; ------------------------------------------------------------------
 ;;; The primitives

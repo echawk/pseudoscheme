@@ -82,7 +82,7 @@
 			   (and m (< m (length a)) (or (= m (length b)) (> (aref a m) (aref b m)))))))
   ("keyword->immutable-string" (k) (immutable! (copy-seq (rkeyword-name k))))
   ("interned-char?" (c) (bool (characterp c)))
-  ("hash-clear" (h) (if (ihash-p h) (empty-ihash (ihash-kind h)) (progn (clrhash (rhash-table h)) h)))
+  ("hash-clear" (h) (if (ihash-p h) (empty-ihash (ihash-kind h)) (progn (with-rhash-lock (h) (clrhash (rhash-table h)) (setf (rhash-snapshot h) nil)) h)))
   ("immutable-hash?" (x) (bool (ihash-p x)))
   ("mutable-hash?" (x) (bool (rhash-p x)))
   ("immutable-string?" (x) (bool (and (stringp x) (immutable-p x))))

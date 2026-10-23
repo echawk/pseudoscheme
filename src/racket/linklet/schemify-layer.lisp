@@ -84,7 +84,7 @@ VARS (if given), which must then be defined."
 (defun interpreter-primitives ()
   (or *interpreter-primitives*
       (let ((h (make-rhash :eq)))
-	(flet ((add (name value) (setf (gethash (rsym name) (rhash-table h)) value)))
+	(flet ((add (name value) (with-rhash-lock (h) (setf (gethash (rsym name) (rhash-table h)) value))))
 	  (maphash (lambda (instance table)
 		     (declare (ignore instance))
 		     (maphash #'add table))
@@ -138,13 +138,13 @@ entry [prim (known-constructor arg ...)], the constructor schemify's."
 			     (destructuring-bind (prim (ctor &rest args)) entry
 			       (let ((f (ignore-errors (schemify-export (rname ctor)))))
 				 (when (functionp f)
-				   (setf (gethash prim (rhash-table h))
+				   (with-rhash-lock (h) (setf (gethash prim (rhash-table h))
 					 (apply f (mapcar (lambda (a)
 							    (if (and (consp a) (symbolp (car a))
 								     (string= (rname (car a)) "quote"))
 								(cadr a)
 								a))
-							  args))))))))))))
+							  args)))))))))))))
 	(setq *primitive-knowns* h))))
 
 (defvar *interpreter-linked* nil)
