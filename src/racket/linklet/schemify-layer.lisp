@@ -111,6 +111,42 @@ VARS (if given), which must then be defined."
 	  (add "#%struct-field-mutator" (lambda (p rtd pos) (declare (ignore rtd pos)) p)))
 	(setq *interpreter-primitives* h))))
 
+(defvar *primitive-knowns* nil
+  "Symbol -> schemify's `known' for each primitive, as Racket CS gives
+schemify-linklet (cs/schemify.sls, PRIM-KNOWNS): schemify expects them
+of some primitives, and uses them to optimize.")
+
+(defparameter *known-table-files*
+  '("kernel" "unsafe" "flfxnum" "paramz" "extfl" "network" "futures" "place"
+    "foreign" "linklet" "internal")
+  "racket/src/cs/primitive/'s tables, in Racket CS's order.")
+
+(defun primitive-knowns ()
+  "*PRIMITIVE-KNOWNS*, read from the tables in Racket's source: each
+entry [prim (known-constructor arg ...)], the constructor schemify's."
+  (or *primitive-knowns*
+      (let ((h (make-rhash :eq)))
+	(dolist (file *known-table-files*)
+	  (let ((path (probe-file (racket-source (format nil "racket/src/cs/primitive/~A.ss" file)))))
+	    (when path
+	      (with-open-file (in path :external-format :utf-8)
+		(loop for form = (read-racket in)
+		      until (eq form *eof*)
+		      when (and (consp form) (symbolp (car form))
+				(string= (rname (car form)) "define-primitive-table"))
+			do (dolist (entry (cddr form))
+			     (destructuring-bind (prim (ctor &rest args)) entry
+			       (let ((f (ignore-errors (schemify-export (rname ctor)))))
+				 (when (functionp f)
+				   (setf (gethash prim (rhash-table h))
+					 (apply f (mapcar (lambda (a)
+							    (if (and (consp a) (symbolp (car a))
+								     (string= (rname (car a)) "quote"))
+								(cadr a)
+								a))
+							  args))))))))))))
+	(setq *primitive-knowns* h))))
+
 (defvar *interpreter-linked* nil)
 
 (defun link-interpreter ()
@@ -130,13 +166,26 @@ VARS (if given), which must then be defined."
 
 (defun interpreted-linklet (form name)
   "FORM, a linklet S-expression, as a COMPILED-LINKLET that is interpreted
-\(Racket CS's 'quick mode), or NIL if the schemify layer isn't there."
+\(Racket CS's 'quick mode), or NIL if the schemify layer isn't there, or
+schemifying it raises an exception (then it's compiled)."
   (when (instantiate-schemify-layer)
     (link-interpreter)
+    (catch 'schemify-failed
+      (qs-r6rs::call-with-mark
+       *exception-handler-key*
+       (lambda (e)
+	 (when (uiop:getenv "QUASISCHEME_RACKET_BACKTRACE")
+	   (format *error-output* "~&;; not interpreted: ~A~%"
+		   (if (exn-p e) (exn-message e) e)))
+	 (throw 'schemify-failed nil))
+       (lambda () (interpreted-linklet-1 form name))))))
+
+(defun interpreted-linklet-1 (form name)
+  (progn
     (multiple-value-bind (impl-lam importss exports)
 	(funcall (schemify-export "schemify-linklet")
 		 form (make-rbox :value qs:false) qs:true (rsym "interp") qs:false qs:false qs:false qs:true qs:false
-		 (make-rhash :eq) (interpreter-primitives) (lambda (v) (declare (ignore v)) qs:false)
+		 (primitive-knowns) (interpreter-primitives) (lambda (v) (declare (ignore v)) qs:false)
 		 (lambda (key) (declare (ignore key)) (values qs:false qs:false qs:false)) qs:false)
       (let* ((b (funcall (schemify-export "interpretable-jitified-linklet") impl-lam qs:false (rsym "racket")))
 	     (proc (funcall (schemify-export "interpret-linklet") b))

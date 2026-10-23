@@ -412,17 +412,26 @@ with one, the body's result, the exports defined in TARGET."
 and the Core Compiler\") and its correlated objects; milestone 1 replaces
 it with (primitive-table '#%linklet) of the pinned release.")
 
-(defvar *interpret-quick-linklets* (not (equal (uiop:getenv "QUASISCHEME_RACKET_INTERPRET") "0"))
+(defvar *interpret-quick-linklets* :unknown
   "Whether a linklet compiled 'quick is interpreted (schemify-layer.lisp),
-not compiled; QUASISCHEME_RACKET_INTERPRET=0 compiles it.")
+not compiled: with QUASISCHEME_RACKET_INTERPRET=1 (a cold #lang
+racket/base takes 746 s so, 80 s compiled).  Read once per process, not
+when the image is built.")
+
+(pushnew (lambda () (setq *interpret-quick-linklets* :unknown)) sb-ext:*init-hooks*)
+
+(defun interpret-quick-linklets-p ()
+  (when (eq *interpret-quick-linklets* :unknown)
+    (setq *interpret-quick-linklets* (equal (uiop:getenv "QUASISCHEME_RACKET_INTERPRET") "1")))
+  *interpret-quick-linklets*)
 
 (defparameter *linklet-functions*
   `(("linklet?" ,(lambda (x) (bool (compiled-linklet-p x))))
     ("compile-linklet" ,(lambda (form &optional (name qs:false) (import-keys qs:false) get-import options)
-			  ;; one compiled 'quick (run once at expand time) is
-			  ;; interpreted, as Racket CS does (schemify-layer.lisp)
+			  ;; one compiled 'quick (run once at expand time) is,
+			  ;; if asked, interpreted, as Racket CS does (schemify-layer.lisp)
 			  (let ((interpreted (and (consp options) (member (rsym "quick") options)
-						  *interpret-quick-linklets*
+						  (interpret-quick-linklets-p)
 						  (interpreted-linklet form name))))
 			    (cond ((and interpreted (truthy import-keys)) (values interpreted import-keys))
 				  (interpreted interpreted)
