@@ -51,6 +51,10 @@
   "The frames of the calls in progress, innermost first.  A base binds
 it to (:BASE).")
 
+;;; it has a global value, so a site's read of it needn't check that it's
+;;; bound (two instructions of the forty or so of a site, on arm64)
+#+sbcl (declaim (sb-ext:always-bound *fstack*))
+
 (defvar *continuation-hook* nil
   "NIL, or a function called with each continuation call/cc makes, and
 the frame pointer of call/cc's frame, before the continuation is passed
