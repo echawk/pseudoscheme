@@ -96,6 +96,22 @@ readers intern every symbol they read, nearly all of them existing ones."
 	  (multiple-value-bind (symbol status) (find-symbol name scheme-package)
 	    (if status symbol (values (intern (copy-seq name) scheme-package))))))))
 
+(#+sbcl sb-ext:defglobal #-sbcl defvar **intern-buffer** nil
+  "A string INTERN-SCHEME-SYMBOL-SIMPLE inverts names into, while no call
+of it has taken it.")
+
+(declaim (inline take-intern-buffer))
+(defun take-intern-buffer (n)
+  "A string of at least N characters to use and give back: the shared
+one, if no other call has it and it is long enough, else a new one."
+  #+sbcl
+  (let ((b **intern-buffer**))
+    (if (and b (>= (length (the (simple-array character (*)) b)) n)
+	     (eq (sb-ext:compare-and-swap (symbol-value '**intern-buffer**) b nil) b))
+	b
+	(make-string (max n 64))))
+  #-sbcl (make-string n))
+
 (defun intern-scheme-symbol-simple (string)
   "INTERN-SCHEME-SYMBOL of a simple character string: ASCII letters told
 by their codes, without Unicode's tables."
@@ -110,9 +126,12 @@ by their codes, without Unicode's tables."
 		   ((lower-case-p c) (setq lower t))))
     (if (eq upper lower)
 	(values (intern string scheme-package))
+	;; the name with its case inverted, in a buffer reused from call
+	;; to call (a dynamic-extent string isn't on the stack on arm64:
+	;; SBCL puts only boxed vectors there), looked up by its length
 	(let* ((n (length string))
-	       (name (make-string n)))
-	  (declare (dynamic-extent name))
+	       (name (take-intern-buffer n)))
+	  (declare (type (simple-array character (*)) name))
 	  (dotimes (i n)
 	    (let ((c (schar string i)))
 	      (setf (schar name i)
@@ -122,8 +141,11 @@ by their codes, without Unicode's tables."
 			    ((< code 128) c)
 			    (upper (char-downcase c))
 			    (t (char-upcase c)))))))
-	  (multiple-value-bind (symbol status) (find-symbol name scheme-package)
-	    (if status symbol (values (intern (copy-seq name) scheme-package))))))))
+	  (multiple-value-bind (symbol status)
+	      #+sbcl (sb-impl::%find-symbol name n scheme-package)
+	      #-sbcl (find-symbol (subseq name 0 n) scheme-package)
+	    (prog1 (if status symbol (values (intern (subseq name 0 n) scheme-package)))
+	      (setq **intern-buffer** name)))))))
 
 ;;; Collecting symbols.  A package never lets go of a symbol, but the
 ;;; symbols Scheme code makes and drops -- gensyms, macro expanders'
