@@ -305,8 +305,17 @@ objects: compiled now if need be."
 	      (let ((*error-output* (make-broadcast-stream)))
 		(linklet-function-1 compiled))))))
 
+(defparameter *linklet-policy*
+  (append qsx::*full-policy* '(#+sbcl (sb-c::compute-debug-fun 0)))
+  "The policy linklets are compiled with: the full-continuation one, and
+SBCL's minimal debug information for each function (its name and lambda
+list, which arities are read from, but not where its variables are,
+which Racket's errors don't show).  A cold #lang racket/base retires
+10% fewer instructions so.")
+
 (defun linklet-function-1 (compiled)
   (let ((qsx::*full-continuations* t)
+	(qsx::*full-policy* *linklet-policy*)
 	(shape (linklet-shape compiled)))
     (call-with-safe-cells
      (lambda ()
