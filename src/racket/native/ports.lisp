@@ -622,7 +622,7 @@ prop:output-port PROPERTY (a port, or the index of a field holding one), or NIL.
 				     while (and (struct-type-parent ty)
 						(eql (property-value (struct-type-parent ty) property) value))
 				     finally (return ty))))
-		    (svref (struct-fields x) (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
+		    (struct-field x (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
 		  value)))
 	(and target (not (eq target qs:false)) target)))))
 

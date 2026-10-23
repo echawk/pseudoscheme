@@ -59,7 +59,7 @@
 	      (let ((eqp (equal+hash-procedures a)))
 		(cond (eqp (truthy (funcall eqp a b (lambda (x y) (bool (equal* x y))))))
 		      ((transparent-p (struct-of-type a))
-		       (every #'equal* (struct-fields a) (struct-fields b)))
+		       (let ((n (struct-field-count a))) (and (= n (struct-field-count b)) (loop for i below n always (equal* (struct-field a i) (struct-field b i))))))
 		      (t nil)))))
 	(t nil)))
 
@@ -105,8 +105,8 @@
 	   (cond (eqp (logand (funcall hashp x (lambda (y) (equal-hash* y (1+ depth)))) most-positive-fixnum))
 		 ((transparent-p (struct-of-type x))
 		  (let ((h (eq-hash (struct-of-type x))))
-		    (loop for f across (struct-fields x) for i below 8
-			  do (setq h (mix h (equal-hash* f (1+ depth)))))
+		    (loop for i below (min 8 (struct-field-count x))
+			  do (setq h (mix h (equal-hash* (struct-field x i) (1+ depth)))))
 		    h))
 		 (t (eq-hash x)))))
 	(t (eqv-hash x))))

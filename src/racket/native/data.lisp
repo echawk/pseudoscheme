@@ -1417,14 +1417,14 @@ of the square roots of the first (or the ninth to sixteenth) primes."
 	       (lambda (x)
 		 (unless (and (struct-instance-p x) (subtype-p (struct-of-type x) *date-type*))
 		   (contract-error who "date?" x))
-		 (svref (struct-fields x) i)))))
+		 (struct-field x i)))))
   (loop for (name . i) in '(("nanosecond" . 10) ("time-zone-name" . 11))
 	do (let ((who (format nil "date*-~A" name)) (i i))
 	     (define-primitive "#%kernel" who
 	       (lambda (x)
 		 (unless (and (struct-instance-p x) (subtype-p (struct-of-type x) *date*-type*))
 		   (contract-error who "date*?" x))
-		 (svref (struct-fields x) i))))))
+		 (struct-field x i))))))
 
 (define-date-types)
 

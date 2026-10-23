@@ -79,7 +79,7 @@ regexp-place-init!, for a new place: there are none).")
 	     (or (truthy (funcall (gethash "regexp?" *regexp-layer*) x))
 		 (truthy (funcall (gethash "byte-regexp?" *regexp-layer*) x))))
     ;; the struct's fields: bytes?, px?, source, ...
-    (let ((fields (struct-fields x)))
+    (let ((fields (struct-fields-copy x)))
       (make-regexp-literal (if (truthy (elt fields 1)) :px :rx) (elt fields 2)))))
 
 ;;; ------------------------------------------------------------------

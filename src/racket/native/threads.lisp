@@ -880,7 +880,7 @@ thread is the root's)."
 		      ;; a field: an event, or a procedure of the struct (racket/base's
 		      ;; guard-evt is such a struct)
 		      ((integerp v)
-		       (let ((f (svref (struct-fields e) v)))
+		       (let ((f (struct-field e v)))
 			 (cond ((evt-value-p f) (expand-evt f who poll groups wraps))
 			       ((functionp f) (expand-guard (funcall f e) who poll groups wraps e))
 			       (t (list (make-branch (make-revt :never) wraps groups))))))
@@ -1300,7 +1300,7 @@ while other threads run.  With TIMEOUT (seconds), true, or NIL if it passes."
   "A function that makes V's twin when V is gone, holding nothing of V's
 identity; or NIL."
   (typecase v
-    (rstruct (let ((type (rstruct-type v)) (fields (rstruct-fields v)))
+    (rstruct (let ((type (rstruct-type v)) (fields (struct-fields-copy v)))
 	       (lambda () (make-rstruct type fields))))
     (rbox (let ((value (rbox-value v))) (lambda () (make-rbox :value value))))
     (mpair (let ((a (mpair-car v)) (d (mpair-cdr v))) (lambda () (make-mpair :car a :cdr d))))
@@ -1467,8 +1467,8 @@ identity; or NIL."
 
 (defnative "exn-classify-errno" (v) (:leaf t)
   (let ((errno (cond ((and (consp v) (integerp (car v)) (racket-symbol-p (cdr v))) (car v))
-		     ((and (exn-p v) (typep (ignore-errors (svref (struct-fields v) 2)) 'cons))
-		      (car (svref (struct-fields v) 2)))
+		     ((and (exn-p v) (typep (ignore-errors (struct-field v 2)) 'cons))
+		      (car (struct-field v 2)))
 		     (t (arg-error "exn-classify-errno" "(or/c exn? (cons/c exact-integer? (or/c 'posix 'windows 'gai)))" v)))))
     (let ((entry (find errno #+darwin *macos-errnos* #-darwin *linux-errnos* :key #'cdr)))
       (if entry (rsym (car entry)) qs:false))))

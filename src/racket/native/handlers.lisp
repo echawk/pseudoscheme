@@ -580,7 +580,7 @@ the adjuster's name for itself)."
 (defun srcloc-string (s)
   "srcloc->string's: S's source, line and column or position; #f if it has
 no source."
-  (let* ((fields (struct-fields s))
+  (let* ((fields (struct-fields-copy s))
 	 (source (svref fields 0)) (line (svref fields 1)) (column (svref fields 2))
 	 (position (svref fields 3)))
     (if (not (truthy source))
@@ -1101,7 +1101,7 @@ through their filters, wants of messages about TOPIC (any, if #f)."
 		      (type (struct-of-type a)))
 		  (cond (eqp (truthy (funcall eqp a b (lambda (x y) (bool (funcall recur x y))))))
 			((and (transparent-p type) (or (not always) (struct-fully-immutable-p type)))
-			 (every (lambda (x y) (funcall recur x y)) (struct-fields a) (struct-fields b)))
+			 (let ((n (struct-field-count a))) (and (= n (struct-field-count b)) (loop for i below n always (funcall recur (struct-field a i) (struct-field b i))))))
 			(t nil)))))
 	  (t nil))))
 
@@ -1150,7 +1150,7 @@ hashes of its parts by RECUR."
 	       (cond (hashp (logand (funcall hashp x recur) most-positive-fixnum))
 		     ((and (transparent-p type) (or (not always) (struct-fully-immutable-p type)))
 		      (let ((h (eq-hash type)))
-			(loop for f across (struct-fields x) do (setq h (mix h (funcall recur f))))
+			(loop for i below (struct-field-count x) do (setq h (mix h (funcall recur (struct-field x i)))))
 			h))
 		     (t (eq-hash x))))))
 	  (t (equal-hash* x)))))

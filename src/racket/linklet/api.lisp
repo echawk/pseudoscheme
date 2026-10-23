@@ -124,8 +124,8 @@ hash tables and prefab structs too; what holds none is returned as is."
 		      (setq new (ihash-set new k2 v2))))
 	   (if changed new x)))
 	((and (rstruct-p x) (struct-type-prefab-key (rstruct-type x)))
-	 (let ((new (map 'simple-vector #'correlated->datum (rstruct-fields x))))
-	   (if (every #'eq new (rstruct-fields x)) x (make-rstruct (rstruct-type x) new))))
+	 (let* ((old (struct-fields-copy x)) (new (map 'simple-vector #'correlated->datum old)))
+	   (if (every #'eq new old) x (make-rstruct (rstruct-type x) new))))
 	(t x)))
 
 ;;; ------------------------------------------------------------------

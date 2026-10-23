@@ -33,9 +33,46 @@
 (defmethod print-object ((x struct-type) stream)
   (format stream "#<struct-type:~A>" (rname (struct-type-name x))))
 
-(declaim (inline make-rstruct))		; constructors make one per call
-(defstruct (rstruct (:constructor make-rstruct (type fields)))
-  type (fields #() :type simple-vector))
+;;; A plain instance is one object: an SBCL instance of RSTRUCT's layout
+;;; whose slot is its type, the fields after it (as many as the type
+;;; has), so that making one is one allocation, not an instance and a
+;;; fields vector (gcbench's trees in Racket mode, the expander's syntax
+;;; objects).  A chaperone (CSTRUCT) has no fields of its own: its
+;;; operations reach those of the plain instance it wraps.
+(defstruct (rstruct (:constructor nil) (:copier nil))
+  type)
+
+(defconstant +rstruct-fields-start+ (+ sb-vm:instance-data-start 1)
+  "The index (%INSTANCE-REF) of a plain instance's first field.")
+
+(declaim (inline allocate-rstruct))
+(defun allocate-rstruct (type n)
+  "A plain instance of TYPE with N fields, all 0."
+  ;; %NEW-INSTANCE, not %MAKE-INSTANCE and setting the layout, which is
+  ;; a full call on arm64
+  (let ((x (sb-kernel:%new-instance (load-time-value (sb-kernel:find-layout 'rstruct) t)
+				    (+ +rstruct-fields-start+ n))))
+    (setf (sb-kernel:%instance-ref x sb-vm:instance-data-start) type)
+    x))
+
+(defmacro rstruct* (type &rest fields)
+  "A plain instance of TYPE with FIELDS, in one allocation."
+  (let ((x (gensym "X")))
+    `(let ((,x (allocate-rstruct ,type ,(length fields))))
+       ,@(loop for f in fields for i from +rstruct-fields-start+
+	       collect `(setf (sb-kernel:%instance-ref ,x ,i) ,f))
+       ,x)))
+
+(defun make-rstruct (type fields)
+  "A plain instance of TYPE whose fields are those of the vector FIELDS."
+  (let ((x (allocate-rstruct type (length fields))))
+    (loop for f across fields for i from +rstruct-fields-start+
+	  do (setf (sb-kernel:%instance-ref x i) f))
+    x))
+
+(declaim (inline plain-rstruct-field-count))
+(defun plain-rstruct-field-count (x)
+  (- (sb-kernel:%instance-length x) +rstruct-fields-start+))
 
 (defclass applicable-rstruct (sb-mop:funcallable-standard-object)
   ((type :initarg :type :reader applicable-rstruct-type)
@@ -48,16 +85,51 @@
   (cond ((rstruct-p x) (rstruct-type x))
 	((typep x 'applicable-rstruct) (applicable-rstruct-type x))))
 
-(defun struct-fields (x)
-  (if (rstruct-p x) (rstruct-fields x) (applicable-rstruct-fields x)))
+(defun struct-base (x)
+  "The plain instance, or applicable one, whose fields X's are: X, or the
+instance X's chaperones wrap."
+  (loop while (cstruct-p x) do (setq x (cstruct-of x)))
+  x)
+
+(declaim (inline struct-field (setf struct-field)))
+(defun struct-field (x i)
+  "Field I (counting all of its type's ancestors') of struct instance X."
+  (cond ((and (rstruct-p x) (not (cstruct-p x))) (sb-kernel:%instance-ref x (+ i +rstruct-fields-start+)))
+	(t (struct-field-1 x i))))
+(defun (setf struct-field) (v x i)
+  (cond ((and (rstruct-p x) (not (cstruct-p x))) (setf (sb-kernel:%instance-ref x (+ i +rstruct-fields-start+)) v))
+	(t (setf (struct-field-1 x i) v))))
+
+(defun struct-field-1 (x i)
+  (let ((base (struct-base x)))
+    (if (rstruct-p base)
+	(sb-kernel:%instance-ref base (+ i +rstruct-fields-start+))
+	(svref (applicable-rstruct-fields base) i))))
+(defun (setf struct-field-1) (v x i)
+  (let ((base (struct-base x)))
+    (if (rstruct-p base)
+	(setf (sb-kernel:%instance-ref base (+ i +rstruct-fields-start+)) v)
+	(setf (svref (applicable-rstruct-fields base) i) v))))
+
+(defun struct-field-count (x)
+  (let ((base (struct-base x)))
+    (if (rstruct-p base) (plain-rstruct-field-count base) (length (applicable-rstruct-fields base)))))
+
+(defun struct-fields-copy (x)
+  "A new vector of struct instance X's fields, to read."
+  (let ((base (struct-base x)))
+    (if (rstruct-p base)
+	(let ((v (make-array (plain-rstruct-field-count base))))
+	  (dotimes (i (length v) v) (setf (svref v i) (sb-kernel:%instance-ref base (+ i +rstruct-fields-start+)))))
+	(copy-seq (applicable-rstruct-fields base)))))
 
 ;;; A chaperone or impersonator of a struct instance (chaperone.lisp
-;;; makes them): an instance of the same type that shares the fields
-;;; vector, with the layer it wraps, and its operations' redirection
+;;; makes them): an instance of the same type whose fields are those of
+;;; the instance under it (STRUCT-BASE), with the layer it wraps, and its operations' redirection
 ;;; procedures: an alist, KEY -> procedure of the instance and the
 ;;; value.  A key is (TYPE . POS) for a field's accessor, (TYPE . -1-POS)
 ;;; for its mutator, a property for its accessor, :INFO for struct-info.
-(defstruct (cstruct (:include rstruct) (:constructor make-cstruct (type fields of kind procs)))
+(defstruct (cstruct (:include rstruct) (:constructor make-cstruct (type of kind procs)) (:copier nil))
   of kind procs)
 
 (defclass applicable-cstruct (applicable-rstruct)
@@ -111,7 +183,7 @@ outermost) change it, innermost first."
 		      (checked-chaperone "struct-set!" (layer-kind x) "value" v (funcall w orig v))
 		      v)))
 	(layered-set (layer-of x) key abs-index new orig))
-      (setf (svref (struct-fields x) abs-index) v)))
+      (setf (struct-field x abs-index) v)))
 
 (defun subtype-p (type ancestor)
   (loop for ty = type then (struct-type-parent ty)
@@ -213,7 +285,7 @@ SBCL's) and making the fields vector from them with no list."
 			      (declare (dynamic-extent more))
 			      (when (or more ,@(and vars `((eq ,(car (last vars)) (load-time-value +missing+ t)))))
 				(arity-error (list* ,@(remove-if (lambda (v) (declare (ignore v)) nil) vars) more)))
-			      (make-rstruct type (vector ,@vars))))))
+			      (rstruct* type ,@vars)))))
      (t nil)))
 
 (defun simple-constructor (type n)
@@ -316,7 +388,7 @@ numbers of arguments."
 	   (accessor (lambda (x i)
 		       (check-instance type x who-ref)
 		       (let* ((index (field-index type i who-ref))
-			      (v (svref (struct-fields x) index)))
+			      (v (struct-field x index)))
 			 (if (chaperone-layer-p x)
 			     (layered-value x (cons type i) v x)
 			     v))))
@@ -327,7 +399,7 @@ numbers of arguments."
 		      (let ((index (field-index type i who-set)))
 			(if (chaperone-layer-p x)
 			    (layered-set x (cons type (- -1 i)) index v x)
-			    (setf (svref (struct-fields x) index) v)))
+			    (setf (struct-field x index) v)))
 		      *void*))
 	   ;; what a property's guard gets, as struct-type-info returns it
 	   (info (list name init-field-count auto-field-count accessor mutator
@@ -428,7 +500,7 @@ TYPE or a subtype: its fields can be read and written directly."
 		 ;; chaperone, the wrong type) through the general accessor
 		 (lambda (s)
 		   (if (plain-instance-of-p s type)
-		       (svref (rstruct-fields s) index)
+		       (sb-kernel:%instance-ref s (+ index +rstruct-fields-start+))
 		       (funcall accessor-proc s field-pos)))
 		 (lambda (s) (funcall accessor-proc s field-pos)))
 	     :field-accessor type)))
@@ -449,7 +521,7 @@ TYPE or a subtype: its fields can be read and written directly."
 	     (if index
 		 (lambda (s v)
 		   (if (plain-instance-of-p s type)
-		       (progn (setf (svref (rstruct-fields s) index) v) *void*)
+		       (progn (setf (sb-kernel:%instance-ref s (+ index +rstruct-fields-start+)) v) *void*)
 		       (funcall mutator-proc s field-pos v)))
 		 (lambda (s v) (funcall mutator-proc s field-pos v)))
 	     :field-mutator type)))
@@ -505,7 +577,7 @@ TYPE or a subtype: its fields can be read and written directly."
   (if (struct-instance-p x)
       (concatenate 'simple-vector
 		   (vector (rsym (format nil "struct:~A" (rname (struct-type-name (struct-of-type x))))))
-		   (struct-fields x))
+		   (struct-fields-copy x))
       (vector (rsym "struct:?"))))
 (defstruct (inspector (:constructor make-inspector* (superior))) superior)
 (defvar *root-inspector* (make-inspector* nil))
@@ -602,23 +674,26 @@ its parent key (or NIL)."
       qs:false))
 
 ;;; Unsafe field access: the index counts every field, the ancestors' first
-(defnative "unsafe-struct-ref" (s i) (:instance "#%unsafe" :leaf t) (svref (struct-fields s) i))
-(defnative "unsafe-struct*-ref" (s i) (:instance "#%unsafe" :leaf t) (svref (struct-fields s) i))
+(defnative "unsafe-struct-ref" (s i) (:instance "#%unsafe" :leaf t) (struct-field s i))
+(defnative "unsafe-struct*-ref" (s i) (:instance "#%unsafe" :leaf t) (struct-field s i))
 (defnative "unsafe-struct-set!" (s i v) (:instance "#%unsafe" :leaf t)
-  (setf (svref (struct-fields s) i) v) *void*)
+  (setf (struct-field s i) v) *void*)
 (defnative "unsafe-struct*-set!" (s i v) (:instance "#%unsafe" :leaf t)
-  (setf (svref (struct-fields s) i) v) *void*)
+  (setf (struct-field s i) v) *void*)
 (defnative "unsafe-struct*-cas!" (s i old new) (:instance "#%unsafe" :leaf t)
-  (let ((fields (struct-fields s)))
-    (bool (eq (sb-ext:compare-and-swap (svref fields i) old new) old))))
+  (let ((base (struct-base s)))
+    (bool (eq (if (rstruct-p base)
+		  (sb-kernel:%instance-cas base (+ i +rstruct-fields-start+) old new)
+		  (sb-ext:compare-and-swap (svref (applicable-rstruct-fields base) i) old new))
+	      old))))
 
 ;;; Keyword procedures' check: V an instance of TYPE (which has
 ;;; prop:checked-procedure) whose first field accepts V1 and V2 gives its
 ;;; second field; anything else is ALT's to deal with
 (defnative "checked-procedure-check-and-extract" (type v alt v1 v2) ()
   (if (and (struct-instance-p v) (subtype-p (struct-of-type v) type)
-	   (truthy (funcall (svref (struct-fields v) 0) v1 v2)))
-      (svref (struct-fields v) 1)
+	   (truthy (funcall (struct-field v 0) v1 v2)))
+      (struct-field v 1)
       (funcall alt v v1 v2)))
 
 ;;; ------------------------------------------------------------------
@@ -703,7 +778,7 @@ properties each with its value."
 	(return-from make-struct-chaperone v))
       (let* ((procs (nreverse procs))
 	     (new (if (rstruct-p v)
-		      (make-cstruct (rstruct-type v) (rstruct-fields v) v kind procs)
+		      (make-cstruct (rstruct-type v) v kind procs)
 		      (let ((n (make-instance 'applicable-cstruct :type (applicable-rstruct-type v)
 							   :fields (applicable-rstruct-fields v)
 							   :of v :kind kind :procs procs)))

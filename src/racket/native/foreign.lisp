@@ -107,7 +107,7 @@ there in places)."
 (defun ffi-obj-p (x) (and (rstruct-p x) (subtype-p (rstruct-type x) *ffi-obj-type*)))
 (defun callback-p (x) (and (rstruct-p x) (subtype-p (rstruct-type x) *callback-type*)))
 
-(defmacro cp-field (x i) `(svref (rstruct-fields ,x) ,i))
+(defmacro cp-field (x i) `(struct-field ,x ,i))
 (defmacro cp-base (x) `(cp-field ,x 0))
 (defmacro cp-offset (x) `(cp-field ,x 1))
 (defmacro cp-tags (x) `(cp-field ,x 2))
@@ -149,7 +149,7 @@ the collector next runs)."
   "The cpointer struct behind P's prop:cpointer, or NIL (never fails)."
   (let ((v (property-value p *prop-cpointer*)))
     (cond ((exact-nonneg-p v)
-	   (let ((x (svref (struct-fields p) v)))
+	   (let ((x (struct-field p v)))
 	     (if (cp-p x) x (extract-cp x))))
 	  ((functionp v)
 	   (let ((p2 (funcall v p)))
@@ -164,7 +164,7 @@ the collector next runs)."
 	(t (multiple-value-bind (v found) (property-value p *prop-cpointer*)
 	     (unless found (arg-error who "cpointer?" p))
 	     (cond ((exact-nonneg-p v)
-		    (let ((x (svref (struct-fields p) v)))
+		    (let ((x (struct-field p v)))
 		      (if (cpointer-p x) (cptr->fptr who x) (arg-error who "cpointer?" x))))
 		   ((functionp v)
 		    (let ((p2 (funcall v p)))

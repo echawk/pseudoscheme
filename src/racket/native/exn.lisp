@@ -75,7 +75,7 @@
 	 more-fields))
 
 (defun exn-message (exn)
-  (svref (struct-fields exn) 0))
+  (struct-field exn 0))
 
 (defun exn-p (x)
   (and (struct-instance-p x) (subtype-p (struct-of-type x) (gethash "exn" *exn-struct-types*))))

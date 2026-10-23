@@ -346,8 +346,8 @@
   (declare (ignore environment))
   (let ((type (rstruct-type x)))
     (cond ((struct-type-prefab-key type)
-	   `(prefab-instance ',(struct-type-prefab-key type) ,(length (rstruct-fields x)) ',(rstruct-fields x)))
-	  ((eq type *srcloc-type*) `(srcloc-instance ',(rstruct-fields x)))
+	   `(prefab-instance ',(struct-type-prefab-key type) ,(struct-field-count x) ',(struct-fields-copy x)))
+	  ((eq type *srcloc-type*) `(srcloc-instance ',(struct-fields-copy x)))
 	  ;; one of the regexp layer's regexps (regexp-layer.lisp): its
 	  ;; literal, compiled again by the layer when it's loaded, or kept
 	  ;; as the literal, which the natives take, before the layer is in

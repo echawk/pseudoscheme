@@ -340,9 +340,8 @@ index of a field of the type that has the property; or NIL."
 	  (let ((owner (loop for ty = (struct-of-type x) then (struct-type-parent ty)
 			     while (and (struct-type-parent ty)
 					(eql (property-value (struct-type-parent ty) *prop-object-name*) value))
-			     finally (return ty)))
-		(fields (if (rstruct-p x) (rstruct-fields x) (applicable-rstruct-fields x))))
-	    (svref fields (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
+			     finally (return ty))))
+	    (struct-field x (+ value (- (struct-type-total owner) (struct-type-field-count owner)))))
 	  (funcall value x)))))
 
 (defun local-function-name (f)
