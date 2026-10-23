@@ -363,6 +363,31 @@ new ones for the rest), and each form's function in turn."
   "The index of the top-level form a split linklet's instantiation is
 running (or ran last): for error reports.")
 
+(defvar *fast-string->number-variable* nil)
+
+(defun fast-import (variable)
+  "VARIABLE, or, for the reader's string->number (#%read's), a variable of
+a procedure that reads an optional sign and decimal digits itself and
+leaves the rest to it: a program's call of it took some 7,000
+instructions for \"123\"."
+  (let ((original *expander-string->number*))
+    (if (and variable original (eq (linklet-variable-value variable) original))
+	(or (and *fast-string->number-variable*
+		 (eq (car *fast-string->number-variable*) original)
+		 (cdr *fast-string->number-variable*))
+	    (let* ((f (lambda (s &rest more)
+			(if (and (or (null more) (eql (car more) 10)) (decimal-digits-string-p s))
+			    (parse-integer s)
+			    (apply original s more))))
+		   (v (make-linklet-variable (linklet-variable-name variable) f)))
+	      (setf (gethash f *arity-masks*) (arity-mask original)
+		    (linklet-variable-constant v) t)
+	      (setf (gethash f *renamed-procedures*)
+		    (or (gethash original *renamed-procedures*) (rsym "string->number")))
+	      (setf *fast-string->number-variable* (cons original v))
+	      v))
+	variable)))
+
 (defun instantiate-linklet (compiled import-instances &optional target)
   "instantiate-linklet: with no TARGET, a new instance with the exports;
 with one, the body's result, the exports defined in TARGET."
@@ -379,7 +404,7 @@ with one, the body's result, the exports defined in TARGET."
 	 (imports (loop for names in (compiled-linklet-imports compiled)
 			for from in import-instances
 			append (loop for n in names
-				     collect (or (instance-variable from n)
+				     collect (or (fast-import (instance-variable from n))
 						 (racket-error "instantiate-linklet"
 							       "variable not found in imported instance: ~A"
 							       (rname n))))))

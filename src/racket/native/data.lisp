@@ -74,7 +74,36 @@ and called KIND in messages: (values start end)."
   (when (null args) (racket-arity-error who 0 "at least 1"))
   args)
 
+(defun ascii-simple-string-p (s)
+  (and (typep s '(simple-array character (*)))
+       (locally (declare (type (simple-array character (*)) s) (optimize speed))
+	 (loop for c across s always (< (char-code c) 128)))))
+
+(defun ascii-ci-order (a b)
+  "-1, 0 or 1 as ASCII simple strings A and B compare case-folded (to
+lower case, as Racket's string-foldcase does)."
+  (declare (type (simple-array character (*)) a b) (optimize speed))
+  (flet ((fold (c) (let ((code (char-code c))) (if (<= 65 code 90) (+ code 32) code))))
+    (let ((la (length a)) (lb (length b)))
+      (dotimes (i (min la lb) (cond ((< la lb) -1) ((> la lb) 1) (t 0)))
+	(let ((x (fold (schar a i))) (y (fold (schar b i))))
+	  (cond ((< x y) (return -1)) ((> x y) (return 1))))))))
+
 (defun string-chain (who test strings fold)
+  ;; two simple strings, the usual call: compared in place
+  (when (and strings (cdr strings) (null (cddr strings))
+	     (typep (first strings) 'simple-string) (typep (second strings) 'simple-string))
+    (let ((a (first strings)) (b (second strings)))
+      (cond ((not fold)
+	     (return-from string-chain (bool (funcall test a b))))
+	    ((and (ascii-simple-string-p a) (ascii-simple-string-p b))
+	     (let ((o (ascii-ci-order a b)))
+	       (return-from string-chain
+		 (bool (cond ((eq test #'string=) (= o 0))
+			     ((eq test #'string<) (< o 0))
+			     ((eq test #'string>) (> o 0))
+			     ((eq test #'string<=) (<= o 0))
+			     (t (>= o 0))))))))))
   (dolist (s strings) (check-string who s))
   (let ((strings (if fold (mapcar #'case-folded strings) strings)))
     (bool (loop for tail on strings
@@ -82,6 +111,10 @@ and called KIND in messages: (values start end)."
 		always (funcall test (first tail) (second tail))))))
 
 (defun char-chain (who test chars)
+  (when (and chars (cdr chars) (null (cddr chars))
+	     (characterp (first chars)) (characterp (second chars)))
+    (return-from char-chain
+      (bool (funcall test (char-downcase (first chars)) (char-downcase (second chars))))))
   (dolist (c chars) (check-char who c))
   (let ((chars (mapcar #'char-downcase chars)))
     (bool (loop for tail on chars
@@ -1502,23 +1535,38 @@ day, month, year, week day, year day, dst?, offset and zone name; or NIL."
 ;;; length: of a proper list only (the host's takes any sequence, and
 ;;; loops on a cycle)
 (defnative "length" (l) (:leaf t)
-  ;; list-length: an error for an improper list, NIL for a cycle (which
-  ;; Racket shows in graph notation)
-  (let ((n (and (listp l) (handler-case (list-length l) (error () :improper)))))
-    (cond ((integerp n) n)
-	  ((null n) (if (listp l)
-			(racket-error "length" "~A is circular" (written l))
-			(arg-error "length" "list?" l)))
-	  (t (arg-error "length" "list?" l)))))
+  ;; a proper list first, counted in a loop (as far as a cycle couldn't
+  ;; hide: then list-length, which finds one)
+  (let ((k (loop for tail = l then (cdr tail)
+		 for i of-type fixnum from 0
+		 while (and (consp tail) (< i 100000))
+		 finally (return (and (null tail) i)))))
+    (or k
+	;; list-length: an error for an improper list, NIL for a cycle
+	;; (which Racket shows in graph notation)
+	(let ((n (and (listp l) (handler-case (list-length l) (error () :improper)))))
+	  (cond ((integerp n) n)
+		((null n) (if (listp l)
+			      (racket-error "length" "~A is circular" (written l))
+			      (arg-error "length" "list?" l)))
+		(t (arg-error "length" "list?" l)))))))
 
 ;;; string->number: the reader's (the expander's read/number.rkt, with
 ;;; its radix, conversion and decimal modes), once the expander is up
 ;;; (sources.lisp); the host's until then
 (defvar *expander-string->number* nil)
 
+(defun decimal-digits-string-p (s)
+  "Whether S is an optional sign then decimal digits, which PARSE-INTEGER
+reads as Racket does."
+  (and (stringp s)
+       (let ((n (length s)) (start (if (and (> (length s) 0) (member (char s 0) '(#\+ #\-))) 1 0)))
+	 (and (> n start) (loop for i from start below n always (char<= #\0 (char s i) #\9))))))
+
 (defnative "string->number" (s &rest more) ()
   ;; the expander's reader calls this for 1.0t0 and the like (extfl.lisp)
-  (cond ((extflonum-from-string s more))
+  (cond ((and (or (null more) (eql (car more) 10)) (decimal-digits-string-p s)) (parse-integer s))
+	((extflonum-from-string s more))
 	(*expander-string->number* (apply *expander-string->number* s more))
 	(t (let ((radix (if more (car more) 10)))
 	     (funcall (qsx:host-ref "string->number") s radix)))))
