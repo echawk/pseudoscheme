@@ -219,18 +219,37 @@ apostrophe or the like between letters (Unicode word breaks, roughly)."
 ;;; compare case-folded characters and strings, so (string-ci=? "Straße"
 ;;; "STRASSE") => #t.
 
-(defprim "char-upcase" (c) (cl-unicode:uppercase-mapping c))
-(defprim "char-downcase" (c) (cl-unicode:lowercase-mapping c))
-(defprim "char-upper-case?" (c) (bool (cl-unicode:has-property c "Uppercase")))
-(defprim "char-lower-case?" (c) (bool (cl-unicode:has-property c "Lowercase")))
-(defprim "char-alphabetic?" (c) (bool (cl-unicode:has-property c "Alphabetic")))
+;;; An ASCII character first, by its code: looking a property up by its
+;;; name took cl-unicode some 13,000 instructions a character.
 
-(defun char-fold-code (c) (char-code (funcall (prim "char-foldcase") c)))
+(defmacro with-ascii-code ((code c) ascii &body other)
+  `(let ((,code (char-code ,c)))
+     (if (< ,code 128) ,ascii (progn ,@other))))
+
+(defprim "char-upcase" (c)
+  (with-ascii-code (code c) (if (<= 97 code 122) (code-char (- code 32)) c)
+    (cl-unicode:uppercase-mapping c)))
+(defprim "char-downcase" (c)
+  (with-ascii-code (code c) (if (<= 65 code 90) (code-char (+ code 32)) c)
+    (cl-unicode:lowercase-mapping c)))
+(defprim "char-upper-case?" (c)
+  (bool (with-ascii-code (code c) (<= 65 code 90) (cl-unicode:has-property c "Uppercase"))))
+(defprim "char-lower-case?" (c)
+  (bool (with-ascii-code (code c) (<= 97 code 122) (cl-unicode:has-property c "Lowercase"))))
+(defprim "char-alphabetic?" (c)
+  (bool (with-ascii-code (code c) (or (<= 65 code 90) (<= 97 code 122))
+	  (cl-unicode:has-property c "Alphabetic"))))
+
+(defun char-fold-code (c)
+  (with-ascii-code (code c) (if (<= 65 code 90) (+ code 32) code)
+    (char-code (funcall (prim "char-foldcase") c))))
 
 (macrolet ((def-ci (name test fold)
 	     `(defprim ,name (a b &rest more)
-		(let ((all (mapcar #',fold (list* a b more))))
-		  (bool (loop for (x y) on all while y always (,test x y)))))))
+		(if (null more)
+		    (bool (,test (,fold a) (,fold b)))
+		    (let ((all (mapcar #',fold (list* a b more))))
+		      (bool (loop for (x y) on all while y always (,test x y))))))))
   (def-ci "char-ci=?" = char-fold-code)
   (def-ci "char-ci<?" < char-fold-code)
   (def-ci "char-ci>?" > char-fold-code)
