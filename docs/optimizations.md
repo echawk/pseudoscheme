@@ -423,6 +423,28 @@ before the translator); 4 is src/continuations.lisp; 7 is the record
 runtime (src/r6rs/). Each must keep every mode's conformance suites
 passing.
 
+## VOPs: faster code from SBCL (October 2026)
+
+An optional layer, `src/sbcl-vops.lisp` (system `quasischeme/fast`),
+loaded by `bin/quasischeme`'s build after everything else: it changes how
+SBCL compiles the code compiled at run time (programs, libraries,
+`--racket`'s linklets), never the runtime's own or a bootstrap's.
+`QUASISCHEME_FAST=0` turns it off for a process; code compiled with and
+without it is as correct, and goes together, so no cache is keyed by it.
+For SBCL 2.6.9 on arm64 (it uses SBCL's internals); elsewhere it does
+nothing.
+
+- **Small stack vectors inline.** A site's frame is a `dynamic-extent`
+  `(vector ...)`, which SBCL compiles on arm64 to a call of the assembly
+  routine `allocate-vector-on-stack`, a zeroing loop, whatever the
+  length. With a constant length of at most 60 words it is now the same
+  instructions inline. Instructions retired: `lattice` 11% fewer in
+  R7RS and Racket mode, `ctak` 2-3%, `peval` and `parsing` 1-2%; `fib`,
+  `destruc`, `gcbench` the same.
+
+Next, by the same measure: what `gcbench`, `parsing` and `lattice` spend
+against upstream Racket (2.1-2.5 times its instructions).
+
 ## Interpreting instead of compiling (October 2026)
 
 Much of what a mode evaluates runs once: a module's top-level forms, a

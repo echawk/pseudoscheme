@@ -60,6 +60,13 @@
      #+(or) (pso-file "write" :depends-on ("spack" "core"))
      ))
 
+(defsystem :quasischeme/fast
+  :maintainer "Ethan Hawk <ethhawk@iu.edu>"
+  :version "1.0"
+  :description "Faster code from SBCL for the translator's output (src/sbcl-vops.lisp): loaded by bin/quasischeme's build, after the rest"
+  :pathname #p"src/"
+  :components ((:file "sbcl-vops")))
+
 (defsystem :quasischeme/translator
   :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"

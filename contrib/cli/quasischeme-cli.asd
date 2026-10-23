@@ -10,7 +10,8 @@
   :maintainer "Ethan Hawk <ethhawk@iu.edu>"
   :version "1.0"
   :description "A standalone Scheme (R7RS, R6RS, R5RS) on Quasischeme"
-  :depends-on (:quasischeme/api :quasischeme/guile :quasischeme/libguile :quasischeme/racket :quasischeme/repl)
+  :depends-on (:quasischeme/api :quasischeme/guile :quasischeme/libguile :quasischeme/racket :quasischeme/repl
+	       :quasischeme/fast)		; last: only code compiled at run time
   :components ((:file "cli"))
   :build-operation "program-op"
   :build-pathname "../../bin/quasischeme.new"
