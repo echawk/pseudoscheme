@@ -442,8 +442,35 @@ nothing.
   R7RS and Racket mode, `ctak` 2-3%, `peval` and `parsing` 1-2%; `fib`,
   `destruc`, `gcbench` the same.
 
-Next, by the same measure: what `gcbench`, `parsing` and `lattice` spend
-against upstream Racket (2.1-2.5 times its instructions).
+## Run time against upstream Racket (October 2026)
+
+By instructions retired, Racket mode's over upstream Racket's on the same
+programs (r7rs-benchmarks' Racket versions, warm), before and after:
+`lattice` 2.48 to 2.16, `parsing` 2.07 to 1.80, `gcbench` 2.14 to 1.68,
+`peval` 1.58 to 1.55, `destruc` 1.53 to 1.28, `nqueens` 1.29 to 1.23,
+`fib` 1.22, `tak` 1.20 to 1.13. What did it:
+
+- the stack-vector VOP above (sites' frames);
+- a struct instance one object, made by `%new-instance` inline
+  (`gcbench` 21%);
+- primitives a sweep of 10M calls each found slow, by a factor of ten
+  to a hundred: `char-alphabetic?` and the other character predicates
+  (cl-unicode's property lookup by name, 13,000 instructions a call),
+  `string-ci=?` (cl-unicode's full case folding), `string->number` of
+  digits, `string->list`, `vector->list`, `format`'s `~a`, `length`;
+- a mutable hash table's own lock in place of SBCL's synchronized
+  tables' mutex (`hash-ref` 543 to 379 instructions);
+- `*fstack*` always bound, hash table operations not sites.
+
+Tried and not kept: a smaller nursery (4-16 MB, to stay in the caches):
+`gcbench` took 2-5 times the cycles, the collections costing more than
+the misses saved.
+
+What is left, by profile: a site costs about 60 instructions against a
+plain call's 10 (the frame, the binding of `*fstack*`, the body's
+closure and the binding-stack check), most of `lattice`'s time; SBCL's
+zeroing of new allocation regions (`__bzero`, 17-30% of `lattice` and
+`gcbench`).
 
 ## Interpreting instead of compiling (October 2026)
 
