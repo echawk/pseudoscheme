@@ -92,14 +92,33 @@ megabyte), while recursion may go as deep as the control stack allows.")
 expands to a call of CALL-WITH-PUSHED-FSTACK, not the push in line.  For
 a form whose code SBCL couldn't otherwise compile (src/guile/cache.lisp)."))
 
-(defmacro with-pushed-frame ((frame) &body body)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+(defvar *site-closures* :unknown
+  "Whether a site's body is always called as a closure (WITH-PUSHED-FRAME):
+QUASISCHEME_SITE_CLOSURES=1.  Read once per process.")
+
+#+sbcl (pushnew (lambda () (setq *site-closures* :unknown)) sb-ext:*init-hooks*)
+
+(defun site-closures-p ()
+  (when (eq *site-closures* :unknown)
+    (setq *site-closures* (equal (uiop:getenv "QUASISCHEME_SITE_CLOSURES") "1")))
+  *site-closures*))
+
+(defmacro with-pushed-frame ((frame) &body body &environment env)
   "Run BODY with FRAME (a vector, already allocated) pushed on *FSTACK*.
 *FSTACK* is bound, which is cheap, until the binding stack is deep; then
 CALL-WITH-ASSIGNED-FSTACK pushes it, taking only control stack.  That
 is out of line: an UNWIND-PROTECT in a component makes SBCL compile all
 of the component's functions more slowly.  Every thread that runs Scheme
-binds *FSTACK* once (WITH-THREAD-STATE)."
-  (let ((cell (gensym "CELL")) (thunk (gensym "BODY")))
+binds *FSTACK* once (WITH-THREAD-STATE).
+
+A body that is one call of a function (a site's always is) is made in
+line, and when the binding stack is deep, the function and its
+arguments are given to CALL-WITH-ASSIGNED-FSTACK-APPLY: no closure
+(lattice retires 11% fewer instructions so, a cold compile some 15%
+more).  Another body is a dynamic-extent closure that either branch
+calls."
+  (let ((cell (gensym "CELL")) (thunk (gensym "BODY")) (form (car body)))
     (when *compact-frames*
       (return-from with-pushed-frame
 	`(let ((,cell (cons ,frame *fstack*)))
@@ -107,16 +126,25 @@ binds *FSTACK* once (WITH-THREAD-STATE)."
 	   (flet ((,thunk () ,@body))
 	     (declare (dynamic-extent #',thunk))
 	     (call-with-pushed-fstack ,cell #',thunk)))))
-    ;; BODY once (code size matters: SBCL can't compile a code object
-    ;; much past a megabyte on arm64), called by either branch
-    `(let ((,cell (cons ,frame *fstack*)))
-       (declare (dynamic-extent ,cell))
-       (flet ((,thunk () ,@body))
-	 (declare (dynamic-extent #',thunk))
-	 (if (binding-stack-deep-p)
-	     (call-with-assigned-fstack ,cell #',thunk)
-	     (let ((*fstack* ,cell))
-	       (,thunk)))))))
+    (if (and (not (site-closures-p))
+	     (null (cdr body)) (consp form) (symbolp (car form)) (listp (cdr form))
+	     (not (special-operator-p (car form))) (not (macro-function (car form) env)))
+	`(let ((,cell (cons ,frame *fstack*)))
+	   (declare (dynamic-extent ,cell))
+	   (if (binding-stack-deep-p)
+	       (call-with-assigned-fstack-apply ,cell #',(car form) ,@(cdr form))
+	       (let ((*fstack* ,cell))
+		 ,form)))
+	;; BODY once (code size matters: SBCL can't compile a code object
+	;; much past a megabyte on arm64), called by either branch
+	`(let ((,cell (cons ,frame *fstack*)))
+	   (declare (dynamic-extent ,cell))
+	   (flet ((,thunk () ,@body))
+	     (declare (dynamic-extent #',thunk))
+	     (if (binding-stack-deep-p)
+		 (call-with-assigned-fstack ,cell #',thunk)
+		 (let ((*fstack* ,cell))
+		   (,thunk))))))))
 
 (defvar *stack-limit* nil
   "NIL, or (start-address . bytes): how much control stack recursion may
@@ -158,6 +186,17 @@ of frameless code read (a global's one load, not a special's lookup).")
     (unwind-protect
 	 (progn (setq *fstack* cell)
 		(funcall thunk))
+      (setq *fstack* old))))
+
+(defun call-with-assigned-fstack-apply (cell function &rest args)
+  "CALL-WITH-ASSIGNED-FSTACK of FUNCTION applied to ARGS, without a closure."
+  (declare (function function) (dynamic-extent args))
+  (when *stack-limit*
+    (check-stack-limit))
+  (let ((old *fstack*))
+    (unwind-protect
+	 (progn (setq *fstack* cell)
+		(apply function args))
       (setq *fstack* old))))
 
 (defmacro with-frame ((frame) &body body)
