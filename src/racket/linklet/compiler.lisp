@@ -724,7 +724,7 @@ continuation transformation, and calls of (racket:arg-safe-ref ...)
 whose procedure arguments are safe."
   (let ((qsx::*safe-call-hook*
 	  (let ((outer qsx::*safe-call-hook*))
-	    (lambda (call) (or (arg-safe-call-p call) (parameter-read-p call) (and outer (funcall outer call))))))
+	    (lambda (call) (or (arg-safe-call-p call) (parameter-read-p call) (table-call-p call) (and outer (funcall outer call))))))
 	(qsx::*safe-operator-hook*
 	  (let ((outer qsx::*safe-operator-hook*))
 	    (lambda (form) (or (safe-variable-ref-p form) (safe-ref-p form) (and outer (funcall outer form)))))))
@@ -956,6 +956,27 @@ capture site.")
     (and (symbolp op) (qsx::scheme-symbol-p op)
 	 (member (qs:scheme-symbol-name op) *raising-natives* :test #'string=))))
 
+(defparameter *table-natives*
+  '("racket:hash-ref" "racket:hash-has-key?" "racket:hash-set!" "racket:hash-set" "racket:hash-remove"
+    "racket:hash-remove!" "racket:hash-count")
+  "Hash table operations that call no procedure of the program's -- but
+an impersonated table's, or a custom one's equality, which, like
+equal?'s calls in member and assoc (continuations.lisp,
+*PROCEDURE-ARGUMENTS*), aren't taken as sites.")
+
+(defun table-call-p (call)
+  "Whether CALL is to one of *TABLE-NATIVES*, and for hash-ref, its
+failure argument absent or a quoted datum that isn't a procedure."
+  (let ((op (car call)))
+    (and (symbolp op) (qsx::scheme-symbol-p op)
+	 (let ((name (qs:scheme-symbol-name op)))
+	   (and (member name *table-natives* :test #'string=)
+		(or (not (string= name "racket:hash-ref"))
+		    (<= (length call) 3)
+		    (and (= (length call) 4)
+			 (qsx::quote-form-p (fourth call))
+			 (not (functionp (cadr (fourth call)))))))))))
+
 (defun parameter-read-p (call)
   "Whether CALL reads a primitive parameter, (error-print-width): no
 procedure of the program's is called."
@@ -1067,7 +1088,7 @@ defines once is judged, so that its exports' helpers are known too."
 			   ((every #'identity js)
 			    (sort (remove-duplicates (loop for j in js when (consp j) append j)) #'<))))))
 	  (let ((qsx::*known-procedures* nil) (qsx::*downward-parameters* nil)
-		(qsx::*safe-call-hook* (lambda (call) (or (arg-safe-call-p call) (own-call-safe-p call) (raising-call-p call) (parameter-read-p call))))
+		(qsx::*safe-call-hook* (lambda (call) (or (arg-safe-call-p call) (own-call-safe-p call) (raising-call-p call) (parameter-read-p call) (table-call-p call))))
 		(qsx::*safe-operator-hook*
 		  (lambda (form)
 		    (or (safe-ref-p form)
