@@ -471,7 +471,9 @@ two words, and its children's to DEPTH-1 levels."
 	       (let ((w (word a (1+ i))))
 		 (unless (= w (svref snapshot i))
 		   (setf (svref snapshot i) w
-			 (svref slots i) (if (logbitp i raw) w (import-scm w)))))))))))
+			 (svref slots i) (if (logbitp i raw) w (import-scm w)))
+		   (when (funcall (pg grecord-p) x)
+		     (funcall (fdefinition (list 'setf (pg struct-field))) (svref slots i) x i))))))))))
 
 (defun sync-child (x)
   (let ((e (and (mutable-p x) (gethash x *mirrors*))))

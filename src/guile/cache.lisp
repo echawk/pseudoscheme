@@ -69,7 +69,13 @@ ones are pruned."
   (or (resolve-module* name)
       (error "compiled Guile code refers to module ~S, which isn't there" name)))
 
+(defmethod make-load-form ((s grecord) &optional environment)
+  (struct-load-form s environment))
+
 (defmethod make-load-form ((s gstruct) &optional environment)
+  (struct-load-form s environment))
+
+(defun struct-load-form (s environment)
   (declare (ignore environment))
   ;; only a module registered under its name can be found again by it:
   ;; an anonymous one's name is a gensym (" g123"), new in each session

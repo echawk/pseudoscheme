@@ -555,12 +555,12 @@ flushed."
     (guile-error "wrong-type-arg" qs:false "Wrong type (expecting ~A): ~S"
 		 (list (scm "struct-vtable-name" type) x) (list x)))
   nil)
-(defimpl "scm_foreign_object_ref" (x n) (svref (foreign-slots x "foreign-object-ref") n))
-(defimpl "scm_foreign_object_signed_ref" (x n) (signed (svref (foreign-slots x "foreign-object-ref") n) 64))
-(defimpl "scm_foreign_object_unsigned_ref" (x n) (svref (foreign-slots x "foreign-object-ref") n))
-(defimpl "scm_foreign_object_set_x" (x n v) (setf (svref (foreign-slots x "foreign-object-set!") n) v) nil)
-(defimpl "scm_foreign_object_signed_set_x" (x n v) (setf (svref (foreign-slots x "foreign-object-set!") n) (ldb (byte 64 0) v)) nil)
-(defimpl "scm_foreign_object_unsigned_set_x" (x n v) (setf (svref (foreign-slots x "foreign-object-set!") n) v) nil)
+(defimpl "scm_foreign_object_ref" (x n) (progn (foreign-slots x "foreign-object-ref") (funcall (pg struct-field) x n)))
+(defimpl "scm_foreign_object_signed_ref" (x n) (signed (progn (foreign-slots x "foreign-object-ref") (funcall (pg struct-field) x n)) 64))
+(defimpl "scm_foreign_object_unsigned_ref" (x n) (progn (foreign-slots x "foreign-object-ref") (funcall (pg struct-field) x n)))
+(defimpl "scm_foreign_object_set_x" (x n v) (progn (foreign-slots x "foreign-object-set!") (funcall (fdefinition (list 'setf (pg struct-field))) v x n)) nil)
+(defimpl "scm_foreign_object_signed_set_x" (x n v) (progn (foreign-slots x "foreign-object-set!") (funcall (fdefinition (list 'setf (pg struct-field))) (ldb (byte 64 0) v) x n)) nil)
+(defimpl "scm_foreign_object_unsigned_set_x" (x n v) (progn (foreign-slots x "foreign-object-set!") (funcall (fdefinition (list 'setf (pg struct-field))) v x n)) nil)
 
 ;;; Pointers
 (defimpl "scm_from_pointer" (p finalizer)

@@ -66,7 +66,7 @@ obarray: finding it interns the name."
       `(root-value-cached ,name (load-time-value (list nil)))
       whole))
 
-(defun module-slot (m i) (svref (struct-slots-of m) i))
+(defun module-slot (m i) (struct-field m i))
 
 (defun ghash-lookup (h key)
   (if (ghash-p h)

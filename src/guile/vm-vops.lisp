@@ -760,8 +760,11 @@ of TYPE, else GENERAL, a function of the index giving a form of X."
   "COND clauses reading (or, with VALUE, setting) field I - 1 of X when
 it's a plain struct (not a vtable, whose words are its own), I constant."
   (and (>= i 1)
-       (let ((place `(svref (gstruct-slots ,x) ,(1- i))))
-	 `(((and (gstruct-p ,x) (not (vtable-p ,x)) (< ,(1- i) (length (gstruct-slots ,x))))
+       (let ((place `(svref (gstruct-slots ,x) ,(1- i)))
+	     (field `(grecord-ref ,x ,(1- i))))
+	 `(((and (grecord-p ,x) (< ,(1- i) (grecord-field-count ,x)))
+	    ,(if value `(setf ,field ,value) field))
+	   ((and (gstruct-p ,x) (not (vtable-p ,x)) (< ,(1- i) (length (gstruct-slots ,x))))
 	    ,(if value `(setf ,place ,value) place))))))
 
 (defun word-ref-form (x i)
@@ -1211,6 +1214,7 @@ the middle of an instruction, say)."
 	 `(let ((x (vm-slot vm ,obj)))
 	    (setf (vm-slot vm ,dst)
 		  (cond ((gstruct-p x) (gstruct-vtable x))
+			((grecord-p x) (grecord-vtable x))
 			((struct-p x) (struct-vtable-of x))
 			(t (vm-error "scm-ref/tag ~D of ~S isn't supported yet" ,tag x))))
 	    ,next))))

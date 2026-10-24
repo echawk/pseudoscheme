@@ -911,7 +911,7 @@ values in the frame, and return from it."
     (qs-r6rs::octets
      (ecase i (1 (length x)) (2 (make-vm-pointer x 0))))
     (t (cond ((and (vtable-p x) (member i '(2 6 7))) (vtable-word x i))
-	     ((struct-p x) (svref (struct-slots-of x) (- i 1)))
+	     ((struct-p x) (struct-field x (- i 1)))
 	     (t (vm-error "reading word ~D of ~S isn't supported yet" i x))))))
 
 (defvar *unboxed-field-maps* (make-hash-table :test 'eq :weakness :key :synchronized t))
@@ -945,7 +945,7 @@ are once made), its field count, and the bitmap of its unboxed fields."
     (atomic-box (ecase i (1 (setf (atomic-box-value x) value))))
     (raw-object (setf (svref (raw-object-words x) i) value))
     (t (if (struct-p x)
-	   (setf (svref (struct-slots-of x) (- i 1)) value)
+	   (setf (struct-field x (- i 1)) value)
 	   (vm-error "writing word ~D of ~S isn't supported yet" i x)))))
 
 (defop "allocate-words/immediate" (dst count)

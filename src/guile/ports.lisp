@@ -1461,7 +1461,7 @@ those bytes begin one, or :INVALID."
 (defun transcoder-encoding (transcoder)
   "The encoding an R6RS transcoder (Guile's: a record) names."
   (if (and transcoder (not (eq transcoder qs:false)) (struct-p transcoder))
-      (let ((codec (svref (struct-slots-of transcoder) 0)))
+      (let ((codec (struct-field transcoder 0)))
 	(if (stringp codec) codec "UTF-8"))
       "ISO-8859-1"))
 

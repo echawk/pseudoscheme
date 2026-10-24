@@ -98,6 +98,25 @@ generic's methods are tried instead (src/guile/goops.lisp).")
   (hidden '() :type list)		; the hidden fields' indices
   (layout-cache nil))			; (layout symbol name . no u field), for INIT-SLOTS
 
+
+;;; A record (a struct of a plain vtable, all its fields given, as
+;;; make-struct/simple and /no-tail make them) is one object: an SBCL
+;;; instance of GRECORD's layout whose slot is its vtable, the fields
+;;; after it, so that making one is one allocation, not a GSTRUCT and a
+;;; slots vector (gcbench's trees in Guile mode).  Other structs, vtables
+;;; and GOOPS instances among them, are GSTRUCTs: GOOPS swaps their slots.
+(defstruct (grecord (:constructor nil) (:copier nil))
+  vtable)
+
+(defconstant +grecord-fields-start+ (+ sb-vm:instance-data-start 1)
+  "The index (%INSTANCE-REF) of a record's first field.")
+
+(declaim (inline grecord-field-count grecord-ref (setf grecord-ref)))
+(defun grecord-field-count (x)
+  (- (sb-kernel:%instance-length x) +grecord-fields-start+))
+(defun grecord-ref (x i) (sb-kernel:%instance-ref x (+ i +grecord-fields-start+)))
+(defun (setf grecord-ref) (v x i) (setf (sb-kernel:%instance-ref x (+ i +grecord-fields-start+)) v))
+
 (defclass applicable-struct (sb-mop:funcallable-standard-object)
   ((vtable :initarg :vtable :accessor astruct-vtable)
    (slots :initarg :slots :accessor astruct-slots))
@@ -110,13 +129,29 @@ generic's methods are tried instead (src/guile/goops.lisp).")
     s))
 
 (declaim (inline struct-p))
-(defun struct-p (x) (or (gstruct-p x) (typep x 'applicable-struct)))
+(defun struct-p (x) (or (gstruct-p x) (grecord-p x) (typep x 'applicable-struct)))
 
 (defun struct-vtable-of (s)
-  (if (gstruct-p s) (gstruct-vtable s) (astruct-vtable s)))
+  (cond ((gstruct-p s) (gstruct-vtable s))
+	((grecord-p s) (grecord-vtable s))
+	(t (astruct-vtable s))))
 
 (defun struct-slots-of (s)
-  (if (gstruct-p s) (gstruct-slots s) (astruct-slots s)))
+  "S's fields, a simple vector: a record's a copy (STRUCT-FIELD sets one)."
+  (cond ((gstruct-p s) (gstruct-slots s))
+	((grecord-p s) (let ((v (make-array (grecord-field-count s))))
+			 (dotimes (i (length v) v) (setf (svref v i) (grecord-ref s i)))))
+	(t (astruct-slots s))))
+
+(defun struct-field-count (s)
+  (cond ((gstruct-p s) (length (gstruct-slots s)))
+	((grecord-p s) (grecord-field-count s))
+	(t (length (astruct-slots s)))))
+
+(defun struct-field (s i)
+  (if (grecord-p s) (grecord-ref s i) (svref (struct-slots-of s) i)))
+(defun (setf struct-field) (v s i)
+  (if (grecord-p s) (setf (grecord-ref s i) v) (setf (svref (struct-slots-of s) i) v)))
 
 (defun layout-string (layout)
   (cond ((symbolp layout) (symbol-name layout))	; made by make-struct-layout: kept as written
@@ -263,7 +298,7 @@ one): it has no fields until then."
   (make-struct* *applicable-struct-with-setter-vtable* (list (layout-symbol "pwpw"))))
 
 (defun check-index (who s i)
-  (unless (and (typep i 'fixnum) (< -1 i (length (struct-slots-of s))))
+  (unless (and (typep i 'fixnum) (< -1 i (struct-field-count s)))
     (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list i) (list i))))
 
 (defguile "struct?" (x) (bool (struct-p x)))
@@ -272,13 +307,15 @@ one): it has no fields until then."
   (unless (struct-p s) (wrong-type "struct-vtable" 1 s))
   (struct-vtable-of s))
 (defguile "struct-ref" (s i)
-  ;; a plain struct's field in range first: a record's accessor's call
-  (if (and (gstruct-p s) (typep i 'fixnum) (< -1 i (length (gstruct-slots s))))
-      (svref (gstruct-slots s) i)
-      (progn
-	(unless (struct-p s) (wrong-type "struct-ref" 1 s))
-	(check-index "struct-ref" s i)
-	(svref (struct-slots-of s) i))))
+  ;; a record's field in range first: its accessor's call
+  (cond ((and (grecord-p s) (typep i 'fixnum) (< -1 i (grecord-field-count s)))
+	 (grecord-ref s i))
+	((and (gstruct-p s) (typep i 'fixnum) (< -1 i (length (gstruct-slots s))))
+	 (svref (gstruct-slots s) i))
+	(t
+	 (unless (struct-p s) (wrong-type "struct-ref" 1 s))
+	 (check-index "struct-ref" s i)
+	 (struct-field s i))))
 
 (declaim (inline plain-vtable-p))
 (defun plain-vtable-p (vt)
@@ -297,6 +334,9 @@ unboxed or hidden fields."
 	  (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list v) (list v)))))))
 
 (defguile "struct-set!" (s i v)
+  (if (and (grecord-p s) (typep i 'fixnum) (< -1 i (grecord-field-count s)))
+      ;; a record's vtable is plain: no unboxed field to check
+      (setf (grecord-ref s i) v)
   (if (and (gstruct-p s) (not (vtable-p s)) (typep i 'fixnum) (< -1 i (length (gstruct-slots s)))
 	   (let ((vt (gstruct-vtable s))) (and (vtable-p vt) (plain-vtable-p vt))))
       ;; a record's field: no unboxed field to check, nor flags to keep
@@ -305,9 +345,9 @@ unboxed or hidden fields."
 	(unless (struct-p s) (wrong-type "struct-set!" 1 s))
 	(check-index "struct-set!" s i)
 	(check-unboxed "struct-set!" s i v)
-	(setf (svref (struct-slots-of s) i) v)
+	(setf (struct-field s i) v)
 	(when (and (vtable-p s) (= i +vtable-index-flags+)) (setf (vtable-flags s) v))
-	v)))
+	v))))
 (setf (gethash "struct-ref/unboxed" *guile-primitives*) (gethash "struct-ref" *guile-primitives*)
       (gethash "struct-set!/unboxed" *guile-primitives*) (gethash "struct-set!" *guile-primitives*))
 ;; the initializers' list on the stack: INIT-SLOTS copies them, keeping
@@ -315,12 +355,23 @@ unboxed or hidden fields."
 (defun make-record-struct (vtable inits who)
   "make-struct of VTABLE and INITS, as WHO: a record's (a plain vtable's
 fields, all given) made directly, another's by MAKE-STRUCT*."
-  (if (and (vtable-p vtable) (plain-vtable-p vtable)
-	   (not (logtest (vtable-flags vtable) (logior +vtable-flag-vtable+ +vtable-flag-applicable+)))
-	   (= (length inits) (vtable-nfields vtable)))
-      (let ((v (make-array (vtable-nfields vtable))))
-	(loop for x in inits for i of-type fixnum from 0 do (setf (svref v i) x))
-	(%make-gstruct vtable v))
+  (or (and (vtable-p vtable) (plain-vtable-p vtable)
+	   ;; not a GOOPS class's instance (512, vtable-flag-goops-class),
+	   ;; whose fields change-class swaps
+	   (not (logtest (vtable-flags vtable)
+			 (logior +vtable-flag-vtable+ +vtable-flag-applicable+ 512)))
+	   (let* ((n (vtable-nfields vtable))
+		  (x (sb-kernel:%new-instance (load-time-value (sb-kernel:find-layout 'grecord) t)
+					      (+ +grecord-fields-start+ n))))
+	     (setf (sb-kernel:%instance-ref x sb-vm:instance-data-start) vtable)
+	     ;; as many initializers as fields, or MAKE-STRUCT*'s
+	     (let ((i 0))
+	       (declare (fixnum i))
+	       (loop for v in inits
+		     do (when (= i n) (return-from make-record-struct (make-struct* vtable inits who)))
+			(setf (grecord-ref x i) v)
+			(incf i))
+	       (and (= i n) x))))
       (make-struct* vtable inits who)))
 
 (defguile "make-struct/no-tail" (vtable &rest inits)
@@ -370,6 +421,7 @@ classes among them, are printed with it.")
 		       (logand (sb-kernel:get-lisp-obj-address s) #xffffffffff)))))))
 
 (defmethod print-object ((s gstruct) stream) (print-struct s stream))
+(defmethod print-object ((s grecord) stream) (print-struct s stream))
 (defmethod print-object ((s applicable-struct) stream) (print-struct s stream))
 
 ;;; Procedures with setters
@@ -614,6 +666,13 @@ fields as Guile's hash goes; the first nodes only, so cycles end."
 					  unless (member i hidden)
 					    do (setq h (logand most-positive-fixnum (+ (* h 31) (walk y)))))
 				    h)))
+		     (grecord (let* ((vtable (grecord-vtable x))
+				     (h (sxhash vtable)))
+				(loop for i below (grecord-field-count x)
+				      while (plusp budget)
+				      do (setq h (logand most-positive-fixnum
+							 (+ (* h 31) (walk (grecord-ref x i))))))
+				h))
 		     (t (sxhash x))))))
       (walk x))))
 (defguile "hash" (key size) (check-hash-size "hash" size) (mod (guile-hash key) size))

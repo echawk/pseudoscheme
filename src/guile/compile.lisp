@@ -70,15 +70,15 @@
   "X's Tree-IL type, a keyword; or NIL if it isn't Tree-IL.  Besides
 psyntax's 18 core types, (language tree-il) defines <fix>, <let-values>,
 <prompt> and <abort> as records, src first."
-  (and (gstruct-p x)
-       (or (gethash (gstruct-vtable x) *node-types*)
-	   (let ((name (svref (gstruct-slots (gstruct-vtable x)) +vtable-index-name+)))
+  (and (or (gstruct-p x) (grecord-p x))
+       (or (gethash (struct-vtable-of x) *node-types*)
+	   (let ((name (svref (gstruct-slots (struct-vtable-of x)) +vtable-index-name+)))
 	     (and (symbolp name)
 		  (cdr (assoc (qs:scheme-symbol-name name)
 			      '(("<fix>" . :fix) ("<let-values>" . :let-values)
 				("<prompt>" . :prompt) ("<abort>" . :abort))
 			      :test #'string=)))))))
-(defun node-field (x i) (svref (gstruct-slots x) i))
+(defun node-field (x i) (if (grecord-p x) (grecord-ref x i) (svref (gstruct-slots x) i)))
 
 (defun make-node (type &rest fields)
   (%make-gstruct (svref *expanded-vtables* (position type *tree-il-types* :key #'car :test #'string-equal))
