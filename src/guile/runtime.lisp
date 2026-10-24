@@ -505,7 +505,32 @@ variable stands while this hasn't changed.")
   (kind nil)				; :eql or :equal once used
   (weakness nil)
   (initial-size 31)
-  (buckets nil))		; hashx- entries made with other procedures: hash value -> alist
+  (buckets nil)			; hashx- entries made with other procedures: hash value -> alist
+  (owner nil))			; the thread holding its lock (WITH-GHASH-LOCK)
+
+;;; A table may be used by several threads at once (lparallel's), so each
+;;; operation on it holds its lock: its owner, set by compare-and-swap,
+;;; recursive (an equal? of the table's keys may use it again), which is
+;;; cheaper than SBCL's synchronized tables' mutex and WITHOUT-INTERRUPTS
+;;; around each GETHASH.  A weak table is SBCL's synchronized one still:
+;;; the collector changes it too.
+
+(defun ghash-acquire (h self)
+  (loop for spins of-type fixnum from 0
+	until (null (sb-ext:compare-and-swap (ghash-owner h) nil self))
+	do (if (< spins 64) (sb-ext:spin-loop-hint) (sb-thread:thread-yield))))
+
+(defmacro with-ghash-lock ((h) &body body)
+  (let ((hv (gensym "H")) (self (gensym "SELF")))
+    `(let ((,hv ,h))
+       (if (or (ghash-weakness ,hv) (eq (ghash-owner ,hv) sb-thread:*current-thread*))
+	   (progn ,@body)
+	   (let ((,self sb-thread:*current-thread*))
+	     (sb-sys:without-interrupts
+	       (ghash-acquire ,hv ,self)
+	       (unwind-protect (progn ,@body)
+		 (sb-thread:barrier (:write))
+		 (setf (ghash-owner ,hv) nil))))))))
 
 (defparameter *hash-table-sizes*
   '(31 61 113 223 443 883 1759 3517 7027 14051 28099 56197 112363 224717 449419 898823
@@ -534,11 +559,11 @@ variable stands while this hasn't changed.")
 	   (setf (ghash-kind h) kind
 		 (ghash-table h) (apply #'make-hash-table
 					:test (if (eq kind :eql) 'eql 'qs:scheme-equal-p)
-					:synchronized t
+					:synchronized (and (ghash-weakness h) t)
 					(and (ghash-weakness h) (list :weakness (ghash-weakness h))))))
 	  ((and (eq kind :equal) (eq (ghash-kind h) :eql))
 	   ;; used with hash- after hashq-: make it an equal? table
-	   (let ((new (make-hash-table :test 'qs:scheme-equal-p :synchronized t)))
+	   (let ((new (make-hash-table :test 'qs:scheme-equal-p :synchronized (and (ghash-weakness h) t))))
 	     (maphash (lambda (k v) (setf (gethash k new) v)) table)
 	     (setf (ghash-kind h) :equal (ghash-table h) new)))
 	  (t table))))
@@ -572,27 +597,30 @@ handle lives exactly as long as its value, through this.")
     `(progn
        (defguile ,(name "-ref") (h key &optional (default qs:false))
 	 (check-table ,(name "-ref") h)
-	 (let ((handle (gethash key (ghash-table-for h ,kind))))
+	 (let ((handle (with-ghash-lock (h) (gethash key (ghash-table-for h ,kind)))))
 	   (if handle (cdr handle) default)))
        (defguile ,(name "-set!") (h key value)
 	 (check-table ,(name "-set!") h)
-	 (let* ((table (ghash-table-for h ,kind)) (handle (gethash key table)))
-	   (if handle
-	       (store-handle-value h handle value)
-	       (setf (gethash key table) (new-handle h key value))))
+	 (with-ghash-lock (h)
+	   (let* ((table (ghash-table-for h ,kind)) (handle (gethash key table)))
+	     (if handle
+		 (store-handle-value h handle value)
+		 (setf (gethash key table) (new-handle h key value)))))
 	 value)
        (defguile ,(name "-remove!") (h key)
 	 (check-table ,(name "-remove!") h)
-	 (let* ((table (ghash-table-for h ,kind)) (handle (gethash key table)))
-	   (remhash key table)
-	   (or handle qs:false)))
+	 (with-ghash-lock (h)
+	   (let* ((table (ghash-table-for h ,kind)) (handle (gethash key table)))
+	     (remhash key table)
+	     (or handle qs:false))))
        (defguile ,(name "-get-handle") (h key)
 	 (check-table ,(name "-get-handle") h)
-	 (or (gethash key (ghash-table-for h ,kind)) qs:false))
+	 (or (with-ghash-lock (h) (gethash key (ghash-table-for h ,kind))) qs:false))
        (defguile ,(name "-create-handle!") (h key init)
 	 (check-table ,(name "-create-handle!") h)
-	 (let ((table (ghash-table-for h ,kind)))
-	   (or (gethash key table) (setf (gethash key table) (new-handle h key init))))))))
+	 (with-ghash-lock (h)
+	   (let ((table (ghash-table-for h ,kind)))
+	     (or (gethash key table) (setf (gethash key table) (new-handle h key init)))))))))
 
 (define-hash-procedures "hashq" :eql)
 (define-hash-procedures "hashv" :eql)
@@ -608,6 +636,9 @@ handle lives exactly as long as its value, through this.")
 (defguile "doubly-weak-hash-table?" (x) (bool (and (ghash-p x) (eq (ghash-weakness x) :key-and-value))))
 
 (defun ghash-handles (h)
+  (with-ghash-lock (h) (ghash-handles-1 h)))
+
+(defun ghash-handles-1 (h)
   (let ((table (ghash-table h)) (handles '()))
     (when table (maphash (lambda (k handle) (declare (ignore k)) (push handle handles)) table))
     (when (ghash-buckets h)
@@ -616,8 +647,9 @@ handle lives exactly as long as its value, through this.")
     handles))
 
 (defguile "hash-clear!" (h)
-  (when (ghash-table h) (clrhash (ghash-table h)))
-  (when (ghash-buckets h) (clrhash (ghash-buckets h)))
+  (with-ghash-lock (h)
+    (when (ghash-table h) (clrhash (ghash-table h)))
+    (when (ghash-buckets h) (clrhash (ghash-buckets h))))
   *unspecified*)
 (defguile "hash-count" (pred h)
   (count-if (lambda (handle) (truthy (funcall pred (car handle) (cdr handle)))) (ghash-handles h)))

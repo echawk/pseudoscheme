@@ -35,15 +35,16 @@
 (defvar *current-module* qs:false)
 
 (defun obarray-variable (name)
-  (let ((handle (gethash name (ghash-table-for *obarray* :eql))))
+  (let ((handle (with-ghash-lock (*obarray*) (gethash name (ghash-table-for *obarray* :eql)))))
     (and handle (cdr handle))))
 
 (defun obarray-define (name value)
   (let ((v (obarray-variable name)))
     (if v
 	(setf (gvariable-value v) value)
-	(setf (gethash name (ghash-table-for *obarray* :eql))
-	      (cons name (setq v (make-gvariable value)))))
+	(with-ghash-lock (*obarray*)
+	  (setf (gethash name (ghash-table-for *obarray* :eql))
+		(cons name (setq v (make-gvariable value))))))
     v))
 
 (defun root-value (name)
@@ -70,7 +71,7 @@ obarray: finding it interns the name."
 
 (defun ghash-lookup (h key)
   (if (ghash-p h)
-      (let ((handle (gethash key (ghash-table-for h :eql))))
+      (let ((handle (with-ghash-lock (h) (gethash key (ghash-table-for h :eql)))))
 	(and handle (cdr handle)))
       nil))
 
@@ -112,8 +113,8 @@ an imported one, else its binder's.  MODULE :root is (guile)."
 		      (setq found winner))
 		    (setq found v found-iface iface)))))
 	  (when (and found (ghash-p imports))
-	    (let ((table (ghash-table-for imports :eql)))
-	      (setf (gethash name table) (cons name found))))
+	    (with-ghash-lock (imports)
+	      (setf (gethash name (ghash-table-for imports :eql)) (cons name found))))
 	  found))))
 
 (defun resolve-duplicate-binding (module name iface1 var1 iface2 var2)
