@@ -39,8 +39,11 @@
 (defun true? (cl-test) (or cl-test (false-value)))
 
 (defun scheme-symbol-p (x)
-  (declare (optimize (safety 0)))	;compilers are stupid
-  (and (symbolp x) (not (eq (car (symbol-plist x)) 'not-a-symbol))))
+  ;; a symbol but true, false and () (marked NOT-A-SYMBOL below): by
+  ;; identity, not by reading the symbol's property list each time
+  (and x (symbolp x)
+       (not (eq x (load-time-value true t)))
+       (not (eq x (false-value)))))
 
 (setf (get true  'not-a-symbol) t)
 (setf (get false 'not-a-symbol) t)
