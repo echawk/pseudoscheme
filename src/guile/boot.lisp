@@ -172,28 +172,35 @@ a function of boot-9's procedure making the one to bind.")
       (setq x (cdr x) slow (cdr slow))
       (when (eq x slow) (return nil)))))
 
-(defun fast-list-procedure-wrapper (original host-name)
+(defun fast-list-procedure-wrapper (original host-name &optional one)
   "Guile's ORIGINAL map or for-each (boot-9's, in Scheme, which checks its
 lists for being proper and not circular as it goes) with the host's
 procedure HOST-NAME (frame-aware, in order, re-entrant) for one or two
 proper lists (of one length) and a procedure, which is the same and several times faster.
-Anything else, and so every error, is the original's."
+Anything else, and so every error, is the original's.  ONE, given a
+procedure and one proper list, does the host's work for it directly,
+with full continuations: no rest lists, no APPLY, no second check."
   (let ((host nil))
     (lambda (f list &rest more)
-      (if (and (functionp f) (proper-list-p list)
-	       (or (null more) (and (null (cdr more)) (proper-list-p (car more))
-				   (= (length list) (length (car more))))))
-	  (apply (or host (setq host (host-procedure host-name))) f list more)
-	  (apply original f list more)))))
+      (cond ((and one (null more) qsx::*full-continuations* (functionp f) (proper-list-p list))
+	     (funcall (the function one) f list))
+	    ((and (functionp f) (proper-list-p list)
+		  (or (null more) (and (null (cdr more)) (proper-list-p (car more))
+				       (= (length list) (length (car more))))))
+	     (apply (or host (setq host (host-procedure host-name))) f list more))
+	    (t (apply original f list more))))))
 
-(defun fast-map-wrapper (original) (fast-list-procedure-wrapper original "map"))
+(defun fast-map-wrapper (original)
+  (fast-list-procedure-wrapper original "map" (lambda (f list) (qsx::map1-loop f list '() nil))))
 
 (defun fast-for-each-wrapper (original)
   (let ((fast (fast-list-procedure-wrapper original "for-each")))
     (lambda (f list &rest more)
-      (let ((value (apply fast f list more)))
-	(declare (ignore value))
-	*unspecified*))))
+      (if (and (null more) qsx::*full-continuations* (functionp f) (proper-list-p list))
+	  (progn (qsx::for-each1-loop f list) *unspecified*)
+	  (let ((value (apply fast f list more)))
+	    (declare (ignore value))
+	    *unspecified*)))))
 
 (defun host-procedure (name)
   "The host's procedure NAME, or with full continuations its frame-aware
