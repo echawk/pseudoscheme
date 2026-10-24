@@ -442,6 +442,14 @@ nothing.
   R7RS and Racket mode, `ctak` 2-3%, `peval` and `parsing` 1-2%; `fib`,
   `destruc`, `gcbench` the same.
 
+SBCL's compiler is also patched for big generated code
+(src/sbcl-compiler.lisp, SBCL 2.6.9 only): `sb-c::select-tagging` and
+`sb-c::map-all-dests` keep what they have seen in sets that become hash
+tables as they grow, not in lists searched with `memq`, which made
+compiling a function of thousands of local functions quadratic. In
+src/continuations.lisp, `free-lexicals` counts bound variables in a
+table for the same reason (a body of thousands of definitions).
+
 ## Run time against upstream Racket (October 2026)
 
 By instructions retired, Racket mode's over upstream Racket's on the same
@@ -456,19 +464,22 @@ programs (r7rs-benchmarks' Racket versions, warm), before and after:
 - primitives a sweep of 10M calls each found slow, by a factor of ten
   to a hundred: `char-alphabetic?` and the other character predicates
   (cl-unicode's property lookup by name, 13,000 instructions a call),
-  `string-ci=?` (cl-unicode's full case folding), `string->number` of
+  `string-ci=?` (cl-unicode's full case folding; an ASCII character or
+  string is now told by its code, src/r6rs/enums.lisp, src/rts.lisp), `string->number` of
   digits, `string->list`, `vector->list`, `format`'s `~a`, `length`;
 - a mutable hash table's own lock in place of SBCL's synchronized
   tables' mutex (`hash-ref` 543 to 379 instructions);
-- `*fstack*` always bound, hash table operations not sites.
+- `*fstack*` always bound (so a site's read of it doesn't check), hash
+  table operations not sites.
 
 Tried and not kept: a smaller nursery (4-16 MB, to stay in the caches):
 `gcbench` took 2-5 times the cycles, the collections costing more than
 the misses saved.
 
 What is left, by profile: a site costs about 60 instructions against a
-plain call's 10 (the frame, the binding of `*fstack*`, the body's
-closure and the binding-stack check), most of `lattice`'s time; SBCL's
+plain call's 10 (the frame, the binding of `*fstack*` and the
+binding-stack check; the body's closure is gone since, 11% of
+`lattice`), most of `lattice`'s time; SBCL's
 zeroing of new allocation regions (`__bzero`, 17-30% of `lattice` and
 `gcbench`).
 
@@ -546,7 +557,13 @@ times on a loaded machine varied by 2x.
   command line's 8 GB heap): 32-128 MB made `lattice` slower, by 3-75%
   in cycles; the collections cost more than the cache misses saved.
 - **A site's body inline** when the binding stack isn't deep, rather than
-  in a `dynamic-extent` closure: about 0.5 ns of a site's 3-6 ns.
+  in a `dynamic-extent` closure, alone: about 0.5 ns of a site's 3-6 ns.
+  Kept later in another form: a site's body is one call of a function,
+  and `with-pushed-frame` makes it in line, giving the function and its
+  arguments to `call-with-assigned-fstack-apply` when the binding stack
+  is deep, with no closure (`lattice` 10.8% fewer instructions, `ctak`
+  5.7%, a cold compile some 15% more; `QUASISCHEME_SITE_CLOSURES=1`
+  restores the closure).
 - **Lazy resume** (October 2026): a machine compiled without its resume
   code (the dispatch and each site's restores, which only a re-entered
   continuation runs), its frames holding a resumer that makes the full

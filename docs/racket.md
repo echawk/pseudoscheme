@@ -29,16 +29,26 @@ linklets to Lisp, with Racket's primitives written natively in Lisp.
   `letrec` checks, `with-continuation-mark` on our continuation marks,
   boxes only for assigned variables, direct calls for a top-level
   procedure's calls of itself and for `letrec`s of lambdas. Linklets
-  too big for SBCL to compile in one piece are split.
+  too big for SBCL to compile in one piece are split. They are compiled
+  with SBCL's minimal debug information for each function
+  (`compute-debug-fun 0`, `*LINKLET-POLICY*`, src/racket/linklet/api.lisp):
+  its name and lambda list, which arities are read from, but not its
+  variables' locations.
 - **The primitives** (src/racket/native/, about 20 files): structs and
-  properties, chaperones and impersonators, ports and `rktio`, the
+  properties (a plain instance is one SBCL instance of `RSTRUCT`'s
+  layout, its type then its fields: `STRUCT-FIELD`, `STRUCT-FIELDS-COPY`),
+  chaperones and impersonators, ports and `rktio`, the
   printer, hash tables, `equal?`, exceptions and error messages,
   parameters, continuation marks and prompts, threads, events and
   custodians (SBCL threads with a baton, preempted every 10 ms),
   `#%foreign` on CFFI, `#%network`, extflonum stubs, places, futures
   and will executors as stand-ins. Regexps are Racket's own regexp
   layer; the old cl-ppcre natives remain as the fallback
-  (`QUASISCHEME_RACKET_REGEXP=native`).
+  (`QUASISCHEME_RACKET_REGEXP=native`). A mutable (not weak) hash table is
+  SBCL's unsynchronized one under a lock of its own (`WITH-RHASH-LOCK`,
+  src/racket/native/hash.lisp), so that the threads of a parallel
+  thread pool (`make-parallel-thread-pool`, `thread #:pool`, lparallel
+  kernels) can share it.
 - **Modules** load from the collections in Racket's source tree, and
   from collection links; `.zo` files are written and read, and each
   compiled linklet is cached as a fasl (src/racket/cache.lisp). With a
@@ -53,7 +63,7 @@ linklets to Lisp, with Racket's primitives written natively in Lisp.
   only for the current build of `bin/quasischeme`), and each run
   after execs it; `QUASISCHEME_RACKET_CORE=0` turns it off.
 - **Tests** (tests/racket/run.sh linklet): 6 hand-written linklet
-  programs, 14 expressions through the expander, and 18 `#lang
+  programs, 14 expressions through the expander, and 24 `#lang
   racket/base` programs in tests/racket/programs/, each checked
   against what Racket 9.3 prints.
 - **Racket's own test suite** (`pkgs/racket-test-core`,
@@ -68,7 +78,7 @@ linklets to Lisp, with Racket's primitives written natively in Lisp.
 
 What's missing: a faster cold start (compiling the linklets with SBCL
 is most of it; a cheaper policy didn't help, and `(debug 0)` breaks
-procedure arities), real places and futures, the thread and io layers themselves, and the
+procedure arities, which is why linklets keep `compute-debug-fun 0`), real places and futures, the thread and io layers themselves, and the
 crashes Racket's suite still finds. `--racket` is strategy B,
 `--racket=linklet`; `--racket=cs` (A) reports "not implemented yet".
 
@@ -147,8 +157,8 @@ imported through cells the analysis doesn't resolve (a split linklet's
 Left: what remains is mostly Racket's own code compiled from linklets
 (the expander's reader for `read`, racket/base's `map` and friends),
 whose calls of imported procedures are capture sites until the analysis
-above finds them safe. Structs are still two objects, an
-instance and its fields vector, which chaperones share.
+above finds them safe. (Since then a plain struct is one
+instance, with its fields in it.)
 
 ## Start-up and speed against `racket` (2026-10-21)
 
@@ -180,6 +190,16 @@ What changed:
 - A small top-level procedure that is never assigned is inlined at the
   calls of it after its definition, its body lowered at top level, as
   schemify does (INLINE-PROCEDURE, src/racket/linklet/compiler.lisp).
+- Calls of `hash-ref` (with no failure argument, or a quoted one that
+  isn't a procedure), `hash-has-key?`, `hash-set!`, `hash-set`,
+  `hash-remove(!)` and `hash-count` aren't continuation capture sites
+  (`*TABLE-NATIVES*`, src/racket/linklet/compiler.lisp).
+- The reader's `string->number` is replaced for `#%read`'s import by a
+  procedure that reads an optional sign and decimal digits itself
+  (`FAST-IMPORT`, src/racket/linklet/api.lisp).
+- Optional VOPs (src/sbcl-vops.lisp, the ASDF system `quasischeme/fast`,
+  loaded last by `bin/quasischeme`'s build) change only code compiled at
+  run time, linklets included; `QUASISCHEME_FAST=0` turns them off.
 
 ### Future work
 
@@ -193,7 +213,7 @@ What changed:
   interpreter (schemify/interpret.rkt). That needs the schemify layer,
   extracted by `utils/racket/extract.sh schemify` and instantiated on our
   compiler (src/racket/linklet/schemify-layer.lisp). It is off by
-  default: a cold `#lang racket/base` takes 746 s interpreted against
+  default (read at run time, not when the image is built): a cold `#lang racket/base` takes 746 s interpreted against
   80 s compiled (every linklet schemified, none falling back), the
   interpreter running on our compile of the schemify layer. Left to do:
   - find where the interpreted cold start spends its time;
@@ -207,8 +227,6 @@ What changed:
   the outer part of a form past its compile limit and compiles the
   procedures inside it one by one; a mode like that is needed here.
   (Smaller intercal programs run: hello.i in 0.24 s warm, racket's 2.0 s.)
-- **Structs are two objects**, an instance and its fields vector, which
-  chaperones share (gcbench is 2.5x upstream).
 - **lattice and parsing** are mostly frame setup for calls of unknown
   procedures: the cost of full continuations, which R7RS mode pays too
   (lattice is 108G there).
@@ -505,9 +523,9 @@ and compile `racket/base`, and bench/'s programs as Racket modules.
 
 ## Structure
 
-The skeleton exists (October 2026): every file below is in place and
-`--racket=NAME` selects a strategy, but each reports what isn't
-implemented yet.
+The files below are in place and `--racket=NAME` selects a strategy;
+only B (linklet) runs, and A and C report that they aren't implemented
+yet.
 
 ```
 utils/racket/
@@ -522,7 +540,9 @@ src/racket/             (ASDF system quasischeme/racket)
     structs.lisp          struct types and properties
     procedures.lisp       arity, wrappers, impersonators and chaperones
     control.lisp          marks, prompts, composable continuations, #%paramz
-    hash.lisp             mutable and immutable (persistent) hash tables
+    hash.lisp             mutable and immutable (persistent) hash tables; WITH-RHASH-LOCK
+    fast-read.lisp        read's fast path for plain syntax from a buffered port
+    threads.lisp          threads, events, custodians, parallel thread pools
     exn.lisp              the exn hierarchy, raise
     rktio.lisp            Racket's OS layer, built from source and bound with CFFI
   cs/                   A: Racket CS's layers on --chez
@@ -533,7 +553,9 @@ src/racket/             (ASDF system quasischeme/racket)
   linklet/              B: our linklet compiler (docs/racket-linklet-compiler.md)
     api.lisp              #%linklet: instances, variables, the interface
     compiler.lisp         passes 1 to 4
-    boot.lisp
+    sources.lisp, regexp-layer.lisp, schemify-layer.lisp   the extracted layers
+    boot.lisp, repl.lisp, command-line.lisp   start-up, the REPL, racket's command line
+    interop.lisp          the cl collection and the ASDF system quasi-racket (docs/interop.md)
   hybrid/               C: A plus native overrides
     overrides.lisp
   strategies.lisp       the three, registered
@@ -545,8 +567,6 @@ tests/racket/
 In the command line (contrib/cli/cli.lisp):
 - `--racket[=cs|linklet|hybrid]` selects the mode and the strategy;
 - `QUASISCHEME_RACKET_STRATEGY` selects the strategy otherwise;
-- `--precompile COLLECTION` will compile a collection into the cache,
-  as `--precompile-srfi` does for the SRFIs.
 
 ## Build time
 

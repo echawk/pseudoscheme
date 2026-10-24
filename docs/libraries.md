@@ -95,7 +95,7 @@ make -C contrib/cli           # writes bin/quasischeme
 
 The examples below put `bin/` on `PATH`. From Lisp you need Quicklisp,
 which fetches Quasischeme's own dependencies (float-features,
-cl-unicode, trivial-gray-streams, trivial-garbage, trivial-cltl2):
+cl-unicode, trivial-gray-streams, trivial-garbage, trivial-cltl2 and CFFI):
 
 ```lisp
 (push #p"/path/to/quasischeme/" asdf:*central-registry*)
@@ -334,8 +334,8 @@ example:
 `foo.guile.sls` or `foo.racket.sls` won't load. Quasischeme uses
 `.quasischeme`, generic, Chez and Ikarus variants only. `(chezscheme)` and `(ikarus)`
 cover what portable libraries commonly need from those systems: file
-system access, `format`, `printf`, boxes, time and dates. They don't
-cover FFIs or engines.
+system access, `format`, `printf`, boxes, time and dates. (`(chezscheme)`
+also has Chez's FFI and engines; docs/chez.md.)
 
 **Continuations.** They are full and re-entrant by default, so
 coroutines, generators and backtracking work. What can't be re-entered

@@ -82,7 +82,7 @@ lists them all:
 |---|---|
 | `,help [cmd]` `,h` | the commands, or one command's help |
 | `,quit` `,q` | leave |
-| `,language [name]` `,L` `,mode` | list the languages, or change to one: r7rs, r6rs, r5rs, chez, guile, r4rs, ieee, r3rs, r2rs, rrs |
+| `,language [name]` `,L` `,mode` | list the languages, or change to one: r7rs, r6rs, r5rs, chez, guile, racket, r4rs, ieee, r3rs, r2rs, rrs |
 | `,load file` `,l` | load a file in the current language |
 | `,describe name` `,d` | what a name is bound to: a procedure and its parameters, syntax, a variable and its value |
 | `,apropos string` `,a` | the bound names containing a string |

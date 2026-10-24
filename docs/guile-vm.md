@@ -1,14 +1,11 @@
 # Guile's VM in Lisp (design)
 
-Guile mode already runs Guile's own compiler: Tree-IL, CPS and the
-assembler produce Guile 3.0 bytecode inside Quasischeme. What it can't
-do is run that bytecode. Nor can it load the `.go` files an installed
-Guile ships, which are the same bytecode in ELF images. This document
-plans a VM for that bytecode, written in Lisp, on top of the existing
-Guile runtime (src/guile/).
-
-The guide used for the plan is chatgpt-guile-vm-process.md (repository
-root).
+Guile mode runs Guile's own compiler: Tree-IL, CPS and the assembler
+produce Guile 3.0 bytecode inside Quasischeme. The VM described here
+runs that bytecode, and loads the `.go` files an installed Guile ships,
+which are the same bytecode in ELF images. It is written in Lisp, on top
+of the Guile runtime (src/guile/). The plan it was built from is kept
+below, with where each part stands.
 
 ## Ground rules
 
@@ -19,7 +16,7 @@ root).
   checked by differential testing against an installed `guile`.
   libguile's C sources (vm-engine.c and the rest, LGPL) are not
   translated or copied; this project's license is BSD-style.
-- **Our own ELF reader.** ELF64 is small: a header, program and section
+- **Our own ELF reader** (src/guile/vm-elf.lisp). ELF64 is small: a header, program and section
   tables, symbols, strings. lisp-binary is GPL-3, so it isn't used.
 - **The runtime owns the semantics.** Numbers, modules, fluids,
   exceptions, prompts and the intrinsics are the existing Guile mode's.
@@ -29,14 +26,14 @@ root).
 
 ## Layers
 
-1. **Metadata** (src/guile/vm/ops.lisp). The opcode table: name, opcode,
+1. **Metadata** (src/guile/vm-ops.lisp). The opcode table: name, opcode,
    kind and word formats, from `(instruction-list)` (as
    `bytecode-table` already fetches it), and the intrinsics, from
    `(language bytecode)`'s intrinsic list. Each word format (`X8_S24`,
    `X8_F12_F12`, `C32`, `L32`, `N32`, `B1_X7_L24`, ...) gives a decoder.
    A disassembler built on them is checked against Guile's own
    disassembler, run on the same bytecode.
-2. **Machine state** (vm/machine.lisp). Per thread: a stack vector, `ip`
+2. **Machine state** (src/guile/vm.lisp). Per thread: a stack vector, `ip`
    (an image and a word index), `sp`, `fp`, and the comparison result
    (`LESS_THAN`, `EQUAL`, `NONE`, `INVALID`). The frame layout is the
    manual's: the dynamic link, vRA and mRA sit above `fp`; locals

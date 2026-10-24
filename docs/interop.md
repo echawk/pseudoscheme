@@ -4,7 +4,9 @@ Quasischeme compiles Scheme *to* Lisp, so most of the bridge is just
 "use the same objects". This document covers what is shared, what gets
 converted at the boundary and why, the API in each direction, and how
 libraries are found and distributed. The code is in `src/interop.lisp`,
-`src/interop/lisp.sls`, `src/api.lisp` and `src/asdf.lisp`. Tests are in
+`src/interop/lisp.sls`, `src/api.lisp` and `src/asdf.lisp`; section 6a's
+is in `src/guile/interop.lisp`, and 6b's in
+`src/racket/linklet/interop.lisp`. Tests are in
 `tests/run-interop-tests.lisp`, and programs using real Common Lisp and C
 libraries in `tests/programs/` (`make test-programs`); examples are in
 `examples/`.

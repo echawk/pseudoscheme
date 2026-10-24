@@ -2,7 +2,7 @@
 
 Where things stand and what to do next, roughly in order. The numbers
 come from the runners in `tests/` and the mode documents; re-run them
-rather than trusting this file. Updated 2026-10-18.
+rather than trusting this file. Updated 2026-10-23.
 
 ## Quasischeme 1.0
 
@@ -14,7 +14,7 @@ The project was renamed from Pseudoscheme on 2026-10-18
 | Every Revised Report, R1RS to R7RS | **done**: R7RS, R6RS, R5RS suites pass in full; R4RS, IEEE, R3RS, R2RS and the Revised Report have modes of their own, with all 993 of the reports' examples passing (docs/reports.md) |
 | All the SRFIs | **done**: every final, unwithdrawn SRFI through 274 (209 of them), with 122 test programs (`make test-srfi`) |
 | Guile | **done in substance**: Guile 3.0's own boot-9, psyntax and modules; its test suite with 3 failures and 1 error left (docs/guile.md); `.go` files on a VM in Lisp; Guix computes the same `hello` derivation as real Guix; a libguile that LilyPond typesets on |
-| Chez | **done in substance**: 1257 of `(chezscheme)`'s 1715 names (the missing ones are mostly Chez's internals, docs/chez.md, "Not planned"); Chez's mats; Idris 2 bootstraps and compiles programs |
+| Chez | **done in substance**: 1257 of `(chezscheme)`'s 1715 names (the missing ones are mostly Chez's internals, docs/chez.md, "Not planned"); Chez's mats; Idris 2 bootstraps and compiles programs; the e editor starts and edits |
 | Emacs through SLY/Slynk and SLIME/Swank | **done** (docs/emacs.md) |
 | An LSP server | after 1.0 (section 7) |
 
@@ -93,6 +93,14 @@ plan. Next:
   declarative top level outside `--compile`. Measure with instructions
   retired (`/usr/bin/time -l`): wall-clock times on this machine vary by
   30% from run to run.
+- **Racket's run time** against upstream Racket's, by instructions
+  retired (docs/optimizations.md, "Run time against upstream Racket"):
+  the optional VOP layer (`quasischeme/fast`), structs as one object,
+  faster primitives and mutable hash tables brought `lattice`, `parsing`,
+  `gcbench` and `destruc` closer, with `fib` and `tak` at 1.1 to 1.2.
+  Left: a site's cost (its frame and the binding of `*fstack*`, now
+  that its body has no closure) and SBCL's zeroing of new allocation
+  regions.
 - **The slowest benchmarks**, `ack`, `fibc`, `divrec`, `browse` (about
   3.5×): what's left is SBCL's call and allocation costs.
 - **R6RS overrides of open-coded primitives** (`list-tail`,
@@ -176,8 +184,10 @@ chibi's or Gauche's leniency, such as duplicate pattern variables in
   Guix's TLS runs; bigger LilyPond inputs; our own `libguile.h`.
 - **Racket** (docs/racket.md): `--racket` is strategy B, our linklet
   compiler; `--racket=cs` (strategy A) reports "not implemented yet".
-  Next: Racket's own suite file by file, a faster cold start (the
-  expander's `quick` linklets, docs/racket.md "Future work"), real
+  `quasi-racket` and `quasi-guile` (docs/interop.md) let Lisp call
+  either. Next: Racket's own suite file by file, a faster cold start
+  (the expander's `quick` linklets, which `QUASISCHEME_RACKET_INTERPRET=1`
+  interprets but slower so far; docs/racket.md "Future work"), real
   places and futures, and Racket's thread and io layers in place of our
   natives.
 
@@ -185,9 +195,10 @@ chibi's or Gauche's leniency, such as duplicate pattern variables in
 
 - **An LSP server** for editors other than Emacs, after 1.0.
 
-- **Racket parallelism** on bordeaux-threads, lparallel or chanl, for
-  futures and places; Racket threads are SBCL threads with a baton
-  today (src/racket/native/threads.lisp).
+- **Racket parallelism**: parallel thread pools (`make-parallel-thread-pool`,
+  on lparallel) run threads in parallel; futures and places are still
+  to do. Racket threads are SBCL threads with a baton otherwise
+  (src/racket/native/threads.lisp).
 - **Opt-in optimizations**: a declarative top level (direct calls
   between top-level procedures), chosen by a flag, an environment
   variable or an importable declaration, as C compilers' flags are,

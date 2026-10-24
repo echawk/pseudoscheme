@@ -93,10 +93,14 @@ The packages `R5RS`, `R6RS` and `R7RS` each have `IMPORT` (not R5RS),
 | Racket (`--racket`) | Racket's own expander, as a linklet | `#lang racket/base` and `#lang racket` programs run; Racket's own suite is measured file by file (docs/racket.md) |
 
 Core forms from every front end pass through an optimizer before the
-translator: cp0 (inlining, constant folding, copy propagation) and
-cptypes (type recovery), after Chez's (src/cp0.lisp, src/cptypes.lisp,
-docs/optimizations.md). `QUASISCHEME_OPTIMIZE=0` turns it off, `1`
-runs cp0 only; `2`, both, is the default.
+translator: cp0 (inlining, constant folding, copy propagation), cptypes
+(type recovery), cpletrec and cpdx (stack allocation of what doesn't
+escape), after Chez's (src/cp0.lisp, src/cptypes.lisp,
+src/cpletrec.lisp, src/cpdx.lisp, docs/optimizations.md).
+`QUASISCHEME_OPTIMIZE=0` turns it off, `1` runs cp0 only; `2`, both,
+is the default. An optional layer of SBCL VOPs (src/sbcl-vops.lisp,
+system `quasischeme/fast`, for SBCL 2.6.9 on arm64) makes code compiled
+at run time a little faster; `QUASISCHEME_FAST=0` turns it off.
 
 Continuations are full and re-entrant, and delimited ones (prompts) are
 native too (docs/continuations.md);
@@ -132,6 +136,8 @@ The other Schemes' modes:
   R6RS programs and libraries importing `(chezscheme)`, which has 1257
   of Chez 10.4.1's 1715 names: engines, ftypes, the FFI, threads, Chez's
   writer and its printer parameters, generic ports, `extend-syntax`.
+  Idris 2 bootstraps and compiles programs under it, and the e editor
+  starts, edits and detaches (docs/chez.md).
 - **Guile** (`--guile`, `src/guile/`): Guile 3.0's own `boot-9.scm`,
   psyntax and modules, loaded from a Guile installation and run on
   libguile's primitives written in Lisp. User code is compiled from
@@ -150,7 +156,8 @@ The other Schemes' modes:
   own build recipe (`utils/racket/extract.sh`) and compiled as linklets
   to Lisp; `racket/base` and `racket` load from the collections in
   Racket's source tree, with Racket's primitives written in Lisp
-  (`src/racket/native/`). Compiled modules are cached.
+  (`src/racket/native/`). Compiled modules are cached. Run time is
+  measured against upstream Racket's in docs/optimizations.md.
 
 ## Repository layout
 
@@ -166,6 +173,9 @@ src/psyntax.lisp     -- psyntax as the front end: host environment,
                         library search, entry points
 src/continuations.lisp
                      -- full continuations (docs/continuations.md)
+src/cp0.lisp, src/cptypes.lisp, src/cpletrec.lisp, src/cpdx.lisp
+                     -- the optimizer (docs/optimizations.md)
+src/sbcl-vops.lisp   -- the optional VOP layer (quasischeme/fast)
 src/library-cache.lisp
                      -- the compiled-library cache
 src/r6rs/            -- the R6RS standard libraries' procedures
@@ -246,6 +256,15 @@ contrib/emacs/       -- quasischeme.el, sly-quasischeme.el,
   Scheme/Lisp bridge. The systems `r5rs`, `r6rs` and `r7rs` are
   shorthands for it.
 - `quasischeme/asdf` -- ASDF component types for Scheme sources.
+- `quasischeme/fast` -- the optional VOP layer (src/sbcl-vops.lisp),
+  loaded last by `bin/quasischeme`'s build.
+- `quasischeme/guile`, `quasischeme/libguile`, `quasischeme/racket` --
+  the Guile, libguile and Racket modes.
+- `quasi-guile`, `quasi-racket` (`quasi-guile.asd`, `quasi-racket.asd`)
+  -- Common Lisp and Guile, or Racket, calling each other: the packages
+  `QUASI-GUILE` (`QG`) and `QUASI-RACKET` (`QR`) evaluate the language
+  and take its procedures as Lisp's; Lisp's packages are reached from
+  Racket as the collection `cl` (docs/interop.md).
 - `quasischeme/repl` -- the command's REPL: a line editor, meta-commands,
   every mode's language, and Guile's own REPL (docs/repl.md).
 - `quasischeme-cli` (`contrib/cli/`) -- the command.
@@ -465,7 +484,8 @@ The big ones; `ROADMAP.md` has the rest, and what 1.0 left out.
   them. Nothing cleans stale cache entries yet.
 - **Racket is partial.** `racket/base` and `racket` programs run, but
   many of Racket's own test files still crash or fail, places and
-  futures are stand-ins, and a cold module cache takes minutes to fill
+  futures are stand-ins (parallel thread pools run threads in
+  parallel), and a cold module cache takes minutes to fill
   (docs/racket.md).
 - **Chez mode is partial.** 1257 of `(chezscheme)`'s 1715 names, the
   missing ones mostly Chez's internals (the inspector, `$` system

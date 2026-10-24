@@ -310,12 +310,11 @@ backends.
 
 ## What's next
 
-1. The 137 functions guile-gnutls, guile-ssh and guile-avahi import:
-   - ports (`scm_make_port_type`, `scm_c_make_port`, the
-     `scm_set_port_*` setters), the largest group: drafted, to be tested;
+1. What guile-gnutls, guile-ssh and guile-avahi import that is still a
+   stub (the port functions they need are done, above):
    - hooks (`scm_c_hook_add`);
    - array handles (`scm_array_get_handle`);
-   - weak tables.
+   - weak tables (`scm_c_make_weak_vector`).
 
    Then Guix's TLS (`guix download`, substitutes) runs on them.
 2. More of LilyPond: bigger inputs (the ly/ regression files), speed.

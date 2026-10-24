@@ -243,32 +243,44 @@ Reimplementing it on SBCL's `sb-posix` is the alternative.
 
 ## Status
 
-Milestone 1 runs; parts of milestone 3 and the control row are done.
+Milestones 1 to 7 run (docs/racket.md, "Where it stands", has the
+current numbers); the cross-linklet knowledge of milestone 8 is in.
 
 - **The compiler** (src/racket/linklet/compiler.lisp):
-  - passes 1 and 3 exist. Pass 3 records what each top-level name is
-    and which ones are `set!`. Known values and early use are still
-    to do.
+  - passes 1 and 3 exist. Pass 3 records what each top-level name is,
+    which ones are `set!`, and the known values that matter (small
+    procedures to inline, struct procedures, safe procedures); early
+    use is still to do.
   - Passes 2 and 4 are one walk: lowering renames lexicals apart as it
     goes. It handles every form in the table except quoted literals
     that need rebuilding.
   - A compiled linklet is a core lambda of its variable objects,
     imports first and then exports. Its body is a `letrec*` of the
-    definitions.
+    definitions. It is compiled with `*LINKLET-POLICY*`
+    (src/racket/linklet/api.lisp): the full-continuation policy and
+    SBCL's `compute-debug-fun 0`, minimal debug information.
+  - A call of a hash table operation (`*TABLE-NATIVES*`) isn't a
+    continuation capture site. A 'quick linklet (expand-time code run
+    once) can be interpreted, as Racket CS does, with
+    `QUASISCHEME_RACKET_INTERPRET=1` (off by default;
+    src/racket/linklet/schemify-layer.lisp). `FAST-IMPORT` gives the
+    reader's `string->number` a fast path.
 - **`#%linklet`** (src/racket/linklet/api.lisp): instances, variables,
   correlated objects, `compile-linklet` and `instantiate-linklet`, with
-  and without a target. Bundles, directories and `.zo` reading and
-  writing are stubs.
+  and without a target, and bundles with their `.zo` reading and
+  writing. The names not yet written are stubs.
 - **The native runtime** (src/racket/native/):
   - structs: properties with supers and guards, auto fields, immutable
     fields, and `prop:procedure` both ways, through funcallable
-    instances;
+    instances. A plain instance is one SBCL instance (type, then
+    fields: `STRUCT-FIELD`, `STRUCT-FIELDS-COPY`);
   - the exn hierarchy, `raise`, `error`, and Lisp errors raised as
     Racket exceptions;
   - continuation marks, prompts with tags, parameters and
     parameterizations;
-  - mutable hash tables, and immutable ones on a hash array mapped
-    trie;
+  - mutable hash tables, each under a lock of its own
+    (`WITH-RHASH-LOCK`, hash.lisp) for parallel thread pools, and
+    immutable ones on a hash array mapped trie;
   - error raisers with Racket's messages, the error and print
     parameters the printer consults, loggers with receivers,
     `equal-always?` (handlers.lisp);
@@ -285,7 +297,8 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
     ports ordinary ports, their events polled;
   - places and futures without parallelism, as Racket CS has where
     they're unavailable, and will executors whose wills never become
-    ready (more.lisp).
+    ready (more.lisp); parallel thread pools are lparallel kernels
+    (threads.lisp).
   - Literal strings, byte strings and vectors are immutable: the header
     flag the Chez mode uses, or the one SBCL's fasl loader gives
     constants, so they stay immutable in cached compiled code.
@@ -305,8 +318,8 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   89 files that report pass about 1.15 million tests with 3 failures
   (optimize 1, subprocess 2); seven don't report under this harness
   even there (module, submodule, sandbox, future, promise, place,
-  syntax). Here, `racket` itself now loads (`#lang racket`); the suite's
-  tally is next.
+  syntax). Here, `racket` itself loads (`#lang racket`); docs/racket.md
+  has the suite's last tally.
 - **Coverage:** `sbcl --script tests/racket/coverage.lisp [--missing]`
   counts how much of each of Racket CS's primitive tables the instances
   have. It reads the tables from the pinned source, which is the
@@ -337,30 +350,29 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   does (docs/racket.md, "The command line"). That is the
   `boot`, `namespace-require` and `eval` that Racket CS's main.sps
   does. tests/racket/expander.rktd holds the expressions and values
-  tests/racket/run.sh checks: 10 of 10 pass.
-- **The compiled expander is cached** (src/racket/cache.lisp): a 21 MB
-  fasl under `~/.cache/quasischeme/racket/`. It is keyed by
-  the linklet's text, the build signature and src/racket/'s file dates.
-  The first process compiles it (about 30 s); after that,
-  `--racket=linklet -e '(+ 1 2)'` takes 0.4 s.
+  tests/racket/run.sh checks.
+- **The compiled expander is cached** (src/racket/cache.lisp) as a fasl
+  under `~/.cache/quasischeme/racket/`, keyed by the linklet's text,
+  the build signature and src/racket/'s file dates, and the first run
+  saves an image with it instantiated (docs/racket.md).
 
 - **`racket/base` loads and runs**, from the pinned source's
   `racket/collects`. Each module is expanded from source by Racket's
   expander and compiled by our compiler, and racket/base takes about a
   minute. Keyword arguments, `for` loops, structs, `with-handlers`,
-  hash tables and regexps work (tests/racket/base/). The natives that
-  stand in for the io and regexp layers are in src/racket/native/:
+  hash tables and regexps work. The natives that stand in for the io
+  layer are in src/racket/native/:
   - `ports.lisp`;
   - `paths.lisp`;
   - `printer.lisp`;
-  - `regexp.lisp`, on CL-PPCRE.
+  - `regexp.lisp`, on CL-PPCRE, the fallback for the regexp layer
+    (`QUASISCHEME_RACKET_REGEXP=native`).
 
 - **Programs run**: `bin/quasischeme --racket=linklet prog.rkt` runs a
   module as `racket prog.rkt` does, its `#lang`, its body and its `main`
   submodule (tests/racket/programs/). Every linklet's compiled code is
-  cached, keyed by its text, so a `#lang racket/base` program starts in
-  about 18 s, which is the expansion of racket/base. The first run after
-  src/racket/ changes compiles everything again (about 100 s).
+  cached, keyed by its text. The first run after src/racket/ changes
+  compiles everything again.
 
 - **.zo files.** A module file is compiled serializable as it loads, and
   its `.zo` is written under a cache root (`current-compiled-file-roots`,
@@ -368,8 +380,7 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   The expander's own load handler finds it next time. Our
   `write-linklet-bundle-hash` and `read-linklet-bundle-hash` write and
   read a bundle as Racket data; the expander's machine-independent
-  bundles it writes itself. With both caches warm, a `#lang
-  racket/base` program runs in 1.3 s.
+  bundles it writes itself.
   `QUASISCHEME_RACKET_ZO=0` turns `.zo` writing off.
 
 - **Safety for continuations, within a linklet.** A whole linklet's
@@ -379,17 +390,18 @@ Milestone 1 runs; parts of milestone 3 and the control row are done.
   never-assigned procedures that can't capture, assuming all can't and
   striking out those that can until none changes. References to those
   procedures are `(racket:safe-variable-ref cell)`, and a call of one
-  isn't a capture site. Across linklets, through `get-import`, is still
-  to do.
+  isn't a capture site. Across linklets, through `get-import`, each
+  linklet records its safe exports (`SAFE-EXPORTS`; docs/racket.md,
+  "Speed"); `QUASISCHEME_RACKET_SAFE_IMPORTS=0` turns it off.
 - **Arities.** A `case-lambda` of several clauses records its arity mask,
   since `(lambda args ...)` doesn't show it. `procedure-reduce-arity`
   checks and restricts. Arity errors, ours and SBCL's, raise
   `exn:fail:contract:arity` (tests/racket/programs/arity.rkt).
 
-Next:
-- milestone 2, the regexp linklet;
-- the rest of `#%kernel` that the extracted layers use, in the order the
-  coverage report's `--missing` list makes plain.
+The regexp layer runs as Racket's own linklet. Next: the rest of
+`#%kernel` that the extracted layers use, in the order the coverage
+report's `--missing` list makes plain, and the future work in
+docs/racket.md.
 
 ## How it compares with docs/racket.md's plan
 

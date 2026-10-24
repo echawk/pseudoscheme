@@ -16,7 +16,14 @@ After `--guile` the command line is Guile's own (`guile --help`): FILE,
 the rest. Guile's own `compile-shell-switches`, from the installation's
 `(ice-9 command-line)`, turns it into the expression to run, as `guile`
 does. Quasischeme's own options go before `--guile`; run as `guile` (a
-link to bin/quasischeme), the program is `--guile`.
+link to bin/quasischeme), the program is `--guile`
+(`run-guile-command-line`, contrib/cli/cli.lisp). The interactive REPL
+Guile's switches end in, `((@ (ice-9 top-repl) top-repl))`, is
+Quasischeme's line editor with Guile's own REPL (`(system repl repl)`)
+reading from it (src/repl/guile.lisp): history, completion, and the
+meta-commands `,lisp` (the Lisp an expression, or a procedure defined at
+the REPL or by a file `,load`ed there, compiles to) and `,asm` (the machine
+code of a procedure, or of an expression compiled but not run).
 
 The sections after "Where it stands" are the plan as written before the
 work started, with each stage marked as it now is.
@@ -386,6 +393,8 @@ All of it is in `src/guile/`, system `quasischeme/guile`:
 | goops.lisp | GOOPS's C half: `class-of` for every object, classes for records and libguile's types, primitive generics |
 | arrays.lisp | Guile's arrays: shared views of a root vector, typed (SRFI 4 vectors are tagged bytevectors) |
 | cache.lisp | the compiled-module cache: Guile's `.go` files, as fasls |
+| elisp.lisp, interop.lisp, sockets.lisp, stacks.lisp | Emacs Lisp's `#nil` lists in Guile's list procedures; Guile and Common Lisp both ways (docs/interop.md); sockets and the network database; stacks and frames (`make-stack`, `(system vm frame)`) |
+| vm.lisp, vm-ops.lisp, vm-elf.lisp, vm-jit.lisp, vm-vops.lisp | Guile's VM, the opcode table and decoder, the ELF reader, and the translation of bytecode to Lisp (docs/guile-vm.md) |
 | primitives.lisp, threads.lisp, regex.lisp, foreign.lisp, i18n.lisp | the rest of libguile so far, and the other C halves that Guile's modules install with `load-extension` (threads, regular expressions, `(system foreign)`, locales, popen, SRFI 60, ...) |
 | modules/ | `(language tree-il spec)`, Guile's own being written for its VM: written afresh, not an edited copy |
 
@@ -542,7 +551,7 @@ and `suspendable-ports` (514 pass: a port's buffers are Guile's own
 | | Guile 3.0 | here |
 |---|---|---|
 | compiling | Tree-IL → CPS → bytecode (`.go` files cached) | Tree-IL → core Scheme → SBCL native code (fasls cached) |
-| `(system vm ...)`, `(language cps)`, the optimizer | present | Guile's passes run when compiling to `cps` or `bytecode`; bytecode can't be loaded. To `value` (`compile`'s default), Tree-IL goes to native code as it is |
+| `(system vm ...)`, `(language cps)`, the optimizer | present | Guile's passes run when compiling to `cps` or `bytecode`; bytecode loads and runs on the VM (docs/guile-vm.md). To `value` (`compile`'s default), Tree-IL goes to native code as it is |
 | GOOPS | present | present (`goops.test`: all 237) |
 | `(system foreign)` | present | present on CFFI (`foreign.test`: 79 pass, 0 fail). Structs aren't passed by value; `pointer->bytevector` of C's memory copies it |
 | `bytevector-slice` | shares the bytes | copies them |
@@ -789,7 +798,7 @@ The writer prints `(1 . #nil)` as `(1)`, as Guile's does.
    compiled structurally.
 3. A Scheme library putting the FFI layer (src/ffi.lisp) in front of
    R5RS, R6RS and R7RS programs.
-4. Then Emacs Lisp, and Guix's client side.
+4. Then Guix's client side (Emacs Lisp runs; see above).
 
 The earlier `(guile)` R6RS library (src/guile/guile.lisp, guile.scm), which
 imitates Guile's everyday procedures for R6RS programs, remains. It is
