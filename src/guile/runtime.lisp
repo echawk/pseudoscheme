@@ -311,13 +311,24 @@ unboxed or hidden fields."
 (setf (gethash "struct-ref/unboxed" *guile-primitives*) (gethash "struct-ref" *guile-primitives*)
       (gethash "struct-set!/unboxed" *guile-primitives*) (gethash "struct-set!" *guile-primitives*))
 ;; the initializers' list on the stack: INIT-SLOTS copies them, keeping
-;; none of it (a record's constructor calls make-struct/no-tail)
+;; none of it (a record's constructor calls make-struct/simple or /no-tail)
+(defun make-record-struct (vtable inits who)
+  "make-struct of VTABLE and INITS, as WHO: a record's (a plain vtable's
+fields, all given) made directly, another's by MAKE-STRUCT*."
+  (if (and (vtable-p vtable) (plain-vtable-p vtable)
+	   (not (logtest (vtable-flags vtable) (logior +vtable-flag-vtable+ +vtable-flag-applicable+)))
+	   (= (length inits) (vtable-nfields vtable)))
+      (let ((v (make-array (vtable-nfields vtable))))
+	(loop for x in inits for i of-type fixnum from 0 do (setf (svref v i) x))
+	(%make-gstruct vtable v))
+      (make-struct* vtable inits who)))
+
 (defguile "make-struct/no-tail" (vtable &rest inits)
   (declare (dynamic-extent inits))
-  (make-struct* vtable inits "make-struct/no-tail"))
+  (make-record-struct vtable inits "make-struct/no-tail"))
 (defguile "make-struct/simple" (vtable &rest inits)
   (declare (dynamic-extent inits))
-  (make-struct* vtable inits "make-struct/simple"))
+  (make-record-struct vtable inits "make-struct/simple"))
 (defguile "allocate-struct" (vtable n)
   (declare (ignore n))
   (make-struct* vtable '() "allocate-struct"))
