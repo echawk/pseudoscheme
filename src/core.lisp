@@ -38,6 +38,7 @@
 
 (defun true? (cl-test) (or cl-test (false-value)))
 
+(declaim (inline scheme-symbol-p))
 (defun scheme-symbol-p (x)
   ;; a symbol but true, false and () (marked NOT-A-SYMBOL below): by
   ;; identity, not by reading the symbol's property list each time

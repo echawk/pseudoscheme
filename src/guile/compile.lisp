@@ -274,7 +274,7 @@ references to these."
   '(("+" 0 nil) ("*" 0 nil) ("-" 1 2) ("<" 2 2) (">" 2 2) ("<=" 2 2) (">=" 2 2) ("=" 2 2)
     ("car" 1 1) ("cdr" 1 1) ("cadr" 1 1) ("cddr" 1 1) ("caar" 1 1) ("cdar" 1 1) ("caddr" 1 1)
     ("cdddr" 1 1) ("cadddr" 1 1) ("pair?" 1 1) ("vector?" 1 1) ("string?" 1 1)
-    ("procedure?" 1 1) ("char?" 1 1) ("number?" 1 1) ("integer?" 1 1) ("zero?" 1 1)
+    ("procedure?" 1 1) ("symbol?" 1 1) ("char?" 1 1) ("number?" 1 1) ("integer?" 1 1) ("zero?" 1 1)
     ("null?" 1 1) ("not" 1 1) ("vector-length" 1 1) ("string-length" 1 1)
     ("cons" 2 2) ("eq?" 2 2) ("eqv?" 2 2) ("vector-ref" 2 2) ("string-ref" 2 2)
     ("set-car!" 2 2) ("set-cdr!" 2 2) ("char=?" 2 2) ("vector-set!" 3 3)
@@ -326,7 +326,8 @@ calls, if F is a reference to the root module's variable of a primitive in
 	(list (core "%guile-sub2") (compile-tree-il (first args)) (compile-tree-il (second args)))
 	(let ((helper (cdr (assoc string '(("<" . "%guile-<") (">" . "%guile->") ("<=" . "%guile-<=")
 					   (">=" . "%guile->=") ("=" . "%guile-=")
-					   ("null?" . "%guile-null?") ("not" . "%guile-not"))
+					   ("null?" . "%guile-null?") ("not" . "%guile-not")
+					   ("symbol?" . "%guile-symbol?"))
 				  :test #'string=))))
 	  ;; not of a predicate's value, which can't be #nil: the host's
 	  (when (and (string= string "not") (boolean-node-p (first args)))
@@ -954,6 +955,8 @@ is (%guile-set! 'site value) or defines the same variable
   ;; null? and not, for which Emacs Lisp's nil, #nil, counts as the empty
   ;; list and as false
   (qsx:defhost "%guile-null?" (x) (bool (or (null x) (eq x *elisp-nil*))))
+  ;; symbol?: not a keyword, which is a Lisp symbol too
+  (qsx:defhost "%guile-symbol?" (x) (bool (and (qs:scheme-symbol-p x) (not (keywordp x)))))
   (qsx:defhost "%guile-not" (x) (bool (or (eq x qs:false) (eq x *elisp-nil*))))
   (qsx:defhost "%guile-true" (x) (if (eq x *elisp-nil*) qs:false x))
   (qsx:defhost "%guile-append2" (x y)
@@ -1014,7 +1017,7 @@ is (%guile-set! 'site value) or defines the same variable
    '("%guile-append2" "%guile-nil:memq" "%guile-nil:memv" "%guile-nil:assq" "%guile-nil:assv"
      "%guile-nil:length" "%guile-nil:list?" "%guile-nil:reverse" "%guile-nil:last-pair"
      "%guile-nil:append"
-     "%guile-ref" "%guile-safe-ref-p" "%guile-note-guarded" "%guile-sub2" "%guile-<" "%guile->" "%guile-<=" "%guile->=" "%guile-=" "%guile-null?" "%guile-not" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
+     "%guile-ref" "%guile-safe-ref-p" "%guile-note-guarded" "%guile-sub2" "%guile-<" "%guile->" "%guile-<=" "%guile->=" "%guile-=" "%guile-null?" "%guile-symbol?" "%guile-not" "%guile-true" "%guile-set!" "%guile-define!" "%guile-unsupported" "%guile-arity-error"
      "%guile-with-meta" "%guile-inline"
      "%guile-nargs>=" "%guile-nargs-between" "%guile-keywords-fit?" "%guile-positional?" "%guile-check-no-more"
      "%guile-check-keywords" "%guile-keyword-ref")))
@@ -1047,6 +1050,7 @@ is (%guile-set! 'site value) or defines the same variable
 			    (t :call))))
     ;; #nil is made once, at load, and never replaced
     ("%guile-null?" (x) (bool (or (null x) (eq x (load-time-value *elisp-nil* t)))))
+    ("%guile-symbol?" (x) (bool (and (qs:scheme-symbol-p x) (not (keywordp x)))))
     ("%guile-not" (x) (bool (or (eq x qs:false) (eq x (load-time-value *elisp-nil* t)))))
     ("%guile-true" (x) (if (eq x (load-time-value *elisp-nil* t)) qs:false x)))
   "(name lambda-list body), as in QSX::*INLINE-PRIMITIVES*.")
