@@ -170,7 +170,12 @@ form imports are there for the rest): the reader hook, ,mode, and the completer.
 				     (format t "No language ~A; ,mode lists them.~%" name))))
 			   qsg::*unspecified*))
     (setq *guile-completer* (qsg:eval-string *guile-setup*)
-	  *guile-hooks-installed* t)))
+	  *guile-hooks-installed* t)
+    ;; the REPL's modules load (ice-9 format), which makes itself the root
+    ;; module's format: a program's format is simple-format, as in Guile
+    ;; without the REPL (ice-9 format's took 90,000 instructions for
+    ;; (format #f "~a" n)); a module that uses (ice-9 format) has its own
+    (qsg:eval-string "(module-set! the-root-module 'format simple-format)")))
 
 (defun guile-completions (prefix)
   (let ((names (ignore-errors (funcall *guile-completer* prefix))))

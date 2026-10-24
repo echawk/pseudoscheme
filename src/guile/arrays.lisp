@@ -523,11 +523,14 @@ of SOURCES, which must have them."
       (if (= (length out) (* n size)) out (subseq out 0 (* n size))))))
 
 (defguile "vector->list" (v &optional (start 0) end)
-  ;; any rank-1 array, as Guile's
-  (unless (and (guile-array-p v) (= 1 (length (nth-value 3 (array-view v "vector->list")))))
-    (wrong-type "vector->list" 1 v))
-  (let ((list (array->list* v)))
-    (subseq list start end)))
+  ;; a simple vector's elements directly; any rank-1 array, as Guile's
+  (if (and (simple-vector-p v) (eql start 0) (null end))
+      (coerce v 'list)
+      (progn
+	(unless (and (guile-array-p v) (= 1 (length (nth-value 3 (array-view v "vector->list")))))
+	  (wrong-type "vector->list" 1 v))
+	(let ((list (array->list* v)))
+	  (subseq list start end)))))
 
 ;; (rnrs bytevectors) exports uniform-array->bytevector, which isn't in
 ;; the root module: libguile defines it in that module's extension.
