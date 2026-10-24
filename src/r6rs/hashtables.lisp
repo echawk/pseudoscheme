@@ -239,6 +239,9 @@ records with it, by the procedures of record-type-hash-procedure.")
 	       (if (<= (decf budget) 0)
 		   0
 		   (typecase obj
+		     ;; SXHASH of a known string of characters is its
+		     ;; string hash, without SXHASH's dispatch
+		     ((simple-array character (*)) (sxhash obj))
 		     (simple-vector (let ((h 17))
 				      (loop for x across obj
 					    while (plusp budget)

@@ -340,8 +340,23 @@ square, else the nearest double, however big or small X is."
     (out-of-range "inexact->exact" z))
   (host-call "exact" z))
 
+(defun decimal-fixnum (string)
+  "STRING's value if it is a decimal integer of at most 18 digits, signed
+or not: read without the reader's general syntax; else NIL."
+  (and (typep string '(simple-array character (*)))
+       (let* ((n (length string))
+	      (start (if (and (> n 1) (member (schar string 0) '(#\+ #\-))) 1 0)))
+	 (and (< start n) (<= (- n start) 18)
+	      (let ((value 0))
+		(declare (fixnum value))
+		(loop for i from start below n
+		      for d = (digit-char-p (schar string i))
+		      do (if d (setq value (+ (* value 10) d)) (return-from decimal-fixnum nil)))
+		(if (char= (schar string 0) #\-) (- value) value))))))
+
 (defguile "string->number" (string &optional (radix 10))
-  (guile-string->number string radix))
+  (or (and (eql radix 10) (decimal-fixnum string))
+      (guile-string->number string radix)))
 
 (defun guile-string->number (string radix)
   (unless (stringp string) (wrong-type "string->number" 1 string))
@@ -517,12 +532,21 @@ square, else the nearest double, however big or small X is."
 	     (lambda (c) (truthy (funcall contains x c)))))))
 
 (defguile "string-split" (s pred)
+  (if (and (characterp pred) (typep s '(simple-array character (*))))
+      ;; a character: its positions found directly, no matcher to call
+      (let ((parts '()) (start 0))
+	(declare (fixnum start))
+	(loop for i = (position pred s :start start)
+	      while i
+	      do (push (subseq s start i) parts) (setq start (1+ i)))
+	(push (subseq s start) parts)
+	(nreverse parts))
   (let ((match (char-matcher pred)) (parts '()) (start 0))
     (loop for i from 0 below (length s)
 	  when (funcall match (char s i))
 	    do (push (subseq s start i) parts) (setq start (1+ i)))
     (push (subseq s start) parts)
-    (nreverse parts)))
+    (nreverse parts))))
 (defguile "string-rindex" (s pred &optional (start 0) (end (length s)))
   (let ((match (char-matcher pred)))
     (or (loop for i from (1- end) downto start when (funcall match (char s i)) return i)
@@ -1676,7 +1700,23 @@ installed Guile returns it; '() if there's no guile program."
 	       (when (minusp x) (write-char #\- out) (setq x (- x)))
 	       (shortest-float-digits x radix out))))))
 
+(defun fixnum-decimal-string (n)
+  "The decimal digits of fixnum N, signed: without the printer."
+  (declare (fixnum n))
+  (let ((buffer (make-string 20)) (i 20) (m (abs n)))
+    (declare (dynamic-extent buffer) (fixnum i) (type (integer 0) m))
+    (loop do (multiple-value-bind (q r) (floor m 10)
+	       (setf (schar buffer (decf i)) (code-char (+ 48 r)) m q))
+	  until (zerop m))
+    (when (minusp n) (setf (schar buffer (decf i)) #\-))
+    (subseq buffer i)))
+
 (defguile "number->string" (n &optional (radix 10))
+  (if (and (typep n 'fixnum) (eql radix 10))
+      (fixnum-decimal-string n)
+      (number->string* n radix)))
+
+(defun number->string* (n radix)
   (unless (and (integerp radix) (<= 2 radix 36))
     (guile-error (ssym "out-of-range") "number->string" "Value out of range: ~S" (list radix) (list radix)))
   (cond ((floatp n) (guile-float-string n radix))

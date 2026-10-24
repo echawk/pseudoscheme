@@ -596,7 +596,20 @@ procedures of record-type-equal-procedure.")
     (cond ((not (eq r :pass)) r)
 	  (*equal-extension* (funcall *equal-extension* obj1 obj2 recur)))))
 
+(declaim (inline character-strings-equal))
+(defun character-strings-equal (a b)
+  "Whether the strings of characters A and B are STRING=: without
+STRING='s dispatch on its arguments' kinds and its bounds."
+  (declare (type (simple-array character (*)) a b) (optimize speed (safety 0)))
+  (let ((n (length a)))
+    (and (= n (length b))
+	 (loop for i of-type fixnum below n
+	       always (char= (schar a i) (schar b i))))))
+
 (defun scheme-equal-p (obj1 obj2)
+  ;; two strings of characters first: an equal? table's keys, often
+  (when (and (typep obj1 '(simple-array character (*))) (typep obj2 '(simple-array character (*))))
+    (return-from scheme-equal-p (character-strings-equal obj1 obj2)))
   (let ((budget *equal-budget*))
     (declare (fixnum budget))
     (block bounded
