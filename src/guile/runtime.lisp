@@ -159,7 +159,9 @@ make-struct."
 	     (= (length inits) (vtable-nfields vtable)))
     (vtable-layout-string vtable)
     (when (cddr (vtable-layout-cache vtable))
-      (return-from init-slots (coerce inits 'simple-vector))))
+      (let ((v (make-array (vtable-nfields vtable))))
+	(loop for x in inits for i of-type fixnum from 0 do (setf (svref v i) x))
+	(return-from init-slots v))))
   (let* ((n (vtable-nfields vtable))
 	 (hidden (vtable-hidden vtable))
 	 (layout (vtable-layout-string vtable))
@@ -270,9 +272,20 @@ one): it has no fields until then."
   (unless (struct-p s) (wrong-type "struct-vtable" 1 s))
   (struct-vtable-of s))
 (defguile "struct-ref" (s i)
-  (unless (struct-p s) (wrong-type "struct-ref" 1 s))
-  (check-index "struct-ref" s i)
-  (svref (struct-slots-of s) i))
+  ;; a plain struct's field in range first: a record's accessor's call
+  (if (and (gstruct-p s) (typep i 'fixnum) (< -1 i (length (gstruct-slots s))))
+      (svref (gstruct-slots s) i)
+      (progn
+	(unless (struct-p s) (wrong-type "struct-ref" 1 s))
+	(check-index "struct-ref" s i)
+	(svref (struct-slots-of s) i))))
+
+(declaim (inline plain-vtable-p))
+(defun plain-vtable-p (vt)
+  "Whether VT, a vtable, is known (from its layout's cache) to have no
+unboxed or hidden fields."
+  (let ((cache (vtable-layout-cache vt)))
+    (and cache (cddr cache) (eq (car cache) (svref (gstruct-slots vt) 0)))))
 (defun check-unboxed (who s i v)
   "An unboxed field (u) holds a 64-bit word."
   (let ((layout (svref (gstruct-slots (struct-vtable-of s)) +vtable-index-layout+)))
@@ -284,16 +297,27 @@ one): it has no fields until then."
 	  (guile-error (ssym "out-of-range") who "Value out of range: ~S" (list v) (list v)))))))
 
 (defguile "struct-set!" (s i v)
-  (unless (struct-p s) (wrong-type "struct-set!" 1 s))
-  (check-index "struct-set!" s i)
-  (check-unboxed "struct-set!" s i v)
-  (setf (svref (struct-slots-of s) i) v)
-  (when (and (vtable-p s) (= i +vtable-index-flags+)) (setf (vtable-flags s) v))
-  v)					; as libguile's: (rnrs enums) relies on it
+  (if (and (gstruct-p s) (not (vtable-p s)) (typep i 'fixnum) (< -1 i (length (gstruct-slots s)))
+	   (let ((vt (gstruct-vtable s))) (and (vtable-p vt) (plain-vtable-p vt))))
+      ;; a record's field: no unboxed field to check, nor flags to keep
+      (setf (svref (gstruct-slots s) i) v)
+      (progn
+	(unless (struct-p s) (wrong-type "struct-set!" 1 s))
+	(check-index "struct-set!" s i)
+	(check-unboxed "struct-set!" s i v)
+	(setf (svref (struct-slots-of s) i) v)
+	(when (and (vtable-p s) (= i +vtable-index-flags+)) (setf (vtable-flags s) v))
+	v)))
 (setf (gethash "struct-ref/unboxed" *guile-primitives*) (gethash "struct-ref" *guile-primitives*)
       (gethash "struct-set!/unboxed" *guile-primitives*) (gethash "struct-set!" *guile-primitives*))
-(defguile "make-struct/no-tail" (vtable &rest inits) (make-struct* vtable inits "make-struct/no-tail"))
-(defguile "make-struct/simple" (vtable &rest inits) (make-struct* vtable inits "make-struct/simple"))
+;; the initializers' list on the stack: INIT-SLOTS copies them, keeping
+;; none of it (a record's constructor calls make-struct/no-tail)
+(defguile "make-struct/no-tail" (vtable &rest inits)
+  (declare (dynamic-extent inits))
+  (make-struct* vtable inits "make-struct/no-tail"))
+(defguile "make-struct/simple" (vtable &rest inits)
+  (declare (dynamic-extent inits))
+  (make-struct* vtable inits "make-struct/simple"))
 (defguile "allocate-struct" (vtable n)
   (declare (ignore n))
   (make-struct* vtable '() "allocate-struct"))
